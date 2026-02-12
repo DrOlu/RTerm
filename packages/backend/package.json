@@ -1,0 +1,13 @@
+{
+  "name": "@gyshell/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "echo \"backend: source-only workspace package\"",
+    "typecheck": "echo \"backend: checked by workspace consumers\""
+  }
+}

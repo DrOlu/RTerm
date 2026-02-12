@@ -1,17 +1,14 @@
 import path from 'node:path'
 import process from 'node:process'
-import { TerminalService } from '../../../src/main/services/TerminalService'
-import { AgentService_v2 } from '../../../src/main/services/AgentService_v2'
-import { UIHistoryService } from '../../../src/main/services/UIHistoryService'
-import { GatewayService } from '../../../src/main/services/Gateway/GatewayService'
-import { WebSocketGatewayAdapter } from '../../../src/main/services/Gateway/WebSocketGatewayAdapter'
-import type { CommandPolicyService } from '../../../src/main/services/CommandPolicy/CommandPolicyService'
-import type { McpToolService } from '../../../src/main/services/McpToolService'
-import type { SettingsService } from '../../../src/main/services/SettingsService'
-import { NodeSettingsService } from './services/NodeSettingsService'
-import { NodeCommandPolicyService } from './services/NodeCommandPolicyService'
-import { NodeMcpToolService } from './services/NodeMcpToolService'
-import { NodeSkillService } from './services/NodeSkillService'
+import { TerminalService } from '../../../packages/backend/src/services/TerminalService'
+import { AgentService_v2 } from '../../../packages/backend/src/services/AgentService_v2'
+import { UIHistoryService } from '../../../packages/backend/src/services/UIHistoryService'
+import { GatewayService } from '../../../packages/backend/src/services/Gateway/GatewayService'
+import { WebSocketGatewayAdapter } from '../../../packages/backend/src/services/Gateway/WebSocketGatewayAdapter'
+import { NodeSettingsService } from '../../../packages/backend/src/adapters/node/NodeSettingsService'
+import { NodeCommandPolicyService } from '../../../packages/backend/src/adapters/node/NodeCommandPolicyService'
+import { NodeMcpToolService } from '../../../packages/backend/src/adapters/node/NodeMcpToolService'
+import { NodeSkillService } from '../../../packages/backend/src/adapters/node/NodeSkillService'
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name]
@@ -51,9 +48,9 @@ async function bootstrap(): Promise<void> {
   const uiHistoryService = new UIHistoryService()
   const agentService = new AgentService_v2(
     terminalService,
-    commandPolicyService as unknown as CommandPolicyService,
-    mcpToolService as unknown as McpToolService,
-    skillService as any,
+    commandPolicyService,
+    mcpToolService,
+    skillService,
     uiHistoryService
   )
 
@@ -61,9 +58,9 @@ async function bootstrap(): Promise<void> {
     terminalService,
     agentService,
     uiHistoryService,
-    commandPolicyService as unknown as CommandPolicyService,
-    settingsService as unknown as SettingsService,
-    mcpToolService as unknown as McpToolService
+    commandPolicyService,
+    settingsService,
+    mcpToolService
   )
 
   agentService.updateSettings(settingsService.getSettings())

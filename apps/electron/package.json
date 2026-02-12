@@ -1,0 +1,12 @@
+{
+  "name": "@gyshell/electron",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron runtime shell for GyShell",
+  "scripts": {
+    "dev": "electron-vite dev --config electron.vite.config.ts",
+    "build": "electron-vite build --config electron.vite.config.ts",
+    "preview": "electron-vite preview --config electron.vite.config.ts"
+  }
+}

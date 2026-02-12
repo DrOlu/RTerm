@@ -5,8 +5,9 @@
     "types": ["node"]
   },
   "include": [
-    "src/main/**/*",
-    "src/preload/**/*",
-    "src/shared/**/*"
+    "apps/electron/src/main/**/*",
+    "apps/electron/src/preload/**/*",
+    "packages/backend/src/**/*",
+    "packages/ui/src/shared/**/*"
   ]
 }

@@ -2,9 +2,26 @@
   "name": "@gyshell/tui",
   "version": "0.1.0",
   "private": true,
-  "description": "Placeholder package for future GyShell standalone TUI frontend",
+  "type": "module",
+  "description": "Standalone GyShell terminal UI client",
+  "main": "dist/index.js",
   "scripts": {
-    "build": "echo \"tui placeholder: no build output yet\"",
-    "typecheck": "echo \"tui placeholder: no typecheck yet\""
+    "build": "esbuild src/index.tsx --bundle --platform=node --format=esm --conditions=browser --jsx=automatic --jsx-import-source=@opentui/solid --packages=external --outfile=dist/index.js",
+    "start": "bun run --conditions=browser --preload @opentui/solid/preload src/index.tsx",
+    "dev": "bun run --watch --conditions=browser --preload @opentui/solid/preload src/index.tsx",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:smoke": "bun run --conditions=browser --preload @opentui/solid/preload src/index.tsx --help"
+  },
+  "dependencies": {
+    "@opentui/core": "0.1.73",
+    "@opentui/solid": "0.1.73",
+    "solid-js": "1.9.9",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "bun": "^1.3.9",
+    "esbuild": "^0.25.9",
+    "typescript": "^5.3.3"
   }
 }

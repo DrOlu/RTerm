@@ -4,5 +4,8 @@
     "types": ["node"],
     "allowImportingTsExtensions": false
   },
-  "include": ["src/**/*.ts", "../../src/main/types/**/*.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "../../packages/backend/src/**/*.ts"
+  ]
 }

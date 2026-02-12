@@ -13,7 +13,7 @@ npm --workspace @gyshell/gybackend run start
 
 - `GYBACKEND_WS_HOST` (default `0.0.0.0`)
 - `GYBACKEND_WS_PORT` (default `17888`)
-- `GYBACKEND_DATA_DIR` (default `~/.gyshell-backend`)
+- `GYBACKEND_DATA_DIR` (default `./.gybackend-data` under current working directory)
 - `GYBACKEND_BOOTSTRAP_LOCAL_TERMINAL` (default `true`)
 - `GYBACKEND_TERMINAL_ID` (default `local-main`)
 - `GYBACKEND_TERMINAL_TITLE` (default `Local`)
@@ -25,4 +25,5 @@ npm --workspace @gyshell/gybackend run start
 
 ## Notes
 
-This first backend package intentionally keeps MCP server runtime as a stub. The gateway protocol and agent runtime are active, and MCP can be completed in a later package extraction milestone.
+- gybackend delegates shared backend behavior to `packages/backend`.
+- MCP runtime is active in standalone backend mode via shared MCP core.

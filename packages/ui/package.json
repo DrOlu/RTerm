@@ -1,0 +1,13 @@
+{
+  "name": "@gyshell/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/renderer_v2/index.tsx"
+  },
+  "scripts": {
+    "build": "echo \"ui: built by electron-vite renderer pipeline\"",
+    "typecheck": "echo \"ui: checked by root tsconfig.web.json\""
+  }
+}
