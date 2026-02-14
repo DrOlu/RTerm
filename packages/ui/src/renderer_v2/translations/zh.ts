@@ -198,6 +198,7 @@ export const zh = {
       exportMenuTitle: '导出历史',
       exportSimple: '导出历史记录',
       exportDetailed: '导出详细 JSON 历史记录',
+      copySessionId: '复制 Session ID',
       searchPlaceholder: '搜索会话名称...',
       clearSearch: '清空搜索',
       searchNoResults: '没有匹配的会话',

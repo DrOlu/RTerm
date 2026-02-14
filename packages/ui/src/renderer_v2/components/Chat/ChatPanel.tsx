@@ -215,7 +215,7 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
     if (!button) return
     const rect = button.getBoundingClientRect()
     const menuWidth = exportMenuRef.current?.offsetWidth || 180
-    const menuHeight = exportMenuRef.current?.offsetHeight || 92
+    const menuHeight = exportMenuRef.current?.offsetHeight || 128
     const margin = 8
     const left = Math.max(margin, Math.min(rect.left, window.innerWidth - margin - menuWidth))
     const top = Math.min(rect.bottom + 2, window.innerHeight - margin - menuHeight)
@@ -237,6 +237,21 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
       await window.gyshell.agent.exportHistory(store.chat.activeSessionId, mode)
     } catch (error) {
       console.error('Failed to export history:', error)
+    } finally {
+      setShowExportMenu(false)
+    }
+  }
+
+  const handleCopySessionId = async () => {
+    const sessionId = activeSession?.id || store.chat.activeSessionId
+    if (!sessionId) {
+      setShowExportMenu(false)
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(sessionId)
+    } catch (error) {
+      console.error('Failed to copy session ID:', error)
     } finally {
       setShowExportMenu(false)
     }
@@ -564,6 +579,15 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
             onClick={() => handleHistoryExport('detailed')}
           >
             {t.chat.history.exportDetailed}
+          </button>
+          <button
+            type="button"
+            className="win-select-option"
+            role="menuitem"
+            onClick={handleCopySessionId}
+            disabled={!activeSessionId}
+          >
+            {t.chat.history.copySessionId}
           </button>
         </div>,
         document.body

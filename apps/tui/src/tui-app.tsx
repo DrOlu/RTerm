@@ -790,7 +790,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
     )
 
     void props.client
-      .request('agent:startTask', {
+      .request('agent:startTaskAsync', {
         sessionId: session.id,
         terminalId: session.terminalId,
         userText: encodedText,

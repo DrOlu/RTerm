@@ -198,6 +198,7 @@ export const en = {
       exportMenuTitle: 'Export History',
       exportSimple: 'Export history',
       exportDetailed: 'Export detailed JSON history',
+      copySessionId: 'Copy Session ID',
       searchPlaceholder: 'Search session names...',
       clearSearch: 'Clear search',
       searchNoResults: 'No matching sessions found',

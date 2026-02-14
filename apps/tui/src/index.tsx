@@ -33,12 +33,14 @@ async function main(): Promise<void> {
     const initialTerminalId = terminals[0].id
 
     if (options.mode === 'run') {
-      await runHeadlessMode(client, initialTerminalId, options.message || '')
+      const target = await resolveTaskTarget(client, terminals, initialTerminalId, options.sessionId)
+      await runHeadlessMode(client, target.sessionId, target.terminalId, options.message || '')
       return
     }
 
     if (options.mode === 'hook') {
-      await runHookMode(client, initialTerminalId, options.message || '')
+      const target = await resolveTaskTarget(client, terminals, initialTerminalId, options.sessionId)
+      await runHookMode(client, target.sessionId, target.terminalId, options.message || '')
       return
     }
 
@@ -198,6 +200,30 @@ async function createInitialPromptSession(
   }
 }
 
+async function resolveTaskTarget(
+  client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
+  terminals: GatewayTerminalSummary[],
+  fallbackTerminalId: string,
+  preferredSessionId?: string,
+): Promise<{ sessionId: string; terminalId: string }> {
+  if (preferredSessionId) {
+    const matched = await tryLoadSessionSnapshot(client, terminals, fallbackTerminalId, preferredSessionId)
+    if (!matched) {
+      throw new Error(`Session not found: ${preferredSessionId}`)
+    }
+    return {
+      sessionId: matched.id,
+      terminalId: matched.terminalId,
+    }
+  }
+
+  const created = await createNewSession(client, fallbackTerminalId)
+  return {
+    sessionId: created.sessionId,
+    terminalId: fallbackTerminalId,
+  }
+}
+
 async function startSessionTask(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
   sessionId: string,
@@ -214,10 +240,9 @@ async function startSessionTask(
   })
 }
 
-async function runHookMode(client: GatewayClient, terminalId: string, userText: string): Promise<void> {
-  const created = await createNewSession(client, terminalId)
+async function runHookMode(client: GatewayClient, sessionId: string, terminalId: string, userText: string): Promise<void> {
   await client.request('agent:startTaskAsync', {
-    sessionId: created.sessionId,
+    sessionId,
     terminalId,
     userText,
     options: {
@@ -226,9 +251,7 @@ async function runHookMode(client: GatewayClient, terminalId: string, userText: 
   })
 }
 
-async function runHeadlessMode(client: GatewayClient, terminalId: string, userText: string): Promise<void> {
-  const created = await createNewSession(client, terminalId)
-  const sessionId = created.sessionId
+async function runHeadlessMode(client: GatewayClient, sessionId: string, terminalId: string, userText: string): Promise<void> {
   const outputCache = new Map<string, string>()
   const messageTypes = new Map<string, ChatMessage['type']>()
 
