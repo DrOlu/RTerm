@@ -33,6 +33,7 @@ import { invokeWithRetryAndSanitizedInput, stripRawResponseFromStoredMessages } 
 import { createStreamReasoningExtractor } from './AgentHelper/utils/stream_reasoning_extractor'
 import { resolveRunExperimentalFlags } from './AgentHelper/utils/experimental_flags'
 import { SelfCorrectionRuntimeManager } from './AgentHelper/utils/self_correction_runtime'
+import { removeUnmatchedToolCallsFromHistory } from './AgentHelper/utils/tool_call_history'
 import {
   CONTINUE_INSTRUCTION_TAG,
   SELF_CORRECTION_INPUT_TAG,
@@ -1680,6 +1681,13 @@ ${recent}
 
   private updateSessionFromMessages(session: ChatSession, messages: BaseMessage[]): void {
     let persisted = messages.filter((m) => !this.helpers.isEphemeral(m))
+    const toolCallCleanResult = removeUnmatchedToolCallsFromHistory(persisted)
+    persisted = toolCallCleanResult.messages
+    if (toolCallCleanResult.removedToolCallCount > 0) {
+      console.warn(
+        `[AgentService_v2] Removed ${toolCallCleanResult.removedToolCallCount} orphan tool_calls before history persistence.`
+      )
+    }
 
     // Check if the last message is an empty AI message and remove it if so
     // if (persisted.length > 0) {
