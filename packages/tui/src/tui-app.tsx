@@ -13,7 +13,7 @@ import type {
 } from './protocol'
 import { applyUiUpdate, compactMessageSummary, createSessionState, findLatestPendingAsk, type SessionState } from './state'
 
-type OverlayType = 'welcome' | 'command' | 'profile' | 'session' | 'terminal' | 'help'
+type OverlayType = 'welcome' | 'command' | 'profile' | 'session' | 'help'
 
 type OverlayOption = {
   key: string
@@ -34,7 +34,6 @@ export interface TuiBootstrapData {
   skills: SkillSummary[]
   activeProfileId: string
   initialSessionId: string
-  initialTerminalId: string
   initialSessionTitle: string
   initialMessages: ChatMessage[]
   initialSessionBusy: boolean
@@ -47,7 +46,6 @@ type SessionMeta = {
   title: string
   updatedAt: number
   messagesCount: number
-  boundTerminalId?: string
   lastMessagePreview?: string
   loaded: boolean
 }
@@ -76,7 +74,6 @@ const SLASH_COMMANDS: SlashOption[] = [
   { command: 'new', description: 'Create a new session' },
   { command: 'sessions', description: 'Open session list' },
   { command: 'profile', description: 'Select model profile' },
-  { command: 'terminal', description: 'Select terminal target' },
   { command: 'stop', description: 'Stop current run' },
   { command: 'help', description: 'Open help panel' },
   { command: 'exit', description: 'Exit GyShell TUI' },
@@ -136,7 +133,6 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
     terminals: GatewayTerminalSummary[]
     profiles: GatewayProfileSummary[]
     activeProfileId: string
-    activeTerminalId: string
     sessionOrder: string[]
     sessions: Record<string, SessionState>
     sessionMeta: Record<string, SessionMeta>
@@ -152,7 +148,6 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
     terminals: props.data.terminals,
     profiles: props.data.profiles,
     activeProfileId: props.data.activeProfileId,
-    activeTerminalId: props.data.initialTerminalId,
     sessionOrder: boot.sessionOrder,
     sessions: boot.sessions,
     sessionMeta: boot.sessionMeta,
@@ -289,7 +284,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
         title: 'New session',
         subtitle: 'Create and switch',
         run: () => {
-          void createNewSession(state.activeTerminalId)
+          void createNewSession()
         },
       },
       {
@@ -303,12 +298,6 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
         title: 'Switch profile',
         subtitle: 'Change active model profile',
         run: () => openOverlay('profile'),
-      },
-      {
-        key: 'terminal',
-        title: 'Switch terminal',
-        subtitle: 'Set target terminal for new sessions',
-        run: () => openOverlay('terminal'),
       },
       {
         key: 'stop',
@@ -349,9 +338,9 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
         {
           key: 'new',
           title: 'Start new session',
-          subtitle: `Target ${lookupTerminalTitle(state.activeTerminalId, state.terminals)}`,
+          subtitle: 'Create and switch',
           run: () => {
-            void createNewSession(state.activeTerminalId)
+            void createNewSession()
           },
         },
         {
@@ -376,26 +365,13 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
       }))
     }
 
-    if (overlay.type === 'terminal') {
-      return state.terminals.map((terminal) => ({
-        key: terminal.id,
-        title: terminal.title,
-        subtitle: `${terminal.type} (${shortId(terminal.id)})`,
-        run: () => {
-          setState('activeTerminalId', terminal.id)
-          setState('statusLine', `Target terminal ${terminal.title}`)
-          closeOverlay()
-        },
-      }))
-    }
-
     if (overlay.type === 'session') {
       return state.sessionOrder.map((sessionId) => {
         const meta = state.sessionMeta[sessionId]
         return {
           key: sessionId,
           title: `${truncateLine(normalizeOutputText(meta?.title || sessionId), 20)} (${shortId(sessionId)})`,
-          subtitle: composeSessionSubtitle(meta, state.terminals),
+          subtitle: composeSessionSubtitle(meta),
           run: () => {
             void switchSession(sessionId)
           },
@@ -417,8 +393,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
       produce((draft) => {
         const current = draft.sessions[update.sessionId]
         if (!current) {
-          const terminalId = draft.activeTerminalId
-          draft.sessions[update.sessionId] = createSessionState(update.sessionId, terminalId, 'New Chat')
+          draft.sessions[update.sessionId] = createSessionState(update.sessionId, 'New Chat')
           draft.sessionOrder.unshift(update.sessionId)
           draft.sessionMeta[update.sessionId] = {
             id: update.sessionId,
@@ -595,7 +570,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
 
     if (event.ctrl && event.name === 'n') {
       event.preventDefault()
-      void createNewSession(state.activeTerminalId)
+      void createNewSession()
       return
     }
 
@@ -797,7 +772,6 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
     void props.client
       .request('agent:startTaskAsync', {
         sessionId: session.id,
-        terminalId: session.terminalId,
         userText: encodedText,
         options: {
           startMode: session.isBusy ? 'inserted' : 'normal',
@@ -820,7 +794,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
     const [command] = raw.slice(1).split(/\s+/)
 
     if (command === 'new') {
-      await createNewSession(state.activeTerminalId)
+      await createNewSession()
       return
     }
 
@@ -831,11 +805,6 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
 
     if (command === 'profile') {
       openOverlay('profile')
-      return
-    }
-
-    if (command === 'terminal') {
-      openOverlay('terminal')
       return
     }
 
@@ -932,15 +901,15 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
     syncInputStateFromRef(true)
   }
 
-  async function createNewSession(terminalId: string): Promise<void> {
+  async function createNewSession(): Promise<void> {
     setState('pending', true)
     try {
-      const result = await props.client.request<{ sessionId: string }>('gateway:createSession', { terminalId })
+      const result = await props.client.request<{ sessionId: string }>('gateway:createSession', {})
       const sessionId = result.sessionId
 
       setState(
         produce((draft) => {
-          draft.sessions[sessionId] = createSessionState(sessionId, terminalId)
+          draft.sessions[sessionId] = createSessionState(sessionId)
           if (!draft.sessionOrder.includes(sessionId)) {
             draft.sessionOrder.unshift(sessionId)
           }
@@ -949,11 +918,9 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
             title: 'New Chat',
             updatedAt: Date.now(),
             messagesCount: 0,
-            boundTerminalId: terminalId,
             lastMessagePreview: '',
             loaded: true,
           }
-          draft.activeTerminalId = terminalId
           draft.activeSessionId = sessionId
         }),
       )
@@ -970,8 +937,6 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
 
   async function switchSession(sessionId: string): Promise<void> {
     await ensureSessionLoaded(sessionId)
-    const targetTerminalId = state.sessions[sessionId]?.terminalId || state.activeTerminalId
-    setState('activeTerminalId', targetTerminalId)
     setState('activeSessionId', sessionId)
     setState('statusLine', `Switched session ${state.sessionMeta[sessionId]?.title || shortId(sessionId)}`)
     closeOverlay()
@@ -986,8 +951,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
       const snapshot = payload.session
       setState(
         produce((draft) => {
-          const terminalId = resolveTerminalId(snapshot.boundTerminalId, draft.terminals, draft.activeTerminalId)
-          const session = createSessionState(sessionId, terminalId, snapshot.title || 'Recovered Session')
+          const session = createSessionState(sessionId, snapshot.title || 'Recovered Session')
           session.messages = (snapshot.messages || []).map(cloneMessage)
           session.isBusy = snapshot.isBusy === true
           session.isThinking = snapshot.isBusy === true
@@ -999,7 +963,6 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
             title: snapshot.title || current?.title || 'Recovered Session',
             updatedAt: snapshot.updatedAt || current?.updatedAt || Date.now(),
             messagesCount: snapshot.messages?.length ?? current?.messagesCount ?? 0,
-            boundTerminalId: snapshot.boundTerminalId || current?.boundTerminalId,
             lastMessagePreview: previewFromSession(session) || current?.lastMessagePreview,
             loaded: true,
           }
@@ -1098,9 +1061,8 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
   })
   const headerRightText = createMemo(() => {
     const profile = truncateDisplayWidth(selectedProfileName(), 24)
-    const terminal = truncateDisplayWidth(lookupTerminalTitle(state.activeTerminalId, state.terminals), 14)
     const runLabel = runActive() ? `RUN ${RUN_SPINNER_FRAMES[runSpinnerIndex()]}` : 'IDLE'
-    const raw = `${profile} | ${terminal} | ${runLabel}`
+    const raw = `${profile} | ${runLabel}`
     const max = Math.max(10, Math.floor(dimensions().width * 0.45))
     return truncateDisplayWidth(raw, max)
   })
@@ -1360,7 +1322,6 @@ function buildBootState(data: TuiBootstrapData, initialSession: SessionState): {
     title: initialSession.title,
     updatedAt: Date.now(),
     messagesCount: initialSession.messages.length,
-    boundTerminalId: data.initialTerminalId,
     lastMessagePreview: previewFromSession(initialSession),
     loaded: true,
   }
@@ -1372,14 +1333,12 @@ function buildBootState(data: TuiBootstrapData, initialSession: SessionState): {
       title: summary.title || existing?.title || 'Recovered Session',
       updatedAt: summary.updatedAt || existing?.updatedAt || Date.now(),
       messagesCount: summary.messagesCount || existing?.messagesCount || 0,
-      boundTerminalId: summary.boundTerminalId || existing?.boundTerminalId,
       lastMessagePreview: summary.lastMessagePreview || existing?.lastMessagePreview,
       loaded: summary.id === data.initialSessionId,
     }
 
     if (summary.id !== data.initialSessionId) {
-      const terminalId = summary.boundTerminalId || data.initialTerminalId
-      const nextSession = createSessionState(summary.id, terminalId, summary.title || 'Recovered Session')
+      const nextSession = createSessionState(summary.id, summary.title || 'Recovered Session')
       nextSession.isBusy = summary.isBusy === true
       nextSession.isThinking = summary.isBusy === true
       sessions[summary.id] = nextSession
@@ -1515,7 +1474,6 @@ function overlayTitle(type: OverlayType): string {
   if (type === 'command') return 'Command Palette'
   if (type === 'profile') return 'Model Profiles'
   if (type === 'session') return 'Sessions'
-  if (type === 'terminal') return 'Terminals'
   return 'Help'
 }
 
@@ -1525,31 +1483,13 @@ function lookupProfileName(activeId: string, profiles: GatewayProfileSummary[]):
   return match.modelName ? `${match.name} (${match.modelName})` : match.name
 }
 
-function lookupTerminalTitle(id: string, terminals: GatewayTerminalSummary[]): string {
-  const match = terminals.find((item) => item.id === id)
-  return match ? match.title : shortId(id)
-}
-
-function resolveTerminalId(
-  preferredTerminalId: string | undefined,
-  terminals: GatewayTerminalSummary[],
-  fallbackTerminalId: string,
-): string {
-  if (!preferredTerminalId) return fallbackTerminalId
-  const exists = terminals.some((terminal) => terminal.id === preferredTerminalId)
-  return exists ? preferredTerminalId : fallbackTerminalId
-}
-
-function composeSessionSubtitle(meta: SessionMeta | undefined, terminals: GatewayTerminalSummary[]): string {
+function composeSessionSubtitle(meta: SessionMeta | undefined): string {
   if (!meta) return 'No metadata'
   const flags = [
     `${meta.messagesCount} msgs`,
     formatShortDate(meta.updatedAt),
     meta.loaded ? 'cached' : 'load on open',
   ]
-  if (meta.boundTerminalId) {
-    flags.push(truncateLine(lookupTerminalTitle(meta.boundTerminalId, terminals), 12))
-  }
   return flags.join(' | ')
 }
 
@@ -1673,7 +1613,7 @@ function safeText(payload: unknown): string {
 }
 
 function hydrateInitialSession(data: TuiBootstrapData): SessionState {
-  const session = createSessionState(data.initialSessionId, data.initialTerminalId, data.initialSessionTitle || 'New Chat')
+  const session = createSessionState(data.initialSessionId, data.initialSessionTitle || 'New Chat')
   session.messages = data.initialMessages.map(cloneMessage)
   session.isThinking = data.initialSessionBusy === true
   session.isBusy = data.initialSessionBusy === true

@@ -261,7 +261,6 @@ import { StoredMessage } from '@langchain/core/messages'
 export interface ChatSession {
   id: string
   title: string
-  boundTerminalTabId: string
   messages: Map<string, StoredMessage>
   lastCheckpointOffset: number
 }

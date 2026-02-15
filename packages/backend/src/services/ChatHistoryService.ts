@@ -4,7 +4,6 @@ import type { ChatSession } from '../types'
 export interface StoredChatSession {
   id: string
   title: string
-  boundTerminalTabId: string
   messages: Array<{
     id: string
     type: string
@@ -46,7 +45,6 @@ export class ChatHistoryService {
     const storedSession: StoredChatSession = {
       id: session.id,
       title: session.title,
-      boundTerminalTabId: session.boundTerminalTabId,
       messages: Array.from(session.messages.entries()).map(([id, msg]) => ({
         id,
         type: (msg as any)._getType ? (msg as any)._getType() : 'unknown',
@@ -82,7 +80,6 @@ export class ChatHistoryService {
     return {
       id: storedSession.id,
       title: storedSession.title,
-      boundTerminalTabId: storedSession.boundTerminalTabId,
       messages,
       lastCheckpointOffset: storedSession.lastCheckpointOffset
     }

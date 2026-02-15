@@ -54,8 +54,8 @@ export class ElectronGatewayIpcAdapter {
     // Agent runtime
     ipcMain.handle(
       'agent:startTask',
-      async (_: any, sessionId: string, terminalId: string, userText: string, options?: StartTaskOptions) => {
-        return this.gateway.dispatchTask(sessionId, userText, terminalId, options)
+      async (_: any, sessionId: string, userText: string, options?: StartTaskOptions) => {
+        return this.gateway.dispatchTask(sessionId, userText, options)
       }
     )
 
@@ -133,7 +133,6 @@ export class ElectronGatewayIpcAdapter {
           const historyToExport = {
             sessionId: backendSession.id,
             title: uiSession?.title || backendSession.title,
-            boundTerminalTabId: backendSession.boundTerminalTabId,
             lastCheckpointOffset: backendSession.lastCheckpointOffset,
             createdAt: new Date(backendSession.createdAt).toISOString(),
             updatedAt: new Date(backendSession.updatedAt).toISOString(),

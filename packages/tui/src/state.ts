@@ -3,18 +3,16 @@ import type { ChatMessage, UIUpdateAction } from './protocol'
 export interface SessionState {
   id: string
   title: string
-  terminalId: string
   messages: ChatMessage[]
   isThinking: boolean
   isBusy: boolean
   lockedProfileId: string | null
 }
 
-export function createSessionState(id: string, terminalId: string, title = 'New Chat'): SessionState {
+export function createSessionState(id: string, title = 'New Chat'): SessionState {
   return {
     id,
     title,
-    terminalId,
     messages: [],
     isThinking: false,
     isBusy: false,

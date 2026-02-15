@@ -341,7 +341,6 @@ export async function startElectronMain(): Promise<void> {
               sessionId: backendSession.id,
               mode,
               title: uiSession?.title || backendSession.title,
-              boundTerminalTabId: backendSession.boundTerminalTabId,
               lastCheckpointOffset: backendSession.lastCheckpointOffset,
               createdAt: new Date(backendSession.createdAt).toISOString(),
               updatedAt: new Date(backendSession.updatedAt).toISOString(),

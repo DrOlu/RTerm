@@ -7,7 +7,7 @@ import {
   getMentionSuggestions,
   type MentionOption
 } from '../lib/mentions'
-import { getRenderableMessages } from '../lib/message-view'
+import { buildChatTimeline, getLatestTokenUsage, type ChatTimelineItem } from '../lib/chat-timeline'
 import {
   applyUiUpdate,
   cloneMessage,
@@ -36,7 +36,6 @@ interface ViewState {
   skills: SkillSummary[]
   profiles: GatewayProfileSummary[]
   activeProfileId: string
-  activeTerminalTargetId: string | null
   sessions: Record<string, SessionState>
   sessionMeta: Record<string, SessionMeta>
   sessionOrder: string[]
@@ -49,22 +48,11 @@ const INITIAL_VIEW_STATE: ViewState = {
   skills: [],
   profiles: [],
   activeProfileId: '',
-  activeTerminalTargetId: null,
   sessions: {},
   sessionMeta: {},
   sessionOrder: [],
   activeSessionId: null,
   statusLine: 'Ready'
-}
-
-function resolveTerminalId(
-  preferredTerminalId: string | undefined,
-  terminals: GatewayTerminalSummary[],
-  fallbackTerminalId: string
-): string {
-  if (!preferredTerminalId) return fallbackTerminalId
-  const exists = terminals.some((terminal) => terminal.id === preferredTerminalId)
-  return exists ? preferredTerminalId : fallbackTerminalId
 }
 
 function buildSessionMeta(
@@ -77,7 +65,6 @@ function buildSessionMeta(
     title: session.title,
     updatedAt: Date.now(),
     messagesCount: session.messages.length,
-    boundTerminalId: session.terminalId,
     lastMessagePreview: previewFromSession(session),
     loaded: previous?.loaded ?? true,
     ...patch
@@ -96,6 +83,69 @@ function compactStatusLabel(text: string, limit = 28): string {
   return `${normalized.slice(0, Math.max(1, limit - 3))}...`
 }
 
+function normalizeSkillItem(raw: unknown, enabledByName: Set<string> | null): SkillSummary | null {
+  if (!raw || typeof raw !== 'object') return null
+  const data = raw as Record<string, unknown>
+  if (typeof data.name !== 'string' || !data.name) return null
+  const localEnabled = typeof data.enabled === 'boolean' ? data.enabled : undefined
+  const enabled = enabledByName ? enabledByName.has(data.name) : localEnabled !== false
+
+  return {
+    name: data.name,
+    description: typeof data.description === 'string' ? data.description : undefined,
+    enabled,
+    fileName: typeof data.fileName === 'string' ? data.fileName : undefined,
+    filePath: typeof data.filePath === 'string' ? data.filePath : undefined,
+    baseDir: typeof data.baseDir === 'string' ? data.baseDir : undefined,
+    scanRoot: typeof data.scanRoot === 'string' ? data.scanRoot : undefined,
+    isNested: data.isNested === true,
+    supportingFiles: Array.isArray(data.supportingFiles)
+      ? data.supportingFiles.filter((item): item is string => typeof item === 'string')
+      : undefined
+  }
+}
+
+function mergeSkillsByName(previous: SkillSummary[], incoming: SkillSummary[]): SkillSummary[] {
+  const byName = new Map(previous.map((skill) => [skill.name, skill]))
+  for (const skill of incoming) {
+    const prev = byName.get(skill.name)
+    byName.set(skill.name, {
+      ...(prev || {}),
+      ...skill
+    })
+  }
+  return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+async function fetchSkillsSnapshot(client: GatewayClient): Promise<SkillSummary[]> {
+  try {
+    const [allRaw, enabledRaw] = await Promise.all([
+      client.request<unknown>('skills:getAll', {}),
+      client.request<unknown>('skills:getEnabled', {})
+    ])
+
+    if (Array.isArray(allRaw) && Array.isArray(enabledRaw)) {
+      const enabledByName = new Set(
+        enabledRaw
+          .map((item) => (item && typeof item === 'object' && 'name' in item ? (item as { name?: unknown }).name : null))
+          .filter((name): name is string => typeof name === 'string' && !!name)
+      )
+      return allRaw
+        .map((item) => normalizeSkillItem(item, enabledByName))
+        .filter((item): item is SkillSummary => !!item)
+        .sort((left, right) => left.name.localeCompare(right.name))
+    }
+  } catch {
+    // fallback to legacy list API
+  }
+
+  const payload = await client.request<{ skills: SkillSummary[] }>('skills:list', {})
+  return (payload.skills || [])
+    .map((item) => normalizeSkillItem(item, null))
+    .filter((item): item is SkillSummary => !!item)
+    .sort((left, right) => left.name.localeCompare(right.name))
+}
+
 export interface MobileControllerState {
   gatewayInput: string
   connectionStatus: ConnectionStatus
@@ -108,15 +158,17 @@ export interface MobileControllerState {
   skills: SkillSummary[]
   profiles: GatewayProfileSummary[]
   activeProfileId: string
-  activeTerminalTargetId: string | null
   activeSession: SessionState | null
   activeSessionId: string | null
-  visibleMessages: ChatMessage[]
+  chatTimeline: ChatTimelineItem[]
   sessionOrder: string[]
   sessionMeta: Record<string, SessionMeta>
   sessions: Record<string, SessionState>
   statusLine: string
   isRunning: boolean
+  latestTokens: number
+  latestMaxTokens: number
+  tokenUsagePercent: number | null
 }
 
 export interface MobileControllerActions {
@@ -131,9 +183,9 @@ export interface MobileControllerActions {
   sendMessage: () => Promise<void>
   stopActiveSession: () => Promise<void>
   updateProfile: (profileId: string) => Promise<void>
+  reloadSkills: () => Promise<void>
   setSkillEnabled: (name: string, enabled: boolean) => Promise<void>
   replyAsk: (message: ChatMessage, decision: 'allow' | 'deny') => Promise<void>
-  setActiveTerminalTargetId: (terminalId: string) => void
   createTerminalTab: () => Promise<void>
   closeTerminalTab: (terminalId: string) => Promise<void>
 }
@@ -167,10 +219,9 @@ export function useMobileController(): {
     return view.sessions[view.activeSessionId] || null
   }, [view.activeSessionId, view.sessions])
 
-  const visibleMessages = React.useMemo(() => {
-    if (!activeSession) return [] as ChatMessage[]
-    return getRenderableMessages(activeSession.messages)
-  }, [activeSession])
+  const sessionMessages = activeSession?.messages || []
+  const chatTimeline = React.useMemo(() => buildChatTimeline(sessionMessages), [sessionMessages])
+  const tokenUsage = React.useMemo(() => getLatestTokenUsage(sessionMessages), [sessionMessages])
 
   const mentionState = React.useMemo(() => {
     return getMentionSuggestions(composerValue, composerCursor, view.terminals, view.skills)
@@ -181,12 +232,12 @@ export function useMobileController(): {
       const sessions = { ...previous.sessions }
       const sessionMeta = { ...previous.sessionMeta }
       const sessionOrder = [...previous.sessionOrder]
-      const fallbackTerminalId = previous.terminals[0]?.id || previous.activeTerminalTargetId || ''
 
       const current = sessions[update.sessionId]
       const nextSession = current
         ? cloneSession(current)
-        : createSessionState(update.sessionId, fallbackTerminalId, 'New Chat')
+        : createSessionState(update.sessionId, 'New Chat')
+      const wasBusy = nextSession.isBusy
 
       if (
         update.type === 'ADD_MESSAGE' ||
@@ -195,6 +246,15 @@ export function useMobileController(): {
         update.type === 'UPDATE_MESSAGE'
       ) {
         nextSession.isBusy = true
+      }
+
+      if (
+        update.type === 'ADD_MESSAGE' &&
+        update.message.role === 'user' &&
+        !wasBusy &&
+        !nextSession.lockedProfileId
+      ) {
+        nextSession.lockedProfileId = previous.activeProfileId || null
       }
 
       applyUiUpdate(nextSession, update)
@@ -266,13 +326,16 @@ export function useMobileController(): {
               .filter((name): name is string => !!name)
           )
           setView((previous) => {
-            const updated = previous.skills.map((skill) => ({
+            const incoming = payload
+              .map((item) => normalizeSkillItem(item, enabledNames))
+              .filter((item): item is SkillSummary => !!item)
+            const merged = mergeSkillsByName(previous.skills, incoming).map((skill) => ({
               ...skill,
               enabled: enabledNames.has(skill.name)
             }))
             return {
               ...previous,
-              skills: updated,
+              skills: merged,
               statusLine: `Skills updated (${enabledNames.size})`
             }
           })
@@ -318,11 +381,7 @@ export function useMobileController(): {
       }
 
       try {
-        const skillPayload = await client.request<{ skills: SkillSummary[] }>('skills:list', {})
-        skills = (skillPayload.skills || []).map((skill) => ({
-          ...skill,
-          enabled: skill.enabled !== false
-        }))
+        skills = await fetchSkillsSnapshot(client)
       } catch {
         skills = []
         skillsUnavailable = true
@@ -332,16 +391,13 @@ export function useMobileController(): {
       let summaries = sessionPayload.sessions || []
 
       if (summaries.length === 0) {
-        const created = await client.request<{ sessionId: string }>('gateway:createSession', {
-          terminalId: terminals[0].id
-        })
+        const created = await client.request<{ sessionId: string }>('gateway:createSession', {})
         summaries = [
           {
             id: created.sessionId,
             title: 'New Chat',
             updatedAt: Date.now(),
             messagesCount: 0,
-            boundTerminalId: terminals[0].id,
             lastMessagePreview: '',
             isBusy: false
           }
@@ -358,23 +414,23 @@ export function useMobileController(): {
         sessionId: initialSummary.id
       })
       const snapshot = snapshotPayload.session
-      const fallbackTerminalId = terminals[0].id
 
       const sessions: Record<string, SessionState> = {}
       const sessionMeta: Record<string, SessionMeta> = {}
 
       for (const summary of sortedSummaries) {
-        const terminalId = resolveTerminalId(summary.boundTerminalId, terminals, fallbackTerminalId)
         const loaded = summary.id === snapshot.id
-        const session = createSessionState(summary.id, terminalId, summary.title || 'Recovered Session')
+        const session = createSessionState(summary.id, summary.title || 'Recovered Session')
         if (loaded) {
           session.title = snapshot.title || session.title
           session.messages = (snapshot.messages || []).map(cloneMessage)
           session.isBusy = snapshot.isBusy === true
           session.isThinking = snapshot.isBusy === true
+          session.lockedProfileId = session.isBusy ? activeProfileId || null : null
         } else {
           session.isBusy = summary.isBusy === true
           session.isThinking = summary.isBusy === true
+          session.lockedProfileId = session.isBusy ? activeProfileId || null : null
         }
         sessions[summary.id] = session
         sessionMeta[summary.id] = {
@@ -382,7 +438,6 @@ export function useMobileController(): {
           title: loaded ? session.title : summary.title || 'Recovered Session',
           updatedAt: summary.updatedAt || Date.now(),
           messagesCount: loaded ? session.messages.length : summary.messagesCount,
-          boundTerminalId: summary.boundTerminalId,
           lastMessagePreview: loaded ? previewFromSession(session) : summary.lastMessagePreview,
           loaded
         }
@@ -393,14 +448,11 @@ export function useMobileController(): {
         sessionMeta
       )
 
-      const activeTerminalTargetId = sessions[snapshot.id]?.terminalId || terminals[0]?.id || null
-
       setView({
         terminals,
         skills,
         profiles,
         activeProfileId,
-        activeTerminalTargetId,
         sessions,
         sessionMeta,
         sessionOrder: order,
@@ -426,7 +478,6 @@ export function useMobileController(): {
       const currentMeta = snapshotState.sessionMeta[sessionId]
       if (currentMeta?.loaded) return
 
-      const fallbackTerminalId = snapshotState.terminals[0]?.id || snapshotState.activeTerminalTargetId || ''
       const payload = await client.request<{ session: GatewaySessionSnapshot }>('session:get', { sessionId })
       const snapshot = payload.session
 
@@ -434,11 +485,11 @@ export function useMobileController(): {
         const sessions = { ...previous.sessions }
         const sessionMeta = { ...previous.sessionMeta }
 
-        const terminalId = resolveTerminalId(snapshot.boundTerminalId, previous.terminals, fallbackTerminalId)
-        const nextSession = createSessionState(sessionId, terminalId, snapshot.title || 'Recovered Session')
+        const nextSession = createSessionState(sessionId, snapshot.title || 'Recovered Session')
         nextSession.messages = (snapshot.messages || []).map(cloneMessage)
         nextSession.isBusy = snapshot.isBusy === true
         nextSession.isThinking = snapshot.isBusy === true
+        nextSession.lockedProfileId = nextSession.isBusy ? previous.activeProfileId || null : null
         sessions[sessionId] = nextSession
 
         sessionMeta[sessionId] = {
@@ -446,7 +497,6 @@ export function useMobileController(): {
           title: nextSession.title,
           updatedAt: snapshot.updatedAt || Date.now(),
           messagesCount: nextSession.messages.length,
-          boundTerminalId: snapshot.boundTerminalId,
           lastMessagePreview: previewFromSession(nextSession),
           loaded: true
         }
@@ -465,15 +515,11 @@ export function useMobileController(): {
     async (sessionId: string) => {
       try {
         await ensureSessionLoaded(sessionId)
-        setView((previous) => {
-          const targetTerminalId = previous.sessions[sessionId]?.terminalId || previous.activeTerminalTargetId
-          return {
-            ...previous,
-            activeSessionId: sessionId,
-            activeTerminalTargetId: targetTerminalId,
-            statusLine: `Session: ${compactStatusLabel(previous.sessionMeta[sessionId]?.title || sessionId)}`
-          }
-        })
+        setView((previous) => ({
+          ...previous,
+          activeSessionId: sessionId,
+          statusLine: `Session: ${compactStatusLabel(previous.sessionMeta[sessionId]?.title || sessionId)}`
+        }))
       } catch (error) {
         setConnectionError(`Failed to load session: ${safeError(error)}`)
       }
@@ -481,40 +527,26 @@ export function useMobileController(): {
     [ensureSessionLoaded]
   )
 
-  const createSessionInternal = React.useCallback(async (): Promise<{ sessionId: string; terminalId: string } | null> => {
+  const createSessionInternal = React.useCallback(async (): Promise<{ sessionId: string } | null> => {
     if (!client.isConnected()) {
       setConnectionError('Gateway is not connected')
       return null
     }
 
-    const snapshot = viewRef.current
-    const terminalId =
-      snapshot.activeTerminalTargetId ||
-      (snapshot.activeSessionId ? snapshot.sessions[snapshot.activeSessionId]?.terminalId : undefined) ||
-      snapshot.terminals[0]?.id
-
-    if (!terminalId) {
-      setConnectionError('No terminal available for new session')
-      return null
-    }
-
     try {
-      const payload = await client.request<{ sessionId: string }>('gateway:createSession', {
-        terminalId
-      })
+      const payload = await client.request<{ sessionId: string }>('gateway:createSession', {})
 
       setView((previous) => {
         const sessions = { ...previous.sessions }
         const sessionMeta = { ...previous.sessionMeta }
         const sessionOrder = [payload.sessionId, ...previous.sessionOrder.filter((id) => id !== payload.sessionId)]
-        const nextSession = createSessionState(payload.sessionId, terminalId)
+        const nextSession = createSessionState(payload.sessionId)
         sessions[payload.sessionId] = nextSession
         sessionMeta[payload.sessionId] = {
           id: payload.sessionId,
           title: nextSession.title,
           updatedAt: Date.now(),
           messagesCount: 0,
-          boundTerminalId: terminalId,
           lastMessagePreview: '',
           loaded: true
         }
@@ -524,12 +556,11 @@ export function useMobileController(): {
           sessionMeta,
           sessionOrder,
           activeSessionId: payload.sessionId,
-          activeTerminalTargetId: terminalId,
           statusLine: `Created session ${payload.sessionId.slice(0, 8)}`
         }
       })
 
-      return { sessionId: payload.sessionId, terminalId }
+      return { sessionId: payload.sessionId }
     } catch (error) {
       setConnectionError(`Failed to create session: ${safeError(error)}`)
       return null
@@ -551,21 +582,11 @@ export function useMobileController(): {
     }
 
     let targetSessionId = viewRef.current.activeSessionId
-    let targetTerminalId =
-      (targetSessionId ? viewRef.current.sessions[targetSessionId]?.terminalId : undefined) ||
-      viewRef.current.activeTerminalTargetId ||
-      viewRef.current.terminals[0]?.id
 
     if (!targetSessionId) {
       const created = await createSessionInternal()
       if (!created) return
       targetSessionId = created.sessionId
-      targetTerminalId = created.terminalId
-    }
-
-    if (!targetTerminalId) {
-      setConnectionError('No terminal bound to current session')
-      return
     }
 
     const snapshot = viewRef.current
@@ -582,7 +603,9 @@ export function useMobileController(): {
         const copy = cloneSession(current)
         copy.isThinking = true
         copy.isBusy = true
-        copy.lockedProfileId = previous.activeProfileId || null
+        if (!current.isBusy) {
+          copy.lockedProfileId = previous.activeProfileId || null
+        }
         sessions[targetSessionId!] = copy
       }
       return {
@@ -595,7 +618,6 @@ export function useMobileController(): {
     try {
       await client.request('agent:startTaskAsync', {
         sessionId: targetSessionId,
-        terminalId: targetTerminalId,
         userText: encodedText,
         options: {
           startMode: session?.isBusy ? 'inserted' : 'normal'
@@ -662,13 +684,20 @@ export function useMobileController(): {
           name,
           enabled
         })
-        const nextSkills = (payload.skills || []).map((skill) => ({
-          ...skill,
-          enabled: skill.enabled !== false
-        }))
+        const enabledNames = new Set(
+          (payload.skills || [])
+            .map((skill) => (skill.enabled !== false ? skill.name : null))
+            .filter((item): item is string => typeof item === 'string' && !!item)
+        )
+        const incoming = (payload.skills || [])
+          .map((skill) => normalizeSkillItem(skill, enabledNames))
+          .filter((skill): skill is SkillSummary => !!skill)
         setView((previous) => ({
           ...previous,
-          skills: nextSkills,
+          skills: mergeSkillsByName(previous.skills, incoming).map((skill) => ({
+            ...skill,
+            enabled: enabledNames.has(skill.name)
+          })),
           statusLine: `${enabled ? 'Enabled' : 'Disabled'} skill: ${name}`
         }))
       } catch (error) {
@@ -677,6 +706,20 @@ export function useMobileController(): {
     },
     [client]
   )
+
+  const reloadSkills = React.useCallback(async () => {
+    if (!client.isConnected()) return
+    try {
+      const nextSkills = await fetchSkillsSnapshot(client)
+      setView((previous) => ({
+        ...previous,
+        skills: mergeSkillsByName(previous.skills, nextSkills),
+        statusLine: `Skills refreshed (${nextSkills.length})`
+      }))
+    } catch (error) {
+      setConnectionError(`Failed to reload skills: ${safeError(error)}`)
+    }
+  }, [client])
 
   const replyAsk = React.useCallback(
     async (message: ChatMessage, decision: 'allow' | 'deny') => {
@@ -743,49 +786,12 @@ export function useMobileController(): {
     [composerValue, mentionState.context]
   )
 
-  const setActiveTerminalTargetId = React.useCallback((terminalId: string) => {
-    setView((previous) => ({ ...previous, activeTerminalTargetId: terminalId }))
-  }, [])
-
   const reconcileTerminals = React.useCallback(
     (terminals: GatewayTerminalSummary[], statusLine: string) => {
       setView((previous) => {
-        const nextTerminals = terminals
-        const nextTerminalIds = new Set(nextTerminals.map((terminal) => terminal.id))
-        const fallbackTerminalId = nextTerminals[0]?.id || null
-        const nextActiveTerminalTargetId =
-          previous.activeTerminalTargetId && nextTerminalIds.has(previous.activeTerminalTargetId)
-            ? previous.activeTerminalTargetId
-            : fallbackTerminalId
-
-        const sessions = { ...previous.sessions }
-        const sessionMeta = { ...previous.sessionMeta }
-
-        for (const sessionId of Object.keys(sessions)) {
-          const session = sessions[sessionId]
-          if (!session) continue
-          if (nextTerminalIds.has(session.terminalId)) continue
-          if (!fallbackTerminalId) continue
-
-          const nextSession = cloneSession(session)
-          nextSession.terminalId = fallbackTerminalId
-          sessions[sessionId] = nextSession
-
-          const meta = sessionMeta[sessionId]
-          if (meta) {
-            sessionMeta[sessionId] = {
-              ...meta,
-              boundTerminalId: fallbackTerminalId
-            }
-          }
-        }
-
         return {
           ...previous,
-          terminals: nextTerminals,
-          sessions,
-          sessionMeta,
-          activeTerminalTargetId: nextActiveTerminalTargetId,
+          terminals,
           statusLine
         }
       })
@@ -865,15 +871,17 @@ export function useMobileController(): {
     skills: view.skills,
     profiles: view.profiles,
     activeProfileId: view.activeProfileId,
-    activeTerminalTargetId: view.activeTerminalTargetId,
     activeSession,
     activeSessionId: view.activeSessionId,
-    visibleMessages,
+    chatTimeline,
     sessionOrder: view.sessionOrder,
     sessionMeta: view.sessionMeta,
     sessions: view.sessions,
     statusLine: view.statusLine,
-    isRunning: !!(activeSession?.isBusy || activeSession?.isThinking)
+    isRunning: !!(activeSession?.isBusy || activeSession?.isThinking),
+    latestTokens: tokenUsage.totalTokens,
+    latestMaxTokens: tokenUsage.maxTokens,
+    tokenUsagePercent: tokenUsage.percent
   }
 
   const actions: MobileControllerActions = {
@@ -888,9 +896,9 @@ export function useMobileController(): {
     sendMessage,
     stopActiveSession,
     updateProfile,
+    reloadSkills,
     setSkillEnabled,
     replyAsk,
-    setActiveTerminalTargetId,
     createTerminalTab,
     closeTerminalTab
   }

@@ -1,6 +1,7 @@
 import React from 'react'
-import { SendHorizontal, Square } from 'lucide-react'
+import { Lock, SendHorizontal, Square } from 'lucide-react'
 import { consumeMentionBackspace, type MentionOption } from '../../lib/mentions'
+import type { GatewayProfileSummary } from '../../types'
 import { MentionSuggestions } from './MentionSuggestions'
 
 interface ComposerBarProps {
@@ -12,6 +13,11 @@ interface ComposerBarProps {
   onStop: () => void
   canSend: boolean
   isRunning: boolean
+  profiles: GatewayProfileSummary[]
+  activeProfileId: string
+  lockedProfileId: string | null
+  tokenUsagePercent: number | null
+  onUpdateProfile: (profileId: string) => void
   sessionHint: string
   mentionOptions: MentionOption[]
   onPickMention: (option: MentionOption) => void
@@ -26,6 +32,11 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
   onStop,
   canSend,
   isRunning,
+  profiles,
+  activeProfileId,
+  lockedProfileId,
+  tokenUsagePercent,
+  onUpdateProfile,
   sessionHint,
   mentionOptions,
   onPickMention
@@ -55,19 +66,43 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
     })
   }, [onSend])
 
+  const profileLocked = Boolean(isRunning && lockedProfileId)
+  const profileValue = lockedProfileId || activeProfileId || profiles[0]?.id || ''
+
   return (
     <footer className="composer-modern">
       <div className="composer-status-row">
         <span className="composer-session-hint">{sessionHint}</span>
-        <span
-          className={`composer-run-indicator ${isRunning ? 'running' : 'idle'}`}
-          aria-label={isRunning ? 'Running' : 'Idle'}
-          title={isRunning ? 'Running' : 'Idle'}
-        ></span>
+        <div className="composer-status-right">
+          {tokenUsagePercent !== null ? <span className="composer-token-mini">{tokenUsagePercent}%</span> : null}
+          <span
+            className={`composer-run-indicator ${isRunning ? 'running' : 'idle'}`}
+            aria-label={isRunning ? 'Running' : 'Idle'}
+            title={isRunning ? 'Running' : 'Idle'}
+          ></span>
+        </div>
       </div>
 
       <div className="composer-input-shell">
         <MentionSuggestions options={mentionOptions} onPick={onPickMention} />
+
+        <div className={`composer-profile-mini ${profileLocked ? 'locked' : ''}`}>
+          <span className="composer-profile-prefix">
+            {profileLocked ? <Lock size={10} /> : null}
+            <span>Model</span>
+          </span>
+          <select
+            value={profileValue}
+            disabled={profileLocked || profiles.length === 0}
+            onChange={(event) => onUpdateProfile(event.target.value)}
+          >
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <textarea
           ref={textareaRef}

@@ -936,7 +936,6 @@ export class AppStore {
     content: string,
     options?: { mode?: 'normal' | 'queue' }
   ): boolean {
-    const activeTabId = this.activeTerminalId
     const mode = options?.mode || 'normal'
     let targetSessionId = sessionId
     if (!targetSessionId) {
@@ -950,14 +949,6 @@ export class AppStore {
       return false
     }
 
-    if (!activeTabId) {
-      this.chat.addMessage(
-        { role: 'system', type: 'text', content: 'No active terminal selected.' },
-        targetSessionId
-      )
-      return false
-    }
-
     this.chat.setThinking(true, targetSessionId)
     this.chat.setSessionBusy(true, targetSessionId)
     if (!wasBusy) {
@@ -965,12 +956,8 @@ export class AppStore {
       this.chat.setSessionLockedProfile(targetSessionId, activeProfileId || null)
     }
 
-    const selectionText = this.getTerminalSelection(activeTabId)
-    window.gyshell.terminal.setSelection(activeTabId, selectionText).catch(() => {
-      // ignore
-    })
     const startMode = wasBusy && mode === 'normal' ? 'inserted' : 'normal'
-    window.gyshell.agent.startTask(targetSessionId, activeTabId, content, { startMode })
+    window.gyshell.agent.startTask(targetSessionId, content, { startMode })
     return true
   }
 

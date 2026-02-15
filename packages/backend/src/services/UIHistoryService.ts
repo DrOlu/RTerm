@@ -14,10 +14,19 @@ interface StoredUIHistory {
   sessions: Record<string, UIChatSession>
 }
 
+export interface UISessionSummary {
+  id: string
+  title: string
+  updatedAt: number
+  messagesCount: number
+  lastMessagePreview: string
+}
+
 export class UIHistoryService {
   private store: Store<StoredUIHistory>
   // Keep UI history hot in memory to avoid sync electron-store overhead on every stream chunk.
   private sessionsCache: Record<string, UIChatSession>
+  private sessionSummaryCache: Record<string, UISessionSummary>
   private dirtySessions: Set<string> = new Set()
 
   constructor() {
@@ -31,7 +40,46 @@ export class UIHistoryService {
     }
     this.store = new Store<StoredUIHistory>(storeOptions)
     this.sessionsCache = this.sanitizeSessions(this.store.get('sessions') || {})
+    this.sessionSummaryCache = this.buildSessionSummaryCache(this.sessionsCache)
     this.saveSessions(this.sessionsCache)
+  }
+
+  private buildSessionSummaryCache(sessions: Record<string, UIChatSession>): Record<string, UISessionSummary> {
+    const summaryCache: Record<string, UISessionSummary> = {}
+    for (const [sessionId, session] of Object.entries(sessions)) {
+      summaryCache[sessionId] = this.buildSessionSummary(session)
+    }
+    return summaryCache
+  }
+
+  private buildSessionSummary(session: UIChatSession): UISessionSummary {
+    return {
+      id: session.id,
+      title: session.title,
+      updatedAt: session.updatedAt,
+      messagesCount: session.messages.length,
+      lastMessagePreview: this.getLastVisiblePreview(session.messages)
+    }
+  }
+
+  private getLastVisiblePreview(messages: ChatMessage[]): string {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]
+      if (message.type === 'tokens_count') continue
+      const preview = String(message.content || message.metadata?.output || '')
+      if (preview) return preview
+      return ''
+    }
+    return ''
+  }
+
+  private syncSessionSummary(sessionId: string): void {
+    const session = this.sessionsCache[sessionId]
+    if (!session) {
+      delete this.sessionSummaryCache[sessionId]
+      return
+    }
+    this.sessionSummaryCache[sessionId] = this.buildSessionSummary(session)
   }
 
   private sanitizeSessions(sessions: Record<string, UIChatSession>): Record<string, UIChatSession> {
@@ -89,6 +137,7 @@ export class UIHistoryService {
     session.updatedAt = Date.now()
 
     const actions = this.processEvent(session, event, sessionId)
+    this.syncSessionSummary(sessionId)
     // Mark dirty but do not persist immediately (critical for smooth streaming UX).
     this.dirtySessions.add(sessionId)
     return actions
@@ -432,8 +481,13 @@ export class UIHistoryService {
     return Object.values(this.sessionsCache).sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
+  getAllSessionSummaries(): UISessionSummary[] {
+    return Object.values(this.sessionSummaryCache).sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
   deleteSession(sessionId: string): void {
     delete this.sessionsCache[sessionId]
+    delete this.sessionSummaryCache[sessionId]
     this.dirtySessions.delete(sessionId)
     this.saveSessions(this.sessionsCache)
   }
@@ -442,6 +496,7 @@ export class UIHistoryService {
     if (this.sessionsCache[sessionId]) {
       this.sessionsCache[sessionId].title = newTitle
       this.sessionsCache[sessionId].updatedAt = Date.now()
+      this.syncSessionSummary(sessionId)
       this.dirtySessions.add(sessionId)
       this.flush(sessionId)
     }
@@ -456,6 +511,7 @@ export class UIHistoryService {
 
     const removedCount = session.messages.length - idx
     session.messages = session.messages.slice(0, idx)
+    this.syncSessionSummary(sessionId)
     this.dirtySessions.add(sessionId)
     // Rollback is user-driven and low-frequency; persist immediately.
     this.flush(sessionId)

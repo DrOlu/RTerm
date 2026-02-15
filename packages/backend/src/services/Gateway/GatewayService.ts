@@ -82,9 +82,9 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     });
   }
 
-  async createSession(terminalId: string): Promise<string> {
+  async createSession(): Promise<string> {
     const sessionId = uuidv4();
-    const context = this.createEmptySessionContext(sessionId, terminalId);
+    const context = this.createEmptySessionContext(sessionId);
     this.sessions.set(sessionId, context);
     return sessionId;
   }
@@ -93,11 +93,10 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     return this.sessions.get(sessionId);
   }
 
-  async dispatchTask(sessionId: string, input: string, terminalId?: string, options?: StartTaskOptions): Promise<void> {
+  async dispatchTask(sessionId: string, input: string, options?: StartTaskOptions): Promise<void> {
     let context = this.sessions.get(sessionId);
     if (!context) {
-      const tid = terminalId || this.terminalService.getAllTerminals()[0]?.id || '';
-      context = this.createEmptySessionContext(sessionId, tid);
+      context = this.createEmptySessionContext(sessionId);
       this.sessions.set(sessionId, context);
     }
 
@@ -200,21 +199,31 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
   }
 
   listSessionSummaries(): GatewaySessionSummary[] {
-    return this.uiHistoryService.getAllSessions().map((session) => {
-      const backendSession = this.agentService.loadChatSession(session.id);
+    const summarySource = typeof (this.uiHistoryService as any).getAllSessionSummaries === 'function'
+      ? (this.uiHistoryService as any).getAllSessionSummaries()
+      : this.uiHistoryService.getAllSessions().map((session) => {
+          const latestVisible = [...session.messages]
+            .reverse()
+            .find((message) => message.type !== 'tokens_count');
+          return {
+            id: session.id,
+            title: session.title,
+            updatedAt: session.updatedAt,
+            messagesCount: session.messages.length,
+            lastMessagePreview: latestVisible?.content || latestVisible?.metadata?.output || ''
+          };
+        });
+
+    return summarySource.map((session: any) => {
       const context = this.sessions.get(session.id);
-      const latestVisible = [...session.messages]
-        .reverse()
-        .find((message) => message.type !== 'tokens_count');
       const isBusy = context ? context.status !== 'idle' : false;
 
       return {
         id: session.id,
         title: session.title,
         updatedAt: session.updatedAt,
-        messagesCount: session.messages.length,
-        boundTerminalId: backendSession?.boundTerminalTabId,
-        lastMessagePreview: this.normalizeSessionPreview(latestVisible?.content || latestVisible?.metadata?.output || ''),
+        messagesCount: session.messagesCount,
+        lastMessagePreview: this.normalizeSessionPreview(session.lastMessagePreview || ''),
         isBusy
       };
     });
@@ -224,7 +233,6 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     const session = this.uiHistoryService.getSession(sessionId);
     if (!session) return null;
 
-    const backendSession = this.agentService.loadChatSession(session.id);
     const context = this.sessions.get(session.id);
     const isBusy = context ? context.status !== 'idle' : false;
     return {
@@ -235,7 +243,6 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
         ...message,
         metadata: message.metadata ? { ...message.metadata } : undefined
       })),
-      boundTerminalId: backendSession?.boundTerminalTabId,
       isBusy
     };
   }
@@ -299,10 +306,9 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     context.lockedExperimentalFlags = null;
   }
 
-  private createEmptySessionContext(sessionId: string, boundTerminalId: string): SessionContext {
+  private createEmptySessionContext(sessionId: string): SessionContext {
     return {
       sessionId,
-      boundTerminalId,
       activeRunId: null,
       lockedProfileId: null,
       lockedExperimentalFlags: null,

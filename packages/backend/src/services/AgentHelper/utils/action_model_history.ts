@@ -2,12 +2,11 @@ import { HumanMessage, type BaseMessage } from '@langchain/core/messages'
 import {
   NORMAL_USER_INPUT_TAGS,
   hasAnyNormalUserInputTag,
-  TAB_CONTEXT_MARKER,
   SYS_INFO_MARKER
 } from '../prompts'
 
 export function buildActionModelHistory(allMessages: BaseMessage[]): BaseMessage[] {
-  const specialTags = [...NORMAL_USER_INPUT_TAGS, TAB_CONTEXT_MARKER, SYS_INFO_MARKER]
+  const specialTags = [...NORMAL_USER_INPUT_TAGS, SYS_INFO_MARKER]
   const last3Special: BaseMessage[] = []
   for (let i = allMessages.length - 1; i >= 0 && last3Special.length < 3; i--) {
     const msg = allMessages[i]

@@ -31,17 +31,15 @@ export async function startTuiCli(argv: string[] = process.argv.slice(2)): Promi
       throw new Error('No terminal is available on backend. Start gybackend with terminal bootstrap enabled.')
     }
 
-    const initialTerminalId = terminals[0].id
-
     if (options.mode === 'run') {
-      const target = await resolveTaskTarget(client, terminals, initialTerminalId, options.sessionId)
-      await runHeadlessMode(client, target.sessionId, target.terminalId, options.message || '')
+      const target = await resolveTaskTarget(client, options.sessionId)
+      await runHeadlessMode(client, target.sessionId, options.message || '')
       return
     }
 
     if (options.mode === 'hook') {
-      const target = await resolveTaskTarget(client, terminals, initialTerminalId, options.sessionId)
-      await runHookMode(client, target.sessionId, target.terminalId, options.message || '')
+      const target = await resolveTaskTarget(client, options.sessionId)
+      await runHookMode(client, target.sessionId, options.message || '')
       return
     }
 
@@ -49,8 +47,8 @@ export async function startTuiCli(argv: string[] = process.argv.slice(2)): Promi
     const skills = await safeRequestSkills(client)
     const sessionSummaries = await safeRequestSessionSummaries(client)
     const initialSession = options.message
-      ? await createInitialPromptSession(client, initialTerminalId)
-      : await resolveInitialSession(client, terminals, sessionSummaries, initialTerminalId, options.sessionId)
+      ? await createInitialPromptSession(client)
+      : await resolveInitialSession(client, sessionSummaries, options.sessionId)
 
     const { runTui } = await import('./tui-app')
     const tuiPromise = runTui(client, {
@@ -59,7 +57,6 @@ export async function startTuiCli(argv: string[] = process.argv.slice(2)): Promi
       profiles: profilesData.profiles,
       activeProfileId: profilesData.activeProfileId,
       initialSessionId: initialSession.id,
-      initialTerminalId: initialSession.terminalId,
       initialSessionTitle: initialSession.title,
       initialMessages: initialSession.messages,
       initialSessionBusy: initialSession.isBusy,
@@ -69,7 +66,7 @@ export async function startTuiCli(argv: string[] = process.argv.slice(2)): Promi
     })
 
     if (options.message) {
-      void startSessionTask(client, initialSession.id, initialSession.terminalId, options.message).catch((error) => {
+      void startSessionTask(client, initialSession.id, options.message).catch((error) => {
         const detail = error instanceof Error ? error.message : String(error)
         process.stderr.write(`Failed to send startup message: ${detail}\n`)
       })
@@ -134,21 +131,18 @@ async function safeRequestSkills(
 
 async function resolveInitialSession(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
-  terminals: GatewayTerminalSummary[],
   sessions: GatewaySessionSummary[],
-  fallbackTerminalId: string,
   preferredSessionId?: string,
-): Promise<{ id: string; terminalId: string; title: string; messages: ChatMessage[]; isBusy: boolean }> {
+): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean }> {
   if (preferredSessionId) {
-    const matched = await tryLoadSessionSnapshot(client, terminals, fallbackTerminalId, preferredSessionId)
+    const matched = await tryLoadSessionSnapshot(client, preferredSessionId)
     if (matched) return matched
   }
 
   if (sessions.length === 0) {
-    const created = await createNewSession(client, fallbackTerminalId)
+    const created = await createNewSession(client)
     return {
       id: created.sessionId,
-      terminalId: fallbackTerminalId,
       title: 'New Chat',
       messages: [],
       isBusy: false,
@@ -156,13 +150,12 @@ async function resolveInitialSession(
   }
 
   const preferred = sessions[0]
-  const firstSession = await tryLoadSessionSnapshot(client, terminals, fallbackTerminalId, preferred.id, preferred.title)
+  const firstSession = await tryLoadSessionSnapshot(client, preferred.id, preferred.title)
   if (firstSession) return firstSession
 
-  const created = await createNewSession(client, fallbackTerminalId)
+  const created = await createNewSession(client)
   return {
     id: created.sessionId,
-    terminalId: fallbackTerminalId,
     title: 'New Chat',
     messages: [],
     isBusy: false,
@@ -171,20 +164,16 @@ async function resolveInitialSession(
 
 async function tryLoadSessionSnapshot(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
-  terminals: GatewayTerminalSummary[],
-  fallbackTerminalId: string,
   sessionId: string,
   fallbackTitle?: string,
-): Promise<{ id: string; terminalId: string; title: string; messages: ChatMessage[]; isBusy: boolean } | null> {
+): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean } | null> {
   try {
     const payload = await client.request<{ session: GatewaySessionSnapshot }>('session:get', {
       sessionId,
     })
     const restored = payload.session
-    const terminalId = resolveTerminalId(restored.boundTerminalId, terminals, fallbackTerminalId)
     return {
       id: restored.id,
-      terminalId,
       title: restored.title || fallbackTitle || 'Recovered Session',
       messages: restored.messages ?? [],
       isBusy: restored.isBusy === true,
@@ -196,29 +185,16 @@ async function tryLoadSessionSnapshot(
 
 async function createNewSession(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
-  terminalId: string,
 ): Promise<{ sessionId: string }> {
-  return await client.request<{ sessionId: string }>('gateway:createSession', { terminalId })
-}
-
-function resolveTerminalId(
-  preferredTerminalId: string | undefined,
-  terminals: GatewayTerminalSummary[],
-  fallbackTerminalId: string,
-): string {
-  if (!preferredTerminalId) return fallbackTerminalId
-  const exists = terminals.some((terminal) => terminal.id === preferredTerminalId)
-  return exists ? preferredTerminalId : fallbackTerminalId
+  return await client.request<{ sessionId: string }>('gateway:createSession', {})
 }
 
 async function createInitialPromptSession(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
-  terminalId: string,
-): Promise<{ id: string; terminalId: string; title: string; messages: ChatMessage[]; isBusy: boolean }> {
-  const created = await createNewSession(client, terminalId)
+): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean }> {
+  const created = await createNewSession(client)
   return {
     id: created.sessionId,
-    terminalId,
     title: 'New Chat',
     messages: [],
     isBusy: false,
@@ -227,37 +203,31 @@ async function createInitialPromptSession(
 
 async function resolveTaskTarget(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
-  terminals: GatewayTerminalSummary[],
-  fallbackTerminalId: string,
   preferredSessionId?: string,
-): Promise<{ sessionId: string; terminalId: string }> {
+): Promise<{ sessionId: string }> {
   if (preferredSessionId) {
-    const matched = await tryLoadSessionSnapshot(client, terminals, fallbackTerminalId, preferredSessionId)
+    const matched = await tryLoadSessionSnapshot(client, preferredSessionId)
     if (!matched) {
       throw new Error(`Session not found: ${preferredSessionId}`)
     }
     return {
       sessionId: matched.id,
-      terminalId: matched.terminalId,
     }
   }
 
-  const created = await createNewSession(client, fallbackTerminalId)
+  const created = await createNewSession(client)
   return {
     sessionId: created.sessionId,
-    terminalId: fallbackTerminalId,
   }
 }
 
 async function startSessionTask(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
   sessionId: string,
-  terminalId: string,
   userText: string,
 ): Promise<void> {
   await client.request('agent:startTask', {
     sessionId,
-    terminalId,
     userText,
     options: {
       startMode: 'normal',
@@ -265,10 +235,9 @@ async function startSessionTask(
   })
 }
 
-async function runHookMode(client: GatewayClient, sessionId: string, terminalId: string, userText: string): Promise<void> {
+async function runHookMode(client: GatewayClient, sessionId: string, userText: string): Promise<void> {
   await client.request('agent:startTaskAsync', {
     sessionId,
-    terminalId,
     userText,
     options: {
       startMode: 'normal',
@@ -276,7 +245,7 @@ async function runHookMode(client: GatewayClient, sessionId: string, terminalId:
   })
 }
 
-async function runHeadlessMode(client: GatewayClient, sessionId: string, terminalId: string, userText: string): Promise<void> {
+async function runHeadlessMode(client: GatewayClient, sessionId: string, userText: string): Promise<void> {
   const outputCache = new Map<string, string>()
   const messageTypes = new Map<string, ChatMessage['type']>()
 
@@ -292,7 +261,7 @@ async function runHeadlessMode(client: GatewayClient, sessionId: string, termina
   })
 
   try {
-    await startSessionTask(client, sessionId, terminalId, userText)
+    await startSessionTask(client, sessionId, userText)
   } finally {
     unsubscribeUi()
     unsubscribeClose()

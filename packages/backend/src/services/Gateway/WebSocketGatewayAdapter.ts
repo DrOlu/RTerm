@@ -281,8 +281,7 @@ export class WebSocketGatewayAdapter {
       case 'gateway:ping':
         return { pong: true, ts: Date.now() };
       case 'gateway:createSession': {
-        const terminalId = this.readOptionalStringParam(params, 'terminalId') ?? this.getDefaultTerminalId();
-        const sessionId = await this.gateway.createSession(terminalId);
+        const sessionId = await this.gateway.createSession();
         return { sessionId };
       }
       case 'session:list': {
@@ -579,17 +578,15 @@ export class WebSocketGatewayAdapter {
       case 'agent:startTask': {
         const sessionId = this.readStringParam(params, 'sessionId');
         const userText = this.readStringParam(params, 'userText');
-        const terminalId = this.readOptionalStringParam(params, 'terminalId');
         const options = this.readStartTaskOptions(params.options);
-        await this.gateway.dispatchTask(sessionId, userText, terminalId, options);
+        await this.gateway.dispatchTask(sessionId, userText, options);
         return { ok: true };
       }
       case 'agent:startTaskAsync': {
         const sessionId = this.readStringParam(params, 'sessionId');
         const userText = this.readStringParam(params, 'userText');
-        const terminalId = this.readOptionalStringParam(params, 'terminalId');
         const options = this.readStartTaskOptions(params.options);
-        void this.gateway.dispatchTask(sessionId, userText, terminalId, options).catch((error) => {
+        void this.gateway.dispatchTask(sessionId, userText, options).catch((error) => {
           this.logger.error(`[WebSocketGatewayAdapter] Async task failed (session=${sessionId}).`, error);
         });
         return { ok: true };
@@ -641,15 +638,6 @@ export class WebSocketGatewayAdapter {
     return value;
   }
 
-  private readOptionalStringParam(params: Record<string, any>, name: string): string | undefined {
-    const value = params[name];
-    if (value === undefined || value === null || value === '') return undefined;
-    if (typeof value !== 'string') {
-      throw new WebSocketRpcError('BAD_REQUEST', `Invalid parameter type for ${name}`);
-    }
-    return value;
-  }
-
   private readIntegerParam(params: Record<string, any>, name: string, min: number, max: number): number {
     const value = params[name];
     if (!Number.isInteger(value)) {
@@ -690,17 +678,6 @@ export class WebSocketGatewayAdapter {
       throw new WebSocketRpcError('BAD_REQUEST', 'options.startMode must be "normal" or "inserted".');
     }
     return options;
-  }
-
-  private getDefaultTerminalId(): string {
-    if (!this.options.terminalBridge) {
-      throw new WebSocketRpcError('BAD_REQUEST', 'terminalId is required when terminal bridge is unavailable.');
-    }
-    const terminals = this.options.terminalBridge.listTerminals();
-    if (!terminals.length) {
-      throw new WebSocketRpcError('BAD_REQUEST', 'No terminal is available on backend.');
-    }
-    return terminals[0].id;
   }
 
   private normalizeRpcError(error: unknown): WebSocketRpcError {

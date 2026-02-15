@@ -133,7 +133,6 @@ export interface GatewaySessionSummary {
   title: string
   updatedAt: number
   messagesCount: number
-  boundTerminalId?: string
   lastMessagePreview?: string
   isBusy: boolean
 }
@@ -143,6 +142,5 @@ export interface GatewaySessionSnapshot {
   title: string
   updatedAt: number
   messages: ChatMessage[]
-  boundTerminalId?: string
   isBusy: boolean
 }

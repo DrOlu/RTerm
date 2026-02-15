@@ -3,7 +3,6 @@ import type { ChatMessage, UIUpdateAction } from './types'
 export interface SessionState {
   id: string
   title: string
-  terminalId: string
   messages: ChatMessage[]
   isThinking: boolean
   isBusy: boolean
@@ -15,16 +14,14 @@ export interface SessionMeta {
   title: string
   updatedAt: number
   messagesCount: number
-  boundTerminalId?: string
   lastMessagePreview?: string
   loaded: boolean
 }
 
-export function createSessionState(id: string, terminalId: string, title = 'New Chat'): SessionState {
+export function createSessionState(id: string, title = 'New Chat'): SessionState {
   return {
     id,
     title,
-    terminalId,
     messages: [],
     isThinking: false,
     isBusy: false,

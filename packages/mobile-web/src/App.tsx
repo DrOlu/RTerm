@@ -1,29 +1,39 @@
 import React from 'react'
+import type { AgentTimelineItem } from './lib/chat-timeline'
 import { MessageList } from './components/chat/MessageList'
+import { MessageDetailSheet } from './components/chat/MessageDetailSheet'
+import { SessionBrowser, type SessionBrowserItem } from './components/chat/SessionBrowser'
 import { ComposerBar } from './components/composer/ComposerBar'
 import { BottomNav, type MobileTabKey } from './components/layout/BottomNav'
 import { TopBar } from './components/layout/TopBar'
 import { SettingsPanel } from './components/panels/SettingsPanel'
 import { SkillsPanel } from './components/panels/SkillsPanel'
 import { TerminalPanel } from './components/panels/TerminalPanel'
-import { SessionSheet, type SessionSheetItem } from './components/sheets/SessionSheet'
 import { useMobileController } from './hooks/useMobileController'
 import { formatSessionListTitle, formatTopBarSessionTitle } from './lib/session-title'
+
+type ChatSubView = 'sessions' | 'conversation'
 
 export const App: React.FC = () => {
   const { state, actions } = useMobileController()
   const [activeTab, setActiveTab] = React.useState<MobileTabKey>('chat')
-  const [sessionSheetOpen, setSessionSheetOpen] = React.useState(false)
+  const [chatSubView, setChatSubView] = React.useState<ChatSubView>('sessions')
+  const [sessionSearchQuery, setSessionSearchQuery] = React.useState('')
+  const [detailTurnId, setDetailTurnId] = React.useState<string | null>(null)
 
   const messageListRef = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => {
-    if (activeTab !== 'chat') return
+    if (activeTab !== 'chat' || chatSubView !== 'conversation') return
     const element = messageListRef.current
     if (!element) return
     element.scrollTop = element.scrollHeight
-  }, [activeTab, state.activeSessionId, state.visibleMessages.length])
+  }, [activeTab, chatSubView, state.activeSessionId, state.chatTimeline])
 
-  const sessionItems = React.useMemo<SessionSheetItem[]>(() => {
+  React.useEffect(() => {
+    setDetailTurnId(null)
+  }, [state.activeSessionId])
+
+  const sessionItems = React.useMemo<SessionBrowserItem[]>(() => {
     return state.sessionOrder.map((sessionId) => {
       const meta = state.sessionMeta[sessionId]
       const session = state.sessions[sessionId]
@@ -37,22 +47,38 @@ export const App: React.FC = () => {
       }
     })
   }, [state.sessionMeta, state.sessionOrder, state.sessions])
+  const filteredSessionItems = React.useMemo(() => {
+    const keyword = sessionSearchQuery.trim().toLowerCase()
+    if (!keyword) return sessionItems
+    return sessionItems.filter((item) => {
+      const haystack = `${item.title}\n${item.preview}`.toLowerCase()
+      return haystack.includes(keyword)
+    })
+  }, [sessionItems, sessionSearchQuery])
 
-  const sessionTitle = formatTopBarSessionTitle(state.activeSession?.title || 'No Session')
+  const topBarSessionTitle = formatTopBarSessionTitle(state.activeSession?.title || 'No Session')
   const sessionShortId = state.activeSessionId ? state.activeSessionId.slice(0, 8) : undefined
   const canSend = state.connectionStatus === 'connected' && state.composerValue.trim().length > 0
   const sessionHint = state.activeSessionId
     ? `Session ${state.activeSessionId.slice(0, 8)} · @ mention`
     : 'No active session'
-  const activeSessionTerminalId = state.activeSession?.terminalId
+  const activeSessionLockedProfileId = state.activeSession?.lockedProfileId || null
+  const activeDetailTurn = React.useMemo<AgentTimelineItem | null>(() => {
+    if (!detailTurnId) return null
+    const turn = state.chatTimeline.find((item) => item.kind === 'agent' && item.id === detailTurnId)
+    return turn && turn.kind === 'agent' ? turn : null
+  }, [detailTurnId, state.chatTimeline])
+  const detailOpen = activeTab === 'chat' && chatSubView === 'conversation' && !!activeDetailTurn
 
   const topTitle =
     activeTab === 'chat'
-      ? sessionTitle
+      ? chatSubView === 'sessions'
+        ? 'Chats'
+        : topBarSessionTitle
       : activeTab === 'terminal'
-        ? 'Terminal Tabs'
+        ? 'Terminal'
         : activeTab === 'skills'
-          ? 'Skill Manager'
+          ? 'Skills'
           : 'Settings'
 
   return (
@@ -60,43 +86,68 @@ export const App: React.FC = () => {
       <div className="mobile-app modern">
         <TopBar
           title={topTitle}
-          sessionId={activeTab === 'chat' ? sessionShortId : undefined}
+          sessionId={activeTab === 'chat' && chatSubView === 'conversation' ? sessionShortId : undefined}
           connectionStatus={state.connectionStatus}
           onOpenSessions={() => {
-            setSessionSheetOpen(true)
+            setChatSubView('sessions')
           }}
-          showSessionMeta={activeTab === 'chat'}
-          showSessionAction={activeTab === 'chat'}
+          showSessionMeta={activeTab === 'chat' && chatSubView === 'conversation'}
+          showSessionAction={activeTab === 'chat' && chatSubView === 'conversation'}
         />
 
         {state.connectionError ? <section className="error-strip-modern">{state.connectionError}</section> : null}
 
         {activeTab === 'chat' ? (
-          <>
-            <MessageList messages={state.visibleMessages} onAskDecision={actions.replyAsk} listRef={messageListRef} />
-
-            <ComposerBar
-              value={state.composerValue}
-              cursor={state.composerCursor}
-              onChange={actions.setComposerValue}
-              onCursorChange={actions.setComposerCursor}
-              onSend={() => void actions.sendMessage()}
-              onStop={() => void actions.stopActiveSession()}
-              canSend={canSend}
-              isRunning={state.isRunning}
-              sessionHint={sessionHint}
-              mentionOptions={state.mentionOptions}
-              onPickMention={actions.pickMention}
+          chatSubView === 'sessions' ? (
+            <SessionBrowser
+              activeSessionId={state.activeSessionId}
+              items={filteredSessionItems}
+              searchQuery={sessionSearchQuery}
+              onSearchChange={setSessionSearchQuery}
+              onCreateSession={async () => {
+                await actions.createSession()
+                setSessionSearchQuery('')
+                setChatSubView('conversation')
+              }}
+              onOpenSession={async (sessionId) => {
+                await actions.switchSession(sessionId)
+                setChatSubView('conversation')
+              }}
             />
-          </>
+          ) : (
+            <>
+              <MessageList
+                items={state.chatTimeline}
+                onAskDecision={actions.replyAsk}
+                onOpenDetail={setDetailTurnId}
+                listRef={messageListRef}
+              />
+
+              <ComposerBar
+                value={state.composerValue}
+                cursor={state.composerCursor}
+                onChange={actions.setComposerValue}
+                onCursorChange={actions.setComposerCursor}
+                onSend={() => void actions.sendMessage()}
+                onStop={() => void actions.stopActiveSession()}
+                canSend={canSend}
+                isRunning={state.isRunning}
+                profiles={state.profiles}
+                activeProfileId={state.activeProfileId}
+                lockedProfileId={activeSessionLockedProfileId}
+                tokenUsagePercent={state.tokenUsagePercent}
+                onUpdateProfile={(profileId) => void actions.updateProfile(profileId)}
+                sessionHint={sessionHint}
+                mentionOptions={state.mentionOptions}
+                onPickMention={actions.pickMention}
+              />
+            </>
+          )
         ) : null}
 
         {activeTab === 'terminal' ? (
           <TerminalPanel
             terminals={state.terminals}
-            activeTerminalTargetId={state.activeTerminalTargetId}
-            activeSessionTerminalId={activeSessionTerminalId}
-            onSelectTerminalTarget={actions.setActiveTerminalTargetId}
             onCreateTerminal={() => void actions.createTerminalTab()}
             onCloseTerminal={(terminalId) => void actions.closeTerminalTab(terminalId)}
           />
@@ -105,7 +156,9 @@ export const App: React.FC = () => {
         {activeTab === 'skills' ? (
           <SkillsPanel
             skills={state.skills}
-            onSetSkillEnabled={(name, enabled) => void actions.setSkillEnabled(name, enabled)}
+            connectionStatus={state.connectionStatus}
+            onReload={actions.reloadSkills}
+            onSetSkillEnabled={actions.setSkillEnabled}
           />
         ) : null}
 
@@ -115,36 +168,29 @@ export const App: React.FC = () => {
             connectionStatus={state.connectionStatus}
             actionPending={state.actionPending}
             connectionError={state.connectionError}
-            profiles={state.profiles}
-            activeProfileId={state.activeProfileId}
             onGatewayInputChange={actions.setGatewayInput}
             onConnect={() => void actions.connectGateway()}
             onDisconnect={actions.disconnectGateway}
-            onUpdateProfile={(profileId) => void actions.updateProfile(profileId)}
           />
         ) : null}
 
         <BottomNav
           activeTab={activeTab}
           onChange={(nextTab) => {
-            setSessionSheetOpen(false)
+            if (nextTab !== 'chat') {
+              setDetailTurnId(null)
+            } else {
+              setChatSubView('sessions')
+            }
             setActiveTab(nextTab)
           }}
         />
 
-        <SessionSheet
-          open={sessionSheetOpen && activeTab === 'chat'}
-          activeSessionId={state.activeSessionId}
-          items={sessionItems}
-          onClose={() => setSessionSheetOpen(false)}
-          onCreateSession={async () => {
-            await actions.createSession()
-            setSessionSheetOpen(false)
-          }}
-          onSwitchSession={async (sessionId) => {
-            await actions.switchSession(sessionId)
-            setSessionSheetOpen(false)
-          }}
+        <MessageDetailSheet
+          open={detailOpen}
+          turn={activeDetailTurn}
+          onClose={() => setDetailTurnId(null)}
+          onAskDecision={actions.replyAsk}
         />
       </div>
     </div>

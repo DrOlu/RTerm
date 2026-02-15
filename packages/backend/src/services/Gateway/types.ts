@@ -47,7 +47,6 @@ export interface IClientTransport {
  */
 export interface SessionContext {
   sessionId: string;
-  boundTerminalId: string;
   activeRunId: string | null;      // Currently active Agent run ID
   lockedProfileId: string | null;  // Profile locked for the current busy session window
   lockedExperimentalFlags: ExperimentalFlags | null;
@@ -67,7 +66,6 @@ export interface GatewaySessionSummary {
   title: string;
   updatedAt: number;
   messagesCount: number;
-  boundTerminalId?: string;
   lastMessagePreview?: string;
   isBusy: boolean;
 }
@@ -77,7 +75,6 @@ export interface GatewaySessionSnapshot {
   title: string;
   updatedAt: number;
   messages: ChatMessage[];
-  boundTerminalId?: string;
   isBusy: boolean;
 }
 
@@ -86,11 +83,11 @@ export interface GatewaySessionSnapshot {
  */
 export interface IGateway {
   // Session management
-  createSession(terminalId: string): Promise<string>;
+  createSession(): Promise<string>;
   getSession(sessionId: string): SessionContext | undefined;
   
   // Task scheduling
-  dispatchTask(sessionId: string, input: string, terminalId?: string, options?: StartTaskOptions): Promise<void>;
+  dispatchTask(sessionId: string, input: string, options?: StartTaskOptions): Promise<void>;
   stopTask(sessionId: string): Promise<void>;
   pauseTask(sessionId: string): Promise<void>;
   resumeTask(sessionId: string): Promise<void>;

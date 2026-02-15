@@ -1,17 +1,13 @@
 import React from 'react'
-import type { GatewayProfileSummary } from '../../types'
 
 interface SettingsPanelProps {
   gatewayInput: string
   connectionStatus: 'connecting' | 'connected' | 'disconnected'
   actionPending: boolean
   connectionError: string
-  profiles: GatewayProfileSummary[]
-  activeProfileId: string
   onGatewayInputChange: (value: string) => void
   onConnect: () => void
   onDisconnect: () => void
-  onUpdateProfile: (profileId: string) => void
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -19,12 +15,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   connectionStatus,
   actionPending,
   connectionError,
-  profiles,
-  activeProfileId,
   onGatewayInputChange,
   onConnect,
-  onDisconnect,
-  onUpdateProfile
+  onDisconnect
 }) => {
   const connected = connectionStatus === 'connected'
 
@@ -55,19 +48,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
         {connectionError ? <p className="settings-error">{connectionError}</p> : null}
       </section>
-
-      {profiles.length > 0 ? (
-        <section className="settings-section">
-          <h3>Model Profile</h3>
-          <select value={activeProfileId} onChange={(event) => onUpdateProfile(event.target.value)}>
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name}
-              </option>
-            ))}
-          </select>
-        </section>
-      ) : null}
     </section>
   )
 }

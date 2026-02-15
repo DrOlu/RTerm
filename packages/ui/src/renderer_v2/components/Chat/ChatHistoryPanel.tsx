@@ -10,7 +10,6 @@ import './chatHistory.scss'
 interface StoredChatSession {
   id: string
   title: string
-  boundTerminalTabId: string
   messages: Array<{
     id: string
     type: string

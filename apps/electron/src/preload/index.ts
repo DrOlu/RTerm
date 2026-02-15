@@ -286,7 +286,6 @@ export interface GyShellAPI {
   agent: {
     startTask: (
       sessionId: string,
-      terminalId: string,
       userText: string,
       options?: { startMode?: 'normal' | 'inserted' }
     ) => Promise<void>
@@ -408,8 +407,8 @@ const api: GyShellAPI = {
   },
 
   agent: {
-    startTask: (sessionId, terminalId, userText, options) =>
-      ipcRenderer.invoke('agent:startTask', sessionId, terminalId, userText, options),
+    startTask: (sessionId, userText, options) =>
+      ipcRenderer.invoke('agent:startTask', sessionId, userText, options),
     stopTask: (sessionId) => ipcRenderer.invoke('agent:stopTask', sessionId),
     getAllChatHistory: () => ipcRenderer.invoke('agent:getAllChatHistory'),
     loadChatSession: (sessionId) => ipcRenderer.invoke('agent:loadChatSession', sessionId),

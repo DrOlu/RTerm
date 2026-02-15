@@ -66,7 +66,6 @@ export interface GatewaySessionSummary {
   title: string
   updatedAt: number
   messagesCount: number
-  boundTerminalId?: string
   lastMessagePreview?: string
   isBusy: boolean
 }
@@ -76,7 +75,6 @@ export interface GatewaySessionSnapshot {
   title: string
   updatedAt: number
   messages: ChatMessage[]
-  boundTerminalId?: string
   isBusy: boolean
 }
 
@@ -84,6 +82,12 @@ export interface SkillSummary {
   name: string
   description?: string
   enabled?: boolean
+  fileName?: string
+  filePath?: string
+  baseDir?: string
+  scanRoot?: string
+  isNested?: boolean
+  supportingFiles?: string[]
 }
 
 export interface GatewayTerminalSummary {

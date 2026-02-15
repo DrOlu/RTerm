@@ -40,7 +40,6 @@ import {
   USER_INSERTED_INPUT_INSTRUCTION,
   createBaseSystemPrompt,
   createSystemInfoPrompt,
-  createTabContextPrompt,
   COMMAND_POLICY_DECISION_SCHEMA,
   WRITE_STDIN_POLICY_DECISION_SCHEMA,
   TASK_COMPLETION_DECISION_SCHEMA,
@@ -439,20 +438,7 @@ export class AgentService_v2 {
       if (startupMode === 'normal') {
         const tabs = this.terminalService.getAllTerminals()
         const sysInfoMsg = this.helpers.markEphemeral(createSystemInfoPrompt(tabs, sessionId))
-
-        const currentTabId = state.boundTerminalId
-        const currentTab = currentTabId ? tabs.find(t => t.id === currentTabId) : undefined
-        const recent = currentTabId ? this.terminalService.getRecentOutput(currentTabId) : ''
-        const formattedRecent = recent
-          ? `
-================================================================================
-<terminal_content>
-${recent}
-</terminal_content>
-================================================================================`
-          : ''
-        const contextMsg = this.helpers.markEphemeral(createTabContextPrompt(currentTab, formattedRecent))
-        contextMessages.push(sysInfoMsg, contextMsg)
+        contextMessages.push(sysInfoMsg)
       }
 
       const userLast = withUserMessages[withUserMessages.length - 1]
@@ -1556,7 +1542,7 @@ ${recent}
     if (!this.graph) throw new Error('Graph not initialized')
 
     this.lastAbortedMessage = null
-    const { sessionId, boundTerminalId } = context
+    const { sessionId } = context
     const lockedProfileId = String(context.lockedProfileId || '')
     if (!lockedProfileId) {
       throw new Error(`Missing locked profile for session ${sessionId}`)
@@ -1572,7 +1558,6 @@ ${recent}
       messages: [...baseMessages],
       full_messages: [...baseMessages],
       sessionId: sessionId,
-      boundTerminalId: boundTerminalId,
       startup_input: input,
       startup_mode: startMode,
       runtimeThinkingCorrectionEnabled: runExperimentalFlags.runtimeThinkingCorrectionEnabled,
@@ -1593,7 +1578,6 @@ ${recent}
         const sessionToSave = loadedSession || {
           id: sessionId,
           title: 'New Session',
-          boundTerminalTabId: boundTerminalId,
           messages: new Map(),
           lastCheckpointOffset: 0
         }
@@ -1608,7 +1592,7 @@ ${recent}
       const errorMessage = err.message || String(err)
 
       // For any error (Abort or internal Error), try to save all history in the current Checkpoint
-      await this.trySaveSessionFromCheckpoint(sessionId, boundTerminalId)
+      await this.trySaveSessionFromCheckpoint(sessionId)
       
       if (this.helpers.isAbortError(err)) {
         return
@@ -1637,7 +1621,7 @@ ${recent}
     }
   }
 
-  private async trySaveSessionFromCheckpoint(sessionId: string, boundTerminalId: string): Promise<void> {
+  private async trySaveSessionFromCheckpoint(sessionId: string): Promise<void> {
     if (!this.graph) return
     try {
       const snapshot = await this.graph.getState({ configurable: { thread_id: sessionId } })
@@ -1654,7 +1638,6 @@ ${recent}
       const session = this.chatHistoryService.loadSession(sessionId) || {
         id: sessionId,
         title: 'New Session',
-        boundTerminalTabId: boundTerminalId,
         messages: new Map(),
         lastCheckpointOffset: 0
       }

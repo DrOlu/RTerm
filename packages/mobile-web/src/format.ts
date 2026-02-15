@@ -68,8 +68,18 @@ export function messageDetail(message: ChatMessage): string {
   return trimOuterBlankLines(normalizeDisplayText(base))
 }
 
-export function clipMultiline(text: string, maxLines: number): string {
-  const lines = String(text || '').split('\n')
-  if (lines.length <= maxLines) return text
-  return `${lines.slice(0, maxLines).join('\n')}\n... (${lines.length - maxLines} more lines)`
+export function clipMultiline(text: string, maxLines: number, maxChars = 420): string {
+  const normalized = String(text || '')
+  if (!normalized) return ''
+
+  const lines = normalized.split('\n')
+  if (lines.length > maxLines) {
+    return `${lines.slice(0, maxLines).join('\n')}\n... (${lines.length - maxLines} more lines)`
+  }
+
+  if (normalized.length > maxChars) {
+    return `${normalized.slice(0, maxChars).trimEnd()}\n... (${normalized.length - maxChars} more chars)`
+  }
+
+  return normalized
 }
