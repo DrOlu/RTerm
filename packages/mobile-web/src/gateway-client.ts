@@ -23,6 +23,13 @@ type PendingRequest = {
 
 const DEFAULT_RPC_TIMEOUT = 15000
 
+function formatCloseDetail(event: CloseEvent): string {
+  const code = Number.isFinite(event.code) ? event.code : 1006
+  const reason = typeof event.reason === 'string' ? event.reason.trim() : ''
+  const cleanSuffix = event.wasClean ? ', clean' : ', unclean'
+  return reason ? `code=${code}${cleanSuffix}, reason=${reason}` : `code=${code}${cleanSuffix}`
+}
+
 export class GatewayClient {
   private socket: WebSocket | null = null
   private nextRequestId = 1
@@ -94,7 +101,7 @@ export class GatewayClient {
           settled = true
           reject(new Error(`Socket closed before connected (${event.code})`))
         }
-        const reason = event.reason || 'connection closed'
+        const reason = formatCloseDetail(event)
         this.emit('status', 'disconnected', reason)
       }
 

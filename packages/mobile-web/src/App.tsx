@@ -9,6 +9,7 @@ import { TopBar } from './components/layout/TopBar'
 import { SettingsPanel } from './components/panels/SettingsPanel'
 import { SkillsPanel } from './components/panels/SkillsPanel'
 import { TerminalPanel } from './components/panels/TerminalPanel'
+import { ToolsPanel } from './components/panels/ToolsPanel'
 import { useMobileController } from './hooks/useMobileController'
 import { formatSessionListTitle, formatTopBarSessionTitle } from './lib/session-title'
 
@@ -76,6 +77,8 @@ export const App: React.FC = () => {
         ? 'Terminal'
         : activeTab === 'skills'
           ? 'Skills'
+          : activeTab === 'tools'
+            ? 'Tools'
           : 'Settings'
 
   return (
@@ -172,6 +175,17 @@ export const App: React.FC = () => {
             onGatewayInputChange={actions.setGatewayInput}
             onConnect={() => void actions.connectGateway()}
             onDisconnect={actions.disconnectGateway}
+          />
+        ) : null}
+
+        {activeTab === 'tools' ? (
+          <ToolsPanel
+            mcpTools={state.mcpTools}
+            builtInTools={state.builtInTools}
+            connectionStatus={state.connectionStatus}
+            onReload={actions.reloadTools}
+            onSetMcpEnabled={actions.setMcpEnabled}
+            onSetBuiltInEnabled={actions.setBuiltInToolEnabled}
           />
         ) : null}
 

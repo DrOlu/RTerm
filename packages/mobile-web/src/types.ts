@@ -93,6 +93,22 @@ export interface SkillSummary {
   supportingFiles?: string[]
 }
 
+export type McpServerStatus = 'disabled' | 'connecting' | 'connected' | 'error'
+
+export interface McpServerSummary {
+  name: string
+  enabled: boolean
+  status: McpServerStatus
+  error?: string
+  toolCount?: number
+}
+
+export interface BuiltInToolSummary {
+  name: string
+  description: string
+  enabled: boolean
+}
+
 export interface GatewayTerminalSummary {
   id: string
   title: string

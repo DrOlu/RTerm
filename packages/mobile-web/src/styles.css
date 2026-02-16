@@ -1049,12 +1049,24 @@ button:disabled {
   background: color-mix(in srgb, #2bac76 10%, var(--surface));
 }
 
+.tools-item-body {
+  min-width: 0;
+}
+
+.tools-item-body p {
+  margin: 2px 0 0;
+}
+
+.tool-error-text {
+  color: var(--danger);
+}
+
 .bottom-nav {
   flex-shrink: 0;
   border-top: 1px solid var(--border);
   background: var(--surface);
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0;
   padding-bottom: env(safe-area-inset-bottom);
 }

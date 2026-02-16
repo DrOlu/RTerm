@@ -20,10 +20,12 @@ import {
   type SessionState
 } from '../session-store'
 import type {
+  BuiltInToolSummary,
   ChatMessage,
   GatewayProfileSummary,
   GatewaySessionSnapshot,
   GatewaySessionSummary,
+  McpServerSummary,
   SkillSummary,
   GatewayTerminalSummary,
   UIUpdateAction
@@ -34,6 +36,8 @@ export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected'
 interface ViewState {
   terminals: GatewayTerminalSummary[]
   skills: SkillSummary[]
+  mcpTools: McpServerSummary[]
+  builtInTools: BuiltInToolSummary[]
   profiles: GatewayProfileSummary[]
   activeProfileId: string
   sessions: Record<string, SessionState>
@@ -46,6 +50,8 @@ interface ViewState {
 const INITIAL_VIEW_STATE: ViewState = {
   terminals: [],
   skills: [],
+  mcpTools: [],
+  builtInTools: [],
   profiles: [],
   activeProfileId: '',
   sessions: {},
@@ -53,6 +59,19 @@ const INITIAL_VIEW_STATE: ViewState = {
   sessionOrder: [],
   activeSessionId: null,
   statusLine: 'Ready'
+}
+
+const RECONNECT_BASE_DELAY_MS = 800
+const RECONNECT_MAX_DELAY_MS = 15000
+const RECONNECT_JITTER_MS = 500
+const HEARTBEAT_INTERVAL_MS = 25000
+const HEARTBEAT_RPC_TIMEOUT_MS = 5000
+const HEARTBEAT_MAX_FAILURES = 2
+
+function computeReconnectDelayMs(attempt: number): number {
+  const exponential = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1), RECONNECT_MAX_DELAY_MS)
+  const jitter = Math.floor(Math.random() * (RECONNECT_JITTER_MS + 1))
+  return exponential + jitter
 }
 
 function buildSessionMeta(
@@ -159,6 +178,54 @@ async function fetchSkillsSnapshot(client: GatewayClient): Promise<SkillSummary[
     .sort((left, right) => left.name.localeCompare(right.name))
 }
 
+function normalizeMcpServer(raw: unknown): McpServerSummary | null {
+  if (!raw || typeof raw !== 'object') return null
+  const item = raw as Record<string, unknown>
+  if (typeof item.name !== 'string' || !item.name) return null
+  const statusRaw = item.status
+  const status: McpServerSummary['status'] =
+    statusRaw === 'disabled' || statusRaw === 'connecting' || statusRaw === 'connected' || statusRaw === 'error'
+      ? statusRaw
+      : 'disabled'
+  return {
+    name: item.name,
+    enabled: item.enabled !== false,
+    status,
+    error: typeof item.error === 'string' ? item.error : undefined,
+    toolCount: typeof item.toolCount === 'number' ? item.toolCount : undefined
+  }
+}
+
+function normalizeBuiltInTool(raw: unknown): BuiltInToolSummary | null {
+  if (!raw || typeof raw !== 'object') return null
+  const item = raw as Record<string, unknown>
+  if (typeof item.name !== 'string' || !item.name) return null
+  return {
+    name: item.name,
+    description: typeof item.description === 'string' ? item.description : 'No description provided.',
+    enabled: item.enabled !== false
+  }
+}
+
+async function fetchToolsSnapshot(client: GatewayClient): Promise<{
+  mcpTools: McpServerSummary[]
+  builtInTools: BuiltInToolSummary[]
+}> {
+  const [mcpRaw, builtInRaw] = await Promise.all([
+    client.request<unknown>('tools:getMcp', {}),
+    client.request<unknown>('tools:getBuiltIn', {})
+  ])
+
+  const mcpTools = Array.isArray(mcpRaw)
+    ? mcpRaw.map((item) => normalizeMcpServer(item)).filter((item): item is McpServerSummary => !!item)
+    : []
+  const builtInTools = Array.isArray(builtInRaw)
+    ? builtInRaw.map((item) => normalizeBuiltInTool(item)).filter((item): item is BuiltInToolSummary => !!item)
+    : []
+
+  return { mcpTools, builtInTools }
+}
+
 export interface MobileControllerState {
   gatewayInput: string
   connectionStatus: ConnectionStatus
@@ -169,6 +236,8 @@ export interface MobileControllerState {
   mentionOptions: MentionOption[]
   terminals: GatewayTerminalSummary[]
   skills: SkillSummary[]
+  mcpTools: McpServerSummary[]
+  builtInTools: BuiltInToolSummary[]
   profiles: GatewayProfileSummary[]
   activeProfileId: string
   activeSession: SessionState | null
@@ -198,6 +267,9 @@ export interface MobileControllerActions {
   updateProfile: (profileId: string) => Promise<void>
   reloadSkills: () => Promise<void>
   setSkillEnabled: (name: string, enabled: boolean) => Promise<void>
+  reloadTools: () => Promise<void>
+  setMcpEnabled: (name: string, enabled: boolean) => Promise<void>
+  setBuiltInToolEnabled: (name: string, enabled: boolean) => Promise<void>
   replyAsk: (message: ChatMessage, decision: 'allow' | 'deny') => Promise<void>
   createTerminalTab: () => Promise<void>
   closeTerminalTab: (terminalId: string) => Promise<void>
@@ -226,6 +298,39 @@ export function useMobileController(): {
   React.useEffect(() => {
     viewRef.current = view
   }, [view])
+  const gatewayInputRef = React.useRef(gatewayInput)
+  React.useEffect(() => {
+    gatewayInputRef.current = gatewayInput
+  }, [gatewayInput])
+
+  const reconnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectInFlightRef = React.useRef(false)
+  const reconnectAttemptRunnerRef = React.useRef<() => Promise<void>>(async () => {})
+  const reconnectAttemptRef = React.useRef(0)
+  const connectFlowRef = React.useRef<Promise<void> | null>(null)
+  const heartbeatTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+  const heartbeatInFlightRef = React.useRef(false)
+  const heartbeatFailuresRef = React.useRef(0)
+  const manualDisconnectRef = React.useRef(false)
+  const autoReconnectEnabledRef = React.useRef(false)
+  const hasEverConnectedRef = React.useRef(false)
+  const lastConnectedAtRef = React.useRef(0)
+
+  const clearReconnectTimer = React.useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+  }, [])
+
+  const stopHeartbeat = React.useCallback(() => {
+    if (heartbeatTimerRef.current) {
+      clearInterval(heartbeatTimerRef.current)
+      heartbeatTimerRef.current = null
+    }
+    heartbeatInFlightRef.current = false
+    heartbeatFailuresRef.current = 0
+  }, [])
 
   const activeSession = React.useMemo(() => {
     if (!view.activeSessionId) return null
@@ -293,21 +398,295 @@ export function useMobileController(): {
     })
   }, [])
 
+  const bootstrapAfterConnect = React.useCallback(
+    async (target: string, source: 'manual' | 'reconnect') => {
+      const terminalPayload = await client.request<{ terminals: GatewayTerminalSummary[] }>('terminal:list', {})
+      const terminals = terminalPayload.terminals || []
+      if (terminals.length === 0) {
+        throw new Error('No terminal is available on backend.')
+      }
+
+      let profiles: GatewayProfileSummary[] = []
+      let activeProfileId = ''
+      let skills: SkillSummary[] = []
+      let skillsUnavailable = false
+      let mcpTools: McpServerSummary[] = []
+      let builtInTools: BuiltInToolSummary[] = []
+      let toolsUnavailable = false
+      try {
+        const profilePayload = await client.request<{ activeProfileId: string; profiles: GatewayProfileSummary[] }>(
+          'models:getProfiles',
+          {}
+        )
+        profiles = profilePayload.profiles || []
+        activeProfileId = profilePayload.activeProfileId || ''
+      } catch {
+        profiles = []
+        activeProfileId = ''
+      }
+
+      try {
+        skills = await fetchSkillsSnapshot(client)
+      } catch {
+        skills = []
+        skillsUnavailable = true
+      }
+
+      try {
+        const toolsSnapshot = await fetchToolsSnapshot(client)
+        mcpTools = toolsSnapshot.mcpTools
+        builtInTools = toolsSnapshot.builtInTools
+      } catch {
+        mcpTools = []
+        builtInTools = []
+        toolsUnavailable = true
+      }
+
+      const sessionPayload = await client.request<{ sessions: GatewaySessionSummary[] }>('session:list', {})
+      let summaries = sessionPayload.sessions || []
+
+      if (summaries.length === 0) {
+        const created = await client.request<{ sessionId: string }>('gateway:createSession', {})
+        summaries = [
+          {
+            id: created.sessionId,
+            title: 'New Chat',
+            updatedAt: Date.now(),
+            messagesCount: 0,
+            lastMessagePreview: '',
+            isBusy: false,
+            lockedProfileId: null
+          }
+        ]
+      }
+
+      const sortedSummaries = [...summaries].sort((left, right) => right.updatedAt - left.updatedAt)
+      const previous = viewRef.current
+      const preferredSummary = sortedSummaries.find((item) => item.id === previous.activeSessionId) || sortedSummaries[0]
+      if (!preferredSummary) {
+        throw new Error('No session available from gateway.')
+      }
+
+      const mustLoadSnapshotIds = new Set<string>([
+        preferredSummary.id,
+        ...sortedSummaries.filter((item) => item.isBusy).map((item) => item.id)
+      ])
+      const loadedSnapshots = new Map<string, GatewaySessionSnapshot>()
+      await Promise.all(
+        [...mustLoadSnapshotIds].map(async (sessionId) => {
+          try {
+            const payload = await client.request<{ session: GatewaySessionSnapshot }>('session:get', { sessionId })
+            loadedSnapshots.set(sessionId, payload.session)
+          } catch (error) {
+            if (sessionId === preferredSummary.id) {
+              throw error
+            }
+          }
+        })
+      )
+
+      const sessions: Record<string, SessionState> = {}
+      const sessionMeta: Record<string, SessionMeta> = {}
+      const activeSessionId = loadedSnapshots.has(preferredSummary.id) ? preferredSummary.id : sortedSummaries[0]?.id || null
+
+      for (const summary of sortedSummaries) {
+        const snapshot = loadedSnapshots.get(summary.id)
+        const loaded = !!snapshot
+        const session = createSessionState(summary.id, summary.title || 'Recovered Session')
+        if (snapshot) {
+          session.title = snapshot.title || session.title
+          session.messages = (snapshot.messages || []).map(cloneMessage)
+          session.isBusy = snapshot.isBusy === true
+          session.isThinking = snapshot.isBusy === true
+          session.lockedProfileId = snapshot.lockedProfileId || null
+        } else {
+          session.isBusy = summary.isBusy === true
+          session.isThinking = summary.isBusy === true
+          session.lockedProfileId = summary.lockedProfileId || null
+        }
+        sessions[summary.id] = session
+        sessionMeta[summary.id] = {
+          id: summary.id,
+          title: loaded ? session.title : summary.title || 'Recovered Session',
+          updatedAt: summary.updatedAt || Date.now(),
+          messagesCount: loaded ? session.messages.length : summary.messagesCount,
+          lastMessagePreview: loaded ? previewFromSession(session) : summary.lastMessagePreview,
+          loaded
+        }
+      }
+
+      const order = reorderSessionIds(
+        sortedSummaries.map((summary) => summary.id),
+        sessionMeta
+      )
+
+      setView({
+        terminals,
+        skills,
+        mcpTools,
+        builtInTools,
+        profiles,
+        activeProfileId,
+        sessions,
+        sessionMeta,
+        sessionOrder: order,
+        activeSessionId,
+        statusLine:
+          source === 'reconnect'
+            ? `Recovered: ${target}`
+            : skillsUnavailable || toolsUnavailable
+              ? `Connected: ${target} (skills unavailable)`
+              : `Connected: ${target}`
+      })
+    },
+    [client]
+  )
+
+  const scheduleReconnect = React.useCallback(
+    (reason: string, immediate = false) => {
+      if (manualDisconnectRef.current || !autoReconnectEnabledRef.current || !hasEverConnectedRef.current) return
+      if (client.isConnected()) return
+      clearReconnectTimer()
+
+      if (!window.navigator.onLine) {
+        setView((previous) => ({ ...previous, statusLine: 'Offline. Waiting for network...' }))
+        return
+      }
+
+      const nextAttempt = reconnectAttemptRef.current + 1
+      const delay = immediate ? 0 : computeReconnectDelayMs(nextAttempt)
+      reconnectAttemptRef.current = nextAttempt
+      setView((previous) => ({
+        ...previous,
+        statusLine: immediate
+          ? `Reconnecting now (${nextAttempt})...`
+          : `Disconnected: ${reason}. Reconnecting in ${Math.max(1, Math.ceil(delay / 1000))}s (${nextAttempt})...`
+      }))
+
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null
+        void reconnectAttemptRunnerRef.current()
+      }, delay)
+    },
+    [clearReconnectTimer, client]
+  )
+
+  const startHeartbeat = React.useCallback(() => {
+    stopHeartbeat()
+    if (!client.isConnected()) return
+
+    heartbeatTimerRef.current = setInterval(() => {
+      if (heartbeatInFlightRef.current || !client.isConnected()) return
+      heartbeatInFlightRef.current = true
+      void client
+        .request('gateway:ping', {}, HEARTBEAT_RPC_TIMEOUT_MS)
+        .then(() => {
+          heartbeatFailuresRef.current = 0
+        })
+        .catch(() => {
+          heartbeatFailuresRef.current += 1
+          if (heartbeatFailuresRef.current >= HEARTBEAT_MAX_FAILURES) {
+            stopHeartbeat()
+            setConnectionError('Gateway heartbeat lost. Reconnecting...')
+            try {
+              client.disconnect()
+            } catch {
+              // ignore disconnect errors
+            }
+            scheduleReconnect('heartbeat lost', true)
+          }
+        })
+        .finally(() => {
+          heartbeatInFlightRef.current = false
+        })
+    }, HEARTBEAT_INTERVAL_MS)
+  }, [client, scheduleReconnect, stopHeartbeat])
+
+  const runConnectFlow = React.useCallback(
+    async (target: string, source: 'manual' | 'reconnect') => {
+      if (connectFlowRef.current) {
+        await connectFlowRef.current
+        return
+      }
+      const flow = (async () => {
+        await client.connect(target)
+        if (source === 'manual') {
+          saveGatewayUrlToStorage(target)
+        }
+        await bootstrapAfterConnect(target, source)
+        lastConnectedAtRef.current = Date.now()
+        hasEverConnectedRef.current = true
+        reconnectAttemptRef.current = 0
+        clearReconnectTimer()
+        reconnectInFlightRef.current = false
+        startHeartbeat()
+      })()
+      connectFlowRef.current = flow.finally(() => {
+        connectFlowRef.current = null
+      })
+      await connectFlowRef.current
+    },
+    [bootstrapAfterConnect, clearReconnectTimer, client, startHeartbeat]
+  )
+
+  const runAutoReconnectAttempt = React.useCallback(async () => {
+    if (reconnectInFlightRef.current) return
+    if (manualDisconnectRef.current || !autoReconnectEnabledRef.current || !hasEverConnectedRef.current) return
+    if (!window.navigator.onLine) {
+      setView((previous) => ({ ...previous, statusLine: 'Offline. Waiting for network...' }))
+      return
+    }
+
+    reconnectInFlightRef.current = true
+    const target = normalizeGatewayUrl(gatewayInputRef.current)
+    try {
+      setConnectionError('')
+      await runConnectFlow(target, 'reconnect')
+    } catch (error) {
+      reconnectInFlightRef.current = false
+      scheduleReconnect(safeError(error))
+    }
+  }, [runConnectFlow, scheduleReconnect])
+  reconnectAttemptRunnerRef.current = runAutoReconnectAttempt
+
   React.useEffect(() => {
     const unsubscribers = [
       client.on('status', (status, detail) => {
+        const currentReconnectAttempt = reconnectAttemptRef.current
         setConnectionStatus(status)
         if (status === 'connecting') {
           setConnectionError('')
-          setView((previous) => ({ ...previous, statusLine: 'Connecting gateway...' }))
+          setView((previous) => ({
+            ...previous,
+            statusLine:
+              currentReconnectAttempt > 0
+                ? `Reconnecting gateway... (${currentReconnectAttempt})`
+                : 'Connecting gateway...'
+          }))
         }
         if (status === 'connected') {
           setConnectionError('')
-          setView((previous) => ({ ...previous, statusLine: 'Gateway connected' }))
+          setView((previous) => ({
+            ...previous,
+            statusLine:
+              currentReconnectAttempt > 0
+                ? `Gateway reconnected (${currentReconnectAttempt})`
+                : 'Gateway connected'
+          }))
         }
         if (status === 'disconnected') {
+          stopHeartbeat()
           const reason = detail || 'connection closed'
+          if (manualDisconnectRef.current) {
+            setView((previous) => ({ ...previous, statusLine: 'Disconnected by user' }))
+            return
+          }
+          if (!window.navigator.onLine) {
+            setView((previous) => ({ ...previous, statusLine: 'Offline. Waiting for network...' }))
+            return
+          }
           setView((previous) => ({ ...previous, statusLine: `Disconnected: ${reason}` }))
+          scheduleReconnect(reason)
         }
       }),
       client.on('error', (message) => {
@@ -339,12 +718,26 @@ export function useMobileController(): {
         }
 
         if (channel === 'tools:mcpUpdated') {
-          setView((previous) => ({ ...previous, statusLine: 'MCP status updated' }))
+          const nextMcpTools = Array.isArray(payload)
+            ? payload.map((item) => normalizeMcpServer(item)).filter((item): item is McpServerSummary => !!item)
+            : []
+          setView((previous) => ({
+            ...previous,
+            mcpTools: nextMcpTools,
+            statusLine: `MCP tools updated (${nextMcpTools.length})`
+          }))
           return
         }
 
         if (channel === 'tools:builtInUpdated') {
-          setView((previous) => ({ ...previous, statusLine: 'Built-in tools updated' }))
+          const nextBuiltInTools = Array.isArray(payload)
+            ? payload.map((item) => normalizeBuiltInTool(item)).filter((item): item is BuiltInToolSummary => !!item)
+            : []
+          setView((previous) => ({
+            ...previous,
+            builtInTools: nextBuiltInTools,
+            statusLine: `Built-in tools updated (${nextBuiltInTools.length})`
+          }))
           return
         }
 
@@ -374,133 +767,64 @@ export function useMobileController(): {
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe())
+      clearReconnectTimer()
+      stopHeartbeat()
+      autoReconnectEnabledRef.current = false
+      manualDisconnectRef.current = true
       client.disconnect()
     }
-  }, [applyLiveUpdate, client])
+  }, [applyLiveUpdate, clearReconnectTimer, client, scheduleReconnect, stopHeartbeat])
+
+  React.useEffect(() => {
+    const onOffline = () => {
+      clearReconnectTimer()
+      setView((previous) => ({ ...previous, statusLine: 'Offline. Waiting for network...' }))
+    }
+    const onOnline = () => {
+      if (manualDisconnectRef.current || !autoReconnectEnabledRef.current || !hasEverConnectedRef.current) return
+      if (client.isConnected()) return
+      scheduleReconnect('network restored', true)
+    }
+    window.addEventListener('offline', onOffline)
+    window.addEventListener('online', onOnline)
+    return () => {
+      window.removeEventListener('offline', onOffline)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [clearReconnectTimer, client, scheduleReconnect])
 
   const connectGateway = React.useCallback(async () => {
     const target = normalizeGatewayUrl(gatewayInput)
     setActionPending(true)
     setConnectionError('')
+    manualDisconnectRef.current = false
+    autoReconnectEnabledRef.current = true
+    reconnectInFlightRef.current = false
+    reconnectAttemptRef.current = 0
+    clearReconnectTimer()
 
     try {
-      await client.connect(target)
-      saveGatewayUrlToStorage(target)
-
-      const terminalPayload = await client.request<{ terminals: GatewayTerminalSummary[] }>('terminal:list', {})
-      const terminals = terminalPayload.terminals || []
-      if (terminals.length === 0) {
-        throw new Error('No terminal is available on backend.')
-      }
-
-      let profiles: GatewayProfileSummary[] = []
-      let activeProfileId = ''
-      let skills: SkillSummary[] = []
-      let skillsUnavailable = false
-      try {
-        const profilePayload = await client.request<{ activeProfileId: string; profiles: GatewayProfileSummary[] }>(
-          'models:getProfiles',
-          {}
-        )
-        profiles = profilePayload.profiles || []
-        activeProfileId = profilePayload.activeProfileId || ''
-      } catch {
-        profiles = []
-        activeProfileId = ''
-      }
-
-      try {
-        skills = await fetchSkillsSnapshot(client)
-      } catch {
-        skills = []
-        skillsUnavailable = true
-      }
-
-      const sessionPayload = await client.request<{ sessions: GatewaySessionSummary[] }>('session:list', {})
-      let summaries = sessionPayload.sessions || []
-
-      if (summaries.length === 0) {
-        const created = await client.request<{ sessionId: string }>('gateway:createSession', {})
-        summaries = [
-          {
-            id: created.sessionId,
-            title: 'New Chat',
-            updatedAt: Date.now(),
-            messagesCount: 0,
-            lastMessagePreview: '',
-            isBusy: false,
-            lockedProfileId: null
-          }
-        ]
-      }
-
-      const sortedSummaries = [...summaries].sort((left, right) => right.updatedAt - left.updatedAt)
-      const initialSummary = sortedSummaries[0]
-      if (!initialSummary) {
-        throw new Error('No session available from gateway.')
-      }
-
-      const snapshotPayload = await client.request<{ session: GatewaySessionSnapshot }>('session:get', {
-        sessionId: initialSummary.id
-      })
-      const snapshot = snapshotPayload.session
-
-      const sessions: Record<string, SessionState> = {}
-      const sessionMeta: Record<string, SessionMeta> = {}
-
-      for (const summary of sortedSummaries) {
-        const loaded = summary.id === snapshot.id
-        const session = createSessionState(summary.id, summary.title || 'Recovered Session')
-        if (loaded) {
-          session.title = snapshot.title || session.title
-          session.messages = (snapshot.messages || []).map(cloneMessage)
-          session.isBusy = snapshot.isBusy === true
-          session.isThinking = snapshot.isBusy === true
-          session.lockedProfileId = snapshot.lockedProfileId || null
-        } else {
-          session.isBusy = summary.isBusy === true
-          session.isThinking = summary.isBusy === true
-          session.lockedProfileId = summary.lockedProfileId || null
-        }
-        sessions[summary.id] = session
-        sessionMeta[summary.id] = {
-          id: summary.id,
-          title: loaded ? session.title : summary.title || 'Recovered Session',
-          updatedAt: summary.updatedAt || Date.now(),
-          messagesCount: loaded ? session.messages.length : summary.messagesCount,
-          lastMessagePreview: loaded ? previewFromSession(session) : summary.lastMessagePreview,
-          loaded
-        }
-      }
-
-      const order = reorderSessionIds(
-        sortedSummaries.map((summary) => summary.id),
-        sessionMeta
-      )
-
-      setView({
-        terminals,
-        skills,
-        profiles,
-        activeProfileId,
-        sessions,
-        sessionMeta,
-        sessionOrder: order,
-        activeSessionId: snapshot.id,
-        statusLine: skillsUnavailable ? `Connected: ${target} (skills unavailable)` : `Connected: ${target}`
-      })
+      await runConnectFlow(target, 'manual')
     } catch (error) {
       setConnectionError(safeError(error))
+      scheduleReconnect(safeError(error))
     } finally {
       setActionPending(false)
     }
-  }, [client, gatewayInput])
+  }, [clearReconnectTimer, gatewayInput, runConnectFlow, scheduleReconnect])
 
   const disconnectGateway = React.useCallback(() => {
+    manualDisconnectRef.current = true
+    autoReconnectEnabledRef.current = false
+    reconnectInFlightRef.current = false
+    reconnectAttemptRef.current = 0
+    clearReconnectTimer()
+    stopHeartbeat()
     client.disconnect()
     setConnectionStatus('disconnected')
+    setConnectionError('')
     setView((previous) => ({ ...previous, statusLine: 'Disconnected by user' }))
-  }, [client])
+  }, [clearReconnectTimer, client, stopHeartbeat])
 
   const ensureSessionLoaded = React.useCallback(
     async (sessionId: string) => {
@@ -607,7 +931,11 @@ export function useMobileController(): {
     if (!content) return
 
     if (!client.isConnected()) {
-      setConnectionError('Connect gateway first')
+      setConnectionError(
+        connectionStatus === 'connecting'
+          ? 'Gateway is reconnecting. Please wait and retry.'
+          : 'Gateway is disconnected. Please wait for reconnection.'
+      )
       return
     }
 
@@ -671,7 +999,7 @@ export function useMobileController(): {
         }
       })
     }
-  }, [client, composerValue, createSessionInternal])
+  }, [client, composerValue, connectionStatus, createSessionInternal])
 
   const stopActiveSession = React.useCallback(async () => {
     const active = viewRef.current.activeSessionId
@@ -741,6 +1069,61 @@ export function useMobileController(): {
       }))
     } catch (error) {
       setConnectionError(`Failed to reload skills: ${safeError(error)}`)
+    }
+  }, [client])
+
+  const setMcpEnabled = React.useCallback(
+    async (name: string, enabled: boolean) => {
+      if (!name || !client.isConnected()) return
+      try {
+        const payload = await client.request<unknown>('tools:setMcpEnabled', { name, enabled })
+        const nextMcpTools = Array.isArray(payload)
+          ? payload.map((item) => normalizeMcpServer(item)).filter((item): item is McpServerSummary => !!item)
+          : []
+        setView((previous) => ({
+          ...previous,
+          mcpTools: nextMcpTools,
+          statusLine: `${enabled ? 'Enabled' : 'Disabled'} MCP: ${name}`
+        }))
+      } catch (error) {
+        setConnectionError(`Failed to update MCP server: ${safeError(error)}`)
+      }
+    },
+    [client]
+  )
+
+  const setBuiltInToolEnabled = React.useCallback(
+    async (name: string, enabled: boolean) => {
+      if (!name || !client.isConnected()) return
+      try {
+        const payload = await client.request<unknown>('tools:setBuiltInEnabled', { name, enabled })
+        const nextBuiltInTools = Array.isArray(payload)
+          ? payload.map((item) => normalizeBuiltInTool(item)).filter((item): item is BuiltInToolSummary => !!item)
+          : []
+        setView((previous) => ({
+          ...previous,
+          builtInTools: nextBuiltInTools,
+          statusLine: `${enabled ? 'Enabled' : 'Disabled'} built-in tool: ${name}`
+        }))
+      } catch (error) {
+        setConnectionError(`Failed to update built-in tool: ${safeError(error)}`)
+      }
+    },
+    [client]
+  )
+
+  const reloadTools = React.useCallback(async () => {
+    if (!client.isConnected()) return
+    try {
+      const snapshot = await fetchToolsSnapshot(client)
+      setView((previous) => ({
+        ...previous,
+        mcpTools: snapshot.mcpTools,
+        builtInTools: snapshot.builtInTools,
+        statusLine: `Tools refreshed (${snapshot.mcpTools.length + snapshot.builtInTools.length})`
+      }))
+    } catch (error) {
+      setConnectionError(`Failed to reload tools: ${safeError(error)}`)
     }
   }, [client])
 
@@ -892,6 +1275,8 @@ export function useMobileController(): {
     mentionOptions: mentionState.options,
     terminals: view.terminals,
     skills: view.skills,
+    mcpTools: view.mcpTools,
+    builtInTools: view.builtInTools,
     profiles: view.profiles,
     activeProfileId: view.activeProfileId,
     activeSession,
@@ -921,6 +1306,9 @@ export function useMobileController(): {
     updateProfile,
     reloadSkills,
     setSkillEnabled,
+    reloadTools,
+    setMcpEnabled,
+    setBuiltInToolEnabled,
     replyAsk,
     createTerminalTab,
     closeTerminalTab

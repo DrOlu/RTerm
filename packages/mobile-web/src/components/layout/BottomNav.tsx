@@ -1,8 +1,8 @@
 import React from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { MessageCircle, Settings, Sparkles, TerminalSquare } from 'lucide-react'
+import { MessageCircle, Settings, Sparkles, TerminalSquare, Wrench } from 'lucide-react'
 
-export type MobileTabKey = 'chat' | 'terminal' | 'skills' | 'settings'
+export type MobileTabKey = 'chat' | 'terminal' | 'skills' | 'tools' | 'settings'
 
 interface BottomNavProps {
   activeTab: MobileTabKey
@@ -13,6 +13,7 @@ const TABS: Array<{ key: MobileTabKey; label: string; icon: LucideIcon }> = [
   { key: 'chat', label: 'Chat', icon: MessageCircle },
   { key: 'terminal', label: 'Terminal', icon: TerminalSquare },
   { key: 'skills', label: 'Skills', icon: Sparkles },
+  { key: 'tools', label: 'Tools', icon: Wrench },
   { key: 'settings', label: 'Settings', icon: Settings }
 ]
 
