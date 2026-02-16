@@ -117,6 +117,19 @@ function mergeSkillsByName(previous: SkillSummary[], incoming: SkillSummary[]): 
   return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name))
 }
 
+function collectEnabledSkillNames(payload: unknown[]): Set<string> {
+  return new Set(
+    payload
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null
+        if (!('name' in item) || typeof item.name !== 'string') return null
+        if ('enabled' in item && item.enabled === false) return null
+        return item.name
+      })
+      .filter((name): name is string => !!name)
+  )
+}
+
 async function fetchSkillsSnapshot(client: GatewayClient): Promise<SkillSummary[]> {
   try {
     const [allRaw, enabledRaw] = await Promise.all([
@@ -330,28 +343,28 @@ export function useMobileController(): {
           return
         }
 
+        if (channel === 'tools:builtInUpdated') {
+          setView((previous) => ({ ...previous, statusLine: 'Built-in tools updated' }))
+          return
+        }
+
         if (channel === 'skills:updated') {
           if (!Array.isArray(payload)) return
-          const enabledNames = new Set(
-            payload
-              .map((item) => {
-                if (!item || typeof item !== 'object') return null
-                if (!('name' in item) || typeof item.name !== 'string') return null
-                return item.name
-              })
-              .filter((name): name is string => !!name)
-          )
+          const enabledNames = collectEnabledSkillNames(payload)
           setView((previous) => {
-            const incoming = payload
-              .map((item) => normalizeSkillItem(item, enabledNames))
-              .filter((item): item is SkillSummary => !!item)
-            const merged = mergeSkillsByName(previous.skills, incoming).map((skill) => ({
-              ...skill,
-              enabled: enabledNames.has(skill.name)
-            }))
+            const nextSkills =
+              previous.skills.length === 0
+                ? payload
+                    .map((item) => normalizeSkillItem(item, enabledNames))
+                    .filter((item): item is SkillSummary => !!item)
+                    .sort((left, right) => left.name.localeCompare(right.name))
+                : previous.skills.map((skill) => ({
+                    ...skill,
+                    enabled: enabledNames.has(skill.name)
+                  }))
             return {
               ...previous,
-              skills: merged,
+              skills: nextSkills,
               statusLine: `Skills updated (${enabledNames.size})`
             }
           })
@@ -701,17 +714,10 @@ export function useMobileController(): {
           name,
           enabled
         })
-        const enabledNames = new Set(
-          (payload.skills || [])
-            .map((skill) => (skill.enabled !== false ? skill.name : null))
-            .filter((item): item is string => typeof item === 'string' && !!item)
-        )
-        const incoming = (payload.skills || [])
-          .map((skill) => normalizeSkillItem(skill, enabledNames))
-          .filter((skill): skill is SkillSummary => !!skill)
+        const enabledNames = collectEnabledSkillNames(payload.skills || [])
         setView((previous) => ({
           ...previous,
-          skills: mergeSkillsByName(previous.skills, incoming).map((skill) => ({
+          skills: previous.skills.map((skill) => ({
             ...skill,
             enabled: enabledNames.has(skill.name)
           })),

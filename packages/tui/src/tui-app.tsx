@@ -451,6 +451,11 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
 
     if (channel === 'tools:mcpUpdated') {
       setState('statusLine', 'MCP status updated')
+      return
+    }
+
+    if (channel === 'tools:builtInUpdated') {
+      setState('statusLine', 'Built-in tools updated')
     }
   })
 

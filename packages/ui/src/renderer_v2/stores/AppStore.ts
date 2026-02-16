@@ -27,6 +27,7 @@ export type SettingsSection = 'general' | 'theme' | 'models' | 'security' | 'too
 export type McpToolSummary = Awaited<ReturnType<Window['gyshell']['tools']['getMcp']>>[number]
 export type BuiltInToolSummary = Awaited<ReturnType<Window['gyshell']['tools']['getBuiltIn']>>[number]
 export type SkillSummary = Awaited<ReturnType<Window['gyshell']['skills']['getAll']>>[number]
+export type SkillStatusSummary = Awaited<ReturnType<Window['gyshell']['skills']['setEnabled']>>[number]
 export type CommandPolicyLists = Awaited<ReturnType<Window['gyshell']['settings']['getCommandPolicyLists']>>
 export type VersionCheckResult = Awaited<ReturnType<Window['gyshell']['version']['check']>>
 
@@ -237,6 +238,53 @@ export class AppStore {
     }
   }
 
+  private applySkillStatusUpdate(updates: SkillStatusSummary[]): void {
+    const enabledByName = new Map<string, boolean>()
+    updates.forEach((item) => {
+      if (!item?.name) return
+      enabledByName.set(item.name, item.enabled !== false)
+    })
+    if (enabledByName.size === 0) return
+
+    this.skills = this.skills.map((skill) =>
+      enabledByName.has(skill.name)
+        ? {
+            ...skill,
+            enabled: enabledByName.get(skill.name)
+          }
+        : skill
+    )
+
+    if (!this.settings) return
+    const nextToolsSkills = { ...(this.settings.tools?.skills ?? {}) }
+    enabledByName.forEach((enabled, name) => {
+      nextToolsSkills[name] = enabled
+    })
+    this.settings = {
+      ...this.settings,
+      tools: {
+        builtIn: this.settings.tools?.builtIn ?? {},
+        skills: nextToolsSkills
+      }
+    }
+  }
+
+  private applyBuiltInToolStatusUpdate(tools: BuiltInToolSummary[]): void {
+    this.builtInTools = tools
+    if (!this.settings) return
+    const nextToolsBuiltIn = { ...(this.settings.tools?.builtIn ?? {}) }
+    tools.forEach((tool) => {
+      nextToolsBuiltIn[tool.name] = tool.enabled
+    })
+    this.settings = {
+      ...this.settings,
+      tools: {
+        builtIn: nextToolsBuiltIn,
+        skills: this.settings.tools?.skills ?? {}
+      }
+    }
+  }
+
   openSettings(): void {
     this.view = 'settings'
   }
@@ -429,9 +477,18 @@ export class AppStore {
 
   async loadSkills(): Promise<void> {
     try {
-      const skills = await window.gyshell.skills.getAll()
+      const [skills, enabledSkills, settings] = await Promise.all([
+        window.gyshell.skills.getAll(),
+        window.gyshell.skills.getEnabled(),
+        this.fetchCombinedSettings()
+      ])
+      const enabledByName = new Set(enabledSkills.map((skill) => skill.name))
       runInAction(() => {
-        this.skills = skills
+        this.settings = settings
+        this.skills = skills.map((skill) => ({
+          ...skill,
+          enabled: enabledByName.has(skill.name)
+        }))
       })
     } catch (err) {
       console.error('Failed to load skills', err)
@@ -443,9 +500,18 @@ export class AppStore {
   }
 
   async reloadSkills(): Promise<void> {
-    const skills = await window.gyshell.skills.reload()
+    const [skills, enabledSkills, settings] = await Promise.all([
+      window.gyshell.skills.reload(),
+      window.gyshell.skills.getEnabled(),
+      this.fetchCombinedSettings()
+    ])
+    const enabledByName = new Set(enabledSkills.map((skill) => skill.name))
     runInAction(() => {
-      this.skills = skills
+      this.settings = settings
+      this.skills = skills.map((skill) => ({
+        ...skill,
+        enabled: enabledByName.has(skill.name)
+      }))
     })
   }
 
@@ -486,19 +552,16 @@ export class AppStore {
   async setBuiltInToolEnabled(name: string, enabled: boolean): Promise<void> {
     const builtInTools = await window.gyshell.tools.setBuiltInEnabled(name, enabled)
     runInAction(() => {
-      this.builtInTools = builtInTools
+      this.applyBuiltInToolStatusUpdate(builtInTools)
     })
   }
 
   async setSkillEnabled(name: string, enabled: boolean): Promise<void> {
-    const enabledSkills = await window.gyshell.skills.setEnabled(name, enabled)
+    const skills = await window.gyshell.skills.setEnabled(name, enabled)
     const settings = await this.fetchCombinedSettings()
     runInAction(() => {
       this.settings = settings
-      this.skills = this.skills.map(s => ({
-        ...s,
-        enabled: enabledSkills.some(es => es.name === s.name)
-      }))
+      this.applySkillStatusUpdate(skills)
     })
   }
 
@@ -679,13 +742,16 @@ export class AppStore {
         })
       })
 
-      // Skill status updates
-      window.gyshell.skills.onUpdated((enabledSkills: SkillSummary[]) => {
+      window.gyshell.tools.onBuiltInUpdated((tools) => {
         runInAction(() => {
-          this.skills = this.skills.map(s => ({
-            ...s,
-            enabled: enabledSkills.some(es => es.name === s.name)
-          }))
+          this.applyBuiltInToolStatusUpdate(tools)
+        })
+      })
+
+      // Skill status updates
+      window.gyshell.skills.onUpdated((skills) => {
+        runInAction(() => {
+          this.applySkillStatusUpdate(skills)
         })
       })
 

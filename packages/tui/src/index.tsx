@@ -117,16 +117,29 @@ async function safeRequestSkills(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> }
 ): Promise<SkillSummary[]> {
   try {
-    const payload = await client.request<{
-      skills: Array<{ name: string; description?: string; enabled?: boolean }>
-    }>('skills:list', {})
-    return (payload.skills ?? []).map((skill) => ({
+    const [allRaw, enabledRaw] = await Promise.all([
+      client.request<Array<{ name: string; description?: string }>>('skills:getAll', {}),
+      client.request<Array<{ name: string }>>('skills:getEnabled', {})
+    ])
+    const enabledSet = new Set((enabledRaw ?? []).map((item) => item.name))
+    return (allRaw ?? []).map((skill) => ({
       name: skill.name,
       description: skill.description,
-      enabled: skill.enabled !== false
+      enabled: enabledSet.has(skill.name)
     }))
   } catch {
-    return []
+    try {
+      const payload = await client.request<{
+        skills: Array<{ name: string; description?: string; enabled?: boolean }>
+      }>('skills:list', {})
+      return (payload.skills ?? []).map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        enabled: skill.enabled !== false
+      }))
+    } catch {
+      return []
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, MessageSquare } from 'lucide-react'
 import { formatRelativeTime } from '../../format'
 
 export interface SessionBrowserItem {
@@ -18,12 +18,6 @@ interface SessionBrowserProps {
   onSearchChange: (value: string) => void
   onCreateSession: () => void
   onOpenSession: (sessionId: string) => void
-}
-
-function titleInitial(title: string): string {
-  const normalized = String(title || '').trim()
-  if (!normalized) return '#'
-  return normalized.slice(0, 1).toUpperCase()
 }
 
 export const SessionBrowser: React.FC<SessionBrowserProps> = ({
@@ -72,7 +66,10 @@ export const SessionBrowser: React.FC<SessionBrowserProps> = ({
                 className={`session-chat-item ${isActive ? 'active' : ''}`}
                 onClick={() => onOpenSession(item.id)}
               >
-                <div className={`session-status-indicator ${item.isRunning ? 'running' : 'idle'}`} />
+                <div className="session-chat-icon">
+                  <MessageSquare size={18} />
+                  <div className={`session-status-indicator ${item.isRunning ? 'running' : 'idle'}`} />
+                </div>
                 <div className="session-chat-main">
                   <div className="session-chat-head">
                     <h3 className="session-chat-title">{item.title}</h3>

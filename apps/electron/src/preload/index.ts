@@ -185,6 +185,12 @@ interface SkillSummary {
   isNested: boolean
 }
 
+interface SkillStatusSummary {
+  name: string
+  description?: string
+  enabled: boolean
+}
+
 interface TerminalColorScheme {
   name: string
   foreground: string
@@ -355,6 +361,7 @@ export interface GyShellAPI {
     getBuiltIn: () => Promise<BuiltInToolSummary[]>
     setBuiltInEnabled: (name: string, enabled: boolean) => Promise<BuiltInToolSummary[]>
     onMcpUpdated: (callback: (data: McpToolSummary[]) => void) => () => void
+    onBuiltInUpdated: (callback: (data: BuiltInToolSummary[]) => void) => () => void
   }
 
   themes: {
@@ -367,11 +374,12 @@ export interface GyShellAPI {
     openFolder: () => Promise<void>
     reload: () => Promise<SkillSummary[]>
     getAll: () => Promise<SkillSummary[]>
+    getEnabled: () => Promise<SkillSummary[]>
     create: () => Promise<SkillSummary>
     openFile: (fileName: string) => Promise<void>
     delete: (fileName: string) => Promise<SkillSummary[]>
-    setEnabled: (name: string, enabled: boolean) => Promise<SkillSummary[]>
-    onUpdated: (callback: (data: SkillSummary[]) => void) => () => void
+    setEnabled: (name: string, enabled: boolean) => Promise<SkillStatusSummary[]>
+    onUpdated: (callback: (data: SkillStatusSummary[]) => void) => () => void
   }
 
   version: {
@@ -499,6 +507,11 @@ const api: GyShellAPI = {
       const handler = (_: IpcRendererEvent, data: McpToolSummary[]) => callback(data)
       ipcRenderer.on('tools:mcpUpdated', handler)
       return () => ipcRenderer.off('tools:mcpUpdated', handler)
+    },
+    onBuiltInUpdated: (callback) => {
+      const handler = (_: IpcRendererEvent, data: BuiltInToolSummary[]) => callback(data)
+      ipcRenderer.on('tools:builtInUpdated', handler)
+      return () => ipcRenderer.off('tools:builtInUpdated', handler)
     }
   },
   themes: {
@@ -510,12 +523,13 @@ const api: GyShellAPI = {
     openFolder: () => ipcRenderer.invoke('skills:openFolder'),
     reload: () => ipcRenderer.invoke('skills:reload'),
     getAll: () => ipcRenderer.invoke('skills:getAll'),
+    getEnabled: () => ipcRenderer.invoke('skills:getEnabled'),
     create: () => ipcRenderer.invoke('skills:create'),
     openFile: (fileName) => ipcRenderer.invoke('skills:openFile', fileName),
     delete: (fileName) => ipcRenderer.invoke('skills:delete', fileName),
     setEnabled: (name: string, enabled: boolean) => ipcRenderer.invoke('skills:setEnabled', name, enabled),
-    onUpdated: (callback: (data: SkillSummary[]) => void) => {
-      const handler = (_: IpcRendererEvent, data: SkillSummary[]) => callback(data)
+    onUpdated: (callback: (data: SkillStatusSummary[]) => void) => {
+      const handler = (_: IpcRendererEvent, data: SkillStatusSummary[]) => callback(data)
       ipcRenderer.on('skills:updated', handler)
       return () => ipcRenderer.off('skills:updated', handler)
     }

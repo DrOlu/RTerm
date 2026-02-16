@@ -255,21 +255,12 @@ export class ChatStore {
 
   handleUiUpdate(update: any) {
     const { type, sessionId } = update
-    let session = this.sessions.find((s) => s.id === sessionId)
+    const session = this.sessions.find((s) => s.id === sessionId)
     if (!session) {
-      const created: ChatSession = {
-        id: sessionId,
-        title: 'New Chat',
-        messagesById: observable.map<string, ChatMessage>(),
-        messageIds: [],
-        isThinking: false,
-        isSessionBusy: false,
-        lockedProfileId: null
-      }
-      runInAction(() => {
-        this.sessions.push(created)
-      })
-      session = created
+      // Do not create a synthetic session from live updates.
+      // If the session is not currently opened in the UI, keep UI stable and let
+      // users load the real session explicitly from history.
+      return
     }
 
     runInAction(() => {

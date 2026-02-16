@@ -17,7 +17,10 @@ import { NodeCommandPolicyService } from '../../adapters/node/NodeCommandPolicyS
 import { NodeMcpToolService } from '../../adapters/node/NodeMcpToolService'
 import { NodeSkillService } from '../../adapters/node/NodeSkillService'
 import { ModelCapabilityService } from '../../services/ModelCapabilityService'
-import { BUILTIN_TOOL_INFO } from '../../services/AgentHelper/tools'
+import {
+  buildBuiltInToolStatusSummary,
+  buildSkillStatusSummary
+} from '../../services/Gateway/toolingSummary'
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name]
@@ -334,15 +337,8 @@ export async function startGyBackend(): Promise<void> {
             const next = settingsService.getSettings()
             agentService.updateSettings(next)
             const skills = await skillService.getAll()
-            const summary = skills.map((skill) => ({
-              name: skill.name,
-              description: skill.description,
-              enabled: (next.tools?.skills ?? {})[skill.name] !== false
-            }))
-            gatewayService.broadcastRaw(
-              'skills:updated',
-              summary.filter((skill) => skill.enabled)
-            )
+            const summary = buildSkillStatusSummary(skills, next.tools?.skills)
+            gatewayService.broadcastRaw('skills:updated', summary)
             return summary
           }
         },
@@ -379,12 +375,7 @@ export async function startGyBackend(): Promise<void> {
           },
           getBuiltIn: () => {
             const settings = settingsService.getSettings()
-            const enabledMap = settings.tools?.builtIn ?? {}
-            return BUILTIN_TOOL_INFO.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              enabled: enabledMap[tool.name] ?? true
-            }))
+            return buildBuiltInToolStatusSummary(settings.tools?.builtIn)
           },
           setBuiltInEnabled: async (name, enabled) => {
             const settings = settingsService.getSettings()
@@ -393,11 +384,9 @@ export async function startGyBackend(): Promise<void> {
             settingsService.setSettings({ tools: { builtIn: nextBuiltIn, skills: settings.tools?.skills ?? {} } })
             const next = settingsService.getSettings()
             agentService.updateSettings(next)
-            return BUILTIN_TOOL_INFO.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              enabled: nextBuiltIn[tool.name] ?? true
-            }))
+            const summary = buildBuiltInToolStatusSummary(next.tools?.builtIn)
+            gatewayService.broadcastRaw('tools:builtInUpdated', summary)
+            return summary
           }
         }
       })

@@ -24,7 +24,10 @@ import { TempFileService } from '../../../backend/src/services/TempFileService'
 import { VersionService } from '../../../backend/src/services/VersionService'
 import { ElectronAppSettingsMigration } from '../settings/ElectronAppSettingsMigration'
 import { installCliLaunchers } from './CliInstallService'
-import { BUILTIN_TOOL_INFO } from '../../../backend/src/services/AgentHelper/tools'
+import {
+  buildBuiltInToolStatusSummary,
+  buildSkillStatusSummary
+} from '../../../backend/src/services/Gateway/toolingSummary'
 
 let mainWindow: BrowserWindow | null = null
 let settingsService: SettingsService
@@ -399,15 +402,8 @@ export async function startElectronMain(): Promise<void> {
             agentService.updateSettings(nextSettings)
 
             const skills = await skillService.getAll()
-            const summary = skills.map((skill) => ({
-              name: skill.name,
-              description: skill.description,
-              enabled: (nextSettings.tools?.skills ?? {})[skill.name] !== false
-            }))
-            gatewayService.broadcastRaw(
-              'skills:updated',
-              summary.filter((skill) => skill.enabled)
-            )
+            const summary = buildSkillStatusSummary(skills, nextSettings.tools?.skills)
+            gatewayService.broadcastRaw('skills:updated', summary)
             return summary
           }
         },
@@ -444,12 +440,7 @@ export async function startElectronMain(): Promise<void> {
           },
           getBuiltIn: () => {
             const settings = settingsService.getSettings()
-            const enabledMap = settings.tools?.builtIn ?? {}
-            return BUILTIN_TOOL_INFO.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              enabled: enabledMap[tool.name] ?? true
-            }))
+            return buildBuiltInToolStatusSummary(settings.tools?.builtIn)
           },
           setBuiltInEnabled: async (name, enabled) => {
             const settings = settingsService.getSettings()
@@ -458,11 +449,9 @@ export async function startElectronMain(): Promise<void> {
             settingsService.setSettings({ tools: { builtIn: nextBuiltIn, skills: settings.tools?.skills ?? {} } })
             const next = settingsService.getSettings()
             agentService.updateSettings(next)
-            return BUILTIN_TOOL_INFO.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              enabled: nextBuiltIn[tool.name] ?? true
-            }))
+            const summary = buildBuiltInToolStatusSummary(next.tools?.builtIn)
+            gatewayService.broadcastRaw('tools:builtInUpdated', summary)
+            return summary
           }
         }
       })

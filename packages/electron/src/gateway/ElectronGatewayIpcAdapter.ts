@@ -11,7 +11,10 @@ import type { ModelCapabilityService } from '../../../backend/src/services/Model
 import type { McpToolService } from '../../../backend/src/services/McpToolService'
 import type { VersionService } from '../../../backend/src/services/VersionService'
 import type { WsGatewayAccess } from '../../../backend/src/types'
-import { BUILTIN_TOOL_INFO } from '../../../backend/src/services/AgentHelper/tools'
+import {
+  buildBuiltInToolStatusSummary,
+  buildSkillStatusSummary
+} from '../../../backend/src/services/Gateway/toolingSummary'
 import { resolveTheme } from '../../../shared/src/theme/themes'
 import type { WebSocketGatewayControlService } from '../../../backend/src/services/Gateway/WebSocketGatewayControlService'
 import type { UiSettingsStore } from '../settings/UiSettingsStore'
@@ -217,9 +220,11 @@ export class ElectronGatewayIpcAdapter {
       })
       this.agentService.updateSettings(this.settingsService.getSettings())
 
-      const enabledSkills = await this.skillService.getEnabledSkills()
-      this.gateway.broadcastRaw('skills:updated', enabledSkills)
-      return enabledSkills
+      const nextSettings = this.settingsService.getSettings()
+      const allSkills = await this.skillService.getAll()
+      const summary = buildSkillStatusSummary(allSkills, nextSettings.tools?.skills)
+      this.gateway.broadcastRaw('skills:updated', summary)
+      return summary
     })
 
     // Settings / tools / themes / models
@@ -301,12 +306,7 @@ export class ElectronGatewayIpcAdapter {
 
     ipcMain.handle('tools:getBuiltIn', async () => {
       const settings = this.settingsService.getSettings()
-      const enabledMap = settings.tools?.builtIn ?? {}
-      return BUILTIN_TOOL_INFO.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        enabled: enabledMap[tool.name] ?? true
-      }))
+      return buildBuiltInToolStatusSummary(settings.tools?.builtIn)
     })
 
     ipcMain.handle('tools:setBuiltInEnabled', async (_: any, name: string, enabled: boolean) => {
@@ -314,12 +314,11 @@ export class ElectronGatewayIpcAdapter {
       const nextBuiltIn = { ...(settings.tools?.builtIn ?? {}) }
       nextBuiltIn[name] = enabled
       this.settingsService.setSettings({ tools: { builtIn: nextBuiltIn, skills: settings.tools?.skills ?? {} } })
-      this.agentService.updateSettings(this.settingsService.getSettings())
-      return BUILTIN_TOOL_INFO.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        enabled: nextBuiltIn[tool.name] ?? true
-      }))
+      const nextSettings = this.settingsService.getSettings()
+      this.agentService.updateSettings(nextSettings)
+      const summary = buildBuiltInToolStatusSummary(nextSettings.tools?.builtIn)
+      this.gateway.broadcastRaw('tools:builtInUpdated', summary)
+      return summary
     })
 
     ipcMain.handle('themes:openCustomConfig', async () => {
