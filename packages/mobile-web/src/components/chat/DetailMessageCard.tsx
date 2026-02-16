@@ -1,9 +1,8 @@
 import React from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { clipMultiline, formatClock, messageDetail, messageTypeTitle } from '../../format'
 import { isEmptyMessageContent, normalizeDisplayText, trimOuterBlankLines } from '../../session-store'
 import type { ChatMessage } from '../../types'
+import { MarkdownContent } from '../common/MarkdownContent'
 import { MentionContent } from '../common/MentionContent'
 
 interface DetailMessageCardProps {
@@ -33,16 +32,7 @@ export const DetailMessageCard: React.FC<DetailMessageCardProps> = ({ message, o
           <span>{formatClock(message.timestamp)}</span>
         </header>
         {message.role === 'assistant' ? (
-          <div className="detail-markdown">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />
-              }}
-            >
-              {displayText}
-            </ReactMarkdown>
-          </div>
+          <MarkdownContent className="detail-markdown" content={displayText} />
         ) : (
           <p className="detail-text-body">
             <MentionContent text={displayText} />

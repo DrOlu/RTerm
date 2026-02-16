@@ -14,6 +14,12 @@ import { useMobileController } from './hooks/useMobileController'
 import { formatSessionListTitle, formatTopBarSessionTitle } from './lib/session-title'
 
 type ChatSubView = 'sessions' | 'conversation'
+const AUTO_SCROLL_THRESHOLD_PX = 64
+
+function isScrolledNearBottom(element: HTMLElement, thresholdPx = AUTO_SCROLL_THRESHOLD_PX): boolean {
+  const remainingDistance = element.scrollHeight - element.scrollTop - element.clientHeight
+  return remainingDistance <= thresholdPx
+}
 
 export const App: React.FC = () => {
   const { state, actions } = useMobileController()
@@ -23,11 +29,57 @@ export const App: React.FC = () => {
   const [detailTurnId, setDetailTurnId] = React.useState<string | null>(null)
 
   const messageListRef = React.useRef<HTMLDivElement>(null)
+  const shouldStickMessageListToBottomRef = React.useRef(true)
+  const previousConversationContextRef = React.useRef<{
+    activeTab: MobileTabKey
+    chatSubView: ChatSubView
+    activeSessionId: string | null
+  } | null>(null)
+
   React.useEffect(() => {
     if (activeTab !== 'chat' || chatSubView !== 'conversation') return
     const element = messageListRef.current
     if (!element) return
-    element.scrollTop = element.scrollHeight
+    const handleScroll = () => {
+      shouldStickMessageListToBottomRef.current = isScrolledNearBottom(element)
+    }
+    handleScroll()
+    element.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      element.removeEventListener('scroll', handleScroll)
+    }
+  }, [activeTab, chatSubView, state.activeSessionId])
+
+  React.useEffect(() => {
+    const currentContext = {
+      activeTab,
+      chatSubView,
+      activeSessionId: state.activeSessionId
+    }
+    if (activeTab !== 'chat' || chatSubView !== 'conversation') {
+      previousConversationContextRef.current = currentContext
+      return
+    }
+
+    const element = messageListRef.current
+    if (!element) {
+      previousConversationContextRef.current = currentContext
+      return
+    }
+
+    const previousContext = previousConversationContextRef.current
+    const hasContextChanged =
+      !previousContext ||
+      previousContext.activeTab !== currentContext.activeTab ||
+      previousContext.chatSubView !== currentContext.chatSubView ||
+      previousContext.activeSessionId !== currentContext.activeSessionId
+
+    if (hasContextChanged || shouldStickMessageListToBottomRef.current) {
+      element.scrollTop = element.scrollHeight
+      shouldStickMessageListToBottomRef.current = true
+    }
+
+    previousConversationContextRef.current = currentContext
   }, [activeTab, chatSubView, state.activeSessionId, state.chatTimeline])
 
   React.useEffect(() => {

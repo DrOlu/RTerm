@@ -4,6 +4,13 @@ import type { AgentTimelineItem } from '../../lib/chat-timeline'
 import type { ChatMessage } from '../../types'
 import { DetailMessageCard } from './DetailMessageCard'
 
+const DETAIL_AUTO_SCROLL_THRESHOLD_PX = 48
+
+function isDetailListNearBottom(element: HTMLElement): boolean {
+  const remainingDistance = element.scrollHeight - element.scrollTop - element.clientHeight
+  return remainingDistance <= DETAIL_AUTO_SCROLL_THRESHOLD_PX
+}
+
 interface MessageDetailSheetProps {
   open: boolean
   turn: AgentTimelineItem | null
@@ -18,6 +25,47 @@ export const MessageDetailSheet: React.FC<MessageDetailSheetProps> = ({
   onAskDecision
 }) => {
   const messages = turn?.detailMessages || []
+  const detailListRef = React.useRef<HTMLElement>(null)
+  const shouldStickDetailListToBottomRef = React.useRef(true)
+  const detailUpdateSignature = React.useMemo(() => {
+    return messages
+      .map((message) => {
+        const contentLength = String(message.content || '').length
+        const outputLength = String(message.metadata?.output || '').length
+        return `${message.id}:${message.streaming ? '1' : '0'}:${contentLength}:${outputLength}`
+      })
+      .join('|')
+  }, [messages])
+
+  React.useEffect(() => {
+    if (!open) return
+    const element = detailListRef.current
+    if (!element) return
+
+    const handleScroll = () => {
+      shouldStickDetailListToBottomRef.current = isDetailListNearBottom(element)
+    }
+    handleScroll()
+    element.addEventListener('scroll', handleScroll, { passive: true })
+    return () => {
+      element.removeEventListener('scroll', handleScroll)
+    }
+  }, [open, turn?.id])
+
+  React.useEffect(() => {
+    if (!open) return
+    const element = detailListRef.current
+    if (!element) return
+    element.scrollTop = element.scrollHeight
+    shouldStickDetailListToBottomRef.current = true
+  }, [open, turn?.id])
+
+  React.useEffect(() => {
+    if (!open || !shouldStickDetailListToBottomRef.current) return
+    const element = detailListRef.current
+    if (!element) return
+    element.scrollTop = element.scrollHeight
+  }, [open, detailUpdateSignature])
 
   return (
     <aside className={`detail-screen ${open ? 'is-open' : ''}`} aria-hidden={!open}>
@@ -33,7 +81,7 @@ export const MessageDetailSheet: React.FC<MessageDetailSheetProps> = ({
         <span>{messages.length} events</span>
       </section>
 
-      <section className="detail-list">
+      <section className="detail-list" ref={detailListRef}>
         {messages.length === 0 ? (
           <p className="panel-empty">No detail messages for this turn.</p>
         ) : (

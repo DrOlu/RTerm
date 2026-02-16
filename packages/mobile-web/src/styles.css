@@ -354,6 +354,10 @@ button:disabled {
   background: color-mix(in srgb, var(--surface) 92%, transparent);
 }
 
+.message-list > * {
+  min-width: 0;
+}
+
 .empty-state {
   margin: auto;
   width: min(280px, 92%);
@@ -389,11 +393,13 @@ button:disabled {
 
 .bubble {
   max-width: 90%;
+  min-width: 0;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface);
   padding: 10px 12px;
   box-shadow: 0 2px 10px rgba(10, 33, 57, 0.05);
+  overflow: hidden;
 }
 
 .bubble.user {
@@ -412,11 +418,19 @@ button:disabled {
 .bubble-markdown {
   font-size: 14px;
   line-height: 1.45;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bubble-markdown code {
   font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
   font-size: 12px;
+}
+
+.bubble-markdown :where(p, li, blockquote, td, th) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bubble-markdown pre {
@@ -425,7 +439,24 @@ button:disabled {
   border-radius: 4px;
   border: 1px solid var(--tool-border);
   background: var(--tool-soft);
-  overflow: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: pre;
+  -webkit-overflow-scrolling: touch;
+}
+
+.bubble-markdown pre code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  white-space: pre;
+}
+
+.bubble-markdown :not(pre) > code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bubble footer {
@@ -508,6 +539,9 @@ button:disabled {
   margin-top: 8px;
   font-size: 13px;
   line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .detail-markdown > :first-child {
@@ -523,13 +557,35 @@ button:disabled {
   font-size: 12px;
 }
 
+.detail-markdown :where(p, li, blockquote, td, th) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .detail-markdown pre {
   margin: 6px 0;
   padding: 8px;
   border-radius: 6px;
   border: 1px solid var(--tool-border);
   background: var(--tool-soft);
-  overflow: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: pre;
+  -webkit-overflow-scrolling: touch;
+}
+
+.detail-markdown pre code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  white-space: pre;
+}
+
+.detail-markdown :not(pre) > code {
+  white-space: break-spaces;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .event-card {
@@ -537,6 +593,8 @@ button:disabled {
   border: 1px solid var(--border);
   background: var(--surface);
   padding: 10px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .event-card header {
@@ -1170,6 +1228,10 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.detail-list > * {
+  min-width: 0;
 }
 
 @keyframes spin {

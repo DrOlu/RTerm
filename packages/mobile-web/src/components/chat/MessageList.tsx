@@ -1,10 +1,9 @@
 import React from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { formatClock, messageDetail, messageTypeTitle } from '../../format'
 import { type AgentTimelineItem, type ChatTimelineItem } from '../../lib/chat-timeline'
 import { normalizeDisplayText, trimOuterBlankLines } from '../../session-store'
 import type { ChatMessage } from '../../types'
+import { MarkdownContent } from '../common/MarkdownContent'
 import { MentionContent } from '../common/MentionContent'
 
 interface MessageListProps {
@@ -57,16 +56,7 @@ const AgentTurnBubble: React.FC<{
     <article className="bubble-row assistant">
       <div className="bubble assistant agent-turn">
         {isText ? (
-          <div className="bubble-markdown">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />
-              }}
-            >
-              {markdownPreview}
-            </ReactMarkdown>
-          </div>
+          <MarkdownContent className="bubble-markdown" content={markdownPreview} />
         ) : (
           <div className="agent-event-preview">
             <div className="agent-event-title">{messageTitle}</div>
