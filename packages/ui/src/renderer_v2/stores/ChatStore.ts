@@ -255,8 +255,22 @@ export class ChatStore {
 
   handleUiUpdate(update: any) {
     const { type, sessionId } = update
-    const session = this.sessions.find((s) => s.id === sessionId)
-    if (!session) return
+    let session = this.sessions.find((s) => s.id === sessionId)
+    if (!session) {
+      const created: ChatSession = {
+        id: sessionId,
+        title: 'New Chat',
+        messagesById: observable.map<string, ChatMessage>(),
+        messageIds: [],
+        isThinking: false,
+        isSessionBusy: false,
+        lockedProfileId: null
+      }
+      runInAction(() => {
+        this.sessions.push(created)
+      })
+      session = created
+    }
 
     runInAction(() => {
       switch (type) {
@@ -305,6 +319,10 @@ export class ChatStore {
         case 'DONE':
           session.isThinking = false
           break
+        case 'SESSION_PROFILE_LOCKED':
+          session.isSessionBusy = true
+          session.lockedProfileId = update.lockedProfileId || null
+          break
         case 'SESSION_READY':
           session.isSessionBusy = false
           session.lockedProfileId = null
@@ -335,7 +353,12 @@ export class ChatStore {
       const sessionInfo = allHistory.find(h => h.id === sessionId)
 
       // Load UI messages from backend
-      const messages = await window.gyshell.agent.getUiMessages(sessionId)
+      const [messages, runtimeSnapshot] = await Promise.all([
+        window.gyshell.agent.getUiMessages(sessionId),
+        window.gyshell.agent.getSessionSnapshot(sessionId)
+      ])
+      const isBusy = runtimeSnapshot?.isBusy === true
+      const lockedProfileId = runtimeSnapshot?.lockedProfileId || null
       
       runInAction(() => {
         const existingSession = this.sessions.find(s => s.id === sessionId)
@@ -347,7 +370,9 @@ export class ChatStore {
             existingSession.messagesById.set(msg.id, msg)
             existingSession.messageIds.push(msg.id)
           })
-          existingSession.isThinking = false
+          existingSession.isThinking = isBusy
+          existingSession.isSessionBusy = isBusy
+          existingSession.lockedProfileId = lockedProfileId
           if (sessionInfo?.title) {
             existingSession.title = sessionInfo.title
           }
@@ -363,9 +388,9 @@ export class ChatStore {
             title: sessionInfo?.title || 'Loaded Session',
             messagesById,
             messageIds,
-            isThinking: false,
-            isSessionBusy: false,
-            lockedProfileId: null
+            isThinking: isBusy,
+            isSessionBusy: isBusy,
+            lockedProfileId
           })
         }
 

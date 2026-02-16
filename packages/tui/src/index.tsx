@@ -60,6 +60,7 @@ export async function startTuiCli(argv: string[] = process.argv.slice(2)): Promi
       initialSessionTitle: initialSession.title,
       initialMessages: initialSession.messages,
       initialSessionBusy: initialSession.isBusy,
+      initialSessionLockedProfileId: initialSession.lockedProfileId,
       restoredSessionCount: sessionSummaries.length,
       recoveredSessions: sessionSummaries,
       skills,
@@ -133,7 +134,7 @@ async function resolveInitialSession(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
   sessions: GatewaySessionSummary[],
   preferredSessionId?: string,
-): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean }> {
+): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean; lockedProfileId: string | null }> {
   if (preferredSessionId) {
     const matched = await tryLoadSessionSnapshot(client, preferredSessionId)
     if (matched) return matched
@@ -146,6 +147,7 @@ async function resolveInitialSession(
       title: 'New Chat',
       messages: [],
       isBusy: false,
+      lockedProfileId: null,
     }
   }
 
@@ -159,6 +161,7 @@ async function resolveInitialSession(
     title: 'New Chat',
     messages: [],
     isBusy: false,
+    lockedProfileId: null,
   }
 }
 
@@ -166,7 +169,7 @@ async function tryLoadSessionSnapshot(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
   sessionId: string,
   fallbackTitle?: string,
-): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean } | null> {
+): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean; lockedProfileId: string | null } | null> {
   try {
     const payload = await client.request<{ session: GatewaySessionSnapshot }>('session:get', {
       sessionId,
@@ -177,6 +180,7 @@ async function tryLoadSessionSnapshot(
       title: restored.title || fallbackTitle || 'Recovered Session',
       messages: restored.messages ?? [],
       isBusy: restored.isBusy === true,
+      lockedProfileId: restored.lockedProfileId || null,
     }
   } catch {
     return null
@@ -191,13 +195,14 @@ async function createNewSession(
 
 async function createInitialPromptSession(
   client: { request: <T>(method: string, params?: Record<string, unknown>) => Promise<T> },
-): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean }> {
+): Promise<{ id: string; title: string; messages: ChatMessage[]; isBusy: boolean; lockedProfileId: string | null }> {
   const created = await createNewSession(client)
   return {
     id: created.sessionId,
     title: 'New Chat',
     messages: [],
     isBusy: false,
+    lockedProfileId: null,
   }
 }
 

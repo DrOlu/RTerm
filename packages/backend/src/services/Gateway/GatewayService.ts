@@ -217,6 +217,7 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     return summarySource.map((session: any) => {
       const context = this.sessions.get(session.id);
       const isBusy = context ? context.status !== 'idle' : false;
+      const lockedProfileId = isBusy ? context?.lockedProfileId || null : null;
 
       return {
         id: session.id,
@@ -224,7 +225,8 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
         updatedAt: session.updatedAt,
         messagesCount: session.messagesCount,
         lastMessagePreview: this.normalizeSessionPreview(session.lastMessagePreview || ''),
-        isBusy
+        isBusy,
+        lockedProfileId
       };
     });
   }
@@ -235,6 +237,7 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
 
     const context = this.sessions.get(session.id);
     const isBusy = context ? context.status !== 'idle' : false;
+    const lockedProfileId = isBusy ? context?.lockedProfileId || null : null;
     return {
       id: session.id,
       title: session.title,
@@ -243,7 +246,8 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
         ...message,
         metadata: message.metadata ? { ...message.metadata } : undefined
       })),
-      isBusy
+      isBusy,
+      lockedProfileId
     };
   }
 
@@ -323,6 +327,11 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     const settings = this.settingsService.getSettings();
     context.lockedProfileId = settings.models.activeProfileId || '';
     context.lockedExperimentalFlags = getRunExperimentalFlagsFromSettings(settings);
+    this.transportHub.sendUIUpdate({
+      type: 'SESSION_PROFILE_LOCKED',
+      sessionId: context.sessionId,
+      lockedProfileId: context.lockedProfileId || null
+    });
   }
 
   async pauseTask(sessionId: string): Promise<void> {

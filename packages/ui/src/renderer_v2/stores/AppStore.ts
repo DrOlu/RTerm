@@ -36,6 +36,7 @@ export interface TerminalTabModel {
   config: TerminalConfig
   connectionRef?: { type: 'local' } | { type: 'ssh'; entryId: string }
 }
+type TerminalListPayload = Awaited<ReturnType<Window['gyshell']['terminal']['list']>>
 
 export class AppStore {
   view: AppView = 'main'
@@ -141,7 +142,8 @@ export class AppStore {
       loadVersionState: action,
       checkVersion: action,
       closeVersionUpdateDialog: action,
-      openVersionDownload: action
+      openVersionDownload: action,
+      reconcileTerminalTabs: action
     })
     this.chat.setQueueRunner((sessionId, content) => this.sendChatMessage(sessionId, content, { mode: 'queue' }))
   }
@@ -172,6 +174,56 @@ export class AppStore {
   get activeTerminal(): TerminalTabModel | null {
     if (!this.activeTerminalId) return null
     return this.terminalTabs.find((t) => t.id === this.activeTerminalId) ?? null
+  }
+
+  private toTerminalConfig(item: {
+    id: string
+    title: string
+    type: TerminalConfig['type']
+    cols: number
+    rows: number
+  }): TerminalConfig {
+    return {
+      type: item.type,
+      id: item.id,
+      title: item.title,
+      cols: item.cols > 0 ? item.cols : 80,
+      rows: item.rows > 0 ? item.rows : 24
+    } as TerminalConfig
+  }
+
+  reconcileTerminalTabs(payload: TerminalListPayload): void {
+    const incoming = payload?.terminals || []
+    const existingById = new Map(this.terminalTabs.map((tab) => [tab.id, tab]))
+    const nextTabs: TerminalTabModel[] = incoming.map((item) => {
+      const existing = existingById.get(item.id)
+      if (existing) {
+        return {
+          ...existing,
+          title: item.title,
+          config: {
+            ...existing.config,
+            title: item.title,
+            cols: item.cols > 0 ? item.cols : existing.config.cols,
+            rows: item.rows > 0 ? item.rows : existing.config.rows
+          }
+        }
+      }
+      return {
+        id: item.id,
+        title: item.title,
+        config: this.toTerminalConfig(item),
+        connectionRef: item.type === 'local' ? { type: 'local' } : undefined
+      }
+    })
+
+    let nextActive = this.activeTerminalId
+    if (!nextActive || !nextTabs.some((tab) => tab.id === nextActive)) {
+      nextActive = nextTabs[0]?.id || null
+    }
+
+    this.terminalTabs = nextTabs
+    this.activeTerminalId = nextActive
   }
 
   private async fetchCombinedSettings(): Promise<AppSettings> {
@@ -614,6 +666,12 @@ export class AppStore {
         }
       })
 
+      window.gyshell.terminal.onTabsUpdated((payload) => {
+        runInAction(() => {
+          this.reconcileTerminalTabs(payload)
+        })
+      })
+
       // MCP tool status updates
       window.gyshell.tools.onMcpUpdated((mcpTools) => {
         runInAction(() => {
@@ -631,8 +689,11 @@ export class AppStore {
         })
       })
 
-      // Ensure at least one terminal exists
-      if (this.terminalTabs.length === 0) {
+      const terminalSnapshot = await window.gyshell.terminal.list()
+      runInAction(() => {
+        this.reconcileTerminalTabs(terminalSnapshot)
+      })
+      if (terminalSnapshot.terminals.length === 0) {
         this.createLocalTab()
       }
 

@@ -27,6 +27,13 @@ interface RingBuffer {
 }
 
 type RawEventPublisher = (channel: string, data: unknown) => void
+type TerminalTabSnapshot = {
+  id: string
+  title: string
+  type: ConnectionType
+  cols: number
+  rows: number
+}
 
 export class TerminalService {
   private backends: Map<ConnectionType, TerminalBackend> = new Map()
@@ -48,6 +55,22 @@ export class TerminalService {
 
   setRawEventPublisher(publisher: RawEventPublisher): void {
     this.rawEventPublisher = publisher
+  }
+
+  private listRenderableTerminals(): TerminalTabSnapshot[] {
+    return this.getAllTerminals().map((terminal) => ({
+      id: terminal.id,
+      title: terminal.title,
+      type: terminal.type,
+      cols: terminal.cols,
+      rows: terminal.rows
+    }))
+  }
+
+  private publishTerminalTabsChanged(): void {
+    this.sendToRenderer('terminal:tabs', {
+      terminals: this.listRenderableTerminals()
+    })
   }
 
   private getBackend(type: ConnectionType): TerminalBackend {
@@ -131,6 +154,8 @@ export class TerminalService {
     if (config.type === 'local') {
       this.printBanner(config.id)
     }
+
+    this.publishTerminalTabsChanged()
 
     return tab
   }
@@ -272,6 +297,7 @@ export class TerminalService {
     }
     
     this.sendToRenderer('terminal:exit', { terminalId, code })
+    this.publishTerminalTabsChanged()
   }
 
   write(terminalId: string, data: string): void {
@@ -326,6 +352,7 @@ export class TerminalService {
       this.tasksByTerminal.delete(terminalId)
       this.activeTaskByTerminal.delete(terminalId)
     }
+    this.publishTerminalTabsChanged()
   }
 
   interrupt(terminalId: string): void {

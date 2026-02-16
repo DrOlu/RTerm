@@ -50,6 +50,7 @@ export type UIUpdateAction =
   | { type: 'APPEND_OUTPUT'; sessionId: string; messageId: string; outputDelta: string }
   | { type: 'UPDATE_MESSAGE'; sessionId: string; messageId: string; patch: Partial<ChatMessage> }
   | { type: 'DONE'; sessionId: string }
+  | { type: 'SESSION_PROFILE_LOCKED'; sessionId: string; lockedProfileId: string | null }
   | { type: 'SESSION_READY'; sessionId: string }
   | { type: 'ROLLBACK'; sessionId: string; messageId: string }
 
@@ -135,6 +136,7 @@ export interface GatewaySessionSummary {
   messagesCount: number
   lastMessagePreview?: string
   isBusy: boolean
+  lockedProfileId: string | null
 }
 
 export interface GatewaySessionSnapshot {
@@ -143,4 +145,5 @@ export interface GatewaySessionSnapshot {
   updatedAt: number
   messages: ChatMessage[]
   isBusy: boolean
+  lockedProfileId: string | null
 }

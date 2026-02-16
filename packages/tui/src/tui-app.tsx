@@ -37,6 +37,7 @@ export interface TuiBootstrapData {
   initialSessionTitle: string
   initialMessages: ChatMessage[]
   initialSessionBusy: boolean
+  initialSessionLockedProfileId: string | null
   restoredSessionCount: number
   recoveredSessions: GatewaySessionSummary[]
 }
@@ -421,6 +422,19 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
   })
 
   const unsubscribeRaw = props.client.on('raw', (channel, payload) => {
+    if (channel === 'terminal:tabs') {
+      const terminals =
+        payload &&
+        typeof payload === 'object' &&
+        'terminals' in payload &&
+        Array.isArray((payload as { terminals?: unknown[] }).terminals)
+          ? ((payload as { terminals: GatewayTerminalSummary[] }).terminals || [])
+          : []
+      setState('terminals', terminals)
+      setState('statusLine', `Terminal tabs updated (${terminals.length})`)
+      return
+    }
+
     if (channel === 'skills:updated' && Array.isArray(payload)) {
       const next: SkillSummary[] = payload.flatMap((item) => {
         if (!item || typeof item !== 'object') return []
@@ -955,6 +969,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
           session.messages = (snapshot.messages || []).map(cloneMessage)
           session.isBusy = snapshot.isBusy === true
           session.isThinking = snapshot.isBusy === true
+          session.lockedProfileId = snapshot.lockedProfileId || null
           draft.sessions[sessionId] = session
 
           const current = draft.sessionMeta[sessionId]
@@ -1037,6 +1052,11 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
   }
 
   const selectedProfileName = createMemo(() => lookupProfileName(state.activeProfileId, state.profiles))
+  const effectiveProfileName = createMemo(() => {
+    const lockedProfileId = activeSession()?.lockedProfileId || null
+    if (!lockedProfileId) return selectedProfileName()
+    return lookupProfileName(lockedProfileId, state.profiles)
+  })
   const activeSessionShortId = createMemo(() => shortId(state.activeSessionId))
   const activeSessionMeta = createMemo(() => state.sessionMeta[state.activeSessionId])
   const runActive = createMemo(() => Boolean(state.pending || activeSession()?.isBusy))
@@ -1060,7 +1080,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
     return Math.max(1, Math.min(5, lines))
   })
   const headerRightText = createMemo(() => {
-    const profile = truncateDisplayWidth(selectedProfileName(), 24)
+    const profile = truncateDisplayWidth(effectiveProfileName(), 24)
     const runLabel = runActive() ? `RUN ${RUN_SPINNER_FRAMES[runSpinnerIndex()]}` : 'IDLE'
     const raw = `${profile} | ${runLabel}`
     const max = Math.max(10, Math.floor(dimensions().width * 0.45))
@@ -1341,6 +1361,7 @@ function buildBootState(data: TuiBootstrapData, initialSession: SessionState): {
       const nextSession = createSessionState(summary.id, summary.title || 'Recovered Session')
       nextSession.isBusy = summary.isBusy === true
       nextSession.isThinking = summary.isBusy === true
+      nextSession.lockedProfileId = summary.lockedProfileId || null
       sessions[summary.id] = nextSession
     }
   }
@@ -1617,6 +1638,7 @@ function hydrateInitialSession(data: TuiBootstrapData): SessionState {
   session.messages = data.initialMessages.map(cloneMessage)
   session.isThinking = data.initialSessionBusy === true
   session.isBusy = data.initialSessionBusy === true
+  session.lockedProfileId = data.initialSessionLockedProfileId || null
   return session
 }
 

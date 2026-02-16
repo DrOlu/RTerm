@@ -266,6 +266,15 @@ export interface GyShellAPI {
 
   // Terminal
   terminal: {
+    list: () => Promise<{
+      terminals: Array<{
+        id: string
+        title: string
+        type: ConnectionType
+        cols: number
+        rows: number
+      }>
+    }>
     createTab: (config: TerminalConfig) => Promise<{ id: string }>
     write: (terminalId: string, data: string) => Promise<void>
     writePaths: (terminalId: string, paths: string[]) => Promise<void>
@@ -274,6 +283,17 @@ export interface GyShellAPI {
     setSelection: (terminalId: string, selectionText: string) => Promise<void>
     onData: (callback: (data: { terminalId: string; data: string }) => void) => () => void
     onExit: (callback: (data: { terminalId: string; code: number }) => void) => () => void
+    onTabsUpdated: (
+      callback: (data: {
+        terminals: Array<{
+          id: string
+          title: string
+          type: ConnectionType
+          cols: number
+          rows: number
+        }>
+      }) => void
+    ) => () => void
   }
 
   // UI
@@ -293,6 +313,14 @@ export interface GyShellAPI {
     getAllChatHistory: () => Promise<any[]>
     loadChatSession: (sessionId: string) => Promise<any>
     getUiMessages: (sessionId: string) => Promise<any[]>
+    getSessionSnapshot: (sessionId: string) => Promise<{
+      id: string
+      title: string
+      updatedAt: number
+      messages: any[]
+      isBusy: boolean
+      lockedProfileId: string | null
+    } | null>
     deleteChatSession: (sessionId: string) => Promise<void>
     rollbackToMessage: (sessionId: string, messageId: string) => Promise<{ ok: boolean; removedCount: number }>
     replyMessage: (messageId: string, payload: any) => Promise<{ ok: boolean }>
@@ -374,6 +402,7 @@ const api: GyShellAPI = {
   },
 
   terminal: {
+    list: () => ipcRenderer.invoke('terminal:list'),
     createTab: (config) => ipcRenderer.invoke('terminal:createTab', config),
     write: (terminalId, data) => ipcRenderer.invoke('terminal:write', terminalId, data),
     writePaths: (terminalId, paths) => ipcRenderer.invoke('terminal:writePaths', terminalId, paths),
@@ -393,6 +422,22 @@ const api: GyShellAPI = {
         callback(data)
       ipcRenderer.on('terminal:exit', handler)
       return () => ipcRenderer.off('terminal:exit', handler)
+    },
+    onTabsUpdated: (callback) => {
+      const handler = (
+        _: IpcRendererEvent,
+        data: {
+          terminals: Array<{
+            id: string
+            title: string
+            type: ConnectionType
+            cols: number
+            rows: number
+          }>
+        }
+      ) => callback(data)
+      ipcRenderer.on('terminal:tabs', handler)
+      return () => ipcRenderer.off('terminal:tabs', handler)
     }
   },
 
@@ -413,6 +458,10 @@ const api: GyShellAPI = {
     getAllChatHistory: () => ipcRenderer.invoke('agent:getAllChatHistory'),
     loadChatSession: (sessionId) => ipcRenderer.invoke('agent:loadChatSession', sessionId),
     getUiMessages: (sessionId) => ipcRenderer.invoke('agent:getUiMessages', sessionId),
+    getSessionSnapshot: async (sessionId) => {
+      const payload = await ipcRenderer.invoke('session:get', sessionId)
+      return payload?.session ?? null
+    },
     deleteChatSession: (sessionId) => ipcRenderer.invoke('agent:deleteChatSession', sessionId),
     rollbackToMessage: (sessionId, messageId) =>
       ipcRenderer.invoke('agent:rollbackToMessage', sessionId, messageId),

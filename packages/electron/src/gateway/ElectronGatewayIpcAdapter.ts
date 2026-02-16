@@ -151,6 +151,18 @@ export class ElectronGatewayIpcAdapter {
     ipcMain.handle('agent:getAllChatHistory', () => this.agentService.getAllChatHistory())
     ipcMain.handle('agent:loadChatSession', (_: any, id: string) => this.agentService.loadChatSession(id))
     ipcMain.handle('agent:getUiMessages', (_: any, id: string) => this.uiHistoryService.getMessages(id))
+    ipcMain.handle('session:list', () => {
+      return {
+        sessions: this.gateway.listSessionSummaries()
+      }
+    })
+    ipcMain.handle('session:get', (_: any, sessionId: string) => {
+      const session = this.gateway.getSessionSnapshot(sessionId)
+      if (!session) {
+        throw new Error(`Session not found: ${sessionId}`)
+      }
+      return { session }
+    })
     ipcMain.handle('agent:rollbackToMessage', async (_: any, sessionId: string, messageId: string) => {
       return this.gateway.rollbackSessionToMessage(sessionId, messageId)
     })
@@ -333,6 +345,18 @@ export class ElectronGatewayIpcAdapter {
     })
 
     // Terminal
+    ipcMain.handle('terminal:list', async () => {
+      return {
+        terminals: this.terminalService.getAllTerminals().map((terminal) => ({
+          id: terminal.id,
+          title: terminal.title,
+          type: terminal.type,
+          cols: terminal.cols,
+          rows: terminal.rows
+        }))
+      }
+    })
+
     ipcMain.handle('terminal:createTab', async (_: any, config: any) => {
       const tab = await this.terminalService.createTerminal(config)
       return { id: tab.id }

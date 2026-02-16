@@ -309,6 +309,22 @@ export function useMobileController(): {
         setView((previous) => ({ ...previous, statusLine: text }))
       }),
       client.on('raw', (channel, payload) => {
+        if (channel === 'terminal:tabs') {
+          const terminals =
+            payload &&
+            typeof payload === 'object' &&
+            'terminals' in payload &&
+            Array.isArray((payload as { terminals?: unknown[] }).terminals)
+              ? ((payload as { terminals: GatewayTerminalSummary[] }).terminals || [])
+              : []
+          setView((previous) => ({
+            ...previous,
+            terminals,
+            statusLine: `Terminal tabs: ${terminals.length}`
+          }))
+          return
+        }
+
         if (channel === 'tools:mcpUpdated') {
           setView((previous) => ({ ...previous, statusLine: 'MCP status updated' }))
           return
@@ -399,7 +415,8 @@ export function useMobileController(): {
             updatedAt: Date.now(),
             messagesCount: 0,
             lastMessagePreview: '',
-            isBusy: false
+            isBusy: false,
+            lockedProfileId: null
           }
         ]
       }
@@ -426,11 +443,11 @@ export function useMobileController(): {
           session.messages = (snapshot.messages || []).map(cloneMessage)
           session.isBusy = snapshot.isBusy === true
           session.isThinking = snapshot.isBusy === true
-          session.lockedProfileId = session.isBusy ? activeProfileId || null : null
+          session.lockedProfileId = snapshot.lockedProfileId || null
         } else {
           session.isBusy = summary.isBusy === true
           session.isThinking = summary.isBusy === true
-          session.lockedProfileId = session.isBusy ? activeProfileId || null : null
+          session.lockedProfileId = summary.lockedProfileId || null
         }
         sessions[summary.id] = session
         sessionMeta[summary.id] = {
@@ -489,7 +506,7 @@ export function useMobileController(): {
         nextSession.messages = (snapshot.messages || []).map(cloneMessage)
         nextSession.isBusy = snapshot.isBusy === true
         nextSession.isThinking = snapshot.isBusy === true
-        nextSession.lockedProfileId = nextSession.isBusy ? previous.activeProfileId || null : null
+        nextSession.lockedProfileId = snapshot.lockedProfileId || null
         sessions[sessionId] = nextSession
 
         sessionMeta[sessionId] = {

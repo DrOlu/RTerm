@@ -68,6 +68,7 @@ export interface GatewaySessionSummary {
   messagesCount: number;
   lastMessagePreview?: string;
   isBusy: boolean;
+  lockedProfileId: string | null;
 }
 
 export interface GatewaySessionSnapshot {
@@ -76,6 +77,7 @@ export interface GatewaySessionSnapshot {
   updatedAt: number;
   messages: ChatMessage[];
   isBusy: boolean;
+  lockedProfileId: string | null;
 }
 
 /**

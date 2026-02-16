@@ -76,6 +76,11 @@ export function applyUiUpdate(session: SessionState, update: UIUpdateAction): vo
       })
       break
     }
+    case 'SESSION_PROFILE_LOCKED': {
+      session.isBusy = true
+      session.lockedProfileId = update.lockedProfileId || null
+      break
+    }
     case 'SESSION_READY': {
       session.isBusy = false
       session.lockedProfileId = null
