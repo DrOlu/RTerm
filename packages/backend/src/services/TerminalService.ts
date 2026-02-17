@@ -170,10 +170,25 @@ export class TerminalService {
     if (tab) {
       // Sync initialization state and remote OS
       if (tab.isInitializing) {
-        // If we received data, it means backend's silence mode passed
-        tab.isInitializing = false
-        tab.runtimeState = 'ready'
-        this.publishTerminalTabsChanged()
+        if (tab.type === 'ssh') {
+          const backend = this.getBackend('ssh') as SSHBackend
+          const initState = backend.getInitializationState(tab.ptyId)
+          if (initState === 'ready') {
+            tab.isInitializing = false
+            tab.runtimeState = 'ready'
+            this.publishTerminalTabsChanged()
+          } else if (initState === 'failed') {
+            tab.isInitializing = false
+            tab.runtimeState = 'exited'
+            tab.lastExitCode = -1
+            this.publishTerminalTabsChanged()
+          }
+        } else {
+          // For local silence mode, first meaningful output means shell is ready.
+          tab.isInitializing = false
+          tab.runtimeState = 'ready'
+          this.publishTerminalTabsChanged()
+        }
       }
 
       if (tab.type === 'ssh') {

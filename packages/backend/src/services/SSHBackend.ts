@@ -19,6 +19,7 @@ interface SSHInstance {
   forwardServers: net.Server[]
   remoteForwards: Array<{ host: string; port: number }>
   remoteForwardHandlerInstalled: boolean
+  initializationState: 'initializing' | 'ready' | 'failed'
 }
 
 export class SSHBackend implements TerminalBackend {
@@ -438,7 +439,8 @@ Write-Output "__GYSHELL_READY__"
       oscBuffer: '',
       forwardServers: [],
       remoteForwards: [],
-      remoteForwardHandlerInstalled: false
+      remoteForwardHandlerInstalled: false,
+      initializationState: 'initializing'
     }
     this.sessions.set(config.id, instance)
 
@@ -504,6 +506,8 @@ Write-Output "__GYSHELL_READY__"
           (err, stream) => {
           if (err) {
             console.error(`[SSH] Failed to open shell:`, err)
+            instance.initializationState = 'failed'
+            instance.isInitializing = false
             emit(`\x1b[31m✘ Failed to open shell: ${err.message}\x1b[0m\r\n`)
             return
           }
@@ -544,10 +548,11 @@ Write-Output "__GYSHELL_READY__"
             if (instance.isInitializing) {
               retryCount++
               if (retryCount >= maxRetries) {
+                instance.initializationState = 'failed'
+                instance.isInitializing = false 
                 emit('\x1b[31m✘ Initialization failed. Entering fallback mode.\x1b[0m\r\n')
                 console.error(`[SSH] Initialization FAILED after ${maxRetries} attempts for ${config.id}.`)
                 clearInterval(watchdogInterval)
-                instance.isInitializing = false 
                 return
               }
               emit(`\x1b[33m⚠ Initialization timeout, retrying (${retryCount}/${maxRetries})...\x1b[0m\r\n`)
@@ -566,6 +571,7 @@ Write-Output "__GYSHELL_READY__"
                 isReadySent = true
                 clearInterval(watchdogInterval)
                 const sawContinuation = /(?:\r?\n)>>\s*\r?\n/.test(instance.buffer) || instance.buffer.trimEnd().endsWith('\n>>') || instance.buffer.trimEnd().endsWith('\r\n>>')
+                instance.initializationState = 'ready'
                 instance.isInitializing = false
                 const parts = instance.buffer.split('__GYSHELL_READY__')
                 if (parts.length > 1) {
@@ -595,6 +601,8 @@ Write-Output "__GYSHELL_READY__"
 
       client.on('error', (err) => {
         console.error(`[SSH] Client error:`, err)
+        instance.initializationState = 'failed'
+        instance.isInitializing = false
         emit(`\x1b[31m✘ SSH Error: ${err.message}\x1b[0m\r\n`)
         instance.exitCallbacks.forEach(cb => cb(-1))
       })
@@ -640,6 +648,8 @@ Write-Output "__GYSHELL_READY__"
         client.connect(connectConfig)
       } catch (e: any) {
         const errMsg = e instanceof Error ? e.message : String(e)
+        instance.initializationState = 'failed'
+        instance.isInitializing = false
         emit(`\x1b[31m✘ Connection failed: ${errMsg}\x1b[0m\r\n`)
         instance.exitCallbacks.forEach(cb => cb(-1))
       }
@@ -689,6 +699,10 @@ Write-Output "__GYSHELL_READY__"
 
   getRemoteOs(ptyId: string): 'unix' | 'windows' | undefined {
     return this.sessions.get(ptyId)?.remoteOs
+  }
+
+  getInitializationState(ptyId: string): 'initializing' | 'ready' | 'failed' | undefined {
+    return this.sessions.get(ptyId)?.initializationState
   }
 
   async getSystemInfo(ptyId: string): Promise<any> {

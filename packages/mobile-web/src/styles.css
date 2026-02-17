@@ -1048,8 +1048,26 @@ button:disabled {
 }
 
 .terminal-item-main strong {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 14px;
+}
+
+.terminal-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--border);
+}
+
+.terminal-state-dot.active {
+  background: #2bac76;
+}
+
+.terminal-state-dot.inactive {
+  background: #8a8f98;
 }
 
 .terminal-item-main p {

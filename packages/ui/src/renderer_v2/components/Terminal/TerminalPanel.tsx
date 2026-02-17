@@ -60,6 +60,13 @@ export const TerminalPanel: React.FC<{ store: AppStore }> = observer(({ store })
           {store.terminalTabs.map((tab) => {
             const isActive = tab.id === store.activeTerminalId
             const Icon = tab.config.type === 'ssh' ? Server : Laptop
+            const runtimeState = tab.runtimeState || 'initializing'
+            const runtimeIndicatorState =
+              tab.config.type === 'ssh'
+                ? runtimeState === 'ready'
+                  ? 'ready'
+                  : 'inactive'
+                : runtimeState
             return (
               <div
                 key={tab.id}
@@ -73,8 +80,8 @@ export const TerminalPanel: React.FC<{ store: AppStore }> = observer(({ store })
                 </span>
                 <span className="tab-title">{tab.title}</span>
                 <span
-                  className={`tab-runtime-state tab-runtime-state-${tab.runtimeState || 'initializing'}`}
-                  title={tab.runtimeState || 'initializing'}
+                  className={`tab-runtime-state tab-runtime-state-${runtimeIndicatorState}`}
+                  title={runtimeState}
                 />
                 <button
                   className="tab-close"

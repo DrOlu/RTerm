@@ -76,10 +76,19 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
       ) : (
         <div className="terminal-list">
           {terminals.map((terminal) => {
+            const runtimeState = terminal.runtimeState || 'initializing'
+            const activityClass = runtimeState === 'ready' ? 'active' : 'inactive'
             return (
               <article key={terminal.id} className="terminal-item-flat">
                 <div className="terminal-item-main">
-                  <strong>{terminal.title}</strong>
+                  <strong>
+                    <span
+                      className={`terminal-state-dot ${activityClass}`}
+                      title={runtimeState}
+                      aria-label={`Terminal state: ${runtimeState}`}
+                    />
+                    {terminal.title}
+                  </strong>
                   <p>{terminal.type}</p>
                 </div>
                 <button
