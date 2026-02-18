@@ -91,10 +91,6 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
                 return
               }
             }
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              handleSend()
-            }
           }}
           placeholder="Message... use @ for terminal/skill"
           autoCorrect="off"

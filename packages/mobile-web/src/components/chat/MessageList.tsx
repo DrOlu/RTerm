@@ -52,10 +52,9 @@ const UserBubble: React.FC<{
 
 const AgentTurnBubble: React.FC<{
   item: AgentTimelineItem
-  isLastItem: boolean
   onAskDecision: (message: ChatMessage, decision: 'allow' | 'deny') => void
   onOpenDetail: (turnId: string) => void
-}> = ({ item, isLastItem, onAskDecision, onOpenDetail }) => {
+}> = ({ item, onAskDecision, onOpenDetail }) => {
   const message = item.latestMessage
   const messageTitle = messageTypeTitle(message)
   const preview = trimOuterBlankLines(messageDetail(message))
@@ -72,7 +71,7 @@ const AgentTurnBubble: React.FC<{
   const markdownPreview = trimOuterBlankLines(normalizeDisplayText(message.content || ''))
   const textPreview = markdownPreview || (item.streaming ? '...' : '')
   const eventPreview = preview || (item.streaming ? '...' : '')
-  const shouldClampTextPreview = item.streaming || !isLastItem
+  const shouldClampTextPreview = item.streaming
 
   return (
     <article className="bubble-row assistant">
@@ -147,7 +146,6 @@ export const MessageList: React.FC<MessageListProps> = ({
             <AgentTurnBubble
               key={item.id}
               item={item}
-              isLastItem={item.id === items[items.length - 1]?.id}
               onAskDecision={onAskDecision}
               onOpenDetail={onOpenDetail}
             />
