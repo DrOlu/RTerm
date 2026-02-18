@@ -12,6 +12,7 @@ import { TerminalPanel } from './components/panels/TerminalPanel'
 import { ToolsPanel } from './components/panels/ToolsPanel'
 import { useMobileController } from './hooks/useMobileController'
 import { formatSessionListTitle, formatTopBarSessionTitle } from './lib/session-title'
+import type { ChatMessage } from './types'
 
 type ChatSubView = 'sessions' | 'conversation'
 const AUTO_SCROLL_THRESHOLD_PX = 64
@@ -27,6 +28,8 @@ export const App: React.FC = () => {
   const [chatSubView, setChatSubView] = React.useState<ChatSubView>('sessions')
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('')
   const [detailTurnId, setDetailTurnId] = React.useState<string | null>(null)
+  const [rollbackTarget, setRollbackTarget] = React.useState<ChatMessage | null>(null)
+  const [rollbackPending, setRollbackPending] = React.useState(false)
 
   const messageListRef = React.useRef<HTMLDivElement>(null)
   const shouldStickMessageListToBottomRef = React.useRef(true)
@@ -84,7 +87,29 @@ export const App: React.FC = () => {
 
   React.useEffect(() => {
     setDetailTurnId(null)
+    setRollbackTarget(null)
   }, [state.activeSessionId])
+
+  const handleRollbackConfirm = React.useCallback(async () => {
+    if (!rollbackTarget) return
+    const activeSessionId = state.activeSessionId
+    const backendMessageId = rollbackTarget.backendMessageId
+    if (!activeSessionId || !backendMessageId) {
+      setRollbackTarget(null)
+      return
+    }
+
+    setRollbackPending(true)
+    try {
+      const ok = await actions.rollbackToMessage(activeSessionId, backendMessageId)
+      if (!ok) return
+      const rollbackContent = String(rollbackTarget.content || '')
+      actions.setComposerValue(rollbackContent, rollbackContent.length)
+    } finally {
+      setRollbackPending(false)
+      setRollbackTarget(null)
+    }
+  }, [actions, rollbackTarget, state.activeSessionId])
 
   const sessionItems = React.useMemo<SessionBrowserItem[]>(() => {
     return state.sessionOrder.map((sessionId) => {
@@ -177,6 +202,8 @@ export const App: React.FC = () => {
                 items={state.chatTimeline}
                 onAskDecision={actions.replyAsk}
                 onOpenDetail={setDetailTurnId}
+                onRollback={setRollbackTarget}
+                rollbackDisabled={state.isRunning || rollbackPending}
                 listRef={messageListRef}
               />
 
@@ -258,6 +285,28 @@ export const App: React.FC = () => {
           onClose={() => setDetailTurnId(null)}
           onAskDecision={actions.replyAsk}
         />
+
+        {rollbackTarget ? (
+          <div className="confirm-overlay" role="presentation">
+            <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="rollback-confirm-title">
+              <h3 id="rollback-confirm-title">Confirm Rollback</h3>
+              <p>This action cannot be undone. It will delete this message and all subsequent messages. Continue?</p>
+              <div className="confirm-dialog-actions">
+                <button
+                  type="button"
+                  className="accent-btn-flat"
+                  onClick={() => setRollbackTarget(null)}
+                  disabled={rollbackPending}
+                >
+                  Cancel
+                </button>
+                <button type="button" className="danger-btn-flat" onClick={() => void handleRollbackConfirm()} disabled={rollbackPending}>
+                  {rollbackPending ? 'Rolling back...' : 'Rollback'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   )

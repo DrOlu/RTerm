@@ -423,6 +423,7 @@ export interface MobileControllerActions {
   setMcpEnabled: (name: string, enabled: boolean) => Promise<void>
   setBuiltInToolEnabled: (name: string, enabled: boolean) => Promise<void>
   replyAsk: (message: ChatMessage, decision: 'allow' | 'deny') => Promise<void>
+  rollbackToMessage: (sessionId: string, messageId: string) => Promise<boolean>
   createTerminalTab: (target?: CreateTerminalTarget) => Promise<void>
   closeTerminalTab: (terminalId: string) => Promise<void>
 }
@@ -1365,6 +1366,73 @@ export function useMobileController(): {
     [client]
   )
 
+  const rollbackToMessage = React.useCallback(
+    async (sessionId: string, messageId: string): Promise<boolean> => {
+      if (!sessionId || !messageId) return false
+      if (!client.isConnected()) {
+        setConnectionError('Gateway is not connected')
+        return false
+      }
+
+      try {
+        const payload = await client.request<{ ok: boolean; removedCount: number }>('agent:rollbackToMessage', {
+          sessionId,
+          messageId
+        })
+        if (!payload?.ok) {
+          setConnectionError('Rollback target does not exist on backend')
+          return false
+        }
+
+        setView((previous) => {
+          const current = previous.sessions[sessionId]
+          if (!current) {
+            return {
+              ...previous,
+              statusLine: 'Rollback completed'
+            }
+          }
+
+          const rollbackIndex = current.messages.findIndex((item) => item.backendMessageId === messageId)
+          if (rollbackIndex === -1) {
+            return {
+              ...previous,
+              statusLine: 'Rollback completed'
+            }
+          }
+
+          const sessions = { ...previous.sessions }
+          const sessionMeta = { ...previous.sessionMeta }
+          const copy = cloneSession(current)
+          copy.messages = copy.messages.slice(0, rollbackIndex)
+          copy.isThinking = false
+          copy.isBusy = false
+          copy.lockedProfileId = null
+          sessions[sessionId] = copy
+
+          const previousMeta = sessionMeta[sessionId]
+          sessionMeta[sessionId] = buildSessionMeta(copy, previousMeta, {
+            loaded: true,
+            updatedAt: Date.now()
+          })
+
+          return {
+            ...previous,
+            sessions,
+            sessionMeta,
+            sessionOrder: reorderSessionIds(previous.sessionOrder, sessionMeta),
+            statusLine: 'Rollback completed'
+          }
+        })
+        return true
+      } catch (error) {
+        setConnectionError(`Failed to rollback: ${safeError(error)}`)
+        return false
+      }
+    },
+    [client]
+  )
+
   const setComposerValue = React.useCallback((value: string, cursor: number) => {
     setComposerValueRaw(value)
     setComposerCursor(cursor)
@@ -1500,6 +1568,7 @@ export function useMobileController(): {
     setMcpEnabled,
     setBuiltInToolEnabled,
     replyAsk,
+    rollbackToMessage,
     createTerminalTab,
     closeTerminalTab
   }

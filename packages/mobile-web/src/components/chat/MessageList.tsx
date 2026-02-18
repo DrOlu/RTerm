@@ -1,4 +1,5 @@
 import React from 'react'
+import { CornerUpLeft } from 'lucide-react'
 import { formatClock, messageDetail, messageTypeTitle } from '../../format'
 import { type AgentTimelineItem, type ChatTimelineItem } from '../../lib/chat-timeline'
 import { normalizeDisplayText, trimOuterBlankLines } from '../../session-store'
@@ -10,12 +11,19 @@ interface MessageListProps {
   items: ChatTimelineItem[]
   onAskDecision: (message: ChatMessage, decision: 'allow' | 'deny') => void
   onOpenDetail: (turnId: string) => void
+  onRollback: (message: ChatMessage) => void
+  rollbackDisabled: boolean
   listRef: React.RefObject<HTMLDivElement>
 }
 
-const UserBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
+const UserBubble: React.FC<{
+  message: ChatMessage
+  onRollback: (message: ChatMessage) => void
+  rollbackDisabled: boolean
+}> = ({ message, onRollback, rollbackDisabled }) => {
   const displayText = trimOuterBlankLines(normalizeDisplayText(String(message.content || '')))
   if (!displayText.trim()) return null
+  const canRollback = !!message.backendMessageId && !message.streaming && !rollbackDisabled
 
   return (
     <article className="bubble-row user">
@@ -26,6 +34,16 @@ const UserBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
         <footer>
           <span>{formatClock(message.timestamp)}</span>
           {message.streaming ? <span className="streaming">streaming</span> : null}
+          <button
+            type="button"
+            className="bubble-rollback-btn"
+            onClick={() => onRollback(message)}
+            disabled={!canRollback}
+            title="Rollback and re-edit"
+          >
+            <CornerUpLeft size={14} />
+            <span>Rollback</span>
+          </button>
         </footer>
       </div>
     </article>
@@ -98,7 +116,14 @@ const AgentTurnBubble: React.FC<{
   )
 }
 
-export const MessageList: React.FC<MessageListProps> = ({ items, onAskDecision, onOpenDetail, listRef }) => {
+export const MessageList: React.FC<MessageListProps> = ({
+  items,
+  onAskDecision,
+  onOpenDetail,
+  onRollback,
+  rollbackDisabled,
+  listRef
+}) => {
   return (
     <main className="message-list" ref={listRef}>
       {items.length === 0 ? (
@@ -109,7 +134,14 @@ export const MessageList: React.FC<MessageListProps> = ({ items, onAskDecision, 
       ) : (
         items.map((item) => {
           if (item.kind === 'user') {
-            return <UserBubble key={item.id} message={item.message} />
+            return (
+              <UserBubble
+                key={item.id}
+                message={item.message}
+                onRollback={onRollback}
+                rollbackDisabled={rollbackDisabled}
+              />
+            )
           }
           return (
             <AgentTurnBubble
