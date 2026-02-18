@@ -528,12 +528,7 @@ export class UIHistoryService {
     let visibleCount = 0
 
     for (const msg of messages) {
-      if (msg.role !== 'user' && msg.role !== 'assistant') continue
-
-      const body = msg.role === 'user'
-        ? this.normalizeText(msg.content)
-        : this.extractAssistantRichContent(msg)
-
+      const body = this.getReadableMessageBody(msg)
       if (!body) continue
 
       visibleCount += 1
@@ -549,6 +544,32 @@ export class UIHistoryService {
     }
 
     return lines.join('\n')
+  }
+
+  toReadableMarkdownFragment(messages: ChatMessage[]): string {
+    const parts: string[] = []
+    for (const msg of messages) {
+      const body = this.getReadableMessageBody(msg)
+      if (body) parts.push(body)
+    }
+    return this.normalizeText(parts.join('\n\n'))
+  }
+
+  toReadableMarkdownFragmentByMessageIds(sessionId: string, messageIds: string[]): string {
+    const session = this.sessionsCache[sessionId]
+    if (!session) return ''
+    const ids = new Set((messageIds || []).filter((id) => typeof id === 'string' && id.length > 0))
+    if (ids.size === 0) return ''
+    const selected = session.messages.filter((msg) => ids.has(msg.id))
+    return this.toReadableMarkdownFragment(selected)
+  }
+
+  private getReadableMessageBody(msg: ChatMessage): string {
+    if (msg.role !== 'user' && msg.role !== 'assistant') return ''
+    if (msg.role === 'user') {
+      return this.normalizeText(msg.content)
+    }
+    return this.extractAssistantRichContent(msg)
   }
 
   private extractAssistantRichContent(msg: ChatMessage): string {

@@ -758,6 +758,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
 
   async function submitInput(): Promise<void> {
     if (state.overlay) return
+    if (tryHandleBackslashLineContinuation()) return
 
     const text = getInputText().trim()
     if (!text) return
@@ -858,6 +859,28 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
   function getInputText(): string {
     if (inputRef) return inputRef.plainText
     return state.input
+  }
+
+  function tryHandleBackslashLineContinuation(): boolean {
+    const text = getInputText()
+    if (!text) return false
+
+    const cursor = Math.max(0, Math.min(getInputCursorOffset(), text.length))
+    if (cursor <= 0) return false
+    if (text[cursor - 1] !== '\\') return false
+
+    const atLineEnd = cursor >= text.length || text[cursor] === '\n'
+    if (!atLineEnd) return false
+
+    if (inputRef) {
+      replaceInputRange(cursor - 1, cursor, '\n')
+      return true
+    }
+
+    const next = `${text.slice(0, cursor - 1)}\n${text.slice(cursor)}`
+    setState('input', next)
+    setState('suggestionIndex', 0)
+    return true
   }
 
   function getInputCursorOffset(): number {
@@ -1232,7 +1255,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
             inputRef = node
             node.focus()
           }}
-          placeholder="Type prompt. Enter send, Ctrl+J newline, / commands, @ mentions"
+          placeholder="Type prompt. Enter send, Ctrl+J or \\+Enter newline, / commands, @ mentions"
           minHeight={inputMinHeight()}
           maxHeight={5}
           textColor={ui.text}
@@ -1291,7 +1314,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
                   <text fg={ui.muted}>Ctrl+L session list</text>
                   <text fg={ui.muted}>Ctrl+C exit</text>
                   <text fg={ui.text}>Input</text>
-                  <text fg={ui.muted}>Enter send, Ctrl+J newline</text>
+                  <text fg={ui.muted}>Enter send, Ctrl+J or \+Enter newline</text>
                   <text fg={ui.muted}>Tab/Enter accepts @ or / suggestions</text>
                   <text fg={ui.muted}>A / D respond to permission asks</text>
                 </box>

@@ -27,6 +27,13 @@ interface ProbeStepResult {
   error?: string
 }
 
+interface StreamProbeOptions {
+  timeoutMs: number
+  streamOperation: (signal: AbortSignal) => Promise<AsyncIterable<any>>
+  successPredicate: (chunk: any) => boolean
+  noOutputError: string
+}
+
 export class ModelCapabilityService {
   async probe(model: ModelDefinition): Promise<ModelCapabilityProfile> {
     const testedAt = Date.now()
@@ -77,15 +84,14 @@ export class ModelCapabilityService {
     }
   }
 
-  private createProbeClient(model: ModelDefinition, opts?: { maxTokens?: number }): ChatOpenAI {
+  private createProbeClient(model: ModelDefinition): ChatOpenAI {
     return new ChatOpenAI({
       model: model.model,
       apiKey: model.apiKey,
       configuration: {
         baseURL: model.baseUrl
       },
-      temperature: 0,
-      ...(typeof opts?.maxTokens === 'number' ? { maxTokens: opts.maxTokens } : {})
+      temperature: 0
     })
   }
 
@@ -142,66 +148,52 @@ export class ModelCapabilityService {
   }
 
   private async checkTextOutputs(model: ModelDefinition): Promise<ProbeStepResult> {
-    const client = this.createProbeClient(model, { maxTokens: 8 })
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_TEXT_MS)
-
-    try {
-      await client.invoke(
-        [
-          new HumanMessage(
-            'Do not think. Reply immediately with exactly: OK'
-          )
-        ],
-        { signal: controller.signal }
-      )
-      return { ok: true }
-    } catch (err) {
-      if (this.isAbortError(err)) {
-        return { ok: false, error: `Timeout after ${PROBE_TIMEOUT_TEXT_MS}ms` }
-      }
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    } finally {
-      clearTimeout(timer)
-    }
+    const client = this.createProbeClient(model)
+    return await this.runStreamProbe({
+      timeoutMs: PROBE_TIMEOUT_TEXT_MS,
+      streamOperation: async (signal) =>
+        await client.stream(
+          [
+            new HumanMessage(
+              'Do not think. Reply immediately with exactly: OK'
+            )
+          ],
+          { signal }
+        ),
+      successPredicate: (chunk) => this.chunkHasAnyStreamData(chunk),
+      noOutputError: 'No stream data was received before stream completion.'
+    })
   }
 
   private async checkImageInputs(model: ModelDefinition): Promise<ProbeStepResult> {
-    const client = this.createProbeClient(model, { maxTokens: 8 })
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_IMAGE_MS)
-
-    try {
-      await client.invoke(
-        [
-          new HumanMessage({
-            content: [
-              {
-                type: 'text',
-                text: 'Do not think. Ignore the image content and reply immediately with exactly: OK'
-              },
-              {
-                type: 'image_url',
-                image_url: { url: `data:image/png;base64,${TINY_IMAGE_BASE64}` }
-              }
-            ]
-          })
-        ],
-        { signal: controller.signal }
-      )
-      return { ok: true }
-    } catch (err) {
-      if (this.isAbortError(err)) {
-        return { ok: false, error: `Timeout after ${PROBE_TIMEOUT_IMAGE_MS}ms` }
-      }
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
-    } finally {
-      clearTimeout(timer)
-    }
+    const client = this.createProbeClient(model)
+    return await this.runStreamProbe({
+      timeoutMs: PROBE_TIMEOUT_IMAGE_MS,
+      streamOperation: async (signal) =>
+        await client.stream(
+          [
+            new HumanMessage({
+              content: [
+                {
+                  type: 'text',
+                  text: 'Do not think. Ignore the image content and reply immediately with exactly: OK'
+                },
+                {
+                  type: 'image_url',
+                  image_url: { url: `data:image/png;base64,${TINY_IMAGE_BASE64}` }
+                }
+              ]
+            })
+          ],
+          { signal }
+        ),
+      successPredicate: (chunk) => this.chunkHasAnyStreamData(chunk),
+      noOutputError: 'No stream data was received for image-input probe before stream completion.'
+    })
   }
 
   private async checkStructuredOutput(model: ModelDefinition): Promise<ProbeStepResult> {
-    const client = this.createProbeClient(model, { maxTokens: 64 })
+    const client = this.createProbeClient(model)
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_STRUCTURED_MS)
 
@@ -243,47 +235,116 @@ export class ModelCapabilityService {
   }
 
   private async checkObjectToolChoice(model: ModelDefinition): Promise<ProbeStepResult> {
-    const client = this.createProbeClient(model, { maxTokens: 64 })
+    const client = this.createProbeClient(model)
+    const toolName = 'capability_probe_tool'
+    const tool = convertToOpenAITool({
+      name: toolName,
+      description: 'A tiny capability probe tool.',
+      schema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' }
+        },
+        required: ['ok'],
+        additionalProperties: false
+      }
+    } as any)
+    const modelWithTool = client.bindTools([tool], {
+      tool_choice: {
+        type: 'function',
+        function: { name: toolName }
+      } as any
+    })
+
+    return await this.runStreamProbe({
+      timeoutMs: PROBE_TIMEOUT_TOOL_CHOICE_MS,
+      streamOperation: async (signal) =>
+        await modelWithTool.stream(
+          [
+            new HumanMessage(
+              'Do not think. Call the provided function immediately with {"ok": true}.'
+            )
+          ],
+          { signal }
+        ),
+      successPredicate: (chunk) =>
+        this.chunkHasToolCallOutput(chunk) || this.chunkHasTextOutput(chunk),
+      noOutputError: 'No tool call or text output was received before stream completion.'
+    })
+  }
+
+  private async runStreamProbe(options: StreamProbeOptions): Promise<ProbeStepResult> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_TOOL_CHOICE_MS)
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs)
+    let sawExpectedOutput = false
 
     try {
-      const toolName = 'capability_probe_tool'
-      const tool = convertToOpenAITool({
-        name: toolName,
-        description: 'A tiny capability probe tool.',
-        schema: {
-          type: 'object',
-          properties: {
-            ok: { type: 'boolean' }
-          },
-          required: ['ok'],
-          additionalProperties: false
-        }
-      } as any)
-      const modelWithTool = client.bindTools([tool], {
-        tool_choice: {
-          type: 'function',
-          function: { name: toolName }
-        } as any
-      })
-      await modelWithTool.invoke(
-        [
-          new HumanMessage(
-            'Do not think. Call the provided function immediately with {"ok": true}.'
-          )
-        ],
-        { signal: controller.signal }
-      )
-      return { ok: true }
+      const stream = await options.streamOperation(controller.signal)
+      for await (const chunk of stream) {
+        if (!options.successPredicate(chunk)) continue
+        sawExpectedOutput = true
+        controller.abort()
+        break
+      }
+
+      if (sawExpectedOutput) {
+        return { ok: true }
+      }
+      return { ok: false, error: options.noOutputError }
     } catch (err) {
       if (this.isAbortError(err)) {
-        return { ok: false, error: `Timeout after ${PROBE_TIMEOUT_TOOL_CHOICE_MS}ms` }
+        if (sawExpectedOutput) {
+          return { ok: true }
+        }
+        return { ok: false, error: `Timeout after ${options.timeoutMs}ms` }
       }
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  private chunkHasTextOutput(chunk: any): boolean {
+    const text = this.extractTextFromContent(chunk?.content)
+    return text.trim().length > 0
+  }
+
+  private chunkHasAnyStreamData(chunk: any): boolean {
+    if (chunk == null) return false
+    if (typeof chunk !== 'object') return true
+    if (this.chunkHasTextOutput(chunk) || this.chunkHasToolCallOutput(chunk)) return true
+    if (Array.isArray(chunk?.content) && chunk.content.length > 0) return true
+    if (chunk?.response_metadata || chunk?.usage_metadata || chunk?.additional_kwargs) return true
+    return Object.keys(chunk).length > 0
+  }
+
+  private chunkHasToolCallOutput(chunk: any): boolean {
+    if (Array.isArray(chunk?.tool_call_chunks) && chunk.tool_call_chunks.length > 0) {
+      return true
+    }
+    if (Array.isArray(chunk?.tool_calls) && chunk.tool_calls.length > 0) {
+      return true
+    }
+    if (Array.isArray(chunk?.additional_kwargs?.tool_calls) && chunk.additional_kwargs.tool_calls.length > 0) {
+      return true
+    }
+    return false
+  }
+
+  private extractTextFromContent(content: unknown): string {
+    if (typeof content === 'string') {
+      return content
+    }
+    if (!Array.isArray(content)) {
+      return ''
+    }
+    return content
+      .map((part) =>
+        part && typeof part === 'object' && typeof (part as any).text === 'string'
+          ? (part as any).text
+          : ''
+      )
+      .join('')
   }
 
   private isAbortError(err: unknown): boolean {

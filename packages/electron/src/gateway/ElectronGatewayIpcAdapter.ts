@@ -154,6 +154,9 @@ export class ElectronGatewayIpcAdapter {
     ipcMain.handle('agent:getAllChatHistory', () => this.agentService.getAllChatHistory())
     ipcMain.handle('agent:loadChatSession', (_: any, id: string) => this.agentService.loadChatSession(id))
     ipcMain.handle('agent:getUiMessages', (_: any, id: string) => this.uiHistoryService.getMessages(id))
+    ipcMain.handle('agent:formatMessagesMarkdown', (_: any, sessionId: string, messageIds: string[]) => {
+      return this.uiHistoryService.toReadableMarkdownFragmentByMessageIds(sessionId, messageIds)
+    })
     ipcMain.handle('session:list', () => {
       return {
         sessions: this.gateway.listSessionSummaries()
