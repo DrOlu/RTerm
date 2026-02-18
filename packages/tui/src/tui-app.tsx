@@ -864,20 +864,21 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
   function tryHandleBackslashLineContinuation(): boolean {
     const text = getInputText()
     if (!text) return false
-
-    const cursor = Math.max(0, Math.min(getInputCursorOffset(), text.length))
-    if (cursor <= 0) return false
-    if (text[cursor - 1] !== '\\') return false
-
-    const atLineEnd = cursor >= text.length || text[cursor] === '\n'
-    if (!atLineEnd) return false
+    if (!text.endsWith('\\')) return false
+    const replaceStart = text.length - 1
+    const replaceEnd = text.length
 
     if (inputRef) {
-      replaceInputRange(cursor - 1, cursor, '\n')
+      const next = `${text.slice(0, replaceStart)}\n${text.slice(replaceEnd)}`
+      inputRef.replaceText(next)
+      if (typeof inputRef.gotoBufferEnd === 'function') {
+        inputRef.gotoBufferEnd()
+      }
+      syncInputStateFromRef(true)
       return true
     }
 
-    const next = `${text.slice(0, cursor - 1)}\n${text.slice(cursor)}`
+    const next = `${text.slice(0, replaceStart)}\n`
     setState('input', next)
     setState('suggestionIndex', 0)
     return true

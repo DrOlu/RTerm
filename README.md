@@ -8,6 +8,10 @@
 
 English README | [中文 README](./README.zh-CN.md)  
 Latest release notes: [`changelogs/v0.1.7.md`](./changelogs/v0.1.7.md)
+Usage guides:
+[`docs/mobile-web-usage.md`](./docs/mobile-web-usage.md) ·
+[`docs/tui-usage.md`](./docs/tui-usage.md) ·
+[`docs/gybackend-usage.md`](./docs/gybackend-usage.md)
 
 > [!WARNING]
 > **Active Development**: GyShell evolves quickly. If a version introduces history compatibility breaks, it will be called out explicitly in release notes.

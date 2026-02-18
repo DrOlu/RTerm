@@ -8,6 +8,10 @@
 
 [English README](./README.md) | 中文 README  
 最新发布说明：[`changelogs/v0.1.7.md`](./changelogs/v0.1.7.md)
+使用教程:
+[`docs/mobile-web-usage.md`](./docs/mobile-web-usage.md) ·
+[`docs/tui-usage.md`](./docs/tui-usage.md) ·
+[`docs/gybackend-usage.md`](./docs/gybackend-usage.md)
 
 > [!WARNING]
 > **项目处于快速迭代阶段**：如果某个版本引入了历史数据兼容性变更，会在发布说明中明确标注。
