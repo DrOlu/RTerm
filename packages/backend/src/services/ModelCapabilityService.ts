@@ -255,22 +255,46 @@ export class ModelCapabilityService {
         function: { name: toolName }
       } as any
     })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_TOOL_CHOICE_MS)
 
-    return await this.runStreamProbe({
-      timeoutMs: PROBE_TIMEOUT_TOOL_CHOICE_MS,
-      streamOperation: async (signal) =>
-        await modelWithTool.stream(
-          [
-            new HumanMessage(
-              'Do not think. Call the provided function immediately with {"ok": true}.'
-            )
-          ],
-          { signal }
-        ),
-      successPredicate: (chunk) =>
-        this.chunkHasToolCallOutput(chunk) || this.chunkHasTextOutput(chunk),
-      noOutputError: 'No tool call or text output was received before stream completion.'
-    })
+    try {
+      const response = await modelWithTool.invoke(
+        [
+          new HumanMessage(
+            'Do not think. Call the provided function immediately with {"ok": true}.'
+          )
+        ],
+        { signal: controller.signal }
+      ) as any
+      const args = this.extractNamedToolCallArgs(response, toolName)
+      if (!args) {
+        return {
+          ok: false,
+          error: 'Model did not return the forced function tool call for object tool_choice.'
+        }
+      }
+      if (typeof args.ok !== 'boolean') {
+        return {
+          ok: false,
+          error: 'Object tool_choice response did not parse into expected boolean args.'
+        }
+      }
+      if (args.ok !== true) {
+        return {
+          ok: false,
+          error: 'Object tool_choice function call returned ok=false.'
+        }
+      }
+      return { ok: true }
+    } catch (err) {
+      if (this.isAbortError(err)) {
+        return { ok: false, error: `Timeout after ${PROBE_TIMEOUT_TOOL_CHOICE_MS}ms` }
+      }
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   private async runStreamProbe(options: StreamProbeOptions): Promise<ProbeStepResult> {
@@ -329,6 +353,36 @@ export class ModelCapabilityService {
       return true
     }
     return false
+  }
+
+  private extractNamedToolCallArgs(response: any, toolName: string): Record<string, unknown> | null {
+    const parsedToolCalls = Array.isArray(response?.tool_calls) ? response.tool_calls : []
+    const matchedParsed = parsedToolCalls.find((call: any) => call?.name === toolName) || parsedToolCalls[0]
+    const parsedArgs = this.parseToolArgs(matchedParsed?.args)
+    if (parsedArgs) return parsedArgs
+
+    const rawToolCalls = Array.isArray(response?.additional_kwargs?.tool_calls)
+      ? response.additional_kwargs.tool_calls
+      : []
+    const matchedRaw = rawToolCalls.find((call: any) => call?.function?.name === toolName) || rawToolCalls[0]
+    return this.parseToolArgs(matchedRaw?.function?.arguments)
+  }
+
+  private parseToolArgs(rawArgs: unknown): Record<string, unknown> | null {
+    if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+      return rawArgs as Record<string, unknown>
+    }
+    if (typeof rawArgs !== 'string') return null
+
+    try {
+      const parsed = JSON.parse(rawArgs)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+      return null
+    } catch {
+      return null
+    }
   }
 
   private extractTextFromContent(content: unknown): string {

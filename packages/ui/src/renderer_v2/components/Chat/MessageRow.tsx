@@ -120,11 +120,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
   isThinking 
 }) => {
   const session = store.chat.sessions.find(s => s.id === sessionId)
-  if (!session) return null
-  
-  const msg = session.messagesById.get(messageId)
-  if (!msg) return null
-  const isUser = msg.role === 'user'
+  const msg = session?.messagesById.get(messageId)
 
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null)
   const copyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -147,25 +143,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
     }, COPY_FEEDBACK_MS)
   }, [])
 
-  // Logic: If this is an 'alert' (retry hint), only show it if it's the absolute last message in the session
-  // We check messageIds to see if this ID is the very last one.
-  const isLastMessage = session.messageIds[session.messageIds.length - 1] === messageId
-  const isRetryHint = msg.type === 'alert' && msg.metadata?.subToolLevel === 'info'
-  
-  if (isRetryHint && !isLastMessage) {
-    return null
-  }
-  if (msg.type === 'reasoning' && !isLastMessage) {
-    return null
-  }
-
-  // Handle special message types
-  if (msg.type === 'tokens_count') {
-    return null
-  }
-  const canRollback = isUser && !!msg.backendMessageId && !msg.streaming && !isThinking
-
-  const assistantRun = collectConnectedAssistantRun(session, messageId)
+  const assistantRun = session ? collectConnectedAssistantRun(session, messageId) : null
   const groupCopyKey = assistantRun ? `assistant-group:${assistantRun.start}:${assistantRun.end}` : ''
   const shouldShowGroupCopy =
     !!assistantRun &&
@@ -197,6 +175,27 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
     },
     [markCopied]
   )
+
+  if (!session || !msg) return null
+  const isUser = msg.role === 'user'
+
+  // Logic: If this is an 'alert' (retry hint), only show it if it's the absolute last message in the session
+  // We check messageIds to see if this ID is the very last one.
+  const isLastMessage = session.messageIds[session.messageIds.length - 1] === messageId
+  const isRetryHint = msg.type === 'alert' && msg.metadata?.subToolLevel === 'info'
+  
+  if (isRetryHint && !isLastMessage) {
+    return null
+  }
+  if (msg.type === 'reasoning' && !isLastMessage) {
+    return null
+  }
+
+  // Handle special message types
+  if (msg.type === 'tokens_count') {
+    return null
+  }
+  const canRollback = isUser && !!msg.backendMessageId && !msg.streaming && !isThinking
 
   const renderAssistantRow = (children: React.ReactNode) => (
     <div className="message-row-container role-assistant">

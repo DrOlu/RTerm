@@ -20,8 +20,6 @@ export function QueueManager(props: {
   const lastDropIndexRef = useRef<number | null>(null)
   const handledDropRef = useRef(false)
 
-  if (!items.length) return null
-
   const stopAutoScroll = () => {
     autoScrollDirRef.current = 0
     if (autoScrollRafRef.current !== null) {
@@ -194,6 +192,8 @@ export function QueueManager(props: {
       window.removeEventListener('drop', handleWindowDrop, true)
     }
   }, [draggingId, dropIndex, items, onReorder])
+
+  if (!items.length) return null
 
   return (
     <div
