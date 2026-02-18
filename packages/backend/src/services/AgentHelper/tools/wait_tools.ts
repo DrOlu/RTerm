@@ -78,11 +78,9 @@ export async function waitTerminalIdle(
     if (stableCount >= 4) {
       const finalOutput = terminalService.getRecentOutput(bestMatch.id)
       const successMsg = `The terminal has stabilized. The following is the current visible state of the terminal tab "${bestMatch.title || bestMatch.id}":
-================================================================================
 <terminal_content>
 ${finalOutput}
-</terminal_content>
-================================================================================`
+</terminal_content>`
       sendEvent(sessionId, {
         messageId,
         type: 'sub_tool_delta',
@@ -101,11 +99,9 @@ ${finalOutput}
 
   const currentOutput = terminalService.getRecentOutput(bestMatch.id)
   const timeoutMsg = `Wait timeout: The terminal has been running for over 120s and is still not idle. Please check if the task is still running correctly. If you need to continue waiting, run this tool again. If you need to stop it, use write_stdin (e.g., Ctrl+C). The following is the current visible state of the terminal tab "${bestMatch.title || bestMatch.id}":
-================================================================================
 <terminal_content>
 ${currentOutput}
-</terminal_content>
-================================================================================`
+</terminal_content>`
   sendEvent(sessionId, {
     messageId,
     type: 'sub_tool_delta',
@@ -171,7 +167,7 @@ export async function waitCommandEnd(
 
     let finalResult = ''
     if (result.exitCode === -3 || result.stdoutDelta === 'USER_SKIPPED_WAIT') {
-      finalResult = `The user has chosen to run the command "${commandName}" asynchronously. The command is currently running in the background. You can use read_command_output to check its progress if needed. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
+      finalResult = `The command has been switched to asynchronous mode by user choice. It is currently running in the background. You can use read_command_output to check its progress if needed. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
 
       sendEvent(sessionId, {
         messageId,
@@ -185,14 +181,12 @@ export async function waitCommandEnd(
       })
       return finalResult
     } else if (result.exitCode === -1 && result.stdoutDelta?.includes('timed out')) {
-      finalResult = `The command "${commandName}" is still running, but the wait has timed out (120s). You can use read_command_output to check its current progress, or call wait_command_end again if you believe it needs more time to finish. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
+      finalResult = `The command is still running, but the wait has timed out (120s). You can use read_command_output to check its current progress, or call wait_command_end again if you believe it needs more time to finish. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
     } else {
-      finalResult = `The command "${commandName}" has finished executing. The following is the output (history_command_match_id=${historyCommandMatchId}):
-================================================================================
+      finalResult = `The command has finished executing. The following is the output (history_command_match_id=${historyCommandMatchId}):
 <terminal_content>
 ${truncatedOutput}
-</terminal_content>
-================================================================================`
+</terminal_content>`
     }
 
     sendEvent(sessionId, {

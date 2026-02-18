@@ -144,7 +144,7 @@ export async function runCommand(
       const autoSwitchReason = options?.getSkipWaitReason?.()?.trim()
       finalResult = autoSwitchReason
         ? `This command has been switched to nowait mode because ${autoSwitchReason}. The command is currently running in the background. Please DO NOT wait for it to finish unless specifically asked. You can use read_command_output to check its progress if needed. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
-        : `The user has chosen to run the command "${command}" asynchronously. The command is currently running in the background. Please DO NOT wait for it to finish unless specifically asked. You can use read_command_output to check its progress if needed. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
+        : `The command has been switched to asynchronous mode by user choice. It is currently running in the background. Please DO NOT wait for it to finish unless specifically asked. You can use read_command_output to check its progress if needed. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
       
       // Update the finished event to mark it as isNowait: true so the UI banner switches to Async style
       context.sendEvent(sessionId, { 
@@ -159,14 +159,12 @@ export async function runCommand(
       })
       return finalResult
     } else if (result.exitCode === -1 && result.stdoutDelta?.includes('timed out')) {
-      finalResult = `The command "${command}" is still running, but the wait has timed out (120s). You can use read_command_output to check its current progress, or call wait_command_end again if you believe it needs more time to finish. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
+      finalResult = `The command is still running, but the wait has timed out (120s). You can use read_command_output to check its current progress, or call wait_command_end again if you believe it needs more time to finish. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
     } else {
-      finalResult = `The command "${command}" has finished executing. The following is the output (history_command_match_id=${historyCommandMatchId}):
-================================================================================
+      finalResult = `The command has finished executing. The following is the output (history_command_match_id=${historyCommandMatchId}):
 <terminal_content>
 ${truncatedOutput}
-</terminal_content>
-================================================================================`
+</terminal_content>`
     }
 
     context.sendEvent(sessionId, { 
@@ -190,11 +188,9 @@ ${truncatedOutput}
       const recentOutput = terminalService.getRecentOutput(bestMatch.id) || '(No recent output available)'
       const activeTaskId = terminalService.getActiveTaskId(bestMatch.id)
       errorMessage = `Error: ${errorMessage}\n\nThe current visible state of the terminal tab "${bestMatch.title || bestMatch.id}" is:
-================================================================================
 <terminal_content>
 ${recentOutput}
-</terminal_content>
-================================================================================\n\nIf you think you need to exit the current command, use write_stdin. If you want to wait for it to finish, use wait_command_end.${activeTaskId ? ` history_command_match_id=${activeTaskId}, terminalId=${bestMatch.id}` : ''}`
+</terminal_content>\n\nIf you think you need to exit the current command, use write_stdin. If you want to wait for it to finish, use wait_command_end.${activeTaskId ? ` history_command_match_id=${activeTaskId}, terminalId=${bestMatch.id}` : ''}`
     }
 
     context.sendEvent(sessionId, { 
@@ -267,11 +263,9 @@ export async function runCommandNowait(args: z.infer<typeof execCommandSchema>, 
       const recentOutput = terminalService.getRecentOutput(bestMatch.id) || '(No recent output available)'
       const activeTaskId = terminalService.getActiveTaskId(bestMatch.id)
       errorMessage = `Error: ${errorMessage}\n\nThe current visible state of the terminal tab "${bestMatch.title || bestMatch.id}" is:
-================================================================================
 <terminal_content>
 ${recentOutput}
-</terminal_content>
-================================================================================\n\nIf you think you need to exit the current command, use write_stdin. If you want to wait for it to finish, use wait_command_end.${activeTaskId ? ` history_command_match_id=${activeTaskId}, terminalId=${bestMatch.id}` : ''}`
+</terminal_content>\n\nIf you think you need to exit the current command, use write_stdin. If you want to wait for it to finish, use wait_command_end.${activeTaskId ? ` history_command_match_id=${activeTaskId}, terminalId=${bestMatch.id}` : ''}`
     }
 
     context.sendEvent(sessionId, { 
@@ -317,11 +311,9 @@ export async function readTerminalTab(args: z.infer<typeof readTerminalTabSchema
   }
 
   const finalResult = `The following is the current visible state of the terminal tab "${bestMatch.title || bestMatch.id}":
-================================================================================
 <terminal_content>
 ${output}
-</terminal_content>
-================================================================================`
+</terminal_content>`
   
   sendEvent(sessionId, {
     messageId,
@@ -410,11 +402,9 @@ export async function readCommandOutput(
   ].join('\n')
 
   const finalOutput = `${header}
-================================================================================
 <terminal_content>
 ${result}
-</terminal_content>
-================================================================================`
+</terminal_content>`
 
   sendEvent(sessionId, {
     messageId,
@@ -484,11 +474,9 @@ export async function writeStdin(args: z.infer<typeof writeStdinSchema>, context
   abortIfNeeded(context.signal)
   const output = terminalService.getRecentOutput(bestMatch.id) || 'No output available.'
   const resultHint = `Sent sequence: ${sequence?.join(', ')}. The following is the current visible state of the terminal tab "${bestMatch.title || bestMatch.id}" 1s after the sequence was sent:
-================================================================================
 <terminal_content>
 ${output}
-</terminal_content>
-================================================================================`
+</terminal_content>`
 
   sendEvent(sessionId, {
     messageId,
@@ -601,12 +589,7 @@ export function truncateCommandOutput(output: string, historyCommandMatchId: str
 
   const truncatedLines = [...head, omittedLine, ...tail]
 
-  let result = `
-================================================================================
-<terminal_content>
-${truncatedLines.join('\n').trimEnd()}
-</terminal_content>
-================================================================================`
+  let result = truncatedLines.join('\n').trimEnd()
   if (Buffer.byteLength(result, 'utf8') > COMMAND_OUTPUT_MAX_BYTES) {
     result =
       result.slice(0, COMMAND_OUTPUT_MAX_BYTES) +
@@ -642,11 +625,9 @@ function formatCommandOutputSlice(params: { output: string; offset: number; limi
 
   const content = raw.map((line, index) => `${(index + safeOffset + 1).toString().padStart(5, '0')}| ${line}`)
   let result = `
-================================================================================
 <terminal_content>
 ${content.join('\n')}
-</terminal_content>
-================================================================================`
+</terminal_content>`
 
   const totalLines = lines.length
   const lastReadLine = safeOffset + raw.length
