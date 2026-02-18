@@ -1511,7 +1511,7 @@ export class AgentService_v2 {
       )
     }
 
-    return await this.invokeModelDecisionByFunctionCallingAuto(
+    return await this.invokeModelDecisionByPlainToolCall(
       sessionId,
       messages,
       schema,
@@ -1591,7 +1591,7 @@ export class AgentService_v2 {
       })
     }
 
-    return await this.invokeModelDecisionByFunctionCallingAuto(
+    return await this.invokeModelDecisionByPlainToolCall(
       sessionId,
       messages,
       schema,
@@ -1601,7 +1601,7 @@ export class AgentService_v2 {
     )
   }
 
-  private async invokeModelDecisionByFunctionCallingAuto<T extends z.ZodTypeAny>(
+  private async invokeModelDecisionByPlainToolCall<T extends z.ZodTypeAny>(
     sessionId: string,
     messages: BaseMessage[],
     schema: T,
@@ -1619,28 +1619,63 @@ export class AgentService_v2 {
       description: `Return the structured decision payload for ${decisionName}.`,
       schema
     } as any)
-    const modelWithTool = model.bindTools([tool], {
-      tool_choice: 'auto'
-    })
+    const modelWithTool = model.bindTools([tool])
+    const mustUseToolCallPrompt = new HumanMessage(
+      [
+        `You must return the decision by calling tool "${toolName}".`,
+        'Do not return plain text. Return only one tool call.'
+      ].join('\n')
+    )
+    const decisionMessages = [...messages, mustUseToolCallPrompt]
 
     return await invokeWithRetryAndSanitizedInput({
       helpers: this.helpers,
-      messages,
+      messages: decisionMessages,
       signal,
       operation: async (sanitizedMessages) => {
-        const response = await modelWithTool.invoke(sanitizedMessages, { signal }) as any
+        const stream = await modelWithTool.stream(sanitizedMessages, { signal })
+        let response: any = null
+        for await (const chunk of stream) {
+          response = response ? response.concat(chunk) : chunk
+        }
+
+        if (!response) {
+          throw new Error(`No response was returned for ${decisionName}`)
+        }
+
         const toolCalls = Array.isArray(response?.tool_calls) ? response.tool_calls : []
         const call = toolCalls.find((item: any) => item?.name === toolName) || toolCalls[0]
-        if (!call) {
-          throw new Error(`No tool call was returned for ${decisionName}`)
+        if (call) {
+          const rawArgs = typeof call.args === 'string'
+            ? this.helpers.parseStrictJsonObject(call.args)
+            : call.args
+          return schema.parse(rawArgs) as z.infer<T>
         }
-        const rawArgs = typeof call.args === 'string'
-          ? this.helpers.parseStrictJsonObject(call.args)
-          : call.args
-        return schema.parse(rawArgs) as z.infer<T>
+
+        const responseText = String(this.helpers.extractText(response?.content) || '').slice(0, 2000)
+        const rawToolCalls = Array.isArray(response?.additional_kwargs?.tool_calls)
+          ? response.additional_kwargs.tool_calls
+          : []
+        const invalidToolCalls = Array.isArray(response?.invalid_tool_calls)
+          ? response.invalid_tool_calls
+          : []
+
+        const firstRawFunctionArguments = rawToolCalls[0]?.function?.arguments
+        console.warn('[AgentService_v2] No tool call returned for schema decision.', {
+          decisionName,
+          kind,
+          modelToolName: toolName,
+          strategy: 'plain_tool_call_without_tool_choice_stream',
+          responseText,
+          parsedToolCalls: toolCalls,
+          rawToolCalls,
+          invalidToolCalls,
+          firstRawFunctionArguments
+        })
+        throw new Error(`No tool call was returned for ${decisionName}`)
       },
       onRetry: (attempt) => {
-        console.log(`[AgentService_v2] Retrying auto-tool ${kind} decision for ${decisionName} (attempt ${attempt + 1})...`)
+        console.log(`[AgentService_v2] Retrying plain-tool-stream ${kind} decision for ${decisionName} (attempt ${attempt + 1})...`)
       },
       maxRetries: MODEL_RETRY_MAX,
       delaysMs: MODEL_RETRY_DELAYS_MS

@@ -32,6 +32,13 @@ export const FILE_CONTENT_TAG = 'FILE_CONTENT:\n'
 export const TERMINAL_CONTENT_TAG = 'TERMINAL_CONTENT:\n'
 export const USER_PASTE_CONTENT_TAG = FILE_CONTENT_TAG
 
+function formatTodayLocalDate(now: Date = new Date()): string {
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 // --- Tool Descriptions ---
 
 export const WRITE_STDIN_TOOL_DESCRIPTION = [
@@ -220,6 +227,7 @@ export function createSystemInfoPrompt(tabs: TerminalTab[], sessionId: string): 
 export function createBaseSystemPrompt(): SystemMessage {
   return new SystemMessage(
     [
+      `Today is ${formatTodayLocalDate()}.`,
       '# Role: GyShell Assistant',
       'You are GyShell Assistant, an AI-native shell assistant. Your mission is to help users accomplish tasks efficiently through the terminal.',
       '',
