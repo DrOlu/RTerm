@@ -118,16 +118,17 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
         </div>
 
         <div className="composer-row-right">
-          <button
-            type="button"
-            className="composer-icon-button stop"
-            onClick={onStop}
-            disabled={!isRunning}
-            aria-label="Stop run"
-            title="Stop run"
-          >
-            <Square size={12} />
-          </button>
+          {isRunning ? (
+            <button
+              type="button"
+              className="composer-icon-button stop"
+              onClick={onStop}
+              aria-label="Stop run"
+              title="Stop run"
+            >
+              <Square size={12} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="composer-icon-button send"
