@@ -19,8 +19,9 @@
 <p align="center">
   <img src="./demo_imgs/demo.png" width="100%">
 </p>
-演示视频：
-https://github.com/user-attachments/assets/f9daf884-bda0-4a58-8a6d-934db0eddeb5
+<p align="center">
+  <video controls width="100%" src="https://github.com/user-attachments/assets/f9daf884-bda0-4a58-8a6d-934db0eddeb5"></video>
+</p>
 
 ---
 
