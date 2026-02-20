@@ -15,8 +15,8 @@ Usage guides:
 
 > [!TIP]
 > **Recommended Models**:
-> - **Cost-Performance**: Thinking-GLM 5 + Action/Global: Minimax2.5
-> - **Best Performance**: Thinking-Gemini 3.1 Pro + Action/Global: Gemini 3 Flash
+> - **Cost-Performance**: Thinking-GLM 5 + Action/Global-Minimax2.5
+> - **Best Performance**: Thinking-Gemini 3.1 Pro + Action/Global-Gemini 3 Flash
 > - **Local (Mac Studio)**: All-Qwen3.5 / Minimax2.5
 
 > [!WARNING]
