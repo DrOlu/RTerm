@@ -19,13 +19,8 @@
 <p align="center">
   <img src="./demo_imgs/demo.png" width="100%">
 </p>
-<p align="center">
-  <video controls="controls" width="100%">
-    <source src="./demo_imgs/gyshell_demo.mp4?raw=1" type="video/mp4">
-    当前浏览器不支持 HTML video。
-  </video>
-</p>
-演示视频：[`demo_imgs/gyshell_demo.mp4`](./demo_imgs/gyshell_demo.mp4)
+演示视频：
+https://github.com/user-attachments/assets/f9daf884-bda0-4a58-8a6d-934db0eddeb5
 
 ---
 
