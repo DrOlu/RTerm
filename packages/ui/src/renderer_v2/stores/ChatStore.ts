@@ -321,6 +321,21 @@ export class ChatStore {
             this.runNextQueueItem(sessionId)
           }
           break
+        case 'ROLLBACK': {
+          const rollbackIndex = session.messageIds.findIndex((messageId) => {
+            const message = session.messagesById.get(messageId)
+            return message?.backendMessageId === update.messageId
+          })
+          if (rollbackIndex !== -1) {
+            const removedIds = session.messageIds.slice(rollbackIndex)
+            removedIds.forEach((messageId) => session.messagesById.delete(messageId))
+            session.messageIds = session.messageIds.slice(0, rollbackIndex)
+          }
+          session.isThinking = false
+          session.isSessionBusy = false
+          session.lockedProfileId = null
+          break
+        }
       }
     })
 
