@@ -34,11 +34,19 @@ import {
 import type { ToolExecutionContext } from './AgentHelper/types'
 import { AgentHelpers } from './AgentHelper/helpers'
 import { buildDebugRawResponse, captureRawResponseChunk } from './AgentHelper/utils/raw_response'
-import { invokeWithRetryAndSanitizedInput, stripRawResponseFromStoredMessages } from './AgentHelper/utils/model_messages'
+import {
+  buildDynamicRequestHistory,
+  invokeWithRetryAndSanitizedInput,
+  stripRawResponseFromStoredMessages
+} from './AgentHelper/utils/model_messages'
 import { createStreamReasoningExtractor } from './AgentHelper/utils/stream_reasoning_extractor'
 import { resolveRunExperimentalFlags } from './AgentHelper/utils/experimental_flags'
 import { SelfCorrectionRuntimeManager } from './AgentHelper/utils/self_correction_runtime'
 import { removeUnmatchedToolCallsFromHistory } from './AgentHelper/utils/tool_call_history'
+import {
+  clearAllCompressionArtifacts,
+  sanitizeCompressionAfterRollback
+} from './AgentHelper/utils/history_compression_maintenance'
 import {
   CONTINUE_INSTRUCTION_TAG,
   SELF_CORRECTION_INPUT_TAG,
@@ -55,12 +63,16 @@ import {
   TASK_CONTINUE_INSTRUCTION_SCHEMA,
   SELF_CORRECTION_AUDIT_DECISION_SCHEMA,
   SELF_CORRECTION_INSTRUCTION_SCHEMA,
+  COMPACTION_SUMMARY_SCHEMA,
   createCommandPolicyUserPrompt,
+  createCompactionSummaryUserPrompt,
   createSelfCorrectionAuditDecisionUserPrompt,
   createSelfCorrectionInstructionUserPrompt,
   createTaskCompletionDecisionUserPrompt,
   createTaskContinueInstructionUserPrompt,
   createWriteStdinPolicyUserPrompt,
+  hasAnyNormalUserInputTag,
+  WHAT_HAVE_DONE_IN_THE_PAST_TAG,
 } from './AgentHelper/prompts'
 import { runSkillTool } from './AgentHelper/tools/skill_tools'
 import { TokenManager } from './AgentHelper/TokenManager'
@@ -69,24 +81,11 @@ import { InputParseHelper } from './AgentHelper/InputParseHelper'
 const Ann: any = Annotation
 
 const StateAnnotation = Ann.Root({
-  // Runtime Context - used for LLM inference, will be pruned
+  // Runtime/Persistence Context - single source of truth for the whole graph
   messages: Ann({
     reducer: (x: BaseMessage[], y?: BaseMessage | BaseMessage[]) => {
       if (!y) return x
 
-      // If a full list is provided (by token_manager), replace the entire messages state.
-      if (Array.isArray(y)) {
-        return y
-      }
-      // Otherwise, append a single message.
-      return [...x, y]
-    },
-    default: () => []
-  }),
-  // Full Persistence - always append, never prune, used for saving session
-  full_messages: Ann({
-    reducer: (x: BaseMessage[], y?: BaseMessage | BaseMessage[]) => {
-      if (!y) return x
       if (Array.isArray(y)) {
         return y
       }
@@ -147,6 +146,7 @@ const StateAnnotation = Ann.Root({
 
 const MODEL_RETRY_MAX = 4
 const MODEL_RETRY_DELAYS_MS = [1000, 2000, 4000, 6000]
+const COMPACTION_PROTECTED_NORMAL_USER_ROUNDS = 2
 
 interface SessionModelBinding {
   profileId: string
@@ -225,8 +225,6 @@ export class AgentService_v2 {
     const workflow = new StateGraph(StateAnnotation) as any
 
     workflow.addNode('startup_message_builder', this.createStartupMessageBuilderNode())
-    // Add token_manager nodes for double interception
-    workflow.addNode('token_pruner_initial', this.createTokenManagerNode())
     workflow.addNode('token_pruner_runtime', this.createTokenManagerNode())
     
     workflow.addNode('model_request', this.createModelRequestNode())
@@ -240,9 +238,7 @@ export class AgentService_v2 {
     workflow.addNode('final_output', this.createFinalOutputNode())
 
     workflow.addEdge(START, 'startup_message_builder')
-    workflow.addEdge('startup_message_builder', 'token_pruner_initial')
-    workflow.addEdge('token_pruner_initial', 'token_pruner_runtime')
-    
+    workflow.addEdge('startup_message_builder', 'token_pruner_runtime')
     workflow.addEdge('token_pruner_runtime', 'model_request')
     
     workflow.addEdge('model_request', 'batch_toolcall_executor')
@@ -258,7 +254,6 @@ export class AgentService_v2 {
       ['token_pruner_runtime', 'final_output']
     )
     
-    // Tools route back to runtime pruner before model request
     workflow.addConditionalEdges(
       'tools',
       this.routeAfterToolCall,
@@ -378,6 +373,16 @@ export class AgentService_v2 {
     return binding
   }
 
+  private getEffectiveMaxTokensFromBinding(binding: SessionModelBinding): number {
+    return Math.min(binding.globalMaxTokens, binding.thinkingMaxTokens)
+  }
+
+  private getEffectiveMaxTokensForSession(sessionId: string): number | undefined {
+    const binding = this.sessionModelBindings.get(sessionId)
+    if (!binding) return undefined
+    return this.getEffectiveMaxTokensFromBinding(binding)
+  }
+
   releaseSessionModelBinding(sessionId: string): void {
     this.sessionModelBindings.delete(sessionId)
     this.selfCorrectionRuntimeManager.clearSession(sessionId)
@@ -386,23 +391,39 @@ export class AgentService_v2 {
   // --- Graph Nodes ---
   
   private createTokenManagerNode() {
-    return RunnableLambda.from(async (state: any) => {
-      const { messages, token_state } = state
-      
-      // Perform pruning if needed
-      if (TokenManager.isOverflow(token_state.current_tokens, token_state.max_tokens)) {
-        const pruned = TokenManager.prune(messages)
-        // If pruned length differs or content changed (simplified check by length or reference)
-        // TokenManager.prune always returns a new array if changes were made.
-        if (pruned !== messages) {
-            // Debug: log when pruning actually happens
-            console.log(`[TokenManager] Pruned ${messages.length - pruned.length} messages (sessionId=${state.sessionId || 'unknown'})`)
-            // ONLY return messages update to trigger replacement in state.
-            // DO NOT return full_messages here.
-            return { messages: pruned }
+    return RunnableLambda.from(async (state: any, config: any) => {
+      const messages: BaseMessage[] = Array.isArray(state.messages) ? state.messages : []
+      const tokenState = state.token_state || {}
+      const dynamicRequestView = buildDynamicRequestHistory(messages)
+      const estimatedRequestTokens = TokenManager.estimateMessages(dynamicRequestView)
+      const currentTokensForCheck = Math.max(tokenState.current_tokens || 0, estimatedRequestTokens)
+      if (!TokenManager.isOverflow(currentTokensForCheck, tokenState.max_tokens || 0)) {
+        return {}
+      }
+
+      const pruneResult = TokenManager.applyPruneLabels(messages)
+      let nextMessages = pruneResult.messages
+      if (pruneResult.changed) {
+        console.log(
+          `[TokenManager] Labeled ${pruneResult.newlyTaggedCount} messages for dynamic pruning (~${pruneResult.estimatedPrunedTokens} tokens, sessionId=${state.sessionId || 'unknown'})`
+        )
+      }
+
+      if (pruneResult.newlyTaggedCount === 0) {
+        const compactionResult = await this.tryCompactHistory(
+          state.sessionId,
+          nextMessages,
+          config?.signal
+        )
+        if (compactionResult.changed) {
+          nextMessages = compactionResult.messages
         }
       }
-      return {} // No op
+
+      if (nextMessages !== messages) {
+        return { messages: nextMessages }
+      }
+      return {}
     })
   }
 
@@ -416,7 +437,6 @@ export class AgentService_v2 {
       const startupMode: 'normal' | 'inserted' = state.startup_mode === 'inserted' ? 'inserted' : 'normal'
 
       const messages: BaseMessage[] = [...state.messages]
-      const fullMessages: BaseMessage[] = [...state.full_messages]
 
       const userMessageId = uuidv4()
       const { enrichedContent, displayContent } = await InputParseHelper.parseAndEnrich(
@@ -456,22 +476,15 @@ export class AgentService_v2 {
       const withUserMessages = memoryEnabled
         ? [...messages, humanMessage]
         : stripMemorySystemMessages([...messages, humanMessage])
-      const withUserFullMessages = memoryEnabled
-        ? [...fullMessages, humanMessage]
-        : stripMemorySystemMessages([...fullMessages, humanMessage])
 
       const baseSystemMsg = createBaseSystemPrompt()
       const hasBaseSystem = withUserMessages.some(
         m => m.type === 'system' && typeof m.content === 'string' && m.content.includes('# Role: GyShell Assistant')
       )
-      const fullHasBaseSystem = withUserFullMessages.some(
-        m => m.type === 'system' && typeof m.content === 'string' && m.content.includes('# Role: GyShell Assistant')
-      )
       const hasMemorySystem = withUserMessages.some(isMemorySystemMessage)
-      const fullHasMemorySystem = withUserFullMessages.some(isMemorySystemMessage)
 
       let memorySystemMsg: BaseMessage | null = null
-      if (memoryEnabled && (!hasMemorySystem || !fullHasMemorySystem)) {
+      if (memoryEnabled && !hasMemorySystem) {
         try {
           const snapshot = await this.memoryService.getMemorySnapshot()
           memorySystemMsg = createMemorySystemPrompt({
@@ -500,21 +513,11 @@ export class AgentService_v2 {
         userLast
       ]
 
-      const fullUserLast = withUserFullMessages[withUserFullMessages.length - 1]
-      const fullBeforeUser = withUserFullMessages.slice(0, -1)
-      const newFullMessages = [
-        ...(fullHasBaseSystem ? [] : [baseSystemMsg]),
-        ...(fullHasMemorySystem || !memorySystemMsg ? [] : [memorySystemMsg]),
-        ...fullBeforeUser,
-        ...contextMessages,
-        fullUserLast
-      ]
-
       const maxTokens = Math.min(sessionBinding.globalMaxTokens, sessionBinding.thinkingMaxTokens)
 
       let currentTokens = 0
-      for (let i = newFullMessages.length - 1; i >= 0; i--) {
-        const m = newFullMessages[i]
+      for (let i = newMessages.length - 1; i >= 0; i--) {
+        const m = newMessages[i]
         const usage = (m as any).usage_metadata || (m as any).additional_kwargs?.usage
         if (usage?.total_tokens) {
           currentTokens = usage.total_tokens
@@ -524,7 +527,6 @@ export class AgentService_v2 {
 
       return {
         messages: newMessages,
-        full_messages: newFullMessages,
         token_state: {
           max_tokens: maxTokens,
           current_tokens: currentTokens
@@ -540,8 +542,7 @@ export class AgentService_v2 {
       const sessionBinding = this.getSessionModelBinding(sessionId)
       const runtimeThinkingCorrectionEnabled = state.runtimeThinkingCorrectionEnabled !== false
 
-      let modelInputMessages: BaseMessage[] = [...(state.messages as BaseMessage[])]
-      let fullHistoryMessages: BaseMessage[] = [...(state.full_messages as BaseMessage[])]
+      let fullHistoryMessages: BaseMessage[] = [...(state.messages as BaseMessage[])]
 
       const pendingInstruction = this.selfCorrectionRuntimeManager.consumePendingInstruction(sessionId)
       if (pendingInstruction && runtimeThinkingCorrectionEnabled) {
@@ -552,14 +553,15 @@ export class AgentService_v2 {
           _gyshellMessageId: uuidv4(),
           input_kind: 'self_correction'
         }
-        modelInputMessages = [...modelInputMessages, selfCorrectionMessage]
         fullHistoryMessages = [...fullHistoryMessages, selfCorrectionMessage]
       }
+
+      const modelInputMessages = buildDynamicRequestHistory(fullHistoryMessages)
 
       const prevPassCount = typeof state.modelRequestPassCount === 'number' ? state.modelRequestPassCount : 0
       const nextPassCount = prevPassCount + 1
       if (runtimeThinkingCorrectionEnabled && nextPassCount % 8 === 0) {
-        this.spawnSelfCorrectionAudit(sessionId, modelInputMessages, config?.signal, nextPassCount)
+        this.spawnSelfCorrectionAudit(sessionId, fullHistoryMessages, config?.signal, nextPassCount)
       }
 
       // Ensure we get the freshest list from disk
@@ -724,8 +726,7 @@ export class AgentService_v2 {
 
       // Always reset pendingToolCalls here to avoid stale queue influencing routing.
       return { 
-          messages: [...modelInputMessages, fullResponse],
-          full_messages: [...fullHistoryMessages, fullResponse],
+          messages: [...fullHistoryMessages, fullResponse],
           token_state: { current_tokens: currentTokens },
           sessionId,
           pendingToolCalls: [],
@@ -740,14 +741,12 @@ export class AgentService_v2 {
       if (!sessionId) throw new Error('No session ID in state')
 
       const messages: BaseMessage[] = [...state.messages]
-      const fullMessages: BaseMessage[] = [...state.full_messages]
       const lastMessage = messages[messages.length - 1]
-      const fullLastMessage = fullMessages[fullMessages.length - 1]
 
       let pendingToolCalls: any[] = []
 
       if (!AIMessage.isInstance(lastMessage)) {
-        return { messages, full_messages: fullMessages, sessionId, pendingToolCalls }
+        return { messages, sessionId, pendingToolCalls }
       }
 
       const toolCalls: any[] = Array.isArray((lastMessage as any).tool_calls) ? (lastMessage as any).tool_calls : []
@@ -756,16 +755,14 @@ export class AgentService_v2 {
       // and then decide how many tool calls we keep/enqueue.
       if (!toolCalls || toolCalls.length === 0) {
         this.cleanupModelToolCallMetadata(lastMessage, [])
-        this.cleanupModelToolCallMetadata(fullLastMessage, [])
-        return { messages, full_messages: fullMessages, sessionId, pendingToolCalls }
+        return { messages, sessionId, pendingToolCalls }
       }
 
       // If only one tool call, just enqueue it and continue (no extra checks needed).
       if (toolCalls.length === 1) {
         pendingToolCalls = toolCalls.slice(0, 1)
         this.cleanupModelToolCallMetadata(lastMessage, pendingToolCalls)
-        this.cleanupModelToolCallMetadata(fullLastMessage, pendingToolCalls)
-        return { messages, full_messages: fullMessages, sessionId, pendingToolCalls }
+        return { messages, sessionId, pendingToolCalls }
       }
 
     // If ANY exec_command is present, force single-tool: keep only the first tool call.
@@ -773,24 +770,20 @@ export class AgentService_v2 {
       if (hasExecCommand) {
         pendingToolCalls = toolCalls.slice(0, 1)
         this.cleanupModelToolCallMetadata(lastMessage, pendingToolCalls)
-        this.cleanupModelToolCallMetadata(fullLastMessage, pendingToolCalls)
-        return { messages, full_messages: fullMessages, sessionId, pendingToolCalls }
+        return { messages, sessionId, pendingToolCalls }
       }
 
       const skillCall = toolCalls.find((tc) => tc?.name === 'skill')
       if (skillCall) {
         pendingToolCalls = [skillCall]
         this.cleanupModelToolCallMetadata(lastMessage, pendingToolCalls)
-        this.cleanupModelToolCallMetadata(fullLastMessage, pendingToolCalls)
-        return { messages, full_messages: fullMessages, sessionId, pendingToolCalls }
+        return { messages, sessionId, pendingToolCalls }
       }
 
       // Otherwise (no exec_command), allow executing ALL tool calls sequentially.
       pendingToolCalls = toolCalls.slice()
       this.cleanupModelToolCallMetadata(lastMessage, pendingToolCalls)
-      this.cleanupModelToolCallMetadata(fullLastMessage, pendingToolCalls)
-
-      return { messages, full_messages: fullMessages, sessionId, pendingToolCalls }
+      return { messages, sessionId, pendingToolCalls }
     })
   }
 
@@ -810,7 +803,7 @@ export class AgentService_v2 {
         toolMessage.additional_kwargs._gyshellMessageId as string,
         config
       )
-      const fullHistory: BaseMessage[] = state.full_messages
+      const messageHistory: BaseMessage[] = state.messages
       let result = ''
       switch (toolCall.name) {
         case 'skill': {
@@ -897,7 +890,7 @@ export class AgentService_v2 {
 
             if (sessionBinding.actionModel) {
               // Build temporary history for action model
-              const finalActionMessages = this.helpers.buildActionModelHistory(state.full_messages as BaseMessage[])
+              const finalActionMessages = this.helpers.buildActionModelHistory(state.messages as BaseMessage[])
 
               // Call action model for write_stdin policy check
               const user = createWriteStdinPolicyUserPrompt({ chars: validatedArgs.sequence ?? [] })
@@ -923,7 +916,6 @@ export class AgentService_v2 {
                 toolMessage.content = blockReason
                 return {
                   messages: [...state.messages, toolMessage],
-                  full_messages: [...fullHistory, toolMessage],
                   sessionId,
                   pendingToolCalls: queue.slice(1)
                 }
@@ -969,8 +961,7 @@ export class AgentService_v2 {
 
       toolMessage.content = result
       return {
-        messages: [...state.messages, toolMessage],
-        full_messages: [...fullHistory, toolMessage],
+        messages: [...messageHistory, toolMessage],
         sessionId,
         pendingToolCalls: queue.slice(1)
       }
@@ -988,7 +979,7 @@ export class AgentService_v2 {
 
       const toolMessage = this.createToolMessage(toolCall)
       const executionContext = this.createExecutionContext(sessionId, toolMessage.additional_kwargs._gyshellMessageId as string, config)
-      const fullHistory: BaseMessage[] = state.full_messages
+      const messageHistory: BaseMessage[] = state.messages
 
       let validated: z.infer<typeof execCommandSchema>
       try {
@@ -996,8 +987,7 @@ export class AgentService_v2 {
       } catch (err) {
         toolMessage.content = `Parameter validation error for exec_command: ${(err as Error).message}`
         return { 
-            messages: [...state.messages, toolMessage], 
-            full_messages: [...fullHistory, toolMessage],
+            messages: [...messageHistory, toolMessage], 
             sessionId, 
             pendingToolCalls: queue.slice(1) 
         }
@@ -1009,8 +999,7 @@ export class AgentService_v2 {
             ? `Error: Multiple terminal tabs found with name "${validated.tabIdOrName}".`
             : `Error: Terminal tab "${validated.tabIdOrName}" not found.`
         return { 
-            messages: [...state.messages, toolMessage], 
-            full_messages: [...fullHistory, toolMessage],
+            messages: [...messageHistory, toolMessage], 
             sessionId, 
             pendingToolCalls: queue.slice(1) 
         }
@@ -1039,7 +1028,7 @@ export class AgentService_v2 {
 
         const actionDecisionTask = (async () => {
           // Keep action-model judgment independent: do not include global waitMode choice in prompt.
-          const finalActionMessages = this.helpers.buildActionModelHistory(state.full_messages as BaseMessage[])
+          const finalActionMessages = this.helpers.buildActionModelHistory(state.messages as BaseMessage[])
           const user = createCommandPolicyUserPrompt({
             tabTitle: bestMatch.title,
             tabId: bestMatch.id,
@@ -1087,8 +1076,7 @@ export class AgentService_v2 {
 
       toolMessage.content = resultText
       return { 
-          messages: [...state.messages, toolMessage], 
-          full_messages: [...fullHistory, toolMessage],
+          messages: [...messageHistory, toolMessage], 
           sessionId, 
           pendingToolCalls: queue.slice(1) 
       }
@@ -1106,7 +1094,7 @@ export class AgentService_v2 {
 
       const toolMessage = this.createToolMessage(toolCall)
       const executionContext = this.createExecutionContext(sessionId, toolMessage.additional_kwargs._gyshellMessageId as string, config)
-      const fullHistory: BaseMessage[] = state.full_messages
+      const messageHistory: BaseMessage[] = state.messages
 
       let result: string
       try {
@@ -1118,8 +1106,7 @@ export class AgentService_v2 {
 
       toolMessage.content = result
       return { 
-          messages: [...state.messages, toolMessage], 
-          full_messages: [...fullHistory, toolMessage],
+          messages: [...messageHistory, toolMessage], 
           sessionId, 
           pendingToolCalls: queue.slice(1) 
       }
@@ -1139,7 +1126,7 @@ export class AgentService_v2 {
       const toolMessage = this.createToolMessage(toolCall)
       const messageId = toolMessage.additional_kwargs._gyshellMessageId as string
       const executionContext = this.createExecutionContext(sessionId, messageId, config)
-      const fullHistory: BaseMessage[] = state.full_messages
+      const messageHistory: BaseMessage[] = state.messages
 
       let resultText: string
       let imageMessage: HumanMessage | null = null
@@ -1175,8 +1162,7 @@ export class AgentService_v2 {
         : [toolMessage]
 
       return {
-        messages: [...state.messages, ...updates],
-        full_messages: [...fullHistory, ...(updates as BaseMessage[])],
+        messages: [...messageHistory, ...updates],
         sessionId,
         pendingToolCalls: queue.slice(1)
       }
@@ -1194,7 +1180,7 @@ export class AgentService_v2 {
 
       const toolMessage = this.createToolMessage(toolCall)
       const messageId = toolMessage.additional_kwargs._gyshellMessageId as string
-      const fullHistory: BaseMessage[] = state.full_messages
+      const messageHistory: BaseMessage[] = state.messages
 
       let args: any = toolCall.args || {}
       if (typeof args === 'string') {
@@ -1223,8 +1209,7 @@ export class AgentService_v2 {
 
       toolMessage.content = resultText
       return { 
-          messages: [...state.messages, toolMessage], 
-          full_messages: [...fullHistory, toolMessage],
+          messages: [...messageHistory, toolMessage], 
           sessionId, 
           pendingToolCalls: queue.slice(1) 
       }
@@ -1237,13 +1222,11 @@ export class AgentService_v2 {
       if (!sessionId) throw new Error('No session ID in state')
 
       const messages: BaseMessage[] = [...state.messages]
-      const fullMessages: BaseMessage[] = [...state.full_messages]
       const lastMessage = messages[messages.length - 1]
 
       if (!AIMessage.isInstance(lastMessage)) {
         return {
           messages,
-          full_messages: fullMessages,
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: 'end' as const
@@ -1254,7 +1237,6 @@ export class AgentService_v2 {
       if (toolCalls.length > 0) {
         return {
           messages,
-          full_messages: fullMessages,
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: 'continue' as const
@@ -1281,7 +1263,6 @@ export class AgentService_v2 {
       if (completionDecision.is_fully_completed) {
         return {
           messages,
-          full_messages: fullMessages,
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: 'end' as const
@@ -1331,7 +1312,6 @@ export class AgentService_v2 {
 
       return {
         messages: [...messages, continueMessage],
-        full_messages: [...fullMessages, continueMessage],
         sessionId,
         pendingToolCalls: [],
         completionGuardDecision: 'continue' as const
@@ -1385,6 +1365,102 @@ export class AgentService_v2 {
       commandPolicyMode: this.settings?.commandPolicyMode || 'standard',
       signal: config?.signal
     }
+  }
+
+  private async tryCompactHistory(
+    sessionId: string,
+    messages: BaseMessage[],
+    signal: AbortSignal | undefined
+  ): Promise<{ changed: boolean; messages: BaseMessage[] }> {
+    if (!sessionId) {
+      return { changed: false, messages }
+    }
+
+    const insertionIndex = this.findCompactionInsertionIndex(messages)
+    if (insertionIndex < 0) {
+      console.log(
+        `[TokenManager] Overflow remains but compaction skipped: fewer than ${COMPACTION_PROTECTED_NORMAL_USER_ROUNDS + 1} normal user rounds (sessionId=${sessionId}).`
+      )
+      return { changed: false, messages }
+    }
+    if (this.hasCompactionMarkerAtInsertion(messages, insertionIndex)) {
+      console.log(
+        `[TokenManager] Overflow remains but compaction skipped: insertion index=${insertionIndex} already compacted once (sessionId=${sessionId}).`
+      )
+      return { changed: false, messages }
+    }
+
+    const historyBeforeProtectedRounds = messages.slice(0, insertionIndex)
+    let summaryDecision: z.infer<typeof COMPACTION_SUMMARY_SCHEMA>
+    try {
+      summaryDecision = await this.getThinkingModelDecision(
+        sessionId,
+        [
+          ...historyBeforeProtectedRounds,
+          createCompactionSummaryUserPrompt({
+            protectedRounds: COMPACTION_PROTECTED_NORMAL_USER_ROUNDS
+          })
+        ],
+        COMPACTION_SUMMARY_SCHEMA,
+        signal,
+        'history_compaction'
+      )
+    } catch (error) {
+      console.warn('[AgentService_v2] History compaction summary generation failed:', error)
+      return { changed: false, messages }
+    }
+
+    const summaryText = String(summaryDecision.summary || '').trim()
+    if (!summaryText) {
+      return { changed: false, messages }
+    }
+
+    const summaryMessage = new HumanMessage(`${WHAT_HAVE_DONE_IN_THE_PAST_TAG}${summaryText}`)
+    ;(summaryMessage as any).additional_kwargs = {
+      _gyshellMessageId: uuidv4(),
+      [TokenManager.LAST_COMPACTION_FLAG_KEY]: true
+    }
+
+    const compactedMessages = [
+      ...messages.slice(0, insertionIndex),
+      summaryMessage,
+      ...messages.slice(insertionIndex)
+    ]
+
+    console.log(
+      `[TokenManager] Compaction inserted summary at index=${insertionIndex} (sessionId=${sessionId}).`
+    )
+    return { changed: true, messages: compactedMessages }
+  }
+
+  private findCompactionInsertionIndex(messages: BaseMessage[]): number {
+    const normalUserRoundIndices: number[] = []
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i]
+      if (message.type !== 'human') continue
+      if (hasAnyNormalUserInputTag(message.content)) {
+        normalUserRoundIndices.push(i)
+      }
+    }
+    if (normalUserRoundIndices.length <= COMPACTION_PROTECTED_NORMAL_USER_ROUNDS) {
+      return -1
+    }
+
+    // Insert before the earliest message of the protected tail rounds.
+    return normalUserRoundIndices[normalUserRoundIndices.length - COMPACTION_PROTECTED_NORMAL_USER_ROUNDS]
+  }
+
+  private hasCompactionMarkerAtInsertion(messages: BaseMessage[], insertionIndex: number): boolean {
+    if (insertionIndex < 0 || insertionIndex > messages.length) {
+      return false
+    }
+
+    const markerAtInsertion =
+      insertionIndex < messages.length && TokenManager.hasLastCompactionFlag(messages[insertionIndex])
+    const markerBeforeInsertion =
+      insertionIndex > 0 && TokenManager.hasLastCompactionFlag(messages[insertionIndex - 1])
+
+    return markerAtInsertion || markerBeforeInsertion
   }
 
   private spawnSelfCorrectionAudit(
@@ -1596,12 +1672,13 @@ export class AgentService_v2 {
   ): Promise<z.infer<T>> {
     const sessionBinding = this.getSessionModelBinding(sessionId)
     const model = sessionBinding.thinkingModel || sessionBinding.model
+    const processedMessages = buildDynamicRequestHistory(messages)
 
     if (sessionBinding.thinkingModelSupportsStructuredOutput) {
       const structuredModel = model.withStructuredOutput(schema, { method: 'jsonSchema' })
       return await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
-        messages,
+        messages: processedMessages,
         signal,
         operation: async (sanitizedMessages) => {
           return await structuredModel.invoke(sanitizedMessages, { signal }) as any
@@ -1618,7 +1695,7 @@ export class AgentService_v2 {
       const functionCallingModel = model.withStructuredOutput(schema, { method: 'functionCalling' })
       return await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
-        messages,
+        messages: processedMessages,
         signal,
         operation: async (sanitizedMessages) => {
           return await functionCallingModel.invoke(sanitizedMessages, { signal }) as any
@@ -1633,7 +1710,7 @@ export class AgentService_v2 {
 
     return await this.invokeModelDecisionByPlainToolCall(
       sessionId,
-      messages,
+      processedMessages,
       schema,
       signal,
       decisionName,
@@ -1735,15 +1812,31 @@ export class AgentService_v2 {
       throw new Error(`Missing locked profile for session ${sessionId}`)
     }
     this.selfCorrectionRuntimeManager.clearSession(sessionId)
-    this.ensureSessionModelBinding(sessionId, lockedProfileId)
+    const sessionBinding = this.ensureSessionModelBinding(sessionId, lockedProfileId)
+    const currentRunMaxTokens = this.getEffectiveMaxTokensFromBinding(sessionBinding)
     const recursionLimit = this.settings?.recursionLimit ?? 200
     const loadedSession = this.chatHistoryService.loadSession(sessionId)
-    const baseMessages = loadedSession ? mapStoredMessagesToChatMessages(Array.from(loadedSession.messages.values())) : []
+    let baseMessages = loadedSession
+      ? mapStoredMessagesToChatMessages(Array.from(loadedSession.messages.values()))
+      : []
+
+    const shouldResetCompressionArtifacts =
+      !!loadedSession &&
+      (typeof loadedSession.lastProfileMaxTokens !== 'number' ||
+        currentRunMaxTokens > loadedSession.lastProfileMaxTokens)
+    if (shouldResetCompressionArtifacts && baseMessages.length > 0) {
+      const reset = clearAllCompressionArtifacts(baseMessages)
+      if (reset.changed) {
+        baseMessages = reset.messages
+        console.log(
+          `[AgentService_v2] Cleared compression artifacts before run (sessionId=${sessionId}, prevMaxTokens=${loadedSession?.lastProfileMaxTokens ?? 'unknown'}, nextMaxTokens=${currentRunMaxTokens}).`
+        )
+      }
+    }
     const runExperimentalFlags = resolveRunExperimentalFlags(context, this.settings)
 
     const initialState = {
       messages: [...baseMessages],
-      full_messages: [...baseMessages],
       sessionId: sessionId,
       startup_input: input,
       startup_mode: startMode,
@@ -1760,15 +1853,16 @@ export class AgentService_v2 {
       })
 
       // Persistence
-      if (result && (result.full_messages || result.messages)) {
-        const finalMessages = result.full_messages || result.messages
+      if (result && result.messages) {
+        const finalMessages = result.messages
         const sessionToSave = loadedSession || {
           id: sessionId,
           title: 'New Session',
           messages: new Map(),
-          lastCheckpointOffset: 0
+          lastCheckpointOffset: 0,
+          lastProfileMaxTokens: currentRunMaxTokens
         }
-        this.updateSessionFromMessages(sessionToSave, finalMessages as BaseMessage[])
+        this.updateSessionFromMessages(sessionToSave, finalMessages as BaseMessage[], currentRunMaxTokens)
         this.chatHistoryService.saveSession(sessionToSave)
       }
     } catch (err: any) {
@@ -1812,7 +1906,7 @@ export class AgentService_v2 {
     if (!this.graph) return
     try {
       const snapshot = await this.graph.getState({ configurable: { thread_id: sessionId } })
-      let messages = ((snapshot as any)?.values?.full_messages || (snapshot as any)?.values?.messages) as BaseMessage[] | undefined
+      let messages = (snapshot as any)?.values?.messages as BaseMessage[] | undefined
       if (!messages || messages.length === 0) return
       
       // Check if there's an aborted message captured in the instance variable
@@ -1826,9 +1920,14 @@ export class AgentService_v2 {
         id: sessionId,
         title: 'New Session',
         messages: new Map(),
-        lastCheckpointOffset: 0
+        lastCheckpointOffset: 0,
+        lastProfileMaxTokens: this.getEffectiveMaxTokensForSession(sessionId)
       }
-      this.updateSessionFromMessages(session, messages)
+      this.updateSessionFromMessages(
+        session,
+        messages,
+        this.getEffectiveMaxTokensForSession(sessionId)
+      )
       this.chatHistoryService.saveSession(session)
     } catch (error) {
       console.warn('[AgentService_v2] Failed to save session from checkpoint:', error)
@@ -1837,7 +1936,11 @@ export class AgentService_v2 {
 
   // --- Session Management (Legacy / Internal) ---
 
-  private updateSessionFromMessages(session: ChatSession, messages: BaseMessage[]): void {
+  private updateSessionFromMessages(
+    session: ChatSession,
+    messages: BaseMessage[],
+    lastProfileMaxTokens?: number
+  ): void {
     let persisted = messages.filter((m) => !this.helpers.isEphemeral(m))
     const toolCallCleanResult = removeUnmatchedToolCallsFromHistory(persisted)
     persisted = toolCallCleanResult.messages
@@ -1874,6 +1977,9 @@ export class AgentService_v2 {
     }
 
     session.messages = newMessagesMap
+    if (typeof lastProfileMaxTokens === 'number') {
+      session.lastProfileMaxTokens = lastProfileMaxTokens
+    }
   }
 
   loadChatSession(sessionId: string): ChatSession | null {
@@ -1912,7 +2018,18 @@ export class AgentService_v2 {
     }
 
     const kept = entries.slice(0, idx)
-    session.messages = new Map(kept)
+    const keptStoredMessages = kept.map(([, msg]) => msg)
+    const keptMessages = mapStoredMessagesToChatMessages(keptStoredMessages as any[])
+    const rollbackSanitized = sanitizeCompressionAfterRollback(keptMessages, {
+      pruneToolWindow: 10,
+      protectedNormalRounds: COMPACTION_PROTECTED_NORMAL_USER_ROUNDS
+    })
+
+    this.updateSessionFromMessages(
+      session,
+      rollbackSanitized.messages,
+      session.lastProfileMaxTokens
+    )
     this.chatHistoryService.saveSession(session)
 
     return { ok: true, removedCount: entries.length - idx }

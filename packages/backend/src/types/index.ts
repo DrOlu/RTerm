@@ -273,6 +273,7 @@ export interface ChatSession {
   title: string
   messages: Map<string, StoredMessage>
   lastCheckpointOffset: number
+  lastProfileMaxTokens?: number
 }
 
 // ============ Agent Events (Main → Renderer) ============

@@ -1,12 +1,18 @@
 import { BaseMessage, ToolMessage } from '@langchain/core/messages'
+import { cloneMessageWithPatch } from './utils/message_clone'
+
+export interface PruneLabelResult {
+  messages: BaseMessage[]
+  newlyTaggedCount: number
+  totalTaggedCount: number
+  estimatedPrunedTokens: number
+  changed: boolean
+}
 
 export class TokenManager {
   // Conservative estimate: 4 chars per token
   private static readonly CHARS_PER_TOKEN = 4
   
-  // Pruning Thresholds
-  // Start pruning when accumulated tool outputs exceed this (40k tokens)
-  private static readonly PRUNE_PROTECT = 40_000
   // Minimum amount to prune to avoid frequent small updates (20k tokens)
   private static readonly PRUNE_MINIMUM = 20_000
   // Reserve tokens for output generation
@@ -18,12 +24,28 @@ export class TokenManager {
   // Number of recent tool messages to protect regardless of size
   private static readonly RECENT_TOOL_MESSAGES_TO_PROTECT = 10
 
+  // Keys/markers used by dynamic request-history pruning.
+  static readonly PRUNE_FLAG_KEY = '_gyshellPrune'
+  static readonly LAST_COMPACTION_FLAG_KEY = 'last_compaction'
+  static readonly PRUNED_CONTENT_PLACEHOLDER = '[Content Pruned by TokenManager]'
+
   /**
    * Estimate token count for a string using simple character length heuristic
    */
   static estimate(input: string | undefined | null): number {
     if (!input) return 0
     return Math.max(0, Math.round(input.length / this.CHARS_PER_TOKEN))
+  }
+
+  static estimateMessages(messages: BaseMessage[]): number {
+    let total = 0
+    for (const message of messages) {
+      const content = typeof message.content === 'string'
+        ? message.content
+        : JSON.stringify(message.content)
+      total += this.estimate(content)
+    }
+    return total
   }
 
   /**
@@ -38,25 +60,30 @@ export class TokenManager {
     return currentTokens > usable
   }
 
+  static hasPruneLabel(message: BaseMessage): boolean {
+    const additionalKwargs = (message as any)?.additional_kwargs
+    return additionalKwargs?.[this.PRUNE_FLAG_KEY] === true
+  }
+
+  static hasLastCompactionFlag(message: BaseMessage): boolean {
+    const additionalKwargs = (message as any)?.additional_kwargs
+    return additionalKwargs?.[this.LAST_COMPACTION_FLAG_KEY] === true
+  }
+
   /**
-   * Prune messages to reduce token usage
-   * Strategy based on opencode:
-   * 1. Protect the most recent 5 ToolMessages.
-   * 2. For ToolMessages older than that, apply PRUNE_PROTECT threshold.
-   * 3. Replace content if total pruned amount > PRUNE_MINIMUM.
+   * Mark prune candidates by writing a prune label to additional_kwargs.
+   * It never mutates message content.
    */
-  static prune(messages: BaseMessage[]): BaseMessage[] {
-    // We need to work on a copy to avoid mutating the original reference in place
-    // until we are sure we want to return a new list
+  static applyPruneLabels(messages: BaseMessage[]): PruneLabelResult {
     const msgs = [...messages]
+    const pruneWindowStartIndex = this.getPruneWindowStartIndex(msgs)
     
-    let totalToolTokens = 0
-    let prunedTokens = 0
-    const indicesToPrune: number[] = []
+    let estimatedPrunedTokens = 0
+    const indicesToLabel: number[] = []
     let toolMessageCount = 0
 
     // Traverse backwards
-    for (let i = msgs.length - 1; i >= 0; i--) {
+    for (let i = msgs.length - 1; i >= pruneWindowStartIndex; i--) {
       const msg = msgs[i]
       
       // 1. Identify ToolMessages
@@ -76,46 +103,75 @@ export class TokenManager {
 
         // 4. Estimate tokens
         const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
-        // Check if already pruned
-        if (content.includes('[Content Pruned]')) continue
+        // Skip any message already tagged in additional_kwargs.
+        if (this.hasPruneLabel(msg)) continue
 
         const estimate = this.estimate(content)
-        totalToolTokens += estimate
-
-        // 5. If accumulated tool tokens exceed protection threshold, mark for pruning
-        if (totalToolTokens > this.PRUNE_PROTECT) {
-          prunedTokens += estimate
-          indicesToPrune.push(i)
-        }
+        estimatedPrunedTokens += estimate
+        indicesToLabel.push(i)
       }
     }
 
-    // 6. Only apply pruning if we can save a significant amount (PRUNE_MINIMUM)
-    if (prunedTokens > this.PRUNE_MINIMUM) {
-      console.log(`[TokenManager] Pruning triggered. Saving ~${prunedTokens} tokens from ${indicesToPrune.length} messages.`)
-      
-      for (const index of indicesToPrune) {
-        const originalMsg = msgs[index]
-        // Create a new message instance with pruned content
-        // We preserve metadata but replace content
-        const prunedMsg = new (originalMsg.constructor as any)({
-          ...originalMsg,
-          content: `[Content Pruned by TokenManager] Original length: ~${this.estimate(typeof originalMsg.content === 'string' ? originalMsg.content : JSON.stringify(originalMsg.content))} tokens.`
-        })
-        // Ensure strictly type-compatible
-        prunedMsg.id = originalMsg.id
-        if ('name' in originalMsg) (prunedMsg as any).name = (originalMsg as any).name
-        if ('tool_call_id' in (originalMsg as any)) (prunedMsg as any).tool_call_id = (originalMsg as any).tool_call_id
-        
-        msgs[index] = prunedMsg
+    // 5. Only label if estimated savings are meaningful (PRUNE_MINIMUM)
+    if (estimatedPrunedTokens <= this.PRUNE_MINIMUM) {
+      return {
+        messages,
+        newlyTaggedCount: 0,
+        totalTaggedCount: this.countTaggedMessages(messages),
+        estimatedPrunedTokens,
+        changed: false
       }
-      
-      return msgs
     }
 
-    // No changes needed
-    return messages
+    let newlyTaggedCount = 0
+    for (const index of indicesToLabel) {
+      const originalMsg = msgs[index]
+      if (this.hasPruneLabel(originalMsg)) continue
+      const nextAdditionalKwargs = {
+        ...((originalMsg as any).additional_kwargs || {}),
+        [this.PRUNE_FLAG_KEY]: true
+      }
+      msgs[index] = cloneMessageWithPatch(originalMsg, {
+        additionalKwargs: nextAdditionalKwargs
+      })
+      newlyTaggedCount += 1
+    }
+
+    return {
+      messages: newlyTaggedCount > 0 ? msgs : messages,
+      newlyTaggedCount,
+      totalTaggedCount: this.countTaggedMessages(newlyTaggedCount > 0 ? msgs : messages),
+      estimatedPrunedTokens,
+      changed: newlyTaggedCount > 0
+    }
+  }
+
+  private static countTaggedMessages(messages: BaseMessage[]): number {
+    let count = 0
+    for (const message of messages) {
+      if (this.hasPruneLabel(message)) {
+        count += 1
+      }
+    }
+    return count
+  }
+
+  private static getPruneWindowStartIndex(messages: BaseMessage[]): number {
+    let lastCompactionIndex = -1
+    for (let i = 0; i < messages.length; i++) {
+      if (this.hasLastCompactionFlag(messages[i])) {
+        lastCompactionIndex = i
+      }
+    }
+    if (lastCompactionIndex < 0) {
+      return 0
+    }
+
+    let leadingSystemCount = 0
+    while (leadingSystemCount < messages.length && messages[leadingSystemCount]?.type === 'system') {
+      leadingSystemCount += 1
+    }
+    return Math.max(lastCompactionIndex, leadingSystemCount)
   }
 
 }
-

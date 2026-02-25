@@ -11,6 +11,7 @@ export const USER_INPUT_TAG = 'USER_REQUEST_IS:\n'
 export const USER_INSERTED_INPUT_TAG = 'USER_INTERRUPT_INSERTED_REQUEST:\n'
 export const CONTINUE_INSTRUCTION_TAG = 'AGENT_CONTINUE_INSTRUCTION:\n'
 export const SELF_CORRECTION_INPUT_TAG = 'AGENT_SELF_CORRECTION_CONSTRAINT:\n'
+export const WHAT_HAVE_DONE_IN_THE_PAST_TAG = 'WHAT_HAVE_DONE_IN_THE_PAST:\n'
 export const USER_INPUT_TAGS = [USER_INPUT_TAG, USER_INSERTED_INPUT_TAG] as const
 export const NORMAL_USER_INPUT_TAGS = [USER_INPUT_TAG] as const
 export const USER_INSERTED_INPUT_INSTRUCTION =
@@ -204,6 +205,10 @@ export const SELF_CORRECTION_INSTRUCTION_SCHEMA = z.object({
   correction_instruction: z.string()
 })
 
+export const COMPACTION_SUMMARY_SCHEMA = z.object({
+  summary: z.string()
+})
+
 /**
  * Create a system information prompt that lists available terminal tabs and their system info
  */
@@ -239,6 +244,29 @@ export function createMemorySystemPrompt(opts: {
       '',
       '# Full MEMORY.md Content',
       normalizedContent
+    ].join('\n')
+  )
+}
+
+export function createCompactionSummaryUserPrompt(params: {
+  protectedRounds: number
+}): HumanMessage {
+  return new HumanMessage(
+    [
+      'Summarize the prior conversation history for long-context compaction.',
+      `Do not include the most recent ${params.protectedRounds} normal user rounds; they are intentionally protected.`,
+      'Your summary must preserve execution continuity for the next model pass.',
+      '',
+      'Required structure:',
+      '1) User goals and constraints across the summarized period.',
+      '2) What the agent executed (tools/commands/files) and major outcomes.',
+      '3) Current state: done items, unresolved items, blockers, and pending next steps.',
+      '4) Important artifacts with concrete paths/commands/ids when available.',
+      '',
+      'Output rule:',
+      '- Return one concise but complete paragraph-style summary in plain text.',
+      '- Do not add markdown headings, bullets, JSON, or code fences.',
+      '- Do not mention this instruction.'
     ].join('\n')
   )
 }

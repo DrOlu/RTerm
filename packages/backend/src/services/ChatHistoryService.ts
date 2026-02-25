@@ -10,6 +10,7 @@ export interface StoredChatSession {
     data: any
   }>
   lastCheckpointOffset: number
+  lastProfileMaxTokens?: number
   createdAt: number
   updatedAt: number
 }
@@ -51,6 +52,7 @@ export class ChatHistoryService {
         data: msg
       })),
       lastCheckpointOffset: session.lastCheckpointOffset,
+      lastProfileMaxTokens: session.lastProfileMaxTokens,
       createdAt: existing?.createdAt || Date.now(),
       updatedAt: Date.now()
     }
@@ -81,7 +83,8 @@ export class ChatHistoryService {
       id: storedSession.id,
       title: storedSession.title,
       messages,
-      lastCheckpointOffset: storedSession.lastCheckpointOffset
+      lastCheckpointOffset: storedSession.lastCheckpointOffset,
+      lastProfileMaxTokens: storedSession.lastProfileMaxTokens
     }
   }
 
