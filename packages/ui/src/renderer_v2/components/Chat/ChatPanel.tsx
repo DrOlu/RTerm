@@ -13,6 +13,7 @@ import { QueueModeSwitch } from './Queue/QueueModeSwitch'
 import type { QueueItem } from '../../stores/ChatQueueStore'
 import { RichInput, type RichInputHandle } from './RichInput'
 import { CHAT_PANEL_SESSION_TITLE_CHAR_LIMIT, formatChatPanelSessionTitle } from '../../lib/sessionTitleDisplay'
+import type { ComposerDraft, InputImageAttachment } from '../../lib/userInput'
 import './chat.scss'
 
 import { createPortal } from 'react-dom'
@@ -91,9 +92,9 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
   const profileSelectRef = useRef<SelectHandle>(null)
   const [inputEmpty, setInputEmpty] = useState(true)
 
-  const checkInputEmpty = useCallback(() => {
-    const val = richInputRef.current?.getValue() || ''
-    setInputEmpty(!val.trim())
+  const checkInputEmpty = useCallback((draft?: ComposerDraft) => {
+    const current = draft || richInputRef.current?.getDraft() || { text: '', images: [] }
+    setInputEmpty(!(current.text.trim().length > 0 || current.images.length > 0))
   }, [])
   const [showHistory, setShowHistory] = useState(false)
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
@@ -167,18 +168,42 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
 
   // Auto-resize input - removed as RichInput handles its own size via contentEditable
 
-  const handleSendNormal = (val: string) => {
-    if (!val.trim()) return
+  const normalizeInputImages = (
+    images: Array<InputImageAttachment & { localFile?: File }>
+  ): InputImageAttachment[] =>
+    images
+      .map((item) => ({
+        ...(item.attachmentId ? { attachmentId: item.attachmentId } : {}),
+        ...(item.fileName ? { fileName: item.fileName } : {}),
+        ...(item.mimeType ? { mimeType: item.mimeType } : {}),
+        ...(typeof item.sizeBytes === 'number' ? { sizeBytes: item.sizeBytes } : {}),
+        ...(item.sha256 ? { sha256: item.sha256 } : {}),
+        ...(item.previewDataUrl ? { previewDataUrl: item.previewDataUrl } : {}),
+        ...(item.status ? { status: item.status } : {}),
+        ...(item.localFile instanceof File ? { localFile: item.localFile } : {})
+      }))
+      .filter((item) => !!String(item.attachmentId || '').trim() || (item as any).localFile instanceof File)
+
+  const handleSendNormal = async (draft: ComposerDraft) => {
+    if (!draft.text.trim() && draft.images.length === 0) return
     const sessionId = store.chat.activeSessionId || store.chat.createSession()
-    store.sendChatMessage(sessionId, val, { mode: 'normal' })
+    const sent = await store.sendChatMessage(
+      sessionId,
+      {
+        text: draft.text,
+        ...(draft.images.length > 0 ? { images: normalizeInputImages(draft.images) } : {})
+      },
+      { mode: 'normal' }
+    )
+    if (!sent) return
     richInputRef.current?.clear()
     setInputEmpty(true)
   }
 
-  const handleQueueAdd = (val: string) => {
-    if (!val.trim()) return
+  const handleQueueAdd = (draft: ComposerDraft) => {
+    if (!draft.text.trim() && draft.images.length === 0) return
     const sessionId = store.chat.activeSessionId || store.chat.createSession()
-    store.chat.addQueueItem(sessionId, val)
+    store.chat.addQueueItem(sessionId, draft.text, normalizeInputImages(draft.images))
     richInputRef.current?.clear()
     setInputEmpty(true)
   }
@@ -188,18 +213,18 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
     store.chat.startQueue(sessionId)
   }
 
-  const handlePrimaryAction = () => {
-    const val = richInputRef.current?.getValue() || ''
+  const handlePrimaryAction = async () => {
+    const draft = richInputRef.current?.getDraft() || { text: '', images: [] }
     if (isQueueMode) {
-      if (val.trim()) {
-        handleQueueAdd(val)
+      if (draft.text.trim() || draft.images.length > 0) {
+        handleQueueAdd(draft)
       } else if (!isThinking && queueItems.length > 0 && !isQueueRunning) {
         handleQueueRun()
       }
       return
     }
-    if (val.trim()) {
-      handleSendNormal(val)
+    if (draft.text.trim() || draft.images.length > 0) {
+      await handleSendNormal(draft)
     }
   }
 
@@ -267,7 +292,7 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
   }
 
   const renderPrimaryAction = () => (
-    <button className="icon-btn-sm primary" onClick={handlePrimaryAction} disabled={shouldShowPrimaryIdle ? primaryDisabled : false}>
+    <button className="icon-btn-sm primary" onClick={() => { void handlePrimaryAction() }} disabled={shouldShowPrimaryIdle ? primaryDisabled : false}>
       {useQueueAddIcon ? (
         <Plus size={16} strokeWidth={2} />
       ) : isQueueMode ? (
@@ -387,7 +412,10 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
     try {
       await window.gyshell.agent.rollbackToMessage(activeSession.id, backendMessageId)
       store.chat.rollbackToMessage(activeSession.id, backendMessageId)
-      richInputRef.current?.setValue(rollbackTarget.content || '')
+      richInputRef.current?.setDraft({
+        text: rollbackTarget.content || '',
+        images: normalizeInputImages((rollbackTarget.metadata?.inputImages || []) as Array<InputImageAttachment & { localFile?: File }>)
+      })
       setInputEmpty(false)
     } catch (error) {
       console.error('Failed to rollback message:', error)
@@ -397,21 +425,24 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
   }
 
   const handleQueueEditRequest = (item: QueueItem) => {
-    const currentVal = richInputRef.current?.getValue() || ''
-    if (currentVal.trim()) {
+    const currentDraft = richInputRef.current?.getDraft() || { text: '', images: [] }
+    if (currentDraft.text.trim() || currentDraft.images.length > 0) {
       setQueueEditTarget(item)
       return
     }
     if (!activeSessionId) return
     store.chat.removeQueueItem(activeSessionId, item.id)
-    richInputRef.current?.setValue(item.content)
+    richInputRef.current?.setDraft({ text: item.content, images: item.images || [] })
     setInputEmpty(false)
   }
 
   const handleQueueEditConfirm = () => {
     if (!queueEditTarget || !activeSessionId) return
     store.chat.removeQueueItem(activeSessionId, queueEditTarget.id)
-    richInputRef.current?.setValue(queueEditTarget.content)
+    richInputRef.current?.setDraft({
+      text: queueEditTarget.content,
+      images: queueEditTarget.images || []
+    })
     setInputEmpty(false)
     setQueueEditTarget(null)
   }
@@ -657,8 +688,14 @@ export const ChatPanel: React.FC<{ store: AppStore }> = observer(({ store }) => 
               ref={richInputRef}
               store={store}
               placeholder={t.chat.placeholder}
-              onSend={isQueueMode ? handleQueueAdd : handleSendNormal}
-              onInput={checkInputEmpty}
+              onSend={(draft) => {
+                if (isQueueMode) {
+                  handleQueueAdd(draft)
+                  return
+                }
+                void handleSendNormal(draft)
+              }}
+              onInput={(draft) => checkInputEmpty(draft)}
               disabled={inputDisabled}
             />
             

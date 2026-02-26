@@ -23,6 +23,11 @@ import {
   type ChatTimelineItem,
 } from "../lib/chat-timeline";
 import {
+  createImagePreviewDataUrl,
+  isSupportedImageFile,
+  readFileAsDataUrl,
+} from "../lib/input-images";
+import {
   applyUiUpdate,
   cloneMessage,
   cloneSession,
@@ -62,6 +67,8 @@ import type {
   McpServerSummary,
   SkillSummary,
   GatewayTerminalSummary,
+  InputImageAttachment,
+  UserInputPayload,
   UIUpdateAction,
 } from "../types";
 
@@ -111,6 +118,23 @@ const HEARTBEAT_INTERVAL_MS = 25000;
 const HEARTBEAT_RPC_TIMEOUT_MS = 5000;
 const HEARTBEAT_MAX_FAILURES = 2;
 
+interface ComposerImageAttachment extends InputImageAttachment {
+  id: string;
+  previewUrl: string;
+  localFile?: File;
+}
+
+function revokePreviewUrls(images: ComposerImageAttachment[]): void {
+  images.forEach((item) => {
+    if (!String(item.previewUrl || "").startsWith("blob:")) return;
+    try {
+      URL.revokeObjectURL(item.previewUrl);
+    } catch {
+      // ignore revoke errors
+    }
+  });
+}
+
 function computeReconnectDelayMs(attempt: number): number {
   const exponential = Math.min(
     RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1),
@@ -128,6 +152,7 @@ export interface MobileControllerState {
   actionPending: boolean;
   composerValue: string;
   composerCursor: number;
+  composerImages: ComposerImageAttachment[];
   mentionOptions: MentionOption[];
   terminals: GatewayTerminalSummary[];
   sshConnections: GatewaySshConnectionSummary[];
@@ -157,6 +182,13 @@ export interface MobileControllerActions {
   setAccessTokenInput: (value: string) => void;
   setComposerValue: (value: string, cursor: number) => void;
   setComposerCursor: (cursor: number) => void;
+  attachImages: (files: File[]) => Promise<void>;
+  removeComposerImage: (imageId: string) => void;
+  clearComposerImages: () => void;
+  restoreComposerDraft: (
+    value: string,
+    images: InputImageAttachment[],
+  ) => void;
   pickMention: (option: MentionOption) => void;
   connectGateway: () => Promise<void>;
   disconnectGateway: () => void;
@@ -201,6 +233,9 @@ export function useMobileController(): {
 
   const [composerValue, setComposerValueRaw] = React.useState("");
   const [composerCursor, setComposerCursor] = React.useState(0);
+  const [composerImages, setComposerImagesRaw] = React.useState<
+    ComposerImageAttachment[]
+  >([]);
 
   const [view, setView] = React.useState<ViewState>(INITIAL_VIEW_STATE);
   const viewRef = React.useRef<ViewState>(INITIAL_VIEW_STATE);
@@ -215,6 +250,10 @@ export function useMobileController(): {
   React.useEffect(() => {
     accessTokenInputRef.current = accessTokenInput;
   }, [accessTokenInput]);
+  const composerImagesRef = React.useRef(composerImages);
+  React.useEffect(() => {
+    composerImagesRef.current = composerImages;
+  }, [composerImages]);
 
   const reconnectTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -242,6 +281,23 @@ export function useMobileController(): {
       reconnectTimerRef.current = null;
     }
   }, []);
+
+  const setComposerImages = React.useCallback(
+    (
+      updater: (
+        current: ComposerImageAttachment[],
+      ) => ComposerImageAttachment[],
+    ) => {
+      setComposerImagesRaw((current) => {
+        const next = updater(current);
+        const nextIds = new Set(next.map((item) => item.id));
+        const removed = current.filter((item) => !nextIds.has(item.id));
+        revokePreviewUrls(removed);
+        return next;
+      });
+    },
+    [],
+  );
 
   const stopHeartbeat = React.useCallback(() => {
     if (heartbeatTimerRef.current) {
@@ -280,6 +336,12 @@ export function useMobileController(): {
       view.skills,
     );
   }, [composerCursor, composerValue, view.skills, view.terminals]);
+
+  React.useEffect(() => {
+    return () => {
+      revokePreviewUrls(composerImagesRef.current);
+    };
+  }, []);
 
   const applyLiveUpdate = React.useCallback((update: UIUpdateAction) => {
     setView((previous) => {
@@ -1089,9 +1151,75 @@ export function useMobileController(): {
     [client],
   );
 
+  const sanitizeImageAttachmentForSend = React.useCallback(
+    (image: InputImageAttachment): InputImageAttachment => {
+      const attachmentId = String(image.attachmentId || "").trim();
+      const fileName = String(image.fileName || "").trim();
+      const mimeType = String(image.mimeType || "").trim();
+      const sha256 = String(image.sha256 || "").trim();
+      const previewDataUrl = String(image.previewDataUrl || "").trim();
+      const status = image.status === "ready" || image.status === "missing" ? image.status : undefined;
+      return {
+        ...(attachmentId ? { attachmentId } : {}),
+        ...(fileName ? { fileName } : {}),
+        ...(mimeType ? { mimeType } : {}),
+        ...(typeof image.sizeBytes === "number" && Number.isFinite(image.sizeBytes) ? { sizeBytes: image.sizeBytes } : {}),
+        ...(sha256 ? { sha256 } : {}),
+        ...(previewDataUrl ? { previewDataUrl } : {}),
+        ...(status ? { status } : {}),
+      };
+    },
+    [],
+  );
+
+  const resolveComposerImagesForSend = React.useCallback(
+    async (images: ComposerImageAttachment[]): Promise<InputImageAttachment[]> => {
+      if (!Array.isArray(images) || images.length === 0) return [];
+      const out: InputImageAttachment[] = [];
+      for (const image of images) {
+        const attachmentId = String(image.attachmentId || "").trim();
+        if (attachmentId) {
+          const normalized = sanitizeImageAttachmentForSend(image);
+          out.push(normalized);
+          continue;
+        }
+
+        if (image.localFile instanceof File) {
+          const dataBase64 = await readFileAsDataUrl(image.localFile);
+          const previewDataUrl =
+            String(image.previewDataUrl || "").trim() ||
+            (await createImagePreviewDataUrl(image.localFile).catch(() => ""));
+          const saved = await client.request<InputImageAttachment>(
+            "system:saveImageAttachment",
+            {
+              payload: {
+                dataBase64,
+                fileName: image.fileName || image.localFile.name || undefined,
+                mimeType: image.mimeType || image.localFile.type || undefined,
+                ...(previewDataUrl ? { previewDataUrl } : {}),
+              },
+            },
+          );
+          const normalized = sanitizeImageAttachmentForSend({
+            ...saved,
+            fileName: image.fileName || saved.fileName,
+            mimeType: image.mimeType || saved.mimeType,
+            sizeBytes: image.sizeBytes || saved.sizeBytes,
+            previewDataUrl: previewDataUrl || saved.previewDataUrl,
+          });
+          out.push(normalized);
+          continue;
+        }
+      }
+      return out;
+    },
+    [client, sanitizeImageAttachmentForSend],
+  );
+
   const sendMessage = React.useCallback(async () => {
     const content = composerValue.trim();
-    if (!content) return;
+    const pendingImages = composerImagesRef.current;
+    if (!content && pendingImages.length === 0) return;
 
     if (!client.isConnected()) {
       setConnectionError(
@@ -1117,9 +1245,23 @@ export function useMobileController(): {
       snapshot.terminals,
       snapshot.skills,
     );
-
-    setComposerValueRaw("");
-    setComposerCursor(0);
+    let resolvedImages: InputImageAttachment[] = [];
+    if (pendingImages.length > 0) {
+      try {
+        resolvedImages = await resolveComposerImagesForSend(pendingImages);
+      } catch (error) {
+        setConnectionError(`Failed to prepare images: ${safeError(error)}`);
+        return;
+      }
+    }
+    const userInput: UserInputPayload = {
+      text: encodedText,
+      ...(resolvedImages.length > 0
+        ? {
+            images: resolvedImages,
+          }
+        : {}),
+    };
 
     setView((previous) => {
       const sessions = { ...previous.sessions };
@@ -1143,11 +1285,14 @@ export function useMobileController(): {
     try {
       await client.request("agent:startTaskAsync", {
         sessionId: targetSessionId,
-        userText: encodedText,
+        userInput,
         options: {
           startMode: session?.isBusy ? "inserted" : "normal",
         },
       });
+      setComposerValueRaw("");
+      setComposerCursor(0);
+      setComposerImages(() => []);
     } catch (error) {
       setConnectionError(`Failed to send prompt: ${safeError(error)}`);
       setView((previous) => {
@@ -1166,7 +1311,7 @@ export function useMobileController(): {
         };
       });
     }
-  }, [client, composerValue, connectionStatus, createSessionInternal]);
+  }, [client, composerValue, connectionStatus, createSessionInternal, resolveComposerImagesForSend, setComposerImages]);
 
   const stopActiveSession = React.useCallback(async () => {
     const active = viewRef.current.activeSessionId;
@@ -1458,6 +1603,72 @@ export function useMobileController(): {
     [],
   );
 
+  const attachImages = React.useCallback(
+    async (files: File[]) => {
+      if (!Array.isArray(files) || files.length === 0) return;
+
+      const candidates = files.filter((file) => isSupportedImageFile(file));
+      if (candidates.length === 0) return;
+
+      const created: ComposerImageAttachment[] = [];
+      for (const file of candidates) {
+        try {
+          const previewDataUrl = await createImagePreviewDataUrl(file).catch(() => "");
+          created.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            fileName: file.name || undefined,
+            mimeType: file.type || undefined,
+            sizeBytes: Number.isFinite(file.size) ? file.size : undefined,
+            previewUrl: previewDataUrl || URL.createObjectURL(file),
+            ...(previewDataUrl ? { previewDataUrl } : {}),
+            localFile: file,
+          });
+        } catch (error) {
+          setConnectionError(`Failed to attach image: ${safeError(error)}`);
+        }
+      }
+
+      if (created.length === 0) return;
+      setComposerImages((current) => [...current, ...created]);
+    },
+    [setComposerImages],
+  );
+
+  const removeComposerImage = React.useCallback(
+    (imageId: string) => {
+      if (!imageId) return;
+      setComposerImages((current) => current.filter((item) => item.id !== imageId));
+    },
+    [setComposerImages],
+  );
+
+  const clearComposerImages = React.useCallback(() => {
+    setComposerImages(() => []);
+  }, [setComposerImages]);
+
+  const restoreComposerDraft = React.useCallback(
+    (value: string, images: InputImageAttachment[]) => {
+      const text = String(value || "");
+      setComposerValueRaw(text);
+      setComposerCursor(text.length);
+      const mapped = (Array.isArray(images) ? images : [])
+        .filter((item) => !!String(item?.attachmentId || "").trim())
+        .map((item, index) => ({
+          id: `rollback-${Date.now()}-${index}`,
+          ...(item.attachmentId ? { attachmentId: item.attachmentId } : {}),
+          fileName: item.fileName || `image-${item.attachmentId || index}`,
+          mimeType: item.mimeType,
+          sizeBytes: item.sizeBytes,
+          sha256: item.sha256,
+          previewDataUrl: item.previewDataUrl,
+          status: item.status,
+          previewUrl: item.previewDataUrl || "",
+        }));
+      setComposerImages(() => mapped);
+    },
+    [setComposerImages],
+  );
+
   const pickMention = React.useCallback(
     (option: MentionOption) => {
       const context = mentionState.context;
@@ -1573,6 +1784,7 @@ export function useMobileController(): {
     actionPending,
     composerValue,
     composerCursor,
+    composerImages,
     mentionOptions: mentionState.options,
     terminals: view.terminals,
     sshConnections: view.sshConnections,
@@ -1602,6 +1814,10 @@ export function useMobileController(): {
     setAccessTokenInput,
     setComposerValue,
     setComposerCursor,
+    attachImages,
+    removeComposerImage,
+    clearComposerImages,
+    restoreComposerDraft,
     pickMention,
     connectGateway,
     disconnectGateway,

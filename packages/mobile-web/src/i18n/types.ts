@@ -47,6 +47,9 @@ export interface MobileTranslations {
     stopRun: string;
     send: string;
     sendMessage: string;
+    attachImage: string;
+    removeImage: string;
+    clearImages: string;
     mentionSkill: string;
     mentionTerminal: string;
   };

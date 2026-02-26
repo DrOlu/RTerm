@@ -276,6 +276,21 @@ export interface ChatSession {
   lastProfileMaxTokens?: number
 }
 
+export interface InputImageAttachment {
+  attachmentId?: string
+  fileName?: string
+  mimeType?: string
+  sizeBytes?: number
+  sha256?: string
+  previewDataUrl?: string
+  status?: 'ready' | 'missing'
+}
+
+export interface UserInputPayload {
+  text: string
+  images?: InputImageAttachment[]
+}
+
 // ============ Agent Events (Main → Renderer) ============
 export type AgentEventType =
   | 'say'
@@ -300,6 +315,7 @@ export interface AgentEvent {
   type: AgentEventType
   messageId?: string
   inputKind?: 'normal' | 'inserted'
+  inputImages?: InputImageAttachment[]
   level?: 'info' | 'warning' | 'error'
   content?: string
   command?: string

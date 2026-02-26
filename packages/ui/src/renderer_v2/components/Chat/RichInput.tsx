@@ -2,20 +2,36 @@ import React, { useRef, useState, useCallback, useImperativeHandle, forwardRef }
 import { createPortal } from 'react-dom';
 import { observer } from 'mobx-react-lite';
 import { AppStore } from '../../stores/AppStore';
+import {
+  createImagePreviewDataUrl,
+  extractClipboardImageFiles,
+  isRecognizedImageFile,
+  type ComposerDraft,
+  type ComposerImageAttachment,
+  type InputImageAttachment
+} from '../../lib/userInput';
 import './richInput.scss';
+
+type DraftInputImageAttachment = InputImageAttachment & {
+  id?: string;
+  localFile?: File;
+  previewUrl?: string;
+}
 
 export interface RichInputHandle {
   focus: () => void;
   getValue: () => string;
   setValue: (val: string) => void;
+  getDraft: () => ComposerDraft;
+  setDraft: (draft: { text?: string; images?: DraftInputImageAttachment[] }) => void;
   clear: () => void;
 }
 
 interface RichInputProps {
   store: AppStore;
   placeholder?: string;
-  onSend: (value: string) => void;
-  onInput?: () => void;
+  onSend: (draft: ComposerDraft) => void;
+  onInput?: (draft: ComposerDraft) => void;
   disabled?: boolean;
 }
 
@@ -31,8 +47,85 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
   const [suggestions, setSuggestions] = useState<{ type: 'skill' | 'terminal' | 'file' | 'paste'; name: string; id?: string; preview?: string }[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [suggestionPos, setSuggestionPos] = useState({ top: 0, left: 0 });
+  const [imageAttachments, setImageAttachments] = useState<ComposerImageAttachment[]>([]);
+  const imageAttachmentsRef = useRef<ComposerImageAttachment[]>([]);
   const pendingMentionDeleteRef = useRef<HTMLElement | null>(null);
   const cursorMarker = '\uFEFF';
+
+  const isBlobPreview = (url: string): boolean => String(url || '').startsWith('blob:');
+
+  const releasePreviewUrl = (url: string) => {
+    if (!isBlobPreview(url)) return;
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      // ignore revoke errors
+    }
+  };
+
+  const normalizeAttachment = (input: DraftInputImageAttachment, fallbackId?: string): ComposerImageAttachment | null => {
+    const attachmentId = String(input.attachmentId || '').trim();
+    const localFile = (input as any).localFile;
+    const hasLocalFile = localFile instanceof File;
+    if (!attachmentId && !hasLocalFile) return null;
+    const previewUrlInput = String((input as any).previewUrl || '').trim();
+    const previewDataUrl = String(input.previewDataUrl || '').trim();
+    const previewUrl = previewDataUrl || previewUrlInput || (hasLocalFile ? createPreviewUrlForLocalFile(localFile) : '');
+    const fallbackName = hasLocalFile ? String(localFile.name || '').trim() : '';
+    return {
+      id: String((input as any).id || '').trim() || fallbackId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ...(attachmentId ? { attachmentId } : {}),
+      fileName: input.fileName || fallbackName || `image-${attachmentId || 'local'}`,
+      mimeType: input.mimeType || (hasLocalFile ? localFile.type || undefined : undefined),
+      sizeBytes:
+        input.sizeBytes
+        ?? (hasLocalFile && Number.isFinite(localFile.size) ? localFile.size : undefined),
+      sha256: input.sha256,
+      ...(previewDataUrl ? { previewDataUrl } : {}),
+      status: input.status,
+      previewUrl,
+      ...(hasLocalFile ? { localFile } : {})
+    };
+  };
+
+  const createPreviewUrlForLocalFile = (file: File): string => URL.createObjectURL(file);
+
+  const buildDraft = (): ComposerDraft => ({
+    text: serialize(),
+    images: imageAttachments
+  });
+
+  const updateImageAttachments = (updater: (current: ComposerImageAttachment[]) => ComposerImageAttachment[]) => {
+    setImageAttachments((current) => {
+      const next = updater(current);
+      const nextIds = new Set(next.map((item) => item.id));
+      current.forEach((item) => {
+        if (!nextIds.has(item.id)) {
+          releasePreviewUrl(item.previewUrl);
+        }
+      });
+      return next;
+    });
+  };
+
+  const buildImageFromLocalFile = async (file: File): Promise<ComposerImageAttachment | null> => {
+    if (!isRecognizedImageFile(file)) return null;
+    let previewDataUrl = '';
+    try {
+      previewDataUrl = await createImagePreviewDataUrl(file);
+    } catch {
+      previewDataUrl = '';
+    }
+    return {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fileName: file.name || 'image',
+      mimeType: file.type || undefined,
+      sizeBytes: Number.isFinite(file.size) ? file.size : undefined,
+      ...(previewDataUrl ? { previewDataUrl } : {}),
+      previewUrl: previewDataUrl || createPreviewUrlForLocalFile(file),
+      localFile: file
+    };
+  };
 
   const getMentionInfo = () => {
     const selection = window.getSelection();
@@ -262,7 +355,7 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
     setValue: (val: string) => {
       if (editorRef.current) {
         // Parser for [MENTION_XXX:#...#] labels to restore them as rich DOM nodes
-        const parts = val.split(/(\[MENTION_(?:SKILL|TAB|FILE|USER_PASTE):#.+?#(?:#.+?#)?\])/g);
+        const parts = val.split(/(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|USER_PASTE):#.+?#(?:#.+?#)?\])/g);
         editorRef.current.innerHTML = '';
         
         parts.forEach(part => {
@@ -299,6 +392,18 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
               span.textContent = fileName;
               editorRef.current?.appendChild(span);
             }
+          } else if (part.match(/\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/)) {
+            const imageMatch = part.match(/\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/);
+            if (imageMatch) {
+              const span = document.createElement('span');
+              span.className = 'mention-tag';
+              span.contentEditable = 'false';
+              span.dataset.type = 'file';
+              span.dataset.name = imageMatch[1];
+              const imageName = imageMatch[2] || imageMatch[1].split(/[/\\]/).pop() || imageMatch[1];
+              span.textContent = imageName;
+              editorRef.current?.appendChild(span);
+            }
           } else if (part.match(/\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/)) {
             const pasteMatch = part.match(/\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/);
             if (pasteMatch) {
@@ -316,9 +421,87 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
           }
         });
       }
+      updateImageAttachments(() => []);
+    },
+    getDraft: () => buildDraft(),
+    setDraft: (draft: { text?: string; images?: DraftInputImageAttachment[] }) => {
+      const nextText = typeof draft?.text === 'string' ? draft.text : '';
+      const nextImages = Array.isArray(draft?.images) ? draft.images : [];
+      if (editorRef.current) {
+        // Reuse token parser to restore text mentions.
+        const parts = nextText.split(/(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|USER_PASTE):#.+?#(?:#.+?#)?\])/g);
+        editorRef.current.innerHTML = '';
+        parts.forEach(part => {
+          const skillMatch = part.match(/\[MENTION_SKILL:#(.+?)#\]/);
+          const terminalMatch = part.match(/\[MENTION_TAB:#(.+?)##(.+?)#\]/);
+          if (skillMatch) {
+            const span = document.createElement('span');
+            span.className = 'mention-tag';
+            span.contentEditable = 'false';
+            span.dataset.type = 'skill';
+            span.dataset.name = skillMatch[1];
+            span.textContent = `@${skillMatch[1]}`;
+            editorRef.current?.appendChild(span);
+          } else if (terminalMatch) {
+            const span = document.createElement('span');
+            span.className = 'mention-tag';
+            span.contentEditable = 'false';
+            span.dataset.type = 'terminal';
+            span.dataset.name = terminalMatch[1];
+            span.dataset.id = terminalMatch[2];
+            span.textContent = `@${terminalMatch[1]}`;
+            editorRef.current?.appendChild(span);
+          } else if (part.match(/\[MENTION_FILE:#(.+?)#\]/)) {
+            const fileMatch = part.match(/\[MENTION_FILE:#(.+?)#\]/);
+            if (fileMatch) {
+              const span = document.createElement('span');
+              span.className = 'mention-tag';
+              span.contentEditable = 'false';
+              span.dataset.type = 'file';
+              span.dataset.name = fileMatch[1];
+              const fileName = fileMatch[1].split(/[/\\]/).pop() || fileMatch[1];
+              span.textContent = fileName;
+              editorRef.current?.appendChild(span);
+            }
+          } else if (part.match(/\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/)) {
+            const imageMatch = part.match(/\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/);
+            if (imageMatch) {
+              const span = document.createElement('span');
+              span.className = 'mention-tag';
+              span.contentEditable = 'false';
+              span.dataset.type = 'file';
+              span.dataset.name = imageMatch[1];
+              const imageName = imageMatch[2] || imageMatch[1].split(/[/\\]/).pop() || imageMatch[1];
+              span.textContent = imageName;
+              editorRef.current?.appendChild(span);
+            }
+          } else if (part.match(/\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/)) {
+            const pasteMatch = part.match(/\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/);
+            if (pasteMatch) {
+              const span = document.createElement('span');
+              span.className = 'mention-tag';
+              span.contentEditable = 'false';
+              span.dataset.type = 'paste';
+              span.dataset.name = pasteMatch[1];
+              span.dataset.preview = pasteMatch[2];
+              span.textContent = pasteMatch[2];
+              editorRef.current?.appendChild(span);
+            }
+          } else if (part) {
+            editorRef.current?.appendChild(document.createTextNode(part.replace(/\u00A0/g, ' ').replace(/\uFEFF/g, '')));
+          }
+        });
+      }
+      updateImageAttachments(() => {
+        const mapped = nextImages
+          .map((item, index) => normalizeAttachment(item, `rollback-${Date.now()}-${index}`))
+          .filter((item): item is ComposerImageAttachment => item !== null);
+        return mapped;
+      });
     },
     clear: () => {
       if (editorRef.current) editorRef.current.innerHTML = '';
+      updateImageAttachments(() => []);
     }
   }));
 
@@ -350,7 +533,7 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
           removeReselectedMentionTag(info.targetTag);
           pendingMentionDeleteRef.current = null;
           setShowSuggestions(false);
-          onInput?.();
+          onInput?.(buildDraft());
         } else {
           pendingMentionDeleteRef.current = info.targetTag;
           updateSuggestions();
@@ -386,15 +569,17 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      const val = serialize();
-      if (val) onSend(val);
+      const draft = buildDraft();
+      if (draft.text.trim() || draft.images.length > 0) {
+        onSend(draft);
+      }
     }
   };
 
   const handleInput = () => {
     pendingMentionDeleteRef.current = null;
     updateSuggestions();
-    onInput?.();
+    onInput?.(buildDraft());
   };
 
   // Close suggestions when disabled or when overlay opens
@@ -404,7 +589,36 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
     }
   }, [disabled, store.view]);
 
+  React.useEffect(() => {
+    imageAttachmentsRef.current = imageAttachments;
+    onInput?.(buildDraft());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageAttachments]);
+
+  const attachLocalImages = async (files: File[]): Promise<void> => {
+    if (!Array.isArray(files) || files.length === 0) return;
+    const created: ComposerImageAttachment[] = [];
+    for (const file of files) {
+      try {
+        const attachment = await buildImageFromLocalFile(file);
+        if (attachment) created.push(attachment);
+      } catch (err) {
+        console.error('[RichInput] Failed to attach image:', err);
+      }
+    }
+
+    if (created.length === 0) return;
+    updateImageAttachments((current) => [...current, ...created]);
+  };
+
   const handlePaste = async (e: React.ClipboardEvent) => {
+    const imageFiles = extractClipboardImageFiles(e.clipboardData);
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      void attachLocalImages(imageFiles);
+      return;
+    }
+
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
     
@@ -433,18 +647,65 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
     const files = Array.from(e.dataTransfer.files);
     console.log('[RichInput] Files dropped:', files.length);
     if (files.length > 0) {
+      const imageCandidates = files.filter((file) => isRecognizedImageFile(file));
+      if (imageCandidates.length > 0) {
+        void attachLocalImages(imageCandidates);
+      }
+
       files.forEach(f => {
         const path = (f as any).path;
         console.log('[RichInput] Dropped file path:', path);
-        if (path) {
+        if (path && !isRecognizedImageFile(f)) {
           insertMention({ type: 'file', name: path });
         }
       });
     }
   };
 
+  React.useEffect(() => {
+    return () => {
+      imageAttachmentsRef.current.forEach((item) => releasePreviewUrl(item.previewUrl));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="rich-input-wrapper">
+      {imageAttachments.length > 0 && (
+        <div className="rich-input-image-strip">
+          <button
+            type="button"
+            className="rich-input-image-clear-all"
+            onClick={() => {
+              updateImageAttachments(() => []);
+            }}
+            aria-label="Remove all images"
+            title="Remove all images"
+          >
+            <span>ALL</span>
+          </button>
+          {imageAttachments.map((image) => (
+            <div key={image.id} className="rich-input-image-chip">
+              <button
+                type="button"
+                className="rich-input-image-remove"
+                onClick={() => {
+                  updateImageAttachments((current) => current.filter((item) => item.id !== image.id));
+                }}
+                aria-label="Remove image"
+                title="Remove image"
+              >
+                ×
+              </button>
+              {image.previewUrl ? (
+                <img src={image.previewUrl} alt="Attached image" />
+              ) : (
+                <div className="rich-input-image-missing">IMG</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div
         ref={editorRef}
         className={`rich-input-editor ${disabled ? 'disabled' : ''}`}

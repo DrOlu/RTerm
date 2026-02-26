@@ -66,7 +66,13 @@ export class UIHistoryService {
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i]
       if (message.type === 'tokens_count') continue
-      const preview = String(message.content || message.metadata?.output || '')
+      const imagePreview =
+        Array.isArray(message.metadata?.inputImages) && message.metadata.inputImages.length > 0
+          ? message.metadata.inputImages
+              .map((item) => item.fileName || item.attachmentId || 'image')
+              .join(', ')
+          : ''
+      const preview = String(message.content || message.metadata?.output || imagePreview || '')
       if (preview) return preview
       return ''
     }
@@ -171,7 +177,10 @@ export class UIHistoryService {
         type: 'text',
         content: event.content || '',
         metadata: {
-          inputKind: event.inputKind || 'normal'
+          inputKind: event.inputKind || 'normal',
+          ...(Array.isArray(event.inputImages) && event.inputImages.length > 0
+            ? { inputImages: event.inputImages }
+            : {})
         },
         backendMessageId: event.messageId
       }, sessionId)
@@ -574,7 +583,16 @@ export class UIHistoryService {
   private getReadableMessageBody(msg: ChatMessage): string {
     if (msg.role !== 'user' && msg.role !== 'assistant') return ''
     if (msg.role === 'user') {
-      return this.normalizeText(msg.content)
+      const normalized = this.normalizeText(msg.content)
+      if (normalized) return normalized
+      if (Array.isArray(msg.metadata?.inputImages) && msg.metadata.inputImages.length > 0) {
+        const lines = [
+          'Attached images:',
+          ...msg.metadata.inputImages.map((item) => `- ${item.fileName || item.attachmentId || 'image'}`)
+        ]
+        return this.normalizeText(lines.join('\n'))
+      }
+      return ''
     }
     return this.extractAssistantRichContent(msg)
   }

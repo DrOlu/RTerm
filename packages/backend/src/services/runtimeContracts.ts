@@ -4,6 +4,7 @@ import type { CommandPolicyListName, CommandPolicyLists, CommandPolicyMode } fro
 import type { SkillInfo, CreateSkillResult } from './SkillService'
 import type { McpServerSummary } from './McpToolService'
 import type { MemorySnapshot } from '../memory/FileMemoryStore'
+import type { StartTaskInput } from './Gateway/types'
 
 export interface ISettingsRuntime {
   getSettings(): BackendSettings
@@ -77,7 +78,7 @@ export interface IGatewayTerminalRuntime {
 export interface IAgentRuntime {
   setEventPublisher(publisher: (sessionId: string, event: AgentEvent) => void): void
   setFeedbackWaiter(waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>): void
-  run(context: any, input: string, signal: AbortSignal, startMode?: 'normal' | 'inserted'): Promise<void>
+  run(context: any, input: StartTaskInput, signal: AbortSignal, startMode?: 'normal' | 'inserted'): Promise<void>
   isAbortError(error: unknown): boolean
   releaseSessionModelBinding(sessionId: string): void
   loadChatSession(sessionId: string): ChatSession | null

@@ -40,7 +40,8 @@ export const DetailMessageCard: React.FC<DetailMessageCardProps> = ({
     const displayText = trimOuterBlankLines(
       normalizeDisplayText(message.content || ""),
     );
-    if (!displayText.trim()) return null;
+    const inputImages = message.metadata?.inputImages || [];
+    if (!displayText.trim() && inputImages.length === 0) return null;
 
     return (
       <article className={`event-card detail-text ${message.role}`}>
@@ -55,9 +56,31 @@ export const DetailMessageCard: React.FC<DetailMessageCardProps> = ({
         {message.role === "assistant" ? (
           <MarkdownContent className="detail-markdown" content={displayText} />
         ) : (
-          <p className="detail-text-body">
-            <MentionContent text={displayText} />
-          </p>
+          <>
+            {displayText.trim() ? (
+              <p className="detail-text-body">
+                <MentionContent text={displayText} />
+              </p>
+            ) : null}
+            {inputImages.length > 0 ? (
+              <div className="detail-user-images">
+                {inputImages.map((image, index) => (
+                  <div key={`${image.attachmentId || "image"}-${index}`} className="detail-user-image-chip">
+                    {String(image.previewDataUrl || "").trim() ? (
+                      <img
+                        src={String(image.previewDataUrl || "")}
+                        alt={image.fileName || image.attachmentId || "image"}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="detail-user-image-placeholder">IMG</div>
+                    )}
+                    <span>{image.fileName || image.attachmentId || "image"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </>
         )}
       </article>
     );

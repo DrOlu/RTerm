@@ -1,6 +1,7 @@
 import React from "react";
-import { Lock, SendHorizontal, Square } from "lucide-react";
+import { ImagePlus, Lock, SendHorizontal, Square, X } from "lucide-react";
 import { useMobileI18n } from "../../i18n/provider";
+import { extractClipboardImageFiles } from "../../lib/input-images";
 import {
   consumeMentionBackspace,
   type MentionOption,
@@ -11,8 +12,17 @@ import { MentionSuggestions } from "./MentionSuggestions";
 interface ComposerBarProps {
   value: string;
   cursor: number;
+  images: Array<{
+    id: string;
+    attachmentId?: string;
+    fileName?: string;
+    previewUrl: string;
+  }>;
   onChange: (value: string, cursor: number) => void;
   onCursorChange: (cursor: number) => void;
+  onAttachImages: (files: File[]) => void;
+  onRemoveImage: (imageId: string) => void;
+  onClearImages: () => void;
   onSend: () => void;
   onStop: () => void;
   canSend: boolean;
@@ -29,8 +39,12 @@ interface ComposerBarProps {
 export const ComposerBar: React.FC<ComposerBarProps> = ({
   value,
   cursor,
+  images,
   onChange,
   onCursorChange,
+  onAttachImages,
+  onRemoveImage,
+  onClearImages,
   onSend,
   onStop,
   canSend,
@@ -45,6 +59,7 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
 }) => {
   const { t } = useMobileI18n();
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const imageInputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
     const input = textareaRef.current;
@@ -75,6 +90,39 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
   return (
     <footer className="composer-modern">
       <MentionSuggestions options={mentionOptions} onPick={onPickMention} />
+
+      {images.length > 0 ? (
+        <div className="composer-image-strip">
+          <button
+            type="button"
+            className="composer-image-clear-all"
+            onClick={onClearImages}
+            aria-label={t.composer.clearImages}
+            title={t.composer.clearImages}
+          >
+            <span>ALL</span>
+          </button>
+          {images.map((image) => (
+            <div key={image.id} className="composer-image-chip">
+              <button
+                type="button"
+                className="composer-image-remove"
+                onClick={() => onRemoveImage(image.id)}
+                aria-label={t.composer.removeImage}
+                title={t.composer.removeImage}
+              >
+                <X size={10} />
+              </button>
+              {image.previewUrl ? (
+                <img src={image.previewUrl} alt={image.fileName || image.attachmentId || "image"} />
+              ) : (
+                <div className="composer-image-placeholder">IMG</div>
+              )}
+              <span>{image.fileName || image.attachmentId || "image"}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="composer-textarea-row">
         <textarea
@@ -118,6 +166,12 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
               }
             }
           }}
+          onPaste={(event) => {
+            const imageFiles = extractClipboardImageFiles(event.clipboardData);
+            if (imageFiles.length === 0) return;
+            event.preventDefault();
+            onAttachImages(imageFiles);
+          }}
           placeholder={t.composer.placeholder}
           autoCorrect="off"
           autoCapitalize="sentences"
@@ -148,6 +202,29 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
         </div>
 
         <div className="composer-row-right">
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp,image/*"
+            multiple
+            style={{ display: "none" }}
+            onChange={(event) => {
+              const files = Array.from(event.target.files || []);
+              if (files.length > 0) {
+                onAttachImages(files);
+              }
+              event.currentTarget.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="composer-icon-button image"
+            onClick={() => imageInputRef.current?.click()}
+            aria-label={t.composer.attachImage}
+            title={t.composer.attachImage}
+          >
+            <ImagePlus size={14} />
+          </button>
           {isRunning ? (
             <button
               type="button"

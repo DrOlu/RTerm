@@ -7,6 +7,7 @@ import type {
   SessionContext,
   IClientTransport,
   StartTaskOptions,
+  StartTaskInput,
   GatewaySessionSnapshot,
   GatewaySessionSummary
 } from './types';
@@ -93,7 +94,7 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     return this.sessions.get(sessionId);
   }
 
-  async dispatchTask(sessionId: string, input: string, options?: StartTaskOptions): Promise<void> {
+  async dispatchTask(sessionId: string, input: StartTaskInput, options?: StartTaskOptions): Promise<void> {
     let context = this.sessions.get(sessionId);
     if (!context) {
       context = this.createEmptySessionContext(sessionId);

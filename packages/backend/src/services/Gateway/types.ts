@@ -1,4 +1,4 @@
-import type { AgentEvent } from '../../types';
+import type { AgentEvent, UserInputPayload } from '../../types';
 import type { ExperimentalFlags } from '../../types';
 import type { ChatMessage } from '../../types/ui-chat';
 
@@ -56,6 +56,7 @@ export interface SessionContext {
 }
 
 export type StartTaskMode = 'normal' | 'inserted';
+export type StartTaskInput = string | UserInputPayload;
 
 export interface StartTaskOptions {
   startMode?: StartTaskMode;
@@ -89,7 +90,7 @@ export interface IGateway {
   getSession(sessionId: string): SessionContext | undefined;
   
   // Task scheduling
-  dispatchTask(sessionId: string, input: string, options?: StartTaskOptions): Promise<void>;
+  dispatchTask(sessionId: string, input: StartTaskInput, options?: StartTaskOptions): Promise<void>;
   stopTask(sessionId: string): Promise<void>;
   pauseTask(sessionId: string): Promise<void>;
   resumeTask(sessionId: string): Promise<void>;

@@ -470,6 +470,53 @@ button:disabled {
   line-height: 1.45;
 }
 
+.bubble-user-images {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.bubble-user-image-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 92px;
+  min-width: 92px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  background: color-mix(in srgb, var(--surface) 74%, var(--accent-soft));
+  padding: 4px;
+}
+
+.bubble-user-image-chip img,
+.bubble-user-image-placeholder {
+  width: 100%;
+  height: 62px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
+}
+
+.bubble-user-image-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.bubble-user-image-chip span {
+  color: var(--accent-strong);
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .bubble-markdown {
   font-size: 14px;
   line-height: 1.45;
@@ -673,6 +720,53 @@ button:disabled {
   line-height: 1.5;
 }
 
+.detail-user-images {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.detail-user-image-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 96px;
+  min-width: 96px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  background: color-mix(in srgb, var(--surface-soft) 80%, var(--accent-soft));
+  padding: 4px;
+}
+
+.detail-user-image-chip img,
+.detail-user-image-placeholder {
+  width: 100%;
+  height: 64px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
+}
+
+.detail-user-image-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.detail-user-image-chip span {
+  color: var(--accent-strong);
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .detail-markdown {
   margin-top: 8px;
   font-size: 13px;
@@ -861,6 +955,86 @@ button:disabled {
   gap: 8px;
 }
 
+.composer-image-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.composer-image-clear-all {
+  width: 96px;
+  min-width: 96px;
+  height: 76px;
+  border-radius: 8px;
+  border: 1px dashed color-mix(in srgb, var(--danger) 55%, var(--border));
+  background: color-mix(in srgb, var(--danger-soft) 80%, var(--surface));
+  color: var(--danger);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.composer-image-clear-all span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.composer-image-chip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 96px;
+  min-width: 96px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+}
+
+.composer-image-chip img,
+.composer-image-placeholder {
+  width: 100%;
+  height: 64px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: var(--surface-muted);
+}
+
+.composer-image-placeholder {
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.composer-image-chip span {
+  font-size: 10px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-image-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
 .composer-textarea-row {
   display: flex;
   min-height: 38px;
@@ -959,6 +1133,12 @@ button:disabled {
 .composer-icon-button.send:disabled {
   background: var(--border);
   opacity: 1;
+}
+
+.composer-icon-button.image {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  color: var(--ink-soft);
 }
 
 .composer-icon-button.stop {

@@ -331,6 +331,48 @@ body.chat-drag-selection-suppressed * {
     position: relative;
     top: -1px; /* Fine-tune alignment */
   }
+
+  .message-user-images {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .message-user-image-item {
+    display: flex;
+    flex-direction: column;
+    width: 88px;
+    min-width: 88px;
+    padding: 2px;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+    background: transparent;
+
+    img {
+      width: 100%;
+      height: 56px;
+      object-fit: cover;
+      border-radius: 5px;
+      border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+      background: color-mix(in srgb, var(--fg) 3%, transparent);
+    }
+
+    .message-user-image-missing {
+      width: 100%;
+      height: 56px;
+      border-radius: 5px;
+      border: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+      background: color-mix(in srgb, var(--fg) 4%, transparent);
+      color: var(--fg-muted);
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+    }
+  }
   }
 
 .message-text.assistant {

@@ -1,4 +1,4 @@
-import type { IGatewayRuntime, StartTaskOptions } from './types';
+import type { IGatewayRuntime, StartTaskInput, StartTaskOptions } from './types';
 import { WebSocketClientTransport, type IWebSocketConnectionLike } from './WebSocketClientTransport';
 import { WebSocketServer } from 'ws';
 
@@ -19,6 +19,7 @@ type WebSocketRpcMethod =
   | 'terminal:kill'
   | 'terminal:setSelection'
   | 'system:saveTempPaste'
+  | 'system:saveImageAttachment'
   | 'models:getProfiles'
   | 'models:setActiveProfile'
   | 'models:probe'
@@ -107,6 +108,9 @@ export interface WebSocketGatewayAdapterOptions {
   };
   systemBridge?: {
     saveTempPaste?: (content: string) => Promise<string> | string;
+    saveImageAttachment?: (
+      payload: { dataBase64: string; fileName?: string; mimeType?: string; previewDataUrl?: string }
+    ) => Promise<unknown> | unknown;
   };
   skillBridge?: {
     reload?: () => unknown | Promise<unknown>;
@@ -572,6 +576,14 @@ export class WebSocketGatewayAdapter {
         const filePath = await bridge.saveTempPaste(content);
         return filePath;
       }
+      case 'system:saveImageAttachment': {
+        const bridge = this.options.systemBridge;
+        if (!bridge?.saveImageAttachment) {
+          throw new WebSocketRpcError('METHOD_NOT_FOUND', 'system:saveImageAttachment is not available on this websocket gateway.');
+        }
+        const payload = this.readSaveImageAttachmentPayload(params.payload);
+        return await bridge.saveImageAttachment(payload);
+      }
       case 'models:getProfiles': {
         if (!this.options.profileBridge) {
           throw new WebSocketRpcError('METHOD_NOT_FOUND', 'Model profile APIs are not available on this websocket gateway.');
@@ -751,16 +763,16 @@ export class WebSocketGatewayAdapter {
       }
       case 'agent:startTask': {
         const sessionId = this.readStringParam(params, 'sessionId');
-        const userText = this.readStringParam(params, 'userText');
+        const userInput = this.readStartTaskInput(params);
         const options = this.readStartTaskOptions(params.options);
-        await this.gateway.dispatchTask(sessionId, userText, options);
+        await this.gateway.dispatchTask(sessionId, userInput, options);
         return { ok: true };
       }
       case 'agent:startTaskAsync': {
         const sessionId = this.readStringParam(params, 'sessionId');
-        const userText = this.readStringParam(params, 'userText');
+        const userInput = this.readStartTaskInput(params);
         const options = this.readStartTaskOptions(params.options);
-        void this.gateway.dispatchTask(sessionId, userText, options).catch((error) => {
+        void this.gateway.dispatchTask(sessionId, userInput, options).catch((error) => {
           this.logger.error(`[WebSocketGatewayAdapter] Async task failed (session=${sessionId}).`, error);
         });
         return { ok: true };
@@ -852,6 +864,95 @@ export class WebSocketGatewayAdapter {
       throw new WebSocketRpcError('BAD_REQUEST', 'options.startMode must be "normal" or "inserted".');
     }
     return options;
+  }
+
+  private readStartTaskInput(params: Record<string, any>): StartTaskInput {
+    const userInput = params.userInput;
+    if (typeof userInput === 'string') {
+      return userInput;
+    }
+    if (userInput && typeof userInput === 'object' && !Array.isArray(userInput)) {
+      const payload = userInput as { text?: unknown; images?: unknown };
+      const text = typeof payload.text === 'string' ? payload.text : '';
+      const images = this.readInputImages(payload.images);
+      return {
+        text,
+        ...(images.length > 0 ? { images } : {})
+      };
+    }
+
+    const legacyUserText = params.userText;
+    if (typeof legacyUserText === 'string') {
+      return legacyUserText;
+    }
+    throw new WebSocketRpcError('BAD_REQUEST', 'Missing user input payload.');
+  }
+
+  private readInputImages(raw: unknown): Array<{
+    attachmentId: string;
+    fileName?: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    sha256?: string;
+    previewDataUrl?: string;
+    status?: 'ready' | 'missing';
+  }> {
+    if (!raw) return [];
+    if (!Array.isArray(raw)) {
+      throw new WebSocketRpcError('BAD_REQUEST', 'images must be an array.');
+    }
+    return raw.map((item, index) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        throw new WebSocketRpcError('BAD_REQUEST', `images[${index}] must be an object.`);
+      }
+      const entry = item as Record<string, unknown>;
+      const attachmentId = typeof entry.attachmentId === 'string' ? entry.attachmentId.trim() : '';
+      if (!attachmentId) {
+        throw new WebSocketRpcError('BAD_REQUEST', `images[${index}] requires attachmentId.`);
+      }
+      const fileName = typeof entry.fileName === 'string' && entry.fileName.trim() ? entry.fileName.trim() : undefined;
+      const mimeType = typeof entry.mimeType === 'string' && entry.mimeType.trim() ? entry.mimeType.trim() : undefined;
+      const sizeBytes = Number.isFinite(entry.sizeBytes as number) ? Number(entry.sizeBytes) : undefined;
+      const sha256 = typeof entry.sha256 === 'string' && entry.sha256.trim() ? entry.sha256.trim() : undefined;
+      const previewDataUrl =
+        typeof entry.previewDataUrl === 'string' && entry.previewDataUrl.trim() ? entry.previewDataUrl.trim() : undefined;
+      const status = entry.status === 'ready' || entry.status === 'missing' ? entry.status : undefined;
+      return {
+        attachmentId,
+        ...(fileName ? { fileName } : {}),
+        ...(mimeType ? { mimeType } : {}),
+        ...(typeof sizeBytes === 'number' && sizeBytes >= 0 ? { sizeBytes } : {}),
+        ...(sha256 ? { sha256 } : {}),
+        ...(previewDataUrl ? { previewDataUrl } : {}),
+        ...(status ? { status } : {})
+      };
+    });
+  }
+
+  private readSaveImageAttachmentPayload(raw: unknown): {
+    dataBase64: string;
+    fileName?: string;
+    mimeType?: string;
+    previewDataUrl?: string;
+  } {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new WebSocketRpcError('BAD_REQUEST', 'payload must be an object.');
+    }
+    const payload = raw as Record<string, unknown>;
+    const dataBase64 = typeof payload.dataBase64 === 'string' ? payload.dataBase64.trim() : '';
+    if (!dataBase64) {
+      throw new WebSocketRpcError('BAD_REQUEST', 'payload.dataBase64 is required.');
+    }
+    const fileName = typeof payload.fileName === 'string' && payload.fileName.trim() ? payload.fileName.trim() : undefined;
+    const mimeType = typeof payload.mimeType === 'string' && payload.mimeType.trim() ? payload.mimeType.trim() : undefined;
+    const previewDataUrl =
+      typeof payload.previewDataUrl === 'string' && payload.previewDataUrl.trim() ? payload.previewDataUrl.trim() : undefined;
+    return {
+      dataBase64,
+      ...(fileName ? { fileName } : {}),
+      ...(mimeType ? { mimeType } : {}),
+      ...(previewDataUrl ? { previewDataUrl } : {})
+    };
   }
 
   private normalizeRpcError(error: unknown): WebSocketRpcError {

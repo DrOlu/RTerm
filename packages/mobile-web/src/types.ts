@@ -11,6 +11,21 @@ export type MessageType =
   | 'ask'
   | 'tokens_count'
 
+export interface InputImageAttachment {
+  attachmentId?: string
+  fileName?: string
+  mimeType?: string
+  sizeBytes?: number
+  sha256?: string
+  previewDataUrl?: string
+  status?: 'ready' | 'missing'
+}
+
+export interface UserInputPayload {
+  text: string
+  images?: InputImageAttachment[]
+}
+
 export interface ChatMessage {
   id: string
   backendMessageId?: string
@@ -39,6 +54,7 @@ export interface ChatMessage {
     maxTokens?: number
     details?: string
     inputKind?: 'normal' | 'inserted'
+    inputImages?: InputImageAttachment[]
   }
   timestamp: number
   streaming?: boolean

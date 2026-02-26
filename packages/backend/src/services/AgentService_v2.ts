@@ -16,6 +16,7 @@ import type {
 import type { UIHistoryService } from './UIHistoryService'
 import { v4 as uuidv4 } from 'uuid'
 import type { z } from 'zod'
+import type { StartTaskInput } from './Gateway/types'
 import {
   buildToolsForModel,
   execCommandSchema,
@@ -77,6 +78,7 @@ import {
 import { runSkillTool } from './AgentHelper/tools/skill_tools'
 import { TokenManager } from './AgentHelper/TokenManager'
 import { InputParseHelper } from './AgentHelper/InputParseHelper'
+import { ImageAttachmentService } from './ImageAttachmentService'
 
 const Ann: any = Annotation
 
@@ -107,7 +109,7 @@ const StateAnnotation = Ann.Root({
     default: () => ""
   }),
   startup_input: Ann({
-    reducer: (x: string, y?: string) => y ?? x,
+    reducer: (x: StartTaskInput, y?: StartTaskInput) => y ?? x,
     default: () => ''
   }),
   startup_mode: Ann({
@@ -181,6 +183,7 @@ export class AgentService_v2 {
   private sessionModelBindings: Map<string, SessionModelBinding> = new Map()
   private selfCorrectionRuntimeManager = new SelfCorrectionRuntimeManager()
   private waitForFeedback: ((messageId: string, timeoutMs?: number) => Promise<any | null>) | null = null
+  private imageAttachmentService: ImageAttachmentService | null = null
 
   constructor(
     terminalService: TerminalService,
@@ -189,7 +192,8 @@ export class AgentService_v2 {
     skillService: ISkillRuntime,
     memoryService: IMemoryRuntime,
     uiHistoryService: UIHistoryService,
-    chatHistoryService: IChatHistoryRuntime
+    chatHistoryService: IChatHistoryRuntime,
+    imageAttachmentService?: ImageAttachmentService
   ) {
     this.terminalService = terminalService
     this.chatHistoryService = chatHistoryService
@@ -198,6 +202,7 @@ export class AgentService_v2 {
     this.skillService = skillService
     this.memoryService = memoryService
     this.uiHistoryService = uiHistoryService
+    this.imageAttachmentService = imageAttachmentService || null
     this.helpers = new AgentHelpers()
     this.checkpointer = new MemorySaver()
     this.initializeGraph()
@@ -433,13 +438,13 @@ export class AgentService_v2 {
       if (!sessionId) return state
       const sessionBinding = this.getSessionModelBinding(sessionId)
 
-      const startupInput = String(state.startup_input || '')
+      const startupInput = state.startup_input as StartTaskInput
       const startupMode: 'normal' | 'inserted' = state.startup_mode === 'inserted' ? 'inserted' : 'normal'
 
       const messages: BaseMessage[] = [...state.messages]
 
       const userMessageId = uuidv4()
-      const { enrichedContent, displayContent } = await InputParseHelper.parseAndEnrich(
+      const { enrichedContent, displayContent, inputImages, modelImages } = await InputParseHelper.parseAndEnrich(
         startupInput,
         this.skillService,
         this.terminalService,
@@ -447,22 +452,37 @@ export class AgentService_v2 {
           userInputTag: startupMode === 'inserted' ? USER_INSERTED_INPUT_TAG : InputParseHelper.DEFAULT_USER_INPUT_TAG,
           includeContextDetails: true,
           userInputInstruction: startupMode === 'inserted' ? USER_INSERTED_INPUT_INSTRUCTION : undefined,
-          keepTaggedBodyLiteral: startupMode === 'inserted'
+          keepTaggedBodyLiteral: startupMode === 'inserted',
+          modelSupportsImage: sessionBinding.readFileSupport.image,
+          imageAttachmentService: this.imageAttachmentService || undefined
         }
       )
 
-      const humanMessage = new HumanMessage(enrichedContent)
+      const humanMessageContent =
+        modelImages.length > 0
+          ? ([
+              { type: 'text', text: enrichedContent || 'User attached image inputs.' },
+              ...modelImages.map((item) => ({
+                type: 'image_url' as const,
+                image_url: { url: item.dataUrl }
+              }))
+            ] as any)
+          : enrichedContent
+
+      const humanMessage = new HumanMessage(humanMessageContent)
       ;(humanMessage as any).additional_kwargs = {
         _gyshellMessageId: userMessageId,
         original_input: displayContent,
-        input_kind: startupMode
+        input_kind: startupMode,
+        ...(inputImages.length > 0 ? { input_images: inputImages } : {})
       }
 
       this.helpers.sendEvent(sessionId, {
         messageId: userMessageId,
         type: 'user_input',
         content: displayContent,
-        inputKind: startupMode
+        inputKind: startupMode,
+        ...(inputImages.length > 0 ? { inputImages } : {})
       })
 
       const memoryEnabled = this.settings?.memory?.enabled !== false
@@ -1046,7 +1066,16 @@ export class AgentService_v2 {
             'exec_command_parallel_audit'
           )
 
-          console.log('[AgentService_v2] Parallel action model decision for exec_command:', decision)
+          const decisionReason = this.normalizeLogReason(decision.reason)
+          if (decision.decision === 'nowait') {
+            console.log(
+              `[AgentService_v2][exec_command_guard] Triggered nowait switch. reason=${decisionReason}`
+            )
+          } else {
+            console.log(
+              `[AgentService_v2][exec_command_guard] Decision kept wait mode. reason=${decisionReason}`
+            )
+          }
 
           if (waitActive && decision.decision === 'nowait') {
             autoSwitchToNowait = true
@@ -1055,8 +1084,11 @@ export class AgentService_v2 {
 
         })()
           .catch((err: any) => {
-            if (this.helpers.isAbortError(err) || actionDecisionController.signal.aborted) return
-            console.warn('[AgentService_v2] Parallel action model decision for exec_command failed, keep wait mode:', err)
+            if (this.helpers.isAbortError(err) || actionDecisionController.signal.aborted) {
+              console.log('[AgentService_v2][exec_command_guard] Abort trigger received. keep wait mode.')
+              return
+            }
+            console.log('[AgentService_v2][exec_command_guard] Decision skipped, keep wait mode.')
           })
 
         try {
@@ -1253,14 +1285,21 @@ export class AgentService_v2 {
           'task_completion_guard'
         )
       } catch (err) {
-        console.warn('[AgentService_v2] Completion guard failed, fallback to end:', err)
+        if (this.helpers.isAbortError(err) || config?.signal?.aborted) {
+          console.log('[AgentService_v2][task_guard] Abort trigger received during completion audit.')
+          throw err
+        }
+        console.log('[AgentService_v2][task_guard] Completion audit unavailable. fallback=end.')
         completionDecision = {
           is_fully_completed: true,
-          reason: 'Completion guard model error'
+          reason: 'Completion audit unavailable'
         }
       }
 
       if (completionDecision.is_fully_completed) {
+        console.log(
+          `[AgentService_v2][task_guard] Completion confirmed. reason=${this.normalizeLogReason(completionDecision.reason)}`
+        )
         return {
           messages,
           sessionId,
@@ -1268,6 +1307,9 @@ export class AgentService_v2 {
           completionGuardDecision: 'end' as const
         }
       }
+      console.log(
+        `[AgentService_v2][task_guard] Triggered continue. reason=${this.normalizeLogReason(completionDecision.reason)}`
+      )
 
       let continueInstruction: z.infer<typeof TASK_CONTINUE_INSTRUCTION_SCHEMA>
       try {
@@ -1286,7 +1328,11 @@ export class AgentService_v2 {
           'task_continue_instruction'
         )
       } catch (err) {
-        console.warn('[AgentService_v2] Continue-instruction generation failed, fallback to generic instruction:', err)
+        if (this.helpers.isAbortError(err) || config?.signal?.aborted) {
+          console.log('[AgentService_v2][task_guard] Abort trigger received during continue-instruction generation.')
+          throw err
+        }
+        console.log('[AgentService_v2][task_guard] Continue instruction generation unavailable. use generic instruction.')
         continueInstruction = {
           continue_instruction:
             'Continue the task. Re-check unmet requirements, choose the next best tool/approach, execute it, and verify result.'
@@ -1414,7 +1460,15 @@ export class AgentService_v2 {
         'history_compaction'
       )
     } catch (error) {
-      console.warn('[AgentService_v2] History compaction summary generation failed:', error)
+      if (this.helpers.isAbortError(error) || signal?.aborted) {
+        console.log('[AgentService_v2][history_compaction_guard] Abort trigger received.')
+        this.helpers.sendEvent(sessionId, {
+          messageId: compactionMessageId,
+          type: 'sub_tool_finished'
+        })
+        throw error
+      }
+      console.log('[AgentService_v2][history_compaction_guard] Summary generation unavailable. skip compaction.')
       this.helpers.sendEvent(sessionId, {
         messageId: compactionMessageId,
         type: 'sub_tool_finished'
@@ -1510,6 +1564,9 @@ export class AgentService_v2 {
         'self_correction_audit'
       )
       if (auditDecision.is_on_reasonable_path) return
+      console.log(
+        `[AgentService_v2][self_correction_guard] Triggered correction. reason=${this.normalizeLogReason(auditDecision.reason)}`
+      )
 
       const correctionInstruction = await this.getThinkingModelDecision(
         sessionId,
@@ -1531,10 +1588,16 @@ export class AgentService_v2 {
         passCount,
         instruction: instructionText
       })
+      console.log(
+        `[AgentService_v2][self_correction_guard] Correction instruction queued. pass=${passCount}`
+      )
     })()
       .catch((err) => {
-        if (this.helpers.isAbortError(err) || controller.signal.aborted) return
-        console.warn('[AgentService_v2] Self-correction audit failed, skip this round:', err)
+        if (this.helpers.isAbortError(err) || controller.signal.aborted) {
+          console.log('[AgentService_v2][self_correction_guard] Abort trigger received.')
+          return
+        }
+        console.log('[AgentService_v2][self_correction_guard] Audit unavailable. skip this round.')
       })
       .finally(() => {
         this.selfCorrectionRuntimeManager.removeController(sessionId, controller)
@@ -1609,6 +1672,12 @@ export class AgentService_v2 {
 
   private shouldKeepDebugPayloadInPersistence(): boolean {
     return this.settings?.debugMode === true
+  }
+
+  private normalizeLogReason(reason: unknown): string {
+    const text = typeof reason === 'string' ? reason : String(reason ?? '')
+    const compact = text.replace(/\s+/g, ' ').trim()
+    return compact || 'no reason provided'
   }
 
   private async getActionModelPolicyDecision<T extends z.ZodTypeAny>(
@@ -1822,7 +1891,7 @@ export class AgentService_v2 {
 
   // --- Execution Core ---
 
-  async run(context: any, input: string, signal: AbortSignal, startMode: 'normal' | 'inserted' = 'normal'): Promise<void> {
+  async run(context: any, input: StartTaskInput, signal: AbortSignal, startMode: 'normal' | 'inserted' = 'normal'): Promise<void> {
     if (!this.graph) throw new Error('Graph not initialized')
 
     this.lastAbortedMessage = null
@@ -1886,18 +1955,20 @@ export class AgentService_v2 {
         this.chatHistoryService.saveSession(sessionToSave)
       }
     } catch (err: any) {
+      const isAbort = this.helpers.isAbortError(err)
+
+      // For any stop path or internal failure, try to save all history in the current Checkpoint.
+      await this.trySaveSessionFromCheckpoint(sessionId)
+
+      if (isAbort) {
+        console.log(`[AgentService_v2] Run abort trigger received (sessionId=${sessionId}).`)
+        return
+      }
+
       console.error(`[AgentService_v2] Run task failed (sessionId=${sessionId}):`, err)
-      
       // Use our new detail extraction helper
       const errorDetails = this.helpers.extractErrorDetails(err)
       const errorMessage = err.message || String(err)
-
-      // For any error (Abort or internal Error), try to save all history in the current Checkpoint
-      await this.trySaveSessionFromCheckpoint(sessionId)
-      
-      if (this.helpers.isAbortError(err)) {
-        return
-      }
       
       // Broadcast with full details
       this.helpers.sendEvent(sessionId, {

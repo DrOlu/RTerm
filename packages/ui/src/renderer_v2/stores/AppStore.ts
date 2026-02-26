@@ -6,6 +6,7 @@ import { applyAppThemeFromTerminalScheme } from '../theme/appTheme'
 import { resolveTheme } from '../theme/themes'
 import { toXtermTheme } from '../theme/xtermTheme'
 import type { TerminalColorScheme } from '../theme/terminalColorSchemes'
+import { createImagePreviewDataUrl, readFileAsDataUrl, type InputImageAttachment, type UserInputPayload } from '../lib/userInput'
 import { I18nStore } from './I18nStore'
 import { ChatStore } from './ChatStore'
 import { LayoutStore } from './LayoutStore'
@@ -172,7 +173,7 @@ export class AppStore {
       openVersionDownload: action,
       reconcileTerminalTabs: action
     })
-    this.chat.setQueueRunner((sessionId, content) => this.sendChatMessage(sessionId, content, { mode: 'queue' }))
+    this.chat.setQueueRunner((sessionId, input) => this.sendChatMessage(sessionId, input, { mode: 'queue' }))
   }
 
   getUniqueTitle(baseTitle: string): string {
@@ -1193,11 +1194,77 @@ export class AppStore {
     }
   }
 
-  sendChatMessage(
+  private sanitizeImageAttachmentForSend(image: InputImageAttachment): InputImageAttachment {
+    const attachmentId = String(image.attachmentId || '').trim()
+    const fileName = String(image.fileName || '').trim()
+    const mimeType = String(image.mimeType || '').trim()
+    const previewDataUrl = String(image.previewDataUrl || '').trim()
+    const sha256 = String(image.sha256 || '').trim()
+    const status = image.status === 'ready' || image.status === 'missing' ? image.status : undefined
+    return {
+      ...(attachmentId ? { attachmentId } : {}),
+      ...(fileName ? { fileName } : {}),
+      ...(mimeType ? { mimeType } : {}),
+      ...(typeof image.sizeBytes === 'number' && Number.isFinite(image.sizeBytes) ? { sizeBytes: image.sizeBytes } : {}),
+      ...(sha256 ? { sha256 } : {}),
+      ...(previewDataUrl ? { previewDataUrl } : {}),
+      ...(status ? { status } : {})
+    }
+  }
+
+  private async resolveInputImagesForSend(images: InputImageAttachment[] | undefined): Promise<InputImageAttachment[]> {
+    if (!Array.isArray(images) || images.length === 0) return []
+    const resolved: InputImageAttachment[] = []
+    for (const image of images) {
+      const attachmentId = String(image.attachmentId || '').trim()
+      if (attachmentId) {
+        resolved.push(this.sanitizeImageAttachmentForSend(image))
+        continue
+      }
+
+      const localFile = (image as any).localFile
+      if (localFile instanceof File) {
+        const dataBase64 = await readFileAsDataUrl(localFile)
+        const previewDataUrl =
+          String(image.previewDataUrl || '').trim() ||
+          (await createImagePreviewDataUrl(localFile).catch(() => ''))
+        const saved = await window.gyshell.system.saveImageAttachment({
+          dataBase64,
+          fileName: image.fileName || localFile.name || undefined,
+          mimeType: image.mimeType || localFile.type || undefined,
+          ...(previewDataUrl ? { previewDataUrl } : {})
+        })
+        resolved.push(
+          this.sanitizeImageAttachmentForSend({
+            ...saved,
+            fileName: image.fileName || saved.fileName,
+            mimeType: image.mimeType || saved.mimeType,
+            sizeBytes: image.sizeBytes || saved.sizeBytes,
+            previewDataUrl: previewDataUrl || saved.previewDataUrl
+          })
+        )
+        continue
+      }
+
+    }
+    return resolved
+  }
+
+  private async resolveUserInputPayloadForSend(content: string | UserInputPayload): Promise<string | UserInputPayload> {
+    if (typeof content === 'string') return content
+    const text = typeof content?.text === 'string' ? content.text : ''
+    const images = await this.resolveInputImagesForSend(content?.images)
+    return {
+      text,
+      ...(images.length > 0 ? { images } : {})
+    }
+  }
+
+  async sendChatMessage(
     sessionId: string,
-    content: string,
+    content: string | UserInputPayload,
     options?: { mode?: 'normal' | 'queue' }
-  ): boolean {
+  ): Promise<boolean> {
     const mode = options?.mode || 'normal'
     let targetSessionId = sessionId
     if (!targetSessionId) {
@@ -1207,7 +1274,15 @@ export class AppStore {
     const session = this.chat.sessions.find(s => s.id === targetSessionId)
     const wasBusy = !!session?.isSessionBusy
     if (mode === 'queue' && session?.isSessionBusy) {
-      console.warn('[AppStore] Session is busy, ignoring message:', content)
+      console.warn('[AppStore] Session is busy, ignoring message.')
+      return false
+    }
+
+    let resolvedContent: string | UserInputPayload
+    try {
+      resolvedContent = await this.resolveUserInputPayloadForSend(content)
+    } catch (error) {
+      console.error('[AppStore] Failed to resolve image attachments before send:', error)
       return false
     }
 
@@ -1219,7 +1294,7 @@ export class AppStore {
     }
 
     const startMode = wasBusy && mode === 'normal' ? 'inserted' : 'normal'
-    window.gyshell.agent.startTask(targetSessionId, content, { startMode })
+    window.gyshell.agent.startTask(targetSessionId, resolvedContent, { startMode })
     return true
   }
 

@@ -32,6 +32,7 @@ function hasMessagePayload(message: ChatMessage): boolean {
   if (message.type === 'tokens_count') return false
   if (message.type !== 'text') return true
   if (message.streaming) return true
+  if (Array.isArray(message.metadata?.inputImages) && message.metadata.inputImages.length > 0) return true
   if (hasText(message.content)) return true
   if (hasText(message.metadata?.output)) return true
   return false

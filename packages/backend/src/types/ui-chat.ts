@@ -1,3 +1,5 @@
+import type { InputImageAttachment } from './index'
+
 export type MessageType =
   | 'text'
   | 'command'
@@ -39,6 +41,7 @@ export interface ChatMessage {
     maxTokens?: number
     details?: string
     inputKind?: 'normal' | 'inserted'
+    inputImages?: InputImageAttachment[]
   }
   timestamp: number
   streaming?: boolean

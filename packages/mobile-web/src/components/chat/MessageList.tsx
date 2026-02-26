@@ -29,16 +29,37 @@ const UserBubble: React.FC<{
   const displayText = trimOuterBlankLines(
     normalizeDisplayText(String(message.content || "")),
   );
-  if (!displayText.trim()) return null;
+  const inputImages = message.metadata?.inputImages || [];
+  if (!displayText.trim() && inputImages.length === 0) return null;
   const canRollback =
     !!message.backendMessageId && !message.streaming && !rollbackDisabled;
 
   return (
     <article className="bubble-row user">
       <div className="bubble user">
-        <p>
-          <MentionContent text={displayText} />
-        </p>
+        {displayText.trim() ? (
+          <p>
+            <MentionContent text={displayText} />
+          </p>
+        ) : null}
+        {inputImages.length > 0 ? (
+          <div className="bubble-user-images">
+            {inputImages.map((image, index) => (
+              <div key={`${image.attachmentId || "image"}-${index}`} className="bubble-user-image-chip">
+                {String(image.previewDataUrl || "").trim() ? (
+                  <img
+                    src={String(image.previewDataUrl || "")}
+                    alt={image.fileName || image.attachmentId || "image"}
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="bubble-user-image-placeholder">IMG</div>
+                )}
+                <span>{image.fileName || image.attachmentId || "image"}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <footer>
           <span>{formatClock(message.timestamp)}</span>
           {message.streaming ? (

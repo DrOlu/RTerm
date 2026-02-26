@@ -22,6 +22,7 @@ import {
   resolveWsGatewayPolicyFromEnv
 } from '../../../backend/src/services/Gateway/WebSocketGatewayControlService'
 import { TempFileService } from '../../../backend/src/services/TempFileService'
+import { ImageAttachmentService } from '../../../backend/src/services/ImageAttachmentService'
 import { VersionService } from '../../../backend/src/services/VersionService'
 import { AccessTokenService } from '../../../backend/src/services/AccessToken/AccessTokenService'
 import { ElectronAppSettingsMigration } from '../settings/ElectronAppSettingsMigration'
@@ -44,6 +45,7 @@ let skillService: SkillService
 let memoryService: MemoryService
 let uiHistoryService: UIHistoryService
 let tempFileService: TempFileService
+let imageAttachmentService: ImageAttachmentService
 let versionService: VersionService
 let accessTokenService: AccessTokenService
 let webSocketGatewayControlService: WebSocketGatewayControlService | null = null
@@ -212,6 +214,7 @@ export async function startElectronMain(): Promise<void> {
   themeStore = new ThemeConfigStore()
   uiHistoryService = new UIHistoryService()
   tempFileService = new TempFileService()
+  imageAttachmentService = new ImageAttachmentService(app.getPath('userData'))
   versionService = new VersionService()
   accessTokenService = new AccessTokenService()
 
@@ -235,7 +238,8 @@ export async function startElectronMain(): Promise<void> {
     skillService,
     memoryService,
     uiHistoryService,
-    chatHistoryService
+    chatHistoryService,
+    imageAttachmentService
   )
   const gatewayService = new GatewayService(
     terminalService, 
@@ -378,6 +382,14 @@ export async function startElectronMain(): Promise<void> {
         systemBridge: {
           saveTempPaste: async (content: string) => {
             return await tempFileService.saveTempPaste(content)
+          },
+          saveImageAttachment: async (payload: {
+            dataBase64: string
+            fileName?: string
+            mimeType?: string
+            previewDataUrl?: string
+          }) => {
+            return await imageAttachmentService.saveImageAttachment(payload)
           }
         },
         skillBridge: {
@@ -489,6 +501,7 @@ export async function startElectronMain(): Promise<void> {
     uiHistoryService,
     commandPolicyService,
     tempFileService,
+    imageAttachmentService,
     skillService,
     memoryService,
     settingsService,

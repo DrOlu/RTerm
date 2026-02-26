@@ -143,6 +143,7 @@ type AgentEventType =
 interface AgentEvent {
   type: AgentEventType
   inputKind?: 'normal' | 'inserted'
+  inputImages?: InputImageAttachment[]
   level?: 'info' | 'warning' | 'error'
   content?: string
   command?: string
@@ -166,6 +167,28 @@ interface AgentEvent {
   modelName?: string
   totalTokens?: number
   maxTokens?: number
+}
+
+interface InputImageAttachment {
+  attachmentId?: string
+  fileName?: string
+  mimeType?: string
+  sizeBytes?: number
+  sha256?: string
+  previewDataUrl?: string
+  status?: 'ready' | 'missing'
+}
+
+interface UserInputPayload {
+  text: string
+  images?: InputImageAttachment[]
+}
+
+interface SaveImageAttachmentPayload {
+  dataBase64: string
+  fileName?: string
+  mimeType?: string
+  previewDataUrl?: string
 }
 
 interface McpToolSummary {
@@ -274,6 +297,7 @@ export interface GyShellAPI {
     platform: NodeJS.Platform
     openExternal: (url: string) => Promise<void>
     saveTempPaste: (content: string) => Promise<string>
+    saveImageAttachment: (payload: SaveImageAttachmentPayload) => Promise<InputImageAttachment>
   }
   // Settings
   settings: {
@@ -344,7 +368,7 @@ export interface GyShellAPI {
   agent: {
     startTask: (
       sessionId: string,
-      userText: string,
+      userInput: string | UserInputPayload,
       options?: { startMode?: 'normal' | 'inserted' }
     ) => Promise<void>
     stopTask: (sessionId: string) => Promise<void>
@@ -433,7 +457,8 @@ const api: GyShellAPI = {
   system: {
     platform: process.platform,
     openExternal: (url: string) => ipcRenderer.invoke('system:openExternal', url),
-    saveTempPaste: (content: string) => ipcRenderer.invoke('system:saveTempPaste', content)
+    saveTempPaste: (content: string) => ipcRenderer.invoke('system:saveTempPaste', content),
+    saveImageAttachment: (payload: SaveImageAttachmentPayload) => ipcRenderer.invoke('system:saveImageAttachment', payload)
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
@@ -508,8 +533,8 @@ const api: GyShellAPI = {
   },
 
   agent: {
-    startTask: (sessionId, userText, options) =>
-      ipcRenderer.invoke('agent:startTask', sessionId, userText, options),
+    startTask: (sessionId, userInput, options) =>
+      ipcRenderer.invoke('agent:startTask', sessionId, userInput, options),
     stopTask: (sessionId) => ipcRenderer.invoke('agent:stopTask', sessionId),
     getAllChatHistory: () => ipcRenderer.invoke('agent:getAllChatHistory'),
     loadChatSession: (sessionId) => ipcRenderer.invoke('agent:loadChatSession', sessionId),

@@ -1,6 +1,7 @@
 import { makeObservable, observable, action, runInAction, computed, ObservableMap } from 'mobx'
 import { v4 as uuidv4 } from 'uuid'
 import { ChatQueueStore, type QueueItem } from './ChatQueueStore'
+import type { InputImageAttachment, UserInputPayload } from '../lib/userInput'
 
 const buildAutoSessionTitle = (content: string): string => {
   const normalized = String(content || '').replace(/\s+/g, ' ').trim()
@@ -48,6 +49,7 @@ export interface ChatMessage {
     maxTokens?: number
     details?: string
     inputKind?: 'normal' | 'inserted'
+    inputImages?: InputImageAttachment[]
   }
   timestamp: number
   streaming?: boolean
@@ -67,7 +69,7 @@ export class ChatStore {
   sessions: ChatSession[] = []
   activeSessionId: string | null = null
   queue = new ChatQueueStore()
-  private queueRunner?: (sessionId: string, content: string) => boolean
+  private queueRunner?: (sessionId: string, input: UserInputPayload) => Promise<boolean>
 
   constructor() {
     makeObservable(this, {
@@ -329,7 +331,7 @@ export class ChatStore {
           session.isSessionBusy = false
           session.lockedProfileId = null
           if (this.queue.shouldDispatchNextOnSessionReady(sessionId)) {
-            this.runNextQueueItem(sessionId)
+            void this.runNextQueueItem(sessionId)
           }
           break
         case 'ROLLBACK': {
@@ -497,7 +499,7 @@ export class ChatStore {
     })
   }
 
-  setQueueRunner(runner: (sessionId: string, content: string) => boolean): void {
+  setQueueRunner(runner: (sessionId: string, input: UserInputPayload) => Promise<boolean>): void {
     this.queueRunner = runner
   }
 
@@ -522,10 +524,17 @@ export class ChatStore {
     }
   }
 
-  addQueueItem(sessionId: string, content: string): QueueItem | null {
+  addQueueItem(sessionId: string, content: string, images?: InputImageAttachment[]): QueueItem | null {
     const trimmed = String(content || '').trim()
-    if (!trimmed) return null
-    return this.queue.addItem(sessionId, trimmed)
+    const normalizedImages = Array.isArray(images)
+      ? images.filter((item) => {
+          const hasAttachmentId = !!String(item?.attachmentId || '').trim()
+          const hasLocalFile = (item as any)?.localFile instanceof File
+          return hasAttachmentId || hasLocalFile
+        })
+      : []
+    if (!trimmed && normalizedImages.length === 0) return null
+    return this.queue.addItem(sessionId, trimmed, normalizedImages)
   }
 
   removeQueueItem(sessionId: string, itemId: string): void {
@@ -540,7 +549,7 @@ export class ChatStore {
     if (this.queue.isRunning(sessionId)) return
     if (this.queue.getQueue(sessionId).length === 0) return
     this.queue.startRun(sessionId)
-    this.runNextQueueItem(sessionId)
+    void this.runNextQueueItem(sessionId)
   }
 
   stopQueue(sessionId: string): void {
@@ -548,13 +557,23 @@ export class ChatStore {
     this.queue.stopRun(sessionId)
   }
 
-  private runNextQueueItem(sessionId: string): void {
+  private async runNextQueueItem(sessionId: string): Promise<void> {
     const next = this.queue.shiftItem(sessionId)
     if (!next) {
       this.queue.stopRun(sessionId)
       return
     }
-    if (!this.queueRunner || !this.queueRunner(sessionId, next.content)) {
+    if (!this.queue.isRunning(sessionId)) {
+      this.queue.unshiftItem(sessionId, next)
+      return
+    }
+    if (
+      !this.queueRunner ||
+      !(await this.queueRunner(sessionId, {
+        text: next.content,
+        ...(Array.isArray(next.images) && next.images.length > 0 ? { images: next.images } : {})
+      }))
+    ) {
       this.queue.unshiftItem(sessionId, next)
       this.queue.stopRun(sessionId)
       return

@@ -92,6 +92,21 @@
     position: relative;
     top: -1px;
   }
+
+  .queue-card-image-count {
+    display: inline-flex;
+    align-items: center;
+    height: 1.4em;
+    padding: 0 6px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
 }
 
 .queue-stack:not(.is-dragging) .queue-card:hover .queue-card-content {

@@ -1,11 +1,13 @@
 import { makeObservable, observable, action } from 'mobx'
 import { v4 as uuidv4 } from 'uuid'
+import type { InputImageAttachment } from '../lib/userInput'
 
 export type QueueState = 'editing' | 'running'
 
 export interface QueueItem {
   id: string
   content: string
+  images?: InputImageAttachment[]
   createdAt: number
 }
 
@@ -92,10 +94,24 @@ export class ChatQueueStore {
     return this.queuesBySession[sessionId] || []
   }
 
-  addItem(sessionId: string, content: string): QueueItem {
+  addItem(sessionId: string, content: string, images?: InputImageAttachment[]): QueueItem {
     const item: QueueItem = {
       id: uuidv4(),
       content,
+      ...(Array.isArray(images) && images.length > 0
+        ? {
+            images: images.map((image) => ({
+              ...(image.attachmentId ? { attachmentId: image.attachmentId } : {}),
+              ...(image.fileName ? { fileName: image.fileName } : {}),
+              ...(image.mimeType ? { mimeType: image.mimeType } : {}),
+              ...(typeof image.sizeBytes === 'number' ? { sizeBytes: image.sizeBytes } : {}),
+              ...(image.sha256 ? { sha256: image.sha256 } : {}),
+              ...(image.previewDataUrl ? { previewDataUrl: image.previewDataUrl } : {}),
+              ...(image.status ? { status: image.status } : {}),
+              ...((image as any).localFile instanceof File ? { localFile: (image as any).localFile } : {})
+            }))
+          }
+        : {}),
       createdAt: Date.now()
     }
     const current = this.getQueue(sessionId)

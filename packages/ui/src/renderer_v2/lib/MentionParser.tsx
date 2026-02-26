@@ -5,7 +5,7 @@ import React from 'react';
  * 1) Chat message/queue mention rendering (`components/Chat/MessageRow.tsx`, `components/Chat/Queue/QueueCard.tsx`)
  * 2) Session-title text normalization (`lib/sessionTitleDisplay.ts`)
  */
-const MENTION_TOKEN_REGEX = /(\[MENTION_(?:SKILL|TAB|FILE|USER_PASTE):#.+?#(?:#.+?#)?\])/g;
+const MENTION_TOKEN_REGEX = /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|USER_PASTE):#.+?#(?:#.+?#)?\])/g;
 
 const getFileDisplayName = (path: string): string => {
   return path.split(/[/\\]/).pop() || path;
@@ -25,6 +25,12 @@ const mentionTokenToText = (token: string): string | null => {
   const fileMatch = token.match(/^\[MENTION_FILE:#(.+?)#\]$/);
   if (fileMatch) {
     return getFileDisplayName(fileMatch[1]);
+  }
+
+  const imageMatch = token.match(/^\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]$/);
+  if (imageMatch) {
+    const explicitName = String(imageMatch[2] || '').trim();
+    return explicitName || getFileDisplayName(imageMatch[1]);
   }
 
   const pasteMatch = token.match(/^\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]$/);
@@ -54,6 +60,9 @@ export const renderMentionText = (content: string): string => {
     .replace(/\[MENTION_TAB:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, name: string) => `@${name}`)
     .replace(/\[MENTION_SKILL:#([^#\]\r\n]+)(?:#\])?/g, (_m, name: string) => `@${name}`)
     .replace(/\[MENTION_FILE:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, path: string) => getFileDisplayName(path))
+    .replace(/\[MENTION_IMAGE:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g, (_m, path: string, name: string) =>
+      String(name || '').trim() || getFileDisplayName(path)
+    )
     .replace(/\[MENTION_USER_PASTE:#([^#\]\r\n]+)##([^#\]\r\n]+)(?:#\])?/g, (_m, _path: string, preview: string) => preview);
 
   return text;
@@ -87,7 +96,7 @@ export const renderMentionContent = (content: string): (string | React.ReactElem
       );
     }
 
-    if (part.startsWith('[MENTION_FILE:')) {
+    if (part.startsWith('[MENTION_FILE:') || part.startsWith('[MENTION_IMAGE:')) {
       return (
         <span key={`mention-${i}`} className="mention-badge file">
           {mentionText}

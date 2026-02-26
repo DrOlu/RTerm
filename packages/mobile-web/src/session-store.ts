@@ -133,6 +133,9 @@ export function normalizeDisplayText(input: string): string {
     .replace(/\[MENTION_TAB:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, name: string) => `@${name}`)
     .replace(/\[MENTION_SKILL:#([^#\]\r\n]+)(?:#\])?/g, (_m, name: string) => `@${name}`)
     .replace(/\[MENTION_FILE:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, path: string) => path.split(/[/\\]/).pop() || path)
+    .replace(/\[MENTION_IMAGE:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g, (_m, path: string, name: string) =>
+      String(name || '').trim() || path.split(/[/\\]/).pop() || path
+    )
     .replace(/\[MENTION_USER_PASTE:#([^#\]\r\n]+)##([^#\]\r\n]+)(?:#\])?/g, (_m, _path: string, preview: string) => preview)
     .replace(/\s+$/g, '')
 }
@@ -145,6 +148,9 @@ export function trimOuterBlankLines(input: string): string {
 }
 
 export function isEmptyMessageContent(message: ChatMessage): boolean {
+  if (Array.isArray(message.metadata?.inputImages) && message.metadata.inputImages.length > 0) {
+    return false
+  }
   const content = normalizeDisplayText(message.content || '')
   const output = normalizeDisplayText(message.metadata?.output || '')
   return content.trim().length === 0 && output.trim().length === 0
@@ -160,7 +166,13 @@ export function previewFromSession(session: SessionState): string {
   const base =
     latest.type === 'command'
       ? latest.metadata?.output || latest.content
-      : latest.metadata?.output || latest.content
+      : latest.metadata?.output ||
+        latest.content ||
+        (Array.isArray(latest.metadata?.inputImages) && latest.metadata.inputImages.length > 0
+          ? latest.metadata.inputImages
+              .map((image) => image.fileName || image.attachmentId || 'image')
+              .join(', ')
+          : '')
 
   return normalizeDisplayText(base).replace(/\s+/g, ' ').trim().slice(0, 140)
 }

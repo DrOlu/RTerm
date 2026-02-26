@@ -1,10 +1,11 @@
 import { ipcMain, shell, Menu, BrowserWindow } from 'electron'
-import type { StartTaskOptions, IGatewayRuntime } from '../../../backend/src/services/Gateway/types'
+import type { StartTaskOptions, StartTaskInput, IGatewayRuntime } from '../../../backend/src/services/Gateway/types'
 import type { TerminalService } from '../../../backend/src/services/TerminalService'
 import type { AgentService_v2 } from '../../../backend/src/services/AgentService_v2'
 import type { UIHistoryService, HistoryExportMode } from '../../../backend/src/services/UIHistoryService'
 import type { CommandPolicyService } from '../../../backend/src/services/CommandPolicy/CommandPolicyService'
 import type { TempFileService } from '../../../backend/src/services/TempFileService'
+import type { ImageAttachmentService } from '../../../backend/src/services/ImageAttachmentService'
 import type { SkillService } from '../../../backend/src/services/SkillService'
 import type { MemoryService } from '../../../backend/src/services/MemoryService'
 import type { SettingsService } from '../../../backend/src/services/SettingsService'
@@ -35,6 +36,7 @@ export class ElectronGatewayIpcAdapter {
     private uiHistoryService: UIHistoryService,
     private commandPolicyService: CommandPolicyService,
     private tempFileService: TempFileService,
+    private imageAttachmentService: ImageAttachmentService,
     private skillService: SkillService,
     private memoryService: MemoryService,
     private settingsService: SettingsService,
@@ -72,8 +74,8 @@ export class ElectronGatewayIpcAdapter {
     // Agent runtime
     ipcMain.handle(
       'agent:startTask',
-      async (_: any, sessionId: string, userText: string, options?: StartTaskOptions) => {
-        return this.gateway.dispatchTask(sessionId, userText, options)
+      async (_: any, sessionId: string, userInput: StartTaskInput, options?: StartTaskOptions) => {
+        return this.gateway.dispatchTask(sessionId, userInput, options)
       }
     )
 
@@ -192,6 +194,16 @@ export class ElectronGatewayIpcAdapter {
     ipcMain.handle('system:saveTempPaste', async (_: any, content: string) => {
       return await this.tempFileService.saveTempPaste(content)
     })
+
+    ipcMain.handle(
+      'system:saveImageAttachment',
+      async (
+        _: any,
+        payload: { dataBase64: string; fileName?: string; mimeType?: string; previewDataUrl?: string }
+      ) => {
+        return await this.imageAttachmentService.saveImageAttachment(payload)
+      }
+    )
 
     ipcMain.handle('system:openExternal', async (_: any, url: string) => {
       if (url && (url.startsWith('http:') || url.startsWith('https:'))) {

@@ -120,7 +120,10 @@ export const App: React.FC = () => {
       );
       if (!ok) return;
       const rollbackContent = String(rollbackTarget.content || "");
-      actions.setComposerValue(rollbackContent, rollbackContent.length);
+      actions.restoreComposerDraft(
+        rollbackContent,
+        rollbackTarget.metadata?.inputImages || [],
+      );
     } finally {
       setRollbackPending(false);
       setRollbackTarget(null);
@@ -160,7 +163,7 @@ export const App: React.FC = () => {
     : undefined;
   const canSend =
     state.connectionStatus === "connected" &&
-    state.composerValue.trim().length > 0;
+    (state.composerValue.trim().length > 0 || state.composerImages.length > 0);
   const activeSessionLockedProfileId =
     state.activeSession?.lockedProfileId || null;
   const activeDetailTurn = React.useMemo<AgentTimelineItem | null>(() => {
@@ -261,8 +264,12 @@ export const App: React.FC = () => {
               <ComposerBar
                 value={state.composerValue}
                 cursor={state.composerCursor}
+                images={state.composerImages}
                 onChange={actions.setComposerValue}
                 onCursorChange={actions.setComposerCursor}
+                onAttachImages={(files) => void actions.attachImages(files)}
+                onRemoveImage={actions.removeComposerImage}
+                onClearImages={actions.clearComposerImages}
                 onSend={() => void actions.sendMessage()}
                 onStop={() => void actions.stopActiveSession()}
                 canSend={canSend}

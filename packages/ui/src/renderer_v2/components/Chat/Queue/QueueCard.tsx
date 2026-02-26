@@ -39,7 +39,12 @@ export function QueueCard(props: {
       >
         <GripVertical size={14} />
       </div>
-      <div className="queue-card-content">{renderMentionContent(item.content)}</div>
+      <div className="queue-card-content">
+        {renderMentionContent(item.content)}
+        {Array.isArray(item.images) && item.images.length > 0 ? (
+          <span className="queue-card-image-count">+{item.images.length} image</span>
+        ) : null}
+      </div>
       <button
         className="icon-btn-sm queue-card-action"
         onClick={onEdit}

@@ -1,6 +1,6 @@
 import React from 'react'
 
-const MENTION_TOKEN_REGEX = /(\[MENTION_(?:SKILL|TAB|FILE|USER_PASTE):#.+?#(?:#.+?#)?\])/g
+const MENTION_TOKEN_REGEX = /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|USER_PASTE):#.+?#(?:#.+?#)?\])/g
 
 function fileNameFromPath(path: string): string {
   return path.split(/[/\\]/).pop() || path
@@ -20,6 +20,11 @@ function tokenToText(token: string): { text: string; kind: 'terminal' | 'skill' 
   const fileMatch = token.match(/^\[MENTION_FILE:#(.+?)#\]$/)
   if (fileMatch) {
     return { text: fileNameFromPath(fileMatch[1]), kind: 'file' }
+  }
+
+  const imageMatch = token.match(/^\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]$/)
+  if (imageMatch) {
+    return { text: imageMatch[2] || fileNameFromPath(imageMatch[1]), kind: 'file' }
   }
 
   const pasteMatch = token.match(/^\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]$/)

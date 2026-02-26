@@ -61,11 +61,18 @@ const extractNodeText = (node: React.ReactNode): string => {
 
 type RowDisplayKind = 'assistant' | 'user' | 'hidden'
 
+const isCompletedWhitespaceAssistantText = (message: ChatMessage): boolean =>
+  message.role === 'assistant' &&
+  message.type === 'text' &&
+  message.streaming !== true &&
+  !/\S/.test(String(message.content || ''))
+
 const getRowDisplayKind = (session: MessageSessionShape, messageId: string): RowDisplayKind => {
   const candidate = session.messagesById.get(messageId)
   if (!candidate) return 'hidden'
   if (candidate.type === 'tokens_count') return 'hidden'
   if (candidate.role === 'user') return 'user'
+  if (isCompletedWhitespaceAssistantText(candidate)) return 'hidden'
   const isLastInSession = session.messageIds[session.messageIds.length - 1] === messageId
   const isRetryHint = candidate.type === 'alert' && candidate.metadata?.subToolLevel === 'info'
   if (isRetryHint && !isLastInSession) return 'hidden'
@@ -196,6 +203,9 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
   if (msg.type === 'tokens_count') {
     return null
   }
+  if (isCompletedWhitespaceAssistantText(msg)) {
+    return null
+  }
   const canRollback = isUser && !!msg.backendMessageId && !msg.streaming && !isThinking
 
   const renderAssistantRow = (children: React.ReactNode) => (
@@ -217,6 +227,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
   )
 
   if (isUser) {
+    const inputImages = msg.metadata?.inputImages || []
     return (
       <div className="message-row-container role-user">
         <div className="message-role-label user">USER</div>
@@ -226,6 +237,18 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
               {renderMentionContent(msg.content)}
               {msg.streaming && <span className="cursor-blink" />}
             </div>
+            {inputImages.length > 0 && (
+              <div className="message-user-images">
+                {inputImages.map((image, index) => {
+                  const src = String(image.previewDataUrl || '').trim()
+                  return (
+                    <div key={`${image.attachmentId || 'image'}-${index}`} className="message-user-image-item">
+                      {src ? <img src={src} alt="Attached image" loading="lazy" /> : <div className="message-user-image-missing">IMG</div>}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
           <button
             className="message-rollback-btn"

@@ -2,7 +2,9 @@ import fs from 'fs/promises';
 import type { ISkillRuntime } from '../runtimeContracts';
 import { TerminalService } from '../TerminalService';
 import { USEFUL_SKILL_TAG, USER_INPUT_TAGS, FILE_CONTENT_TAG, TERMINAL_CONTENT_TAG } from './prompts';
-import { detectFileKind } from './tools/read_tools';
+import { detectFileKind, readImageFile } from './tools/read_tools';
+import type { InputImageAttachment, UserInputPayload } from '../../types';
+import { ImageAttachmentService } from '../ImageAttachmentService';
 
 /**
  * Helper to parse user input for special labels like skills, terminal tabs, and pastes.
@@ -10,6 +12,7 @@ import { detectFileKind } from './tools/read_tools';
  */
 export class InputParseHelper {
   static readonly DEFAULT_USER_INPUT_TAG = USER_INPUT_TAGS[0];
+  private static readonly MAX_MODEL_IMAGE_BYTES = 8 * 1024 * 1024;
   /**
    * Regex to match skill labels: [MENTION_SKILL:#name#]
    */
@@ -35,7 +38,7 @@ export class InputParseHelper {
    * content for AI and display content for the UI.
    */
   static async parseAndEnrich(
-    input: string,
+    input: string | UserInputPayload,
     skillService: ISkillRuntime,
     terminalService: TerminalService,
     options?: {
@@ -43,14 +46,29 @@ export class InputParseHelper {
       includeContextDetails?: boolean
       userInputInstruction?: string
       keepTaggedBodyLiteral?: boolean
+      modelSupportsImage?: boolean
+      maxImageAttachments?: number
+      imageAttachmentService?: ImageAttachmentService
     }
-  ): Promise<{ enrichedContent: string; displayContent: string }> {
+  ): Promise<{
+    enrichedContent: string
+    displayContent: string
+    inputImages: InputImageAttachment[]
+    modelImages: Array<{ mimeType: string; dataUrl: string }>
+  }> {
+    const normalized = this.normalizeInputPayload(input);
     const userInputTag = options?.userInputTag || USER_INPUT_TAGS[0];
     const includeContextDetails = options?.includeContextDetails !== false;
+    const modelSupportsImage = options?.modelSupportsImage === true;
+    const maxImageAttachments =
+      Number.isInteger(options?.maxImageAttachments) && Number(options?.maxImageAttachments) >= 0
+        ? Number(options?.maxImageAttachments)
+        : Number.POSITIVE_INFINITY;
+
     // 1. Fetch Skill Details
     let skillDetails = '';
     if (includeContextDetails) {
-      const skillMatches = Array.from(input.matchAll(this.SKILL_REGEX));
+      const skillMatches = Array.from(normalized.text.matchAll(this.SKILL_REGEX));
       const skillNames = Array.from(new Set(skillMatches.map(m => m[1])));
       for (const name of skillNames) {
         try {
@@ -66,7 +84,7 @@ export class InputParseHelper {
     // 2. Fetch Terminal Tab Details
     let tabDetails = '';
     if (includeContextDetails) {
-      const tabMatches = Array.from(input.matchAll(this.TAB_REGEX));
+      const tabMatches = Array.from(normalized.text.matchAll(this.TAB_REGEX));
       const tabIds = Array.from(new Set(tabMatches.map(m => m[2])));
       for (const id of tabIds) {
         try {
@@ -88,8 +106,8 @@ ${recentOutput}
     // 3. Fetch Large Paste & Mentioned File Details
     let fileDetails = '';
     if (includeContextDetails) {
-      const pasteMatches = Array.from(input.matchAll(this.PASTE_REGEX));
-      const fileMatches = Array.from(input.matchAll(this.FILE_REGEX));
+      const pasteMatches = Array.from(normalized.text.matchAll(this.PASTE_REGEX));
+      const fileMatches = Array.from(normalized.text.matchAll(this.FILE_REGEX));
       const allFileMatches = [
         ...pasteMatches.map(m => ({ filePath: m[1] })),
         ...fileMatches.map(m => ({ filePath: m[1] }))
@@ -114,26 +132,175 @@ ${recentOutput}
     this.PASTE_REGEX.lastIndex = 0; // Reset regex state
     this.FILE_REGEX.lastIndex = 0; // Reset regex state
 
+    const preparedImages = await this.prepareImagesForInput(normalized.images, {
+      modelSupportsImage,
+      maxImageAttachments,
+      imageAttachmentService: options?.imageAttachmentService
+    });
+
     const normalizedInstruction = String(options?.userInputInstruction || '').trim();
     const keepTaggedBodyLiteral = options?.keepTaggedBodyLiteral === true;
-    const taggedInputLiteral = `"${userInputTag}${input}`;
+    const taggedInputLiteral = `"${userInputTag}${normalized.text}`;
     const userBody = normalizedInstruction
       ? keepTaggedBodyLiteral
         ? `${normalizedInstruction}\n${taggedInputLiteral}`
-        : `${normalizedInstruction}\n${input}`
-      : input;
+        : `${normalizedInstruction}\n${normalized.text}`
+      : normalized.text;
 
     // enrichedContent structure: [Skill Details] + [Tab Details] + [File Details] + [User Body]
     // For inserted mode with keepTaggedBodyLiteral=true, userBody already contains the tagged block.
     let prefix = skillDetails + tabDetails + fileDetails;
     const decoratedBody = keepTaggedBodyLiteral ? userBody : `${userInputTag}${userBody}`;
-    const enrichedContent = prefix 
-      ? `${prefix}${decoratedBody}` 
-      : `${decoratedBody}`;
-    
-    // displayContent is the original input with labels (used for frontend rendering)
-    const displayContent = input;
+    const imageNames = preparedImages.inputImages.map((item) => item.fileName || item.attachmentId || 'image');
+    const missingNames = preparedImages.inputImages
+      .filter((item) => item.status === 'missing')
+      .map((item) => item.fileName || item.attachmentId || 'image');
+    const nonInjectedNote =
+      preparedImages.inputImages.length > 0 && preparedImages.modelImages.length === 0
+        ? `\n\nAttached images (not injected as model image inputs): ${imageNames.join(', ')}`
+        : '';
+    const missingNote =
+      missingNames.length > 0
+        ? `\n\nMissing image attachments (kept as references only): ${missingNames.join(', ')}`
+        : '';
+    const imageFallbackNote = `${nonInjectedNote}${missingNote}`;
+    const enrichedContent = `${prefix}${decoratedBody}${imageFallbackNote}`;
 
-    return { enrichedContent, displayContent };
+    return {
+      enrichedContent,
+      displayContent: normalized.text,
+      inputImages: preparedImages.inputImages,
+      modelImages: preparedImages.modelImages
+    };
+  }
+
+  private static normalizeInputPayload(input: string | UserInputPayload): {
+    text: string
+    images: InputImageAttachment[]
+  } {
+    if (typeof input === 'string') {
+      return {
+        text: input,
+        images: []
+      };
+    }
+
+    if (!input || typeof input !== 'object') {
+      return {
+        text: '',
+        images: []
+      };
+    }
+
+    const text = typeof input.text === 'string' ? input.text : '';
+    const images = Array.isArray(input.images)
+      ? input.images
+          .map((item) => this.sanitizeImageAttachment(item))
+          .filter((item): item is InputImageAttachment => item !== null)
+      : [];
+    return { text, images };
+  }
+
+  private static sanitizeImageAttachment(raw: unknown): InputImageAttachment | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const input = raw as Record<string, unknown>;
+    const attachmentId = typeof input.attachmentId === 'string' ? input.attachmentId.trim() : '';
+    if (!attachmentId) return null;
+    const fileName = typeof input.fileName === 'string' ? input.fileName.trim() : '';
+    const mimeType = typeof input.mimeType === 'string' ? input.mimeType.trim() : '';
+    const sizeBytes = Number.isFinite(input.sizeBytes as number) ? Number(input.sizeBytes) : undefined;
+    const sha256 = typeof input.sha256 === 'string' ? input.sha256.trim() : '';
+    const previewDataUrl = typeof input.previewDataUrl === 'string' ? input.previewDataUrl.trim() : '';
+    const status = input.status === 'ready' || input.status === 'missing' ? input.status : undefined;
+    return {
+      ...(attachmentId ? { attachmentId } : {}),
+      ...(fileName ? { fileName } : {}),
+      ...(mimeType ? { mimeType } : {}),
+      ...(typeof sizeBytes === 'number' && sizeBytes >= 0 ? { sizeBytes } : {}),
+      ...(sha256 ? { sha256 } : {}),
+      ...(previewDataUrl ? { previewDataUrl } : {}),
+      ...(status ? { status } : {})
+    };
+  }
+
+  private static async prepareImagesForInput(
+    images: InputImageAttachment[],
+    options: {
+      modelSupportsImage: boolean
+      maxImageAttachments: number
+      imageAttachmentService?: ImageAttachmentService
+    }
+  ): Promise<{
+    inputImages: InputImageAttachment[]
+    modelImages: Array<{ mimeType: string; dataUrl: string }>
+  }> {
+    const inputImages: InputImageAttachment[] = [];
+    const modelImages: Array<{ mimeType: string; dataUrl: string }> = [];
+    for (const candidate of images.slice(0, options.maxImageAttachments)) {
+      const resolved = await this.resolveImageCandidate(candidate, options.imageAttachmentService);
+      if (!resolved) continue;
+      const { normalizedAttachment, bytes } = resolved;
+      if (normalizedAttachment.status === 'missing') {
+        inputImages.push({
+          ...normalizedAttachment,
+          status: 'missing'
+        });
+        continue;
+      }
+      const imageHint = normalizedAttachment.fileName || normalizedAttachment.attachmentId || 'image';
+      try {
+        const kind = detectFileKind(imageHint, new Uint8Array(bytes));
+        if (kind !== 'image') {
+          continue;
+        }
+
+        const sizeBytes = bytes.byteLength;
+        const image = readImageFile({ bytes: new Uint8Array(bytes), filePath: imageHint });
+        const normalized: InputImageAttachment = {
+          ...normalizedAttachment,
+          fileName: normalizedAttachment.fileName || imageHint,
+          mimeType: normalizedAttachment.mimeType || image.mimeType,
+          sizeBytes,
+          status: normalizedAttachment.status || 'ready'
+        };
+        inputImages.push(normalized);
+
+        if (!options.modelSupportsImage) {
+          continue;
+        }
+        if (sizeBytes > this.MAX_MODEL_IMAGE_BYTES) {
+          console.warn(
+            `[InputParseHelper] Skipped oversized image attachment (> ${this.MAX_MODEL_IMAGE_BYTES} bytes): ${normalizedAttachment.attachmentId}`
+          );
+          continue;
+        }
+        modelImages.push({
+          mimeType: normalized.mimeType || image.mimeType,
+          dataUrl: `data:${image.mimeType};base64,${image.base64}`
+        });
+      } catch (err) {
+        console.warn(`[InputParseHelper] Failed to process input image: ${normalizedAttachment.attachmentId}`, err);
+      }
+    }
+
+    return { inputImages, modelImages };
+  }
+
+  private static async resolveImageCandidate(
+    candidate: InputImageAttachment,
+    attachmentService?: ImageAttachmentService
+  ): Promise<{
+    normalizedAttachment: InputImageAttachment
+    bytes: Uint8Array
+  } | null> {
+    if (attachmentService) {
+      const loaded = await attachmentService.loadImageBytes(candidate);
+      if (!loaded) return null;
+      return {
+        normalizedAttachment: loaded.attachment,
+        bytes: loaded.bytes
+      };
+    }
+    return null;
   }
 }

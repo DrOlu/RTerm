@@ -23,6 +23,7 @@ import {
   buildBuiltInToolStatusSummary,
   buildSkillStatusSummary
 } from '../../services/Gateway/toolingSummary'
+import { ImageAttachmentService } from '../../services/ImageAttachmentService'
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name]
@@ -123,6 +124,7 @@ export async function startGyBackend(): Promise<void> {
   const memoryService = new NodeMemoryService(dataDir)
   const accessTokenService = new NodeAccessTokenService(dataDir)
   const modelCapabilityService = new ModelCapabilityService()
+  const imageAttachmentService = new ImageAttachmentService(dataDir)
 
   const terminalService = new TerminalService()
   const uiHistoryService = new UIHistoryService()
@@ -134,7 +136,8 @@ export async function startGyBackend(): Promise<void> {
     skillService,
     memoryService,
     uiHistoryService,
-    chatHistoryService
+    chatHistoryService,
+    imageAttachmentService
   )
 
   const gatewayService = new GatewayService(
@@ -306,6 +309,14 @@ export async function startGyBackend(): Promise<void> {
         systemBridge: {
           saveTempPaste: async (content: string) => {
             return await saveTempPaste(dataDir, content)
+          },
+          saveImageAttachment: async (payload: {
+            dataBase64: string
+            fileName?: string
+            mimeType?: string
+            previewDataUrl?: string
+          }) => {
+            return await imageAttachmentService.saveImageAttachment(payload)
           }
         },
         skillBridge: {
