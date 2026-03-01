@@ -31,6 +31,7 @@ import {
   buildBuiltInToolStatusSummary,
   buildSkillStatusSummary
 } from '../../../backend/src/services/Gateway/toolingSummary'
+import { TerminalStateStore } from '../../../backend/src/services/terminal/TerminalStateStore'
 
 let mainWindow: BrowserWindow | null = null
 let settingsService: SettingsService
@@ -208,7 +209,10 @@ export async function startElectronMain(): Promise<void> {
   // Initialize services
   settingsService = new SettingsService()
   uiSettingsStore = new UiSettingsStore()
-  terminalService = new TerminalService()
+  const terminalStateStore = new TerminalStateStore(join(app.getPath('userData'), 'terminal-tabs-state.json'))
+  terminalService = new TerminalService({
+    terminalStateStore
+  })
   commandPolicyService = new CommandPolicyService()
   mcpToolService = new McpToolService()
   themeStore = new ThemeConfigStore()
@@ -249,6 +253,17 @@ export async function startElectronMain(): Promise<void> {
     settingsService,
     mcpToolService
   )
+  const terminalRestoreResult = await terminalService.restorePersistedTerminals()
+  if (terminalRestoreResult.restored.length > 0 || terminalRestoreResult.failed.length > 0) {
+    console.log(
+      `[Main] Terminal restore completed. restored=${terminalRestoreResult.restored.length} failed=${terminalRestoreResult.failed.length}`
+    )
+    if (terminalRestoreResult.failed.length > 0) {
+      terminalRestoreResult.failed.forEach((item) => {
+        console.warn(`[Main] Terminal restore failed for ${item.id}: ${item.reason}`)
+      })
+    }
+  }
   gatewayService.registerTransport(new ElectronWindowTransport())
   webSocketGatewayControlService = new WebSocketGatewayControlService({
     createAdapter: (host, port) =>
@@ -293,6 +308,11 @@ export async function startElectronMain(): Promise<void> {
           },
           setSelection: async (terminalId, selectionText) => {
             terminalService.setSelection(terminalId, selectionText)
+          },
+          getBufferDelta: async (terminalId, fromOffset) => {
+            const data = terminalService.getBufferDelta(terminalId, fromOffset)
+            const offset = terminalService.getCurrentOffset(terminalId)
+            return { data, offset }
           }
         },
         profileBridge: {
@@ -550,6 +570,9 @@ export async function startElectronMain(): Promise<void> {
 }
 
 app.on('window-all-closed', async () => {
+  if (terminalService) {
+    terminalService.flushPersistedState()
+  }
   if (webSocketGatewayControlService) {
     try {
       await webSocketGatewayControlService.stop()

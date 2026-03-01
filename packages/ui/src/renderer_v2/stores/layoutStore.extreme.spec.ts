@@ -202,6 +202,62 @@ const run = async (): Promise<void> => {
     assertEqual(hydratedTerminalPanels.length, 2, 'terminal panels should remain after hydration sync')
   })
 
+  await runCase('missing restored terminal tabs keep placeholder panel when pinned', async () => {
+    const persistedTree: LayoutTree = {
+      schemaVersion: 2,
+      root: {
+        type: 'split',
+        id: 'root',
+        direction: 'horizontal',
+        children: [
+          { type: 'panel', id: 'node-chat', panel: { id: 'panel-chat', kind: 'chat' } },
+          { type: 'panel', id: 'node-term-a', panel: { id: 'panel-term-a', kind: 'terminal' } },
+          { type: 'panel', id: 'node-term-b', panel: { id: 'panel-term-b', kind: 'terminal' } }
+        ],
+        sizes: [34, 33, 33]
+      },
+      panelTabs: {
+        'panel-chat': { tabIds: ['chat-1'], activeTabId: 'chat-1' },
+        'panel-term-a': { tabIds: ['term-a'], activeTabId: 'term-a' },
+        'panel-term-b': { tabIds: ['term-missing'], activeTabId: 'term-missing' }
+      }
+    }
+
+    const store = createStore({
+      settings: {
+        layout: {
+          v2: persistedTree
+        }
+      },
+      terminalIds: [],
+      chatIds: ['chat-1'],
+      terminalInventoryHydrated: false
+    })
+
+    store.bootstrap()
+    const unresolvedPanelIds = store.getPanelsWithMissingTabBindings('terminal', ['term-a'])
+    assertEqual(
+      JSON.stringify(unresolvedPanelIds),
+      JSON.stringify(['panel-term-b']),
+      'missing terminal ids should map to their original panel'
+    )
+    store.pinPanelsAsRestorePlaceholder(unresolvedPanelIds)
+
+    const internal = store as any
+    internal.appStore.terminalTabs = [{ id: 'term-a' }]
+    internal.appStore.activeTerminalId = 'term-a'
+    internal.appStore.terminalTabsHydrated = true
+    store.syncPanelBindings({ persist: false })
+
+    const terminalPanels = store.panelNodes.filter((node) => node.panel.kind === 'terminal')
+    assertEqual(terminalPanels.length, 2, 'pinned placeholder panel should not be auto-pruned')
+    assertEqual(
+      JSON.stringify(store.getPanelTabIds('panel-term-b')),
+      JSON.stringify([]),
+      'placeholder panel should become empty after unresolved tab ids are removed'
+    )
+  })
+
   await runCase('syncPanelBindings aligns panel active tab with global active terminal', async () => {
     const store = createStore({
       terminalIds: ['term-a', 'term-b'],

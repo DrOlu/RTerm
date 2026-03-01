@@ -82,6 +82,7 @@ export class ChatStore {
       activeSessionLatestTokens: computed,
       activeSessionLatestMaxTokens: computed,
       hydrateSessionInventoryFromLayout: action,
+      hydrateSessionsFromBackend: action,
       createSession: action,
       setActiveSession: action,
       closeSession: action,
@@ -199,6 +200,108 @@ export class ChatStore {
       this.activeSessionId = nextSessions[0]?.id || null
     }
     this.sessionInventoryHydrated = true
+  }
+
+  async hydrateSessionsFromBackend(
+    sessionIds: string[],
+    preferredActiveSessionId?: string | null
+  ): Promise<void> {
+    const ids = Array.from(new Set((sessionIds || []).filter((id) => typeof id === 'string' && id.length > 0)))
+    if (ids.length === 0) return
+
+    const allHistory = await this.getAllChatHistory()
+    const titleById = new Map<string, string>()
+    allHistory.forEach((item) => {
+      if (!item || typeof item.id !== 'string') return
+      if (typeof item.title !== 'string' || item.title.length === 0) return
+      titleById.set(item.id, item.title)
+    })
+
+    const sessionPayloads = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const [messagesRaw, runtimeSnapshot] = await Promise.all([
+            window.gyshell.agent.getUiMessages(id),
+            window.gyshell.agent.getSessionSnapshot(id)
+          ])
+          const messages = Array.isArray(messagesRaw)
+            ? (messagesRaw.filter((item) => item && typeof item.id === 'string') as ChatMessage[])
+            : []
+          return {
+            id,
+            loaded: true,
+            messages,
+            isBusy: runtimeSnapshot?.isBusy === true,
+            lockedProfileId: runtimeSnapshot?.lockedProfileId || null,
+            title: titleById.get(id)
+          }
+        } catch (error) {
+          console.warn(`Failed to hydrate chat session ${id} from backend:`, error)
+          return {
+            id,
+            loaded: false,
+            messages: [] as ChatMessage[],
+            isBusy: false,
+            lockedProfileId: null,
+            title: titleById.get(id)
+          }
+        }
+      })
+    )
+    const payloadById = new Map(sessionPayloads.map((payload) => [payload.id, payload]))
+
+    runInAction(() => {
+      const existingById = new Map(this.sessions.map((session) => [session.id, session]))
+      const nextSessions = ids.map((id) => {
+        const existing = existingById.get(id) || this.createEmptySession(id, 'New Chat')
+        const payload = payloadById.get(id)
+        if (!payload) return existing
+
+        if (payload.loaded) {
+          existing.messagesById.clear()
+          existing.messageIds = []
+          payload.messages.forEach((message) => {
+            existing.messagesById.set(message.id, message)
+            existing.messageIds.push(message.id)
+          })
+          existing.isThinking = payload.isBusy
+          existing.isSessionBusy = payload.isBusy
+          existing.lockedProfileId = payload.lockedProfileId
+        }
+
+        if (payload.title && payload.title.length > 0) {
+          existing.title = payload.title
+        }
+
+        return existing
+      })
+
+      this.sessions = nextSessions
+
+      const normalizedPreferredActiveId =
+        typeof preferredActiveSessionId === 'string' && preferredActiveSessionId.length > 0
+          ? preferredActiveSessionId
+          : null
+      const preferredExists =
+        !!normalizedPreferredActiveId && nextSessions.some((session) => session.id === normalizedPreferredActiveId)
+      const currentExists = !!this.activeSessionId && nextSessions.some((session) => session.id === this.activeSessionId)
+
+      if (preferredExists) {
+        this.activeSessionId = normalizedPreferredActiveId
+      } else if (!currentExists) {
+        this.activeSessionId = nextSessions[0]?.id || null
+      }
+      this.sessionInventoryHydrated = true
+    })
+    this.emitSessionsChanged()
+
+    if (this.activeSessionId) {
+      try {
+        await window.gyshell.agent.loadChatSession(this.activeSessionId)
+      } catch (error) {
+        console.warn(`Failed to load active chat session ${this.activeSessionId}:`, error)
+      }
+    }
   }
 
   createSession(title: string = 'New Chat'): string {
@@ -340,10 +443,16 @@ export class ChatStore {
       switch (type) {
         case 'ADD_MESSAGE': {
           const msg = update.message
+          if (!msg || typeof msg.id !== 'string' || msg.id.length === 0) {
+            break
+          }
+          const existed = session.messagesById.has(msg.id)
           session.messagesById.set(msg.id, msg)
-          session.messageIds.push(msg.id)
+          if (!existed) {
+            session.messageIds.push(msg.id)
+          }
           // Auto-update title logic if needed (backend also does this, but for UX we can do it here too)
-          if (msg.role === 'user') {
+          if (!existed && msg.role === 'user') {
             const userMsgCount = session.messageIds.filter(msgId => {
               const m = session.messagesById.get(msgId)
               return m && m.role === 'user'

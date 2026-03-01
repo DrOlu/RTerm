@@ -51,7 +51,17 @@ const buildPersistedTree = (options?: {
   }
 })
 
-const installBootstrapWindowMock = (layoutTree: LayoutTree): void => {
+const installBootstrapWindowMock = (
+  layoutTree: LayoutTree,
+  options?: {
+    allChatHistory?: Array<{ id: string; title?: string }>
+    uiMessagesBySessionId?: Record<string, any[]>
+    getUiMessages?: (sessionId: string) => Promise<any[]>
+    runtimeSnapshotsBySessionId?: Record<string, any>
+    onUiUpdateRegister?: (callback: (action: any) => void) => void
+    loadChatSessionCalls?: string[]
+  }
+): void => {
   const versionPayload = {
     status: 'up-to-date',
     currentVersion: '1.0.0',
@@ -85,7 +95,26 @@ const installBootstrapWindowMock = (layoutTree: LayoutTree): void => {
         getCustom: async () => []
       },
       agent: {
-        onUiUpdate: () => {}
+        onUiUpdate: (callback: (action: any) => void) => {
+          options?.onUiUpdateRegister?.(callback)
+        },
+        getAllChatHistory: async () => options?.allChatHistory || [],
+        getUiMessages: async (sessionId: string) => {
+          if (options?.getUiMessages) {
+            return await options.getUiMessages(sessionId)
+          }
+          return options?.uiMessagesBySessionId?.[sessionId] || []
+        },
+        getSessionSnapshot: async (sessionId: string) =>
+          options?.runtimeSnapshotsBySessionId?.[sessionId] || {
+            id: sessionId,
+            isBusy: false,
+            lockedProfileId: null
+          },
+        loadChatSession: async (sessionId: string) => {
+          options?.loadChatSessionCalls?.push(sessionId)
+          return null
+        }
       },
       terminal: {
         onExit: () => {},
@@ -210,6 +239,258 @@ const run = async (): Promise<void> => {
       'chat-c',
       'bootstrap should pass preferred active chat session id to hydration'
     )
+  })
+
+  await runCase('AppStore bootstrap hydrates restored chat tabs with persisted titles/messages', async () => {
+    const layoutTree = buildPersistedTree({
+      focusedPanelId: 'panel-chat-b'
+    })
+    const loadChatSessionCalls: string[] = []
+    installBootstrapWindowMock(layoutTree, {
+      allChatHistory: [
+        { id: 'chat-a', title: 'Alpha Chat' },
+        { id: 'chat-b', title: 'Beta Chat' },
+        { id: 'chat-c', title: 'Gamma Chat' }
+      ],
+      uiMessagesBySessionId: {
+        'chat-a': [{ id: 'msg-a1', role: 'user', type: 'text', content: 'hello', timestamp: 1 }],
+        'chat-b': [{ id: 'msg-b1', role: 'assistant', type: 'text', content: 'ok', timestamp: 2 }],
+        'chat-c': [{ id: 'msg-c1', role: 'user', type: 'text', content: 'resume', timestamp: 3 }]
+      },
+      runtimeSnapshotsBySessionId: {
+        'chat-c': {
+          id: 'chat-c',
+          isBusy: true,
+          lockedProfileId: 'profile-1'
+        }
+      },
+      loadChatSessionCalls
+    })
+
+    const store = new AppStore()
+    ;(store.layout as any).bootstrap = () => {}
+    ;(store.layout as any).syncPanelBindings = () => {}
+    ;(store as any).loadTools = async () => {}
+    ;(store as any).loadSkills = async () => {}
+    ;(store as any).loadMemory = async () => {}
+    ;(store as any).loadCommandPolicyLists = async () => {}
+    ;(store as any).loadAccessTokens = async () => {}
+    ;(store as any).loadVersionState = async () => {}
+    ;(store as any).checkVersion = async () => {}
+
+    await store.bootstrap()
+
+    assertEqual(store.chat.getSessionById('chat-a')?.title, 'Alpha Chat', 'restored chat-a title should be hydrated')
+    assertEqual(store.chat.getSessionById('chat-b')?.title, 'Beta Chat', 'restored chat-b title should be hydrated')
+    assertEqual(store.chat.getSessionById('chat-c')?.title, 'Gamma Chat', 'restored chat-c title should be hydrated')
+    assertEqual(store.chat.getSessionById('chat-c')?.messageIds.length, 1, 'restored chat-c messages should be hydrated')
+    assertEqual(store.chat.activeSessionId, 'chat-c', 'preferred active restored tab should stay active after hydration')
+    assertEqual(
+      JSON.stringify(loadChatSessionCalls),
+      JSON.stringify(['chat-c']),
+      'bootstrap should load runtime backend context for active restored chat session'
+    )
+  })
+
+  await runCase('reconcileTerminalTabs pins unresolved terminal panels only on first hydration', async () => {
+    const store = new AppStore()
+    let missingCallCount = 0
+    let pinCallCount = 0
+    let capturedIncomingIds: string[] = []
+    let capturedPinnedPanels: string[] = []
+
+    ;(store.layout as any).getPanelsWithMissingTabBindings = (_kind: string, ownerTabIds: string[]) => {
+      missingCallCount += 1
+      capturedIncomingIds = [...ownerTabIds]
+      return ['panel-term-missing']
+    }
+    ;(store.layout as any).pinPanelsAsRestorePlaceholder = (panelIds: string[]) => {
+      pinCallCount += 1
+      capturedPinnedPanels = [...panelIds]
+    }
+    ;(store.layout as any).syncPanelBindings = () => {}
+
+    store.reconcileTerminalTabs({
+      terminals: [
+        {
+          id: 'term-1',
+          title: 'Local',
+          type: 'local',
+          cols: 80,
+          rows: 24,
+          runtimeState: 'ready'
+        }
+      ]
+    } as any)
+
+    assertEqual(missingCallCount, 1, 'first hydration should detect unresolved terminal panels')
+    assertEqual(pinCallCount, 1, 'first hydration should pin unresolved terminal panels')
+    assertEqual(JSON.stringify(capturedIncomingIds), JSON.stringify(['term-1']), 'incoming ids should be forwarded to layout')
+    assertEqual(
+      JSON.stringify(capturedPinnedPanels),
+      JSON.stringify(['panel-term-missing']),
+      'layout should receive unresolved panel ids'
+    )
+
+    store.reconcileTerminalTabs({
+      terminals: [
+        {
+          id: 'term-1',
+          title: 'Local',
+          type: 'local',
+          cols: 120,
+          rows: 40,
+          runtimeState: 'ready'
+        }
+      ]
+    } as any)
+
+    assertEqual(missingCallCount, 1, 'subsequent updates should not re-run first hydration placeholder detection')
+    assertEqual(pinCallCount, 1, 'subsequent updates should not re-pin placeholders')
+  })
+
+  await runCase('AppStore bootstrap should buffer ui updates emitted during chat hydration', async () => {
+    const layoutTree = buildPersistedTree({
+      focusedPanelId: 'panel-chat-b'
+    })
+    let uiUpdateHandler: ((action: any) => void) | null = null
+    let resolveHydrationGate: (() => void) | null = null
+    const hydrationGate = new Promise<void>((resolve) => {
+      resolveHydrationGate = resolve
+    })
+
+    installBootstrapWindowMock(layoutTree, {
+      allChatHistory: [
+        { id: 'chat-a', title: 'Alpha Chat' },
+        { id: 'chat-b', title: 'Beta Chat' },
+        { id: 'chat-c', title: 'Gamma Chat' }
+      ],
+      onUiUpdateRegister: (callback) => {
+        uiUpdateHandler = callback
+      },
+      getUiMessages: async (sessionId: string) => {
+        if (sessionId === 'chat-c') {
+          await hydrationGate
+        }
+        return []
+      }
+    })
+
+    const store = new AppStore()
+    ;(store.layout as any).bootstrap = () => {}
+    ;(store.layout as any).syncPanelBindings = () => {}
+    ;(store as any).loadTools = async () => {}
+    ;(store as any).loadSkills = async () => {}
+    ;(store as any).loadMemory = async () => {}
+    ;(store as any).loadCommandPolicyLists = async () => {}
+    ;(store as any).loadAccessTokens = async () => {}
+    ;(store as any).loadVersionState = async () => {}
+    ;(store as any).checkVersion = async () => {}
+
+    const bootstrapPromise = store.bootstrap()
+    for (let i = 0; i < 20 && !uiUpdateHandler; i += 1) {
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    assertCondition(!!uiUpdateHandler, 'bootstrap should register ui update listener before hydration awaits')
+
+    uiUpdateHandler!({
+      type: 'ADD_MESSAGE',
+      sessionId: 'chat-c',
+      message: {
+        id: 'msg-during-hydration',
+        role: 'assistant',
+        type: 'text',
+        content: 'streaming while hydrating',
+        timestamp: 10
+      }
+    })
+
+    resolveHydrationGate!()
+
+    await bootstrapPromise
+
+    const restoredSession = store.chat.getSessionById('chat-c')
+    assertCondition(!!restoredSession, 'restored session should exist after bootstrap')
+    assertCondition(
+      restoredSession?.messageIds.includes('msg-during-hydration'),
+      'ui update emitted during hydration should be replayed after hydration'
+    )
+  })
+
+  await runCase('AppStore bootstrap replay should not duplicate messages already present in hydrated snapshot', async () => {
+    const layoutTree = buildPersistedTree({
+      focusedPanelId: 'panel-chat-b'
+    })
+    let uiUpdateHandler: ((action: any) => void) | null = null
+    let resolveHydrationGate: (() => void) | null = null
+    const hydrationGate = new Promise<void>((resolve) => {
+      resolveHydrationGate = resolve
+    })
+
+    installBootstrapWindowMock(layoutTree, {
+      allChatHistory: [
+        { id: 'chat-a', title: 'Alpha Chat' },
+        { id: 'chat-b', title: 'Beta Chat' },
+        { id: 'chat-c', title: 'Gamma Chat' }
+      ],
+      onUiUpdateRegister: (callback) => {
+        uiUpdateHandler = callback
+      },
+      getUiMessages: async (sessionId: string) => {
+        if (sessionId === 'chat-c') {
+          await hydrationGate
+          return [
+            {
+              id: 'msg-shared',
+              role: 'assistant',
+              type: 'text',
+              content: 'shared message',
+              timestamp: 20
+            }
+          ]
+        }
+        return []
+      }
+    })
+
+    const store = new AppStore()
+    ;(store.layout as any).bootstrap = () => {}
+    ;(store.layout as any).syncPanelBindings = () => {}
+    ;(store as any).loadTools = async () => {}
+    ;(store as any).loadSkills = async () => {}
+    ;(store as any).loadMemory = async () => {}
+    ;(store as any).loadCommandPolicyLists = async () => {}
+    ;(store as any).loadAccessTokens = async () => {}
+    ;(store as any).loadVersionState = async () => {}
+    ;(store as any).checkVersion = async () => {}
+
+    const bootstrapPromise = store.bootstrap()
+    for (let i = 0; i < 20 && !uiUpdateHandler; i += 1) {
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    assertCondition(!!uiUpdateHandler, 'bootstrap should register ui update listener before hydration awaits')
+
+    uiUpdateHandler!({
+      type: 'ADD_MESSAGE',
+      sessionId: 'chat-c',
+      message: {
+        id: 'msg-shared',
+        role: 'assistant',
+        type: 'text',
+        content: 'shared message',
+        timestamp: 20
+      }
+    })
+
+    resolveHydrationGate!()
+    await bootstrapPromise
+
+    const restoredSession = store.chat.getSessionById('chat-c')
+    assertCondition(!!restoredSession, 'restored session should exist after bootstrap')
+    const duplicateCount = restoredSession?.messageIds.filter((id) => id === 'msg-shared').length || 0
+    assertEqual(duplicateCount, 1, 'deferred replay should not duplicate hydrated message ids')
   })
 }
 

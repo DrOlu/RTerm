@@ -54,10 +54,9 @@ import {
   USEFUL_SKILL_TAG,
   USER_INSERTED_INPUT_TAG,
   USER_INSERTED_INPUT_INSTRUCTION,
-  createBaseSystemPrompt,
-  createMemorySystemPrompt,
-  createSystemInfoPrompt,
-  GLOBAL_MEMORY_TAG,
+  createBaseSystemPromptText,
+  prependSystemInfoToUserInput,
+  upsertSingleSystemMessageByText,
   COMMAND_POLICY_DECISION_SCHEMA,
   WRITE_STDIN_POLICY_DECISION_SCHEMA,
   TASK_COMPLETION_DECISION_SCHEMA,
@@ -81,6 +80,7 @@ import { InputParseHelper } from './AgentHelper/InputParseHelper'
 import { ImageAttachmentService } from './ImageAttachmentService'
 
 const Ann: any = Annotation
+type StartupInputState = StartTaskInput | undefined
 
 const StateAnnotation = Ann.Root({
   // Runtime/Persistence Context - single source of truth for the whole graph
@@ -109,8 +109,8 @@ const StateAnnotation = Ann.Root({
     default: () => ""
   }),
   startup_input: Ann({
-    reducer: (x: StartTaskInput, y?: StartTaskInput) => y ?? x,
-    default: () => ''
+    reducer: (x: StartupInputState, y?: StartTaskInput) => y ?? x,
+    default: (): StartupInputState => undefined
   }),
   startup_mode: Ann({
     reducer: (x: 'normal' | 'inserted', y?: 'normal' | 'inserted') => y ?? x,
@@ -438,7 +438,7 @@ export class AgentService_v2 {
       if (!sessionId) return state
       const sessionBinding = this.getSessionModelBinding(sessionId)
 
-      const startupInput = state.startup_input as StartTaskInput
+      const startupInput: StartTaskInput = state.startup_input ?? ''
       const startupMode: 'normal' | 'inserted' = state.startup_mode === 'inserted' ? 'inserted' : 'normal'
 
       const messages: BaseMessage[] = [...state.messages]
@@ -458,16 +458,22 @@ export class AgentService_v2 {
         }
       )
 
+      let injectedUserContent = enrichedContent
+      if (startupMode === 'normal') {
+        const tabs = this.terminalService.getAllTerminals()
+        injectedUserContent = prependSystemInfoToUserInput(enrichedContent, tabs, sessionId)
+      }
+
       const humanMessageContent =
         modelImages.length > 0
           ? ([
-              { type: 'text', text: enrichedContent || 'User attached image inputs.' },
+              { type: 'text', text: injectedUserContent || 'User attached image inputs.' },
               ...modelImages.map((item) => ({
                 type: 'image_url' as const,
                 image_url: { url: item.dataUrl }
               }))
             ] as any)
-          : enrichedContent
+          : injectedUserContent
 
       const humanMessage = new HumanMessage(humanMessageContent)
       ;(humanMessage as any).additional_kwargs = {
@@ -486,52 +492,26 @@ export class AgentService_v2 {
       })
 
       const memoryEnabled = this.settings?.memory?.enabled !== false
-      const isMemorySystemMessage = (message: BaseMessage): boolean =>
-        message.type === 'system' &&
-        typeof message.content === 'string' &&
-        message.content.includes(GLOBAL_MEMORY_TAG.trim())
-      const stripMemorySystemMessages = (list: BaseMessage[]): BaseMessage[] =>
-        list.filter((item) => !isMemorySystemMessage(item))
 
-      const withUserMessages = memoryEnabled
-        ? [...messages, humanMessage]
-        : stripMemorySystemMessages([...messages, humanMessage])
-
-      const baseSystemMsg = createBaseSystemPrompt()
-      const hasBaseSystem = withUserMessages.some(
-        m => m.type === 'system' && typeof m.content === 'string' && m.content.includes('# Role: GyShell Assistant')
-      )
-      const hasMemorySystem = withUserMessages.some(isMemorySystemMessage)
-
-      let memorySystemMsg: BaseMessage | null = null
-      if (memoryEnabled && !hasMemorySystem) {
+      let memoryPrompt:
+        | {
+            memoryFilePath: string
+            memoryContent: string
+          }
+        | undefined
+      if (memoryEnabled) {
         try {
           const snapshot = await this.memoryService.getMemorySnapshot()
-          memorySystemMsg = createMemorySystemPrompt({
+          memoryPrompt = {
             memoryFilePath: snapshot.filePath,
             memoryContent: snapshot.content
-          })
+          }
         } catch (error) {
           console.warn('[AgentService_v2] Failed to load memory.md for system prompt injection:', error)
         }
       }
-
-      const contextMessages: BaseMessage[] = []
-      if (startupMode === 'normal') {
-        const tabs = this.terminalService.getAllTerminals()
-        const sysInfoMsg = createSystemInfoPrompt(tabs, sessionId)
-        contextMessages.push(sysInfoMsg)
-      }
-
-      const userLast = withUserMessages[withUserMessages.length - 1]
-      const beforeUser = withUserMessages.slice(0, -1)
-      const newMessages = [
-        ...(hasBaseSystem ? [] : [baseSystemMsg]),
-        ...(hasMemorySystem || !memorySystemMsg ? [] : [memorySystemMsg]),
-        ...beforeUser,
-        ...contextMessages,
-        userLast
-      ]
+      const baseSystemText = createBaseSystemPromptText(memoryPrompt)
+      const newMessages = upsertSingleSystemMessageByText([...messages, humanMessage], baseSystemText)
 
       const maxTokens = Math.min(sessionBinding.globalMaxTokens, sessionBinding.thinkingMaxTokens)
 

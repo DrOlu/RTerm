@@ -342,7 +342,8 @@ export interface GyShellAPI {
     resize: (terminalId: string, cols: number, rows: number) => Promise<void>
     kill: (terminalId: string) => Promise<void>
     setSelection: (terminalId: string, selectionText: string) => Promise<void>
-    onData: (callback: (data: { terminalId: string; data: string }) => void) => () => void
+    getBufferDelta: (terminalId: string, fromOffset: number) => Promise<{ data: string; offset: number }>
+    onData: (callback: (data: { terminalId: string; data: string; offset?: number }) => void) => () => void
     onExit: (callback: (data: { terminalId: string; code: number }) => void) => () => void
     onTabsUpdated: (
       callback: (data: {
@@ -491,8 +492,10 @@ const api: GyShellAPI = {
     kill: (terminalId) => ipcRenderer.invoke('terminal:kill', terminalId),
     setSelection: (terminalId, selectionText) =>
       ipcRenderer.invoke('terminal:setSelection', terminalId, selectionText),
+    getBufferDelta: (terminalId, fromOffset) =>
+      ipcRenderer.invoke('terminal:getBufferDelta', terminalId, fromOffset),
     onData: (callback) => {
-      const handler = (_: IpcRendererEvent, data: { terminalId: string; data: string }) =>
+      const handler = (_: IpcRendererEvent, data: { terminalId: string; data: string; offset?: number }) =>
         callback(data)
       ipcRenderer.on('terminal:data', handler)
       return () => ipcRenderer.off('terminal:data', handler)

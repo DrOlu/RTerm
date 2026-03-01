@@ -1,4 +1,4 @@
-import { HumanMessage, SystemMessage } from '@langchain/core/messages'
+import { HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages'
 import type { TerminalTab } from '../../types'
 import { z } from 'zod'
 
@@ -7,6 +7,7 @@ import { z } from 'zod'
  */
 
 export const SYS_INFO_MARKER = 'CURRENT_SYSTEM_INFO_MSG:\n'
+export const GYSHELL_BASE_SYSTEM_MARKER = '# Role: GyShell Assistant'
 export const USER_INPUT_TAG = 'USER_REQUEST_IS:\n'
 export const USER_INSERTED_INPUT_TAG = 'USER_INTERRUPT_INSERTED_REQUEST:\n'
 export const CONTINUE_INSTRUCTION_TAG = 'AGENT_CONTINUE_INSTRUCTION:\n'
@@ -17,14 +18,49 @@ export const NORMAL_USER_INPUT_TAGS = [USER_INPUT_TAG] as const
 export const USER_INSERTED_INPUT_INSTRUCTION =
   'The user inserted a message mid-run. Based on the latest input, decide whether to adjust and continue the previous task, or stop the previous path and switch to a new task.'
 
+function extractTextFromMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content
+
+  if (Array.isArray(content)) {
+    const textParts: string[] = []
+    for (const part of content) {
+      if (typeof part === 'string') {
+        textParts.push(part)
+        continue
+      }
+      if (!part || typeof part !== 'object') {
+        continue
+      }
+      const block = part as Record<string, unknown>
+      if (typeof block.text === 'string') {
+        textParts.push(block.text)
+      }
+    }
+    return textParts.join('\n')
+  }
+
+  if (content && typeof content === 'object') {
+    const block = content as Record<string, unknown>
+    if (typeof block.text === 'string') {
+      return block.text
+    }
+  }
+
+  return ''
+}
+
+export function hasAnyTagInMessageContent(content: unknown, tags: readonly string[]): boolean {
+  const normalized = extractTextFromMessageContent(content)
+  if (!normalized) return false
+  return tags.some((tag) => normalized.includes(tag))
+}
+
 export function hasAnyUserInputTag(content: unknown): boolean {
-  if (typeof content !== 'string') return false
-  return USER_INPUT_TAGS.some((tag) => content.includes(tag))
+  return hasAnyTagInMessageContent(content, USER_INPUT_TAGS)
 }
 
 export function hasAnyNormalUserInputTag(content: unknown): boolean {
-  if (typeof content !== 'string') return false
-  return NORMAL_USER_INPUT_TAGS.some((tag) => content.includes(tag))
+  return hasAnyTagInMessageContent(content, NORMAL_USER_INPUT_TAGS)
 }
 
 
@@ -210,9 +246,9 @@ export const COMPACTION_SUMMARY_SCHEMA = z.object({
 })
 
 /**
- * Create a system information prompt that lists available terminal tabs and their system info
+ * Build system info block that lists available terminal tabs and runtime system info.
  */
-export function createSystemInfoPrompt(tabs: TerminalTab[], sessionId: string): HumanMessage {
+export function createSystemInfoPromptText(tabs: TerminalTab[], sessionId: string): string {
   const tabInfos = tabs.map(t => {
     let base = `- ID: ${t.id}, Name: ${t.title}, Type: ${t.type}`
     if (t.systemInfo) {
@@ -223,29 +259,46 @@ export function createSystemInfoPrompt(tabs: TerminalTab[], sessionId: string): 
   }).join('\n')
 
   const sysInfoText = `${SYS_INFO_MARKER}\nYour sessionId for this conversation is ${sessionId}\nAvailable Terminal Tabs:\n${tabInfos}`
-  
-  return new HumanMessage(sysInfoText)
+  return sysInfoText
 }
 
-/**
- * System prompt that injects global memory.md content for this session.
- */
-export function createMemorySystemPrompt(opts: {
-  memoryFilePath: string
-  memoryContent: string
-}): SystemMessage {
-  const normalizedContent = String(opts.memoryContent || '').replace(/\r\n/g, '\n')
-  return new SystemMessage(
-    [
-      GLOBAL_MEMORY_TAG.trim(),
-      `Memory file absolute path: ${opts.memoryFilePath}`,
-      'If you need to add or modify memory, use the create_or_edit tool to edit this exact file path directly.',
-      'If you need to re-read memory later, use the read_file tool to read this exact file path directly.',
-      '',
-      '# Full MEMORY.md Content',
-      normalizedContent
-    ].join('\n')
-  )
+export function prependSystemInfoToUserInput(
+  userInputContent: string,
+  tabs: TerminalTab[],
+  sessionId: string
+): string {
+  const systemInfoText = createSystemInfoPromptText(tabs, sessionId)
+  return `${systemInfoText}\n\n${userInputContent}`
+}
+
+export function upsertSingleSystemMessageByText(
+  messages: BaseMessage[],
+  nextSystemText: string
+): BaseMessage[] {
+  const nextMessages: BaseMessage[] = []
+  let hasPrimarySystem = false
+
+  for (const message of messages) {
+    if (message.type !== 'system') {
+      nextMessages.push(message)
+      continue
+    }
+
+    if (hasPrimarySystem) {
+      continue
+    }
+
+    if (typeof message.content !== 'string' || message.content !== nextSystemText) {
+      ;(message as any).content = nextSystemText
+    }
+    hasPrimarySystem = true
+    nextMessages.push(message)
+  }
+
+  if (!hasPrimarySystem) {
+    return [new SystemMessage(nextSystemText), ...nextMessages]
+  }
+  return nextMessages
 }
 
 export function createCompactionSummaryUserPrompt(params: {
@@ -274,11 +327,29 @@ export function createCompactionSummaryUserPrompt(params: {
 /**
  * System prompt for the main Agent.
  */
-export function createBaseSystemPrompt(): SystemMessage {
-  return new SystemMessage(
-    [
+function buildMemoryPromptBlock(opts: {
+  memoryFilePath: string
+  memoryContent: string
+}): string {
+  const normalizedContent = String(opts.memoryContent || '').replace(/\r\n/g, '\n')
+  return [
+    GLOBAL_MEMORY_TAG.trim(),
+    `Memory file absolute path: ${opts.memoryFilePath}`,
+    'If you need to add or modify memory, use the create_or_edit tool to edit this exact file path directly.',
+    'If you need to re-read memory later, use the read_file tool to read this exact file path directly.',
+    '',
+    '# Full MEMORY.md Content',
+    normalizedContent
+  ].join('\n')
+}
+
+export function createBaseSystemPromptText(memoryPrompt?: {
+  memoryFilePath: string
+  memoryContent: string
+}): string {
+  const baseSections = [
       `Today is ${formatTodayLocalDate()}.`,
-      '# Role: GyShell Assistant',
+      GYSHELL_BASE_SYSTEM_MARKER,
       'You are GyShell Assistant, an AI-native shell assistant. Your mission is to help users accomplish tasks efficiently through the terminal.',
       '',
       '# Core Responsibility',
@@ -335,8 +406,13 @@ export function createBaseSystemPrompt(): SystemMessage {
       `- **\`${USEFUL_SKILL_TAG.trim()}\`**: This tag provides the implementation details or documentation for a specific "Skill" referenced by the user. It also includes the absolute path of the skill file. Use this to understand how to correctly parameterize and call the \`skill\` tool or follow the provided procedure. If you need to modify an existing skill file, just use \`create_or_edit\` with that absolute path. If the skill includes a "Supporting Files" section, you can use the \`read_file\` tool to examine those files or use the terminal to run any provided scripts in the skill's directory.`,
       `- **\`${TERMINAL_CONTENT_TAG.trim()}\`**: This tag precedes the recent output (last 100 lines) of a terminal tab explicitly mentioned by the user via \`[MENTION_TAB:#name##id#]\`. Use this to understand the current state of that specific terminal.`,
       `- **\`${FILE_CONTENT_TAG.trim()}\`**: This tag precedes the actual content of a file or large text pasted by the user. Use this as primary context for the user's request.`
-    ].join('\n')
-  )
+    ]
+
+  if (memoryPrompt) {
+    baseSections.push('', buildMemoryPromptBlock(memoryPrompt))
+  }
+
+  return baseSections.join('\n')
 }
 
 /**

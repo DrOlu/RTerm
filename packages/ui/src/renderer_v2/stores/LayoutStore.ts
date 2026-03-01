@@ -110,6 +110,7 @@ export class LayoutStore {
       panelCount: computed,
       geometry: computed,
       bootstrap: action,
+      pinPanelsAsRestorePlaceholder: action,
       syncPanelBindings: action,
       setViewport: action,
       setSplitSizes: action,
@@ -174,6 +175,32 @@ export class LayoutStore {
     }
     this.syncPanelBindings({ persist: false })
     this.isReady = true
+  }
+
+  getPanelsWithMissingTabBindings(kind: PanelKind, ownerTabIds: Iterable<string>): string[] {
+    const ownerSet = new Set<string>(ownerTabIds)
+    const panels = this.panelNodes.filter((node) => node.panel.kind === kind)
+    const missingPanels: string[] = []
+
+    panels.forEach((panel) => {
+      const panelId = panel.panel.id
+      const persistedTabIds = this.tree.panelTabs?.[panelId]?.tabIds || []
+      if (!persistedTabIds.length) return
+      const hasMissingTabId = persistedTabIds.some((tabId) => !ownerSet.has(tabId))
+      if (!hasMissingTabId) return
+      missingPanels.push(panelId)
+    })
+
+    return missingPanels
+  }
+
+  pinPanelsAsRestorePlaceholder(panelIds: string[]): void {
+    if (!Array.isArray(panelIds) || panelIds.length === 0) return
+    const panelIdSet = new Set(this.panelNodes.map((node) => node.panel.id))
+    panelIds.forEach((panelId) => {
+      if (!panelIdSet.has(panelId)) return
+      this.pinnedEmptyPanelIds.add(panelId)
+    })
   }
 
   syncPanelBindings(options?: { persist?: boolean }) {

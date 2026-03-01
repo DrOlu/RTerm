@@ -24,6 +24,7 @@ import {
   buildSkillStatusSummary
 } from '../../services/Gateway/toolingSummary'
 import { ImageAttachmentService } from '../../services/ImageAttachmentService'
+import { TerminalStateStore } from '../../services/terminal/TerminalStateStore'
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name]
@@ -126,7 +127,13 @@ export async function startGyBackend(): Promise<void> {
   const modelCapabilityService = new ModelCapabilityService()
   const imageAttachmentService = new ImageAttachmentService(dataDir)
 
-  const terminalService = new TerminalService()
+  const terminalStateStore = new TerminalStateStore(path.join(dataDir, 'terminal-tabs-state.json'))
+  const terminalService = new TerminalService({
+    terminalStateStore
+  })
+  process.once('exit', () => {
+    terminalService.flushPersistedState()
+  })
   const uiHistoryService = new UIHistoryService()
   const chatHistoryService = new ChatHistoryService()
   const agentService = new AgentService_v2(
@@ -149,11 +156,23 @@ export async function startGyBackend(): Promise<void> {
     mcpToolService
   )
 
+  const terminalRestoreResult = await terminalService.restorePersistedTerminals()
+  if (terminalRestoreResult.restored.length > 0 || terminalRestoreResult.failed.length > 0) {
+    console.log(
+      `[gybackend] Terminal restore completed. restored=${terminalRestoreResult.restored.length} failed=${terminalRestoreResult.failed.length}`
+    )
+    if (terminalRestoreResult.failed.length > 0) {
+      terminalRestoreResult.failed.forEach((item) => {
+        console.warn(`[gybackend] Terminal restore failed for ${item.id}: ${item.reason}`)
+      })
+    }
+  }
+
   agentService.updateSettings(settingsService.getSettings())
   await skillService.reload()
   await mcpToolService.reloadAll()
 
-  if (bootstrapLocalTerminal) {
+  if (bootstrapLocalTerminal && terminalService.getDisplayTerminals().length === 0) {
     const terminalId = process.env.GYBACKEND_TERMINAL_ID || 'local-main'
     const terminalTitle = process.env.GYBACKEND_TERMINAL_TITLE || 'Local'
     const terminalCwd = process.env.GYBACKEND_TERMINAL_CWD
@@ -218,6 +237,11 @@ export async function startGyBackend(): Promise<void> {
           },
           setSelection: async (terminalId, selectionText) => {
             terminalService.setSelection(terminalId, selectionText)
+          },
+          getBufferDelta: async (terminalId, fromOffset) => {
+            const data = terminalService.getBufferDelta(terminalId, fromOffset)
+            const offset = terminalService.getCurrentOffset(terminalId)
+            return { data, offset }
           }
         },
         profileBridge: {

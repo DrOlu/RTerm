@@ -7,10 +7,12 @@ import type { TerminalBackend, TerminalConfig, TerminalTab, CommandResult, Conne
 import { NodePtyBackend } from './NodePtyBackend'
 import { SSHBackend } from './SSHBackend'
 import { escapeShellPathList } from './ShellUtility'
+import { TerminalStateStore, type PersistedTerminalRecord } from './terminal/TerminalStateStore'
 import { v4 as uuidv4 } from 'uuid'
 
 const MAX_BUFFER_SIZE = 100000 // 100KB
 const SCROLLBACK_SIZE = 5000 // Keep up to 5000 lines in virtual terminal
+const PERSIST_FLUSH_DELAY_MS = 120
 // We do NOT print any wrapper/marker commands in the terminal.
 // Instead, we rely on shell integration hooks (installed at shell startup by NodePtyBackend)
 // that emit invisible OSC markers on command boundaries.
@@ -42,9 +44,31 @@ type TerminalTabSnapshot = {
   lastExitCode?: number
 }
 
+interface TerminalServiceOptions {
+  terminalStateStore?: TerminalStateStore | null
+}
+
+export interface RestoreTerminalResult {
+  restored: string[]
+  failed: Array<{ id: string; reason: string }>
+}
+
+const cloneTerminalConfig = (config: TerminalConfig): TerminalConfig =>
+  JSON.parse(JSON.stringify(config)) as TerminalConfig
+
+const normalizeTerminalConfigForRuntime = (config: TerminalConfig): TerminalConfig => {
+  const normalized = cloneTerminalConfig(config)
+  normalized.id = config.id
+  normalized.title = config.title
+  normalized.cols = Number.isFinite(config.cols) && config.cols > 0 ? Math.max(1, Math.floor(config.cols)) : 80
+  normalized.rows = Number.isFinite(config.rows) && config.rows > 0 ? Math.max(1, Math.floor(config.rows)) : 24
+  return normalized
+}
+
 export class TerminalService {
   private backends: Map<ConnectionType, TerminalBackend> = new Map()
   private terminals: Map<string, TerminalTab> = new Map()
+  private terminalConfigs: Map<string, TerminalConfig> = new Map()
   private buffers: Map<string, RingBuffer> = new Map()
   private headlessPtys: Map<string, TerminalType> = new Map()
   private selectionByTerminal: Map<string, string> = new Map()
@@ -56,12 +80,15 @@ export class TerminalService {
   private pendingTaskFinishByTerminal: Map<string, PendingTaskFinish> = new Map()
   private startMarkerByTaskId: Map<string, any> = new Map()
   private onTaskFinishedCallbacks: Map<string, (result: CommandResult) => void> = new Map()
-  private hasPrintedBanner = false
+  private primaryLocalTerminalId: string | null = null
   private rawEventPublisher: RawEventPublisher | null = null
+  private persistTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly terminalStateStore: TerminalStateStore | null
 
-  constructor() {
+  constructor(options?: TerminalServiceOptions) {
     this.backends.set('local', new NodePtyBackend())
     this.backends.set('ssh', new SSHBackend())
+    this.terminalStateStore = options?.terminalStateStore ?? null
   }
 
   setRawEventPublisher(publisher: RawEventPublisher): void {
@@ -94,10 +121,112 @@ export class TerminalService {
     return backend
   }
 
-  private async printBanner(terminalId: string): Promise<void> {
-    if (this.hasPrintedBanner) return
-    this.hasPrintedBanner = true
+  private mergeTerminalConfigForIdempotent(existing: TerminalConfig, incoming: TerminalConfig): TerminalConfig {
+    if (existing.type !== incoming.type) {
+      return normalizeTerminalConfigForRuntime(existing)
+    }
+    return normalizeTerminalConfigForRuntime({
+      ...existing,
+      ...incoming,
+      id: existing.id,
+      type: existing.type
+    } as TerminalConfig)
+  }
 
+  private extractTerminalConfigForPersist(terminal: TerminalTab): TerminalConfig | null {
+    const existing = this.terminalConfigs.get(terminal.id)
+    if (existing) {
+      return normalizeTerminalConfigForRuntime({
+        ...existing,
+        id: terminal.id,
+        title: terminal.title,
+        cols: terminal.cols,
+        rows: terminal.rows
+      } as TerminalConfig)
+    }
+
+    if (terminal.type === 'local') {
+      return {
+        type: 'local',
+        id: terminal.id,
+        title: terminal.title,
+        cols: terminal.cols > 0 ? terminal.cols : 80,
+        rows: terminal.rows > 0 ? terminal.rows : 24
+      }
+    }
+
+    return null
+  }
+
+  private getPersistableRecords(): PersistedTerminalRecord[] {
+    const records: PersistedTerminalRecord[] = []
+    Array.from(this.terminals.values()).forEach((terminal) => {
+      const config = this.extractTerminalConfigForPersist(terminal)
+      if (!config) return
+      records.push({
+        id: terminal.id,
+        config
+      })
+    })
+    return records
+  }
+
+  private persistTerminalStateNow(): void {
+    if (!this.terminalStateStore) return
+    this.terminalStateStore.save(this.getPersistableRecords())
+  }
+
+  private schedulePersistTerminalState(): void {
+    if (!this.terminalStateStore) return
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null
+      this.persistTerminalStateNow()
+    }, PERSIST_FLUSH_DELAY_MS)
+  }
+
+  flushPersistedState(): void {
+    if (!this.terminalStateStore) return
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+    this.persistTerminalStateNow()
+  }
+
+  async restorePersistedTerminals(): Promise<RestoreTerminalResult> {
+    if (!this.terminalStateStore) {
+      return { restored: [], failed: [] }
+    }
+
+    const records = this.terminalStateStore.load()
+    if (records.length === 0) {
+      return { restored: [], failed: [] }
+    }
+
+    const restored: string[] = []
+    const failed: Array<{ id: string; reason: string }> = []
+
+    for (const record of records) {
+      try {
+        await this.createTerminal(record.config)
+        restored.push(record.id)
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        failed.push({ id: record.id, reason })
+      }
+    }
+
+    // Prune any entries that could not be restored to avoid repeated startup failures.
+    this.persistTerminalStateNow()
+
+    return { restored, failed }
+  }
+
+  private async printBanner(terminalId: string): Promise<void> {
     // ANSI Shadow font for "GyShell"
     // Using \x1b[36m for Cyan color
     const banner = `\r\n\x1b[36m  ____         ____  _          _ _ \r\n / ___|_   _  / ___|| |__   ___| | |\r\n| |  _| | | | \\___ \\| '_ \\ / _ \\ | |\r\n| |_| | |_| |  ___) | | | |  __/ | |\r\n \\____|\\__, | |____/|_| |_|\\___|_|_|\r\n       |___/                        \x1b[0m\r\n`
@@ -110,21 +239,31 @@ export class TerminalService {
     }, 500)
   }
 
-  async createTerminal(config: TerminalConfig): Promise<TerminalTab> {
+  async createTerminal(rawConfig: TerminalConfig): Promise<TerminalTab> {
+    const config = normalizeTerminalConfigForRuntime(rawConfig)
+
     // Idempotent: renderer may call createTab more than once (dev reload / re-mount).
     const existing = this.terminals.get(config.id)
     if (existing) {
+      const existingConfig = this.terminalConfigs.get(config.id)
+      const mergedConfig = existingConfig
+        ? this.mergeTerminalConfigForIdempotent(existingConfig, config)
+        : config
+
       // Keep size updated
-      existing.cols = config.cols
-      existing.rows = config.rows
+      existing.cols = mergedConfig.cols
+      existing.rows = mergedConfig.rows
       // Keep title updated (required)
-      existing.title = config.title
+      existing.title = mergedConfig.title
       
       const headless = this.headlessPtys.get(config.id)
       if (headless) {
-        headless.resize(config.cols, config.rows)
+        headless.resize(mergedConfig.cols, mergedConfig.rows)
       }
-      
+
+      this.terminalConfigs.set(config.id, mergedConfig)
+      this.schedulePersistTerminalState()
+
       return existing
     }
 
@@ -151,8 +290,12 @@ export class TerminalService {
     })
 
     this.terminals.set(config.id, tab)
+    this.terminalConfigs.set(config.id, config)
     this.buffers.set(config.id, { content: '', offset: 0 })
     this.headlessPtys.set(config.id, headless)
+    if (config.type === 'local' && !this.primaryLocalTerminalId) {
+      this.primaryLocalTerminalId = config.id
+    }
 
     // Setup data handler
     backend.onData(ptyId, (data: string) => {
@@ -165,11 +308,12 @@ export class TerminalService {
     })
 
     // Print banner for the first local terminal
-    if (config.type === 'local') {
+    if (config.type === 'local' && this.primaryLocalTerminalId === config.id) {
       this.printBanner(config.id)
     }
 
     this.publishTerminalTabsChanged()
+    this.schedulePersistTerminalState()
 
     return tab
   }
@@ -239,9 +383,11 @@ export class TerminalService {
 
     // Update ring buffer
     const buffer = this.buffers.get(terminalId)
+    let currentOffset = 0
     if (buffer) {
       buffer.content += cleanedData
       buffer.offset += cleanedData.length
+      currentOffset = buffer.offset
 
       // Trim if exceeds max size
       if (buffer.content.length > MAX_BUFFER_SIZE) {
@@ -252,7 +398,7 @@ export class TerminalService {
 
     // Send data to renderer
     if (cleanedData) {
-      this.sendToRenderer('terminal:data', { terminalId, data: cleanedData })
+      this.sendToRenderer('terminal:data', { terminalId, data: cleanedData, offset: currentOffset })
     }
   }
 
@@ -350,10 +496,20 @@ export class TerminalService {
       tab.isInitializing = false
       tab.runtimeState = 'exited'
       tab.lastExitCode = typeof code === 'number' ? code : -1
+      const config = this.terminalConfigs.get(terminalId)
+      if (config) {
+        this.terminalConfigs.set(terminalId, {
+          ...config,
+          title: tab.title,
+          cols: tab.cols,
+          rows: tab.rows
+        } as TerminalConfig)
+      }
     }
     
     this.sendToRenderer('terminal:exit', { terminalId, code })
     this.publishTerminalTabsChanged()
+    this.schedulePersistTerminalState()
   }
 
   write(terminalId: string, data: string): void {
@@ -378,6 +534,14 @@ export class TerminalService {
     if (terminal) {
       terminal.cols = cols
       terminal.rows = rows
+      const config = this.terminalConfigs.get(terminalId)
+      if (config) {
+        this.terminalConfigs.set(terminalId, {
+          ...config,
+          cols: Number.isFinite(cols) && cols > 0 ? Math.max(1, Math.floor(cols)) : config.cols,
+          rows: Number.isFinite(rows) && rows > 0 ? Math.max(1, Math.floor(rows)) : config.rows
+        } as TerminalConfig)
+      }
       const backend = this.getBackend(terminal.type)
       backend.resize(terminal.ptyId, cols, rows)
       
@@ -414,8 +578,14 @@ export class TerminalService {
       this.headlessWriteSeqByTerminal.delete(terminalId)
       this.headlessFlushedSeqByTerminal.delete(terminalId)
       this.pendingTaskFinishByTerminal.delete(terminalId)
+      this.terminalConfigs.delete(terminalId)
+      if (this.primaryLocalTerminalId === terminalId) {
+        const nextLocal = Array.from(this.terminals.values()).find((item) => item.type === 'local')
+        this.primaryLocalTerminalId = nextLocal?.id || null
+      }
     }
     this.publishTerminalTabsChanged()
+    this.schedulePersistTerminalState()
   }
 
   interrupt(terminalId: string): void {
@@ -512,7 +682,10 @@ export class TerminalService {
     const buffer = this.buffers.get(terminalId)
     if (!buffer) return ''
 
-    const startIdx = Math.max(0, fromOffset - (buffer.offset - buffer.content.length))
+    const normalizedFromOffset =
+      Number.isFinite(fromOffset) && fromOffset > 0 ? Math.floor(fromOffset) : 0
+    const bufferStartOffset = Math.max(0, buffer.offset - buffer.content.length)
+    const startIdx = Math.max(0, normalizedFromOffset - bufferStartOffset)
     return buffer.content.slice(startIdx)
   }
 
@@ -556,8 +729,6 @@ export class TerminalService {
     
     return result.join('\n')
   }
-
-  // dynGetRecentOutput is no longer needed as getRecentOutput handles it
 
   getDisplayTerminals(): TerminalTab[] {
     return Array.from(this.terminals.values())

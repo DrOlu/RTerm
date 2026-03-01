@@ -289,7 +289,13 @@ export class AppStore {
   }
 
   reconcileTerminalTabs(payload: TerminalListPayload): void {
+    const firstHydration = this.terminalTabsHydrated !== true
     const incoming = payload?.terminals || []
+    const incomingIds = incoming.map((item) => item.id).filter((id): id is string => typeof id === 'string' && id.length > 0)
+    if (firstHydration) {
+      const unresolvedPanelIds = this.layout.getPanelsWithMissingTabBindings('terminal', incomingIds)
+      this.layout.pinPanelsAsRestorePlaceholder(unresolvedPanelIds)
+    }
     const existingById = new Map(this.terminalTabs.map((tab) => [tab.id, tab]))
     const nextTabs: TerminalTabModel[] = incoming.map((item) => {
       const existing = existingById.get(item.id)
@@ -869,6 +875,17 @@ export class AppStore {
 
   async bootstrap(): Promise<void> {
     if (this.isBootstrapped) return
+    const deferredUiUpdates: any[] = []
+    let deferUiUpdates = false
+    const flushDeferredUiUpdates = () => {
+      if (!deferUiUpdates) return
+      deferUiUpdates = false
+      if (deferredUiUpdates.length === 0) return
+      const pending = deferredUiUpdates.splice(0, deferredUiUpdates.length)
+      pending.forEach((action) => {
+        this.chat.handleUiUpdate(action)
+      })
+    }
     try {
       const [backendSettings, uiSettings, customThemes] = await Promise.all([
         window.gyshell.settings.get(),
@@ -883,6 +900,7 @@ export class AppStore {
       const theme = resolveTheme(settings.themeId, customThemes)
       applyAppThemeFromTerminalScheme(theme.terminal)
       const xtermTheme = toXtermTheme(theme.terminal, { transparentBackground: true })
+      deferUiUpdates = persistedChatInventoryState.tabIds.length > 0
 
       runInAction(() => {
         this.settings = settings
@@ -897,9 +915,26 @@ export class AppStore {
         this.layout.bootstrap()
       })
 
-      // Setup deterministic UI update listener (backend is the source of truth)
+      // Setup deterministic UI update listener (backend is the source of truth).
+      // Register before awaiting hydration to avoid dropping updates emitted during startup.
       window.gyshell.agent.onUiUpdate((action) => {
-        this.chat.handleUiUpdate(action)
+        runInAction(() => {
+          if (deferUiUpdates) {
+            deferredUiUpdates.push(action)
+            return
+          }
+          this.chat.handleUiUpdate(action)
+        })
+      })
+
+      if (persistedChatInventoryState.tabIds.length > 0) {
+        await this.chat.hydrateSessionsFromBackend(
+          persistedChatInventoryState.tabIds,
+          persistedChatInventoryState.preferredActiveTabId
+        )
+      }
+      runInAction(() => {
+        flushDeferredUiUpdates()
       })
 
       // Terminal exit should not auto-close tabs. UI tab lifecycle is user-driven.
@@ -950,6 +985,9 @@ export class AppStore {
       void this.loadVersionState()
       void this.checkVersion({ showPopupOnVersionChange: true })
     } catch (err) {
+      runInAction(() => {
+        flushDeferredUiUpdates()
+      })
       console.error('Failed to bootstrap settings', err)
       runInAction(() => {
         this.isBootstrapped = true

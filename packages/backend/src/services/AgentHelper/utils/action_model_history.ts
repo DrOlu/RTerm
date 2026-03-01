@@ -1,6 +1,7 @@
 import { HumanMessage, type BaseMessage } from '@langchain/core/messages'
 import {
   NORMAL_USER_INPUT_TAGS,
+  hasAnyTagInMessageContent,
   hasAnyNormalUserInputTag,
   SYS_INFO_MARKER
 } from '../prompts'
@@ -11,7 +12,7 @@ export function buildActionModelHistory(allMessages: BaseMessage[]): BaseMessage
   for (let i = allMessages.length - 1; i >= 0 && last3Special.length < 3; i--) {
     const msg = allMessages[i]
     const content = msg.content
-    if (msg.type === 'human' && typeof content === 'string' && specialTags.some((tag) => content.includes(tag))) {
+    if (msg.type === 'human' && hasAnyTagInMessageContent(content, specialTags)) {
       last3Special.unshift(msg)
     }
   }

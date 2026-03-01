@@ -135,19 +135,6 @@ const createRuntime = (
     // ignore transient DOM/layout issues
   }
 
-  const plainConfig = toPlainConfig(config)
-  const dims = fit.proposeDimensions()
-  const size = resolveTerminalSize(dims, {
-    cols: term.cols,
-    rows: term.rows
-  })
-  window.gyshell.terminal.createTab({ ...plainConfig, cols: size.cols, rows: size.rows }).catch(() => {
-    // ignore: backend is idempotent and may fail during hot reload; user will see logs in devtools
-  })
-  window.gyshell.terminal.resize(config.id, size.cols, size.rows).catch(() => {
-    // ignore
-  })
-
   const runtime: TerminalRuntime = {
     terminalId: config.id,
     term,
@@ -284,11 +271,77 @@ const createRuntime = (
   mountEl.addEventListener('contextmenu', handleContextMenu)
   const removeContextMenuListener = window.gyshell.ui.onContextMenuAction(onContextMenuAction)
 
-  const cleanup = window.gyshell.terminal.onData(({ terminalId, data }) => {
-    if (terminalId === config.id) {
+  let lastBufferOffset = 0
+  let isSyncingInitialBuffer = true
+  const pendingLiveEvents: Array<{ data: string; offset?: number }> = []
+  const writeDataWithOffset = (data: string, offset?: number): void => {
+    if (!data) return
+    if (!Number.isFinite(offset)) {
       term.write(data)
+      return
+    }
+
+    const normalizedOffset = Math.max(0, Math.floor(offset as number))
+    const chunkStart = Math.max(0, normalizedOffset - data.length)
+    if (normalizedOffset <= lastBufferOffset) {
+      return
+    }
+    if (chunkStart < lastBufferOffset) {
+      const overlap = lastBufferOffset - chunkStart
+      const nextChunk = data.slice(Math.max(0, overlap))
+      if (nextChunk) {
+        term.write(nextChunk)
+      }
+      lastBufferOffset = normalizedOffset
+      return
+    }
+    term.write(data)
+    lastBufferOffset = normalizedOffset
+  }
+
+  const cleanup = window.gyshell.terminal.onData(({ terminalId, data, offset }) => {
+    if (terminalId === config.id) {
+      if (isSyncingInitialBuffer) {
+        pendingLiveEvents.push({ data, offset })
+        return
+      }
+      writeDataWithOffset(data, offset)
     }
   })
+
+  const plainConfig = toPlainConfig(config)
+  const dims = fit.proposeDimensions()
+  const size = resolveTerminalSize(dims, {
+    cols: term.cols,
+    rows: term.rows
+  })
+  window.gyshell.terminal.createTab({ ...plainConfig, cols: size.cols, rows: size.rows }).catch(() => {
+    // ignore: backend is idempotent and may fail during hot reload; user will see logs in devtools
+  })
+  window.gyshell.terminal.resize(config.id, size.cols, size.rows).catch(() => {
+    // ignore
+  })
+
+  const syncBufferedOutput = async (): Promise<void> => {
+    try {
+      const initial = await window.gyshell.terminal.getBufferDelta(config.id, 0)
+      writeDataWithOffset(initial.data || '', initial.offset)
+
+      const normalizedOffset = Math.max(lastBufferOffset, Number.isFinite(initial.offset) ? Math.floor(initial.offset) : 0)
+      lastBufferOffset = normalizedOffset
+      const tail = await window.gyshell.terminal.getBufferDelta(config.id, normalizedOffset)
+      writeDataWithOffset(tail.data || '', tail.offset)
+    } catch {
+      // ignore: runtime output sync is best-effort
+    } finally {
+      isSyncingInitialBuffer = false
+      if (pendingLiveEvents.length > 0) {
+        const pending = pendingLiveEvents.splice(0, pendingLiveEvents.length)
+        pending.forEach((event) => writeDataWithOffset(event.data, event.offset))
+      }
+    }
+  }
+  void syncBufferedOutput()
 
   runtime.cleanupBackendData = cleanup
   runtime.cleanupContextMenuListener = removeContextMenuListener

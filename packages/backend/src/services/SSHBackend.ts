@@ -4,6 +4,8 @@ import * as net from 'net'
 import { SocksClient } from 'socks'
 import type { TerminalBackend, TerminalConfig, SSHConnectionConfig } from '../types'
 
+const GYSHELL_READY_MARKER = '__GYSHELL_READY__'
+
 interface SSHInstance {
   client: ssh2.Client
   stream?: ssh2.ClientChannel
@@ -24,6 +26,11 @@ interface SSHInstance {
 
 export class SSHBackend implements TerminalBackend {
   private sessions: Map<string, SSHInstance> = new Map()
+
+  private stripReadyMarker(chunk: string): string {
+    if (!chunk.includes(GYSHELL_READY_MARKER)) return chunk
+    return chunk.replace(/__GYSHELL_READY__/g, '')
+  }
 
   private async execCollect(
     client: ssh2.Client,
@@ -520,15 +527,16 @@ Write-Output "__GYSHELL_READY__"
           let isReadySent = false
 
           const attemptInjection = () => {
-            if (!instance.stream || isReadySent) return
+            if (!instance.stream || isReadySent || !instance.isInitializing) return
             
             console.log(`[SSH] Injection attempt ${retryCount + 1}...`)
-            stream.write('\x03\n\n')
+            instance.stream.write('\x03\n\n')
 
             setTimeout(() => {
+              if (!instance.stream || isReadySent || !instance.isInitializing) return
               if (instance.remoteOs === 'windows') {
                 const b64 = this.buildWindowsPowerShellEncodedCommand()
-                stream.write(`powershell.exe -NoLogo -NoProfile -NoExit -EncodedCommand ${b64}\r`)
+                instance.stream.write(`powershell.exe -NoLogo -NoProfile -NoExit -EncodedCommand ${b64}\r`)
               } else {
                 const script = this.getUnixInjectionScript()
                 const b64 = Buffer.from(script).toString('base64')
@@ -536,7 +544,7 @@ Write-Output "__GYSHELL_READY__"
                 
                 const CHUNK_SIZE = 256
                 for (let i = 0; i < injection.length; i += CHUNK_SIZE) {
-                  stream.write(injection.slice(i, i + CHUNK_SIZE))
+                  instance.stream.write(injection.slice(i, i + CHUNK_SIZE))
                 }
               }
             }, 500)
@@ -566,16 +574,16 @@ Write-Output "__GYSHELL_READY__"
             const chunk = data.toString()
             if (instance.isInitializing) {
               instance.buffer += chunk
-              if (instance.buffer.includes('__GYSHELL_READY__')) {
+              if (instance.buffer.includes(GYSHELL_READY_MARKER)) {
                 emit('\x1b[2J\x1b[H') // Clear screen
                 isReadySent = true
                 clearInterval(watchdogInterval)
                 const sawContinuation = /(?:\r?\n)>>\s*\r?\n/.test(instance.buffer) || instance.buffer.trimEnd().endsWith('\n>>') || instance.buffer.trimEnd().endsWith('\r\n>>')
                 instance.initializationState = 'ready'
                 instance.isInitializing = false
-                const parts = instance.buffer.split('__GYSHELL_READY__')
+                const parts = instance.buffer.split(GYSHELL_READY_MARKER)
                 if (parts.length > 1) {
-                  const realContent = parts.slice(1).join('__GYSHELL_READY__').trimStart()
+                  const realContent = this.stripReadyMarker(parts.slice(1).join(GYSHELL_READY_MARKER)).trimStart()
                   if (realContent) emit(realContent)
                 }
                 instance.buffer = '' 

@@ -18,6 +18,7 @@ type WebSocketRpcMethod =
   | 'terminal:resize'
   | 'terminal:kill'
   | 'terminal:setSelection'
+  | 'terminal:getBufferDelta'
   | 'system:saveTempPaste'
   | 'system:saveImageAttachment'
   | 'models:getProfiles'
@@ -94,6 +95,7 @@ export interface WebSocketGatewayAdapterOptions {
     resize?: (terminalId: string, cols: number, rows: number) => void | Promise<void>;
     kill?: (terminalId: string) => void | Promise<void>;
     setSelection?: (terminalId: string, selectionText: string) => void | Promise<void>;
+    getBufferDelta?: (terminalId: string, fromOffset: number) => { data: string; offset: number } | Promise<{ data: string; offset: number }>;
   };
   profileBridge?: {
     getProfiles: () => {
@@ -566,6 +568,18 @@ export class WebSocketGatewayAdapter {
         }
         await bridge.setSelection(terminalId, selectionText);
         return { ok: true };
+      }
+      case 'terminal:getBufferDelta': {
+        const bridge = this.options.terminalBridge;
+        if (!bridge?.getBufferDelta) {
+          throw new WebSocketRpcError(
+            'METHOD_NOT_FOUND',
+            'terminal:getBufferDelta is not available on this websocket gateway.'
+          );
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const fromOffset = this.readIntegerParam(params, 'fromOffset', 0, Number.MAX_SAFE_INTEGER);
+        return await bridge.getBufferDelta(terminalId, fromOffset);
       }
       case 'system:saveTempPaste': {
         const bridge = this.options.systemBridge;

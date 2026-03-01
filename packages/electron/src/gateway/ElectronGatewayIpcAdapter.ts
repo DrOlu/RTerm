@@ -461,6 +461,15 @@ export class ElectronGatewayIpcAdapter {
       this.terminalService.setSelection(terminalId, selectionText)
     })
 
+    ipcMain.handle('terminal:getBufferDelta', async (_: any, terminalId: string, fromOffset: number) => {
+      const data = this.terminalService.getBufferDelta(terminalId, fromOffset)
+      const offset = this.terminalService.getCurrentOffset(terminalId)
+      return {
+        data,
+        offset
+      }
+    })
+
     // UI
     ipcMain.handle(
       'ui:showContextMenu',
