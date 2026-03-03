@@ -825,13 +825,17 @@ export class AgentService_v2 {
           })
           const outcome = await runSkillTool(args, this.skillService, config?.signal)
           result = outcome.message
-          const skillContent = result.split(USEFUL_SKILL_TAG)[1].trim()
 
-          this.helpers.sendEvent(sessionId, {
-            messageId,
-            type: 'sub_tool_delta',
-            outputDelta: skillContent
-          })
+          // Only emit content delta on success: error messages do not contain USEFUL_SKILL_TAG
+          // and splitting by it would yield undefined at index [1].
+          if (outcome.kind === 'text') {
+            const skillContent = result.split(USEFUL_SKILL_TAG)[1].trim()
+            this.helpers.sendEvent(sessionId, {
+              messageId,
+              type: 'sub_tool_delta',
+              outputDelta: skillContent
+            })
+          }
 
           this.helpers.sendEvent(sessionId, {
             messageId,
