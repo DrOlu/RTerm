@@ -18,6 +18,7 @@ import {
 import { ConfirmDialog } from '../Common/ConfirmDialog'
 import { renderPanelByKind } from './panelRenderRegistry'
 import { PanelTypeRail } from './PanelTypeRail'
+import { getPanelKindAdapter } from '../../stores/panelKindAdapters'
 
 interface LayoutWorkspaceProps {
   store: AppStore
@@ -287,6 +288,9 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(({ store
 
   const normalizeClosableTabIds = React.useCallback(
     (kind: PanelKind, tabIds: string[]): string[] => {
+      if (!getPanelKindAdapter(kind).supportsTabs || kind === 'filesystem') {
+        return []
+      }
       const ownerIds =
         kind === 'terminal'
           ? new Set(store.terminalTabs.map((tab) => tab.id))
@@ -305,6 +309,7 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(({ store
 
   const requestCloseTabsByKind = React.useCallback(
     (kind: PanelKind, tabIds: string[]) => {
+      if (!getPanelKindAdapter(kind).supportsTabs || kind === 'filesystem') return
       const ids = normalizeClosableTabIds(kind, tabIds)
       if (ids.length === 0) return
       if (kind === 'terminal') {
@@ -323,9 +328,16 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(({ store
   const requestClosePanel = React.useCallback(
     (panelId: string) => {
       if (!store.layout.canRemovePanel(panelId)) return
+      const panelKind = store.layout.getPanelKindById(panelId)
+      if (panelKind && !store.canClosePanel(panelKind)) {
+        return
+      }
       store.layout.removePanel(panelId)
+      if (panelKind) {
+        store.onPanelRemoved(panelKind)
+      }
     },
-    [store.layout]
+    [store]
   )
 
   const terminalSignature = store.terminalTabs.map((tab) => tab.id).join('|')
@@ -622,7 +634,12 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(({ store
       const tabId = tabElement.getAttribute('data-layout-tab-id')
       const kind = tabElement.getAttribute('data-layout-tab-kind')
       const sourcePanelId = tabElement.getAttribute('data-layout-tab-panel-id')
-      if (!tabId || !sourcePanelId || (kind !== 'chat' && kind !== 'terminal')) return null
+      if (!tabId || !sourcePanelId || (kind !== 'chat' && kind !== 'terminal' && kind !== 'filesystem' && kind !== 'fileEditor')) {
+        return null
+      }
+      if (!getPanelKindAdapter(kind).supportsTabs) {
+        return null
+      }
       return {
         tabId,
         kind,
@@ -783,22 +800,31 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(({ store
     if (!layoutMenu) return []
     const canSplit = store.layout.panelCount < MAX_LAYOUT_PANELS
     const canClosePanel = store.layout.canRemovePanel(layoutMenu.panelId)
+    const canCloseTabs = getPanelKindAdapter(layoutMenu.panelKind).supportsTabs && layoutMenu.panelKind !== 'filesystem'
 
     if (layoutMenu.mode === 'bar') {
-      return [
+      const items: Array<{
+        action: LayoutMenuAction
+        labelKey: LayoutMenuLabelKey
+        danger?: boolean
+        disabled?: boolean
+      }> = [
         {
           action: 'close-panel',
           labelKey: 'closePanel',
           danger: true,
           disabled: !canClosePanel
-        },
-        {
+        }
+      ]
+      if (canCloseTabs) {
+        items.push({
           action: 'close-all-tabs',
           labelKey: 'closeAllTabs',
           danger: true,
           disabled: menuTabIds.length === 0
-        }
-      ]
+        })
+      }
+      return items
     }
 
     const hasTargetTab = !!layoutMenu.targetTabId && menuTabIds.includes(layoutMenu.targetTabId)
@@ -812,19 +838,19 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(({ store
         action: 'close-tab',
         labelKey: 'closeTab',
         danger: true,
-        disabled: !hasTargetTab
+        disabled: !canCloseTabs || !hasTargetTab
       },
       {
         action: 'close-other-tabs',
         labelKey: 'closeOtherTabs',
         danger: true,
-        disabled: !hasTargetTab || menuTabIds.length <= 1
+        disabled: !canCloseTabs || !hasTargetTab || menuTabIds.length <= 1
       },
       {
         action: 'close-all-tabs',
         labelKey: 'closeAllTabs',
         danger: true,
-        disabled: menuTabIds.length === 0
+        disabled: !canCloseTabs || menuTabIds.length === 0
       }
     ]
 

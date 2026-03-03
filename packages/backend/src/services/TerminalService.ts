@@ -3,7 +3,16 @@ import type { Terminal as TerminalType } from '@xterm/headless'
 const { Terminal } = pkg
 import path from 'path'
 import os from 'os'
-import type { TerminalBackend, TerminalConfig, TerminalTab, CommandResult, ConnectionType, FileStatInfo, CommandTask } from '../types'
+import type {
+  TerminalBackend,
+  TerminalConfig,
+  TerminalTab,
+  CommandResult,
+  ConnectionType,
+  FileStatInfo,
+  FileSystemEntry,
+  CommandTask
+} from '../types'
 import { NodePtyBackend } from './NodePtyBackend'
 import { SSHBackend } from './SSHBackend'
 import { escapeShellPathList } from './ShellUtility'
@@ -610,34 +619,212 @@ export class TerminalService {
     return backend.getHomeDir(terminal.ptyId)
   }
 
-  async readFile(terminalId: string, filePath: string): Promise<Buffer> {
+  getRemoteOs(terminalId: string): 'unix' | 'windows' | undefined {
+    const terminal = this.terminals.get(terminalId)
+    if (!terminal) return undefined
+    if (terminal.remoteOs) return terminal.remoteOs
+    const backend = this.getBackend(terminal.type)
+    const osType = backend.getRemoteOs(terminal.ptyId)
+    if (osType) {
+      terminal.remoteOs = osType
+    }
+    return osType
+  }
+
+  getTerminalType(terminalId: string): TerminalConfig['type'] {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    return terminal.type
+  }
+
+  getFileSystemIdentity(terminalId: string): string | null {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    if (terminal.type === 'local') {
+      return 'local://default'
+    }
+    const config = this.terminalConfigs.get(terminalId)
+    if (!config || config.type !== 'ssh') {
+      return null
+    }
+    const host = String(config.host || '').trim().toLowerCase()
+    if (!host) {
+      return null
+    }
+    const username = String(config.username || '').trim().toLowerCase()
+    const port = Number.isFinite(config.port) && config.port > 0 ? Math.floor(config.port) : 22
+    return `ssh://${username}@${host}:${port}`
+  }
+
+  async resolvePathForFileSystem(terminalId: string, filePath: string): Promise<string> {
+    this.getTerminalOrThrow(terminalId)
+    return await this.resolvePath(terminalId, filePath)
+  }
+
+  private getTerminalOrThrow(terminalId: string): TerminalTab {
     const terminal = this.terminals.get(terminalId)
     if (!terminal) {
       throw new Error(`Terminal ${terminalId} not found`)
     }
+    return terminal
+  }
+
+  async readFile(terminalId: string, filePath: string): Promise<Buffer> {
+    const terminal = this.getTerminalOrThrow(terminalId)
     const resolvedPath = await this.resolvePath(terminalId, filePath)
     const backend = this.getBackend(terminal.type)
     return backend.readFile(terminal.ptyId, resolvedPath)
   }
 
+  async readFileChunk(
+    terminalId: string,
+    filePath: string,
+    offset: number,
+    chunkSize: number,
+    options?: { totalSizeHint?: number }
+  ): Promise<{ chunk: Buffer; bytesRead: number; totalSize: number; nextOffset: number; eof: boolean }> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedPath = await this.resolvePath(terminalId, filePath)
+    const backend = this.getBackend(terminal.type)
+    return await backend.readFileChunk(terminal.ptyId, resolvedPath, offset, chunkSize, options)
+  }
+
   async writeFile(terminalId: string, filePath: string, content: string): Promise<void> {
-    const terminal = this.terminals.get(terminalId)
-    if (!terminal) {
-      throw new Error(`Terminal ${terminalId} not found`)
-    }
+    const terminal = this.getTerminalOrThrow(terminalId)
     const resolvedPath = await this.resolvePath(terminalId, filePath)
     const backend = this.getBackend(terminal.type)
     return backend.writeFile(terminal.ptyId, resolvedPath, content)
   }
 
-  async statFile(terminalId: string, filePath: string): Promise<FileStatInfo> {
-    const terminal = this.terminals.get(terminalId)
-    if (!terminal) {
-      throw new Error(`Terminal ${terminalId} not found`)
+  async writeFileChunk(
+    terminalId: string,
+    filePath: string,
+    offset: number,
+    content: Buffer,
+    options?: { truncate?: boolean }
+  ): Promise<{ writtenBytes: number; nextOffset: number }> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedPath = await this.resolvePath(terminalId, filePath)
+    const backend = this.getBackend(terminal.type)
+    return await backend.writeFileChunk(terminal.ptyId, resolvedPath, offset, content, options)
+  }
+
+  async downloadFileToLocalPath(
+    terminalId: string,
+    sourcePath: string,
+    targetLocalPath: string,
+    options?: {
+      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      signal?: AbortSignal
     }
+  ): Promise<{ totalBytes: number } | null> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedPath = await this.resolvePath(terminalId, sourcePath)
+    const backend = this.getBackend(terminal.type)
+    if (typeof backend.downloadFileToLocalPath !== 'function') {
+      return null
+    }
+    return await backend.downloadFileToLocalPath(terminal.ptyId, resolvedPath, targetLocalPath, options)
+  }
+
+  async uploadFileFromLocalPath(
+    terminalId: string,
+    sourceLocalPath: string,
+    targetPath: string,
+    options?: {
+      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      signal?: AbortSignal
+    }
+  ): Promise<{ totalBytes: number } | null> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedTargetPath = await this.resolvePath(terminalId, targetPath)
+    const backend = this.getBackend(terminal.type)
+    if (typeof backend.uploadFileFromLocalPath !== 'function') {
+      return null
+    }
+    return await backend.uploadFileFromLocalPath(terminal.ptyId, sourceLocalPath, resolvedTargetPath, options)
+  }
+
+  async statFile(terminalId: string, filePath: string): Promise<FileStatInfo> {
+    const terminal = this.getTerminalOrThrow(terminalId)
     const resolvedPath = await this.resolvePath(terminalId, filePath)
     const backend = this.getBackend(terminal.type)
     return backend.statFile(terminal.ptyId, resolvedPath)
+  }
+
+  async listDirectory(
+    terminalId: string,
+    dirPath?: string
+  ): Promise<{ path: string; entries: FileSystemEntry[] }> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const backend = this.getBackend(terminal.type)
+    const hasExplicitPath = typeof dirPath === 'string' && dirPath.trim().length > 0
+    const requestedPath = hasExplicitPath
+      ? dirPath!.trim()
+      : this.getCwd(terminalId) || (await this.getHomeDir(terminalId)) || '.'
+    const resolvedPath = await this.resolvePath(terminalId, requestedPath)
+    try {
+      const entries = await backend.listDirectory(terminal.ptyId, resolvedPath)
+      return {
+        path: resolvedPath,
+        entries
+      }
+    } catch (error) {
+      if (hasExplicitPath || !this.isPathMissingError(error)) {
+        throw error
+      }
+
+      const fallbackPaths = await this.getDirectoryFallbackPaths(terminalId, terminal.remoteOs)
+      for (const fallbackPath of fallbackPaths) {
+        if (!fallbackPath || fallbackPath === resolvedPath) continue
+        try {
+          const entries = await backend.listDirectory(terminal.ptyId, fallbackPath)
+          return {
+            path: fallbackPath,
+            entries
+          }
+        } catch (fallbackError) {
+          if (!this.isPathMissingError(fallbackError)) {
+            throw fallbackError
+          }
+        }
+      }
+      throw error
+    }
+  }
+
+  async createDirectory(terminalId: string, dirPath: string): Promise<void> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedPath = await this.resolvePath(terminalId, dirPath)
+    const backend = this.getBackend(terminal.type)
+    await backend.createDirectory(terminal.ptyId, resolvedPath)
+  }
+
+  async createFile(terminalId: string, filePath: string): Promise<void> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedPath = await this.resolvePath(terminalId, filePath)
+    const backend = this.getBackend(terminal.type)
+    await backend.createFile(terminal.ptyId, resolvedPath)
+  }
+
+  async deletePath(terminalId: string, targetPath: string, options?: { recursive?: boolean }): Promise<void> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedPath = await this.resolvePath(terminalId, targetPath)
+    const backend = this.getBackend(terminal.type)
+    await backend.deletePath(terminal.ptyId, resolvedPath, options)
+  }
+
+  async renamePath(terminalId: string, sourcePath: string, targetPath: string): Promise<void> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedSource = await this.resolvePath(terminalId, sourcePath)
+    const resolvedTarget = await this.resolvePath(terminalId, targetPath)
+    const backend = this.getBackend(terminal.type)
+    await backend.renamePath(terminal.ptyId, resolvedSource, resolvedTarget)
+  }
+
+  async writeFileBytes(terminalId: string, filePath: string, content: Buffer): Promise<void> {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    const resolvedPath = await this.resolvePath(terminalId, filePath)
+    const backend = this.getBackend(terminal.type)
+    await backend.writeFileBytes(terminal.ptyId, resolvedPath, content)
   }
 
   /**
@@ -676,6 +863,49 @@ export class TerminalService {
     }
 
     return targetPath
+  }
+
+  private async getDirectoryFallbackPaths(
+    terminalId: string,
+    remoteOs: 'unix' | 'windows' | undefined
+  ): Promise<string[]> {
+    const candidates: string[] = []
+    const homeDir = await this.getHomeDir(terminalId)
+    if (homeDir) {
+      candidates.push(homeDir)
+      if (remoteOs === 'windows') {
+        const rootFromHome = path.win32.parse(homeDir).root
+        if (rootFromHome) {
+          candidates.push(rootFromHome)
+        }
+      }
+    }
+
+    if (remoteOs === 'windows') {
+      candidates.push('C:\\')
+    } else {
+      candidates.push('/')
+    }
+
+    const seen = new Set<string>()
+    const resolvedCandidates: string[] = []
+    for (const candidate of candidates) {
+      const resolved = await this.resolvePath(terminalId, candidate)
+      if (!resolved || seen.has(resolved)) continue
+      seen.add(resolved)
+      resolvedCandidates.push(resolved)
+    }
+    return resolvedCandidates
+  }
+
+  private isPathMissingError(error: unknown): boolean {
+    const maybeError = error as { code?: string | number; message?: string } | null
+    const code = maybeError?.code
+    if (code === 'ENOENT' || code === '2' || code === 2) {
+      return true
+    }
+    const message = maybeError?.message || (error instanceof Error ? error.message : String(error))
+    return /no such file|not found|cannot find/i.test(message)
   }
 
   getBufferDelta(terminalId: string, fromOffset: number): string {

@@ -293,6 +293,35 @@ export interface SSHConnectionConfig extends BaseConnectionConfig {
 
 export type TerminalConfig = LocalConnectionConfig | SSHConnectionConfig
 
+export interface FileSystemEntry {
+  name: string
+  path: string
+  isDirectory: boolean
+  isSymbolicLink: boolean
+  size: number
+  mode?: string
+  modifiedAt?: string
+}
+
+export interface FileSystemListResult {
+  path: string
+  entries: FileSystemEntry[]
+}
+
+export interface ReadTextFileResult {
+  path: string
+  content: string
+  size: number
+  encoding: 'utf8'
+}
+
+export interface ReadBase64FileResult {
+  path: string
+  contentBase64: string
+  size: number
+  mimeType: string
+}
+
 export interface GyShellAPI {
   system: {
     platform: NodeJS.Platform
@@ -356,6 +385,46 @@ export interface GyShellAPI {
           runtimeState?: 'initializing' | 'ready' | 'exited'
           lastExitCode?: number
         }>
+      }) => void
+    ) => () => void
+  }
+
+  filesystem: {
+    list: (terminalId: string, dirPath?: string) => Promise<FileSystemListResult>
+    readTextFile: (terminalId: string, filePath: string, options?: { maxBytes?: number }) => Promise<ReadTextFileResult>
+    readFileBase64: (terminalId: string, filePath: string, options?: { maxBytes?: number }) => Promise<ReadBase64FileResult>
+    writeTextFile: (terminalId: string, filePath: string, content: string) => Promise<void>
+    writeFileBase64: (
+      terminalId: string,
+      filePath: string,
+      contentBase64: string,
+      options?: { maxBytes?: number }
+    ) => Promise<void>
+    transferEntries: (
+      sourceTerminalId: string,
+      sourcePaths: string[],
+      targetTerminalId: string,
+      targetDirPath: string,
+      options?: { mode?: 'copy' | 'move'; transferId?: string; chunkSize?: number; overwrite?: boolean }
+    ) => Promise<{ mode: 'copy' | 'move'; totalBytes: number; transferredFiles: number; totalFiles: number }>
+    cancelTransfer: (transferId: string) => Promise<{ ok: boolean }>
+    createDirectory: (terminalId: string, dirPath: string) => Promise<void>
+    createFile: (terminalId: string, filePath: string) => Promise<void>
+    deletePath: (terminalId: string, targetPath: string, options?: { recursive?: boolean }) => Promise<void>
+    renamePath: (terminalId: string, sourcePath: string, targetPath: string) => Promise<void>
+    onTransferProgress: (
+      callback: (payload: {
+        transferId: string
+        mode: 'copy' | 'move'
+        sourceTerminalId: string
+        targetTerminalId: string
+        targetDirPath: string
+        sourcePaths: string[]
+        bytesTransferred: number
+        totalBytes: number
+        transferredFiles: number
+        totalFiles: number
+        eof: boolean
       }) => void
     ) => () => void
   }
@@ -523,6 +592,53 @@ const api: GyShellAPI = {
       ) => callback(data)
       ipcRenderer.on('terminal:tabs', handler)
       return () => ipcRenderer.off('terminal:tabs', handler)
+    }
+  },
+
+  filesystem: {
+    list: (terminalId, dirPath) => ipcRenderer.invoke('filesystem:list', terminalId, dirPath),
+    readTextFile: (terminalId, filePath, options) =>
+      ipcRenderer.invoke('filesystem:readTextFile', terminalId, filePath, options),
+    readFileBase64: (terminalId, filePath, options) =>
+      ipcRenderer.invoke('filesystem:readFileBase64', terminalId, filePath, options),
+    writeTextFile: (terminalId, filePath, content) =>
+      ipcRenderer.invoke('filesystem:writeTextFile', terminalId, filePath, content),
+    writeFileBase64: (terminalId, filePath, contentBase64, options) =>
+      ipcRenderer.invoke('filesystem:writeFileBase64', terminalId, filePath, contentBase64, options),
+    transferEntries: (sourceTerminalId, sourcePaths, targetTerminalId, targetDirPath, options) =>
+      ipcRenderer.invoke(
+        'filesystem:transferEntries',
+        sourceTerminalId,
+        sourcePaths,
+        targetTerminalId,
+        targetDirPath,
+        options
+      ),
+    cancelTransfer: (transferId) => ipcRenderer.invoke('filesystem:cancelTransfer', transferId),
+    createDirectory: (terminalId, dirPath) =>
+      ipcRenderer.invoke('filesystem:createDirectory', terminalId, dirPath),
+    createFile: (terminalId, filePath) =>
+      ipcRenderer.invoke('filesystem:createFile', terminalId, filePath),
+    deletePath: (terminalId, targetPath, options) =>
+      ipcRenderer.invoke('filesystem:deletePath', terminalId, targetPath, options),
+    renamePath: (terminalId, sourcePath, targetPath) =>
+      ipcRenderer.invoke('filesystem:renamePath', terminalId, sourcePath, targetPath),
+    onTransferProgress: (callback) => {
+      const handler = (_: IpcRendererEvent, payload: {
+        transferId: string
+        mode: 'copy' | 'move'
+        sourceTerminalId: string
+        targetTerminalId: string
+        targetDirPath: string
+        sourcePaths: string[]
+        bytesTransferred: number
+        totalBytes: number
+        transferredFiles: number
+        totalFiles: number
+        eof: boolean
+      }) => callback(payload)
+      ipcRenderer.on('filesystem:transferProgress', handler)
+      return () => ipcRenderer.off('filesystem:transferProgress', handler)
     }
   },
 

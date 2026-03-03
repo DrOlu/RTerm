@@ -259,6 +259,31 @@ export interface CommandTask {
 export interface FileStatInfo {
   exists: boolean
   isDirectory: boolean
+  /** File size in bytes. Only present when the file exists and is not a directory. */
+  size?: number
+}
+
+export interface FileSystemEntry {
+  name: string
+  path: string
+  isDirectory: boolean
+  isSymbolicLink: boolean
+  size: number
+  mode?: string
+  modifiedAt?: string
+}
+
+export interface FileChunkReadResult {
+  chunk: Buffer
+  bytesRead: number
+  totalSize: number
+  nextOffset: number
+  eof: boolean
+}
+
+export interface FileChunkWriteResult {
+  writtenBytes: number
+  nextOffset: number
 }
 
 // ============ Agent Types ============
@@ -390,6 +415,54 @@ export interface TerminalBackend {
   writeFile(ptyId: string, filePath: string, content: string): Promise<void>
 
   /**
+   * Read a partial chunk from file for streaming transfer.
+   */
+  readFileChunk(
+    ptyId: string,
+    filePath: string,
+    offset: number,
+    chunkSize: number,
+    options?: { totalSizeHint?: number }
+  ): Promise<FileChunkReadResult>
+
+  /**
+   * Write a partial chunk to file for streaming transfer.
+   */
+  writeFileChunk(
+    ptyId: string,
+    filePath: string,
+    offset: number,
+    content: Buffer,
+    options?: { truncate?: boolean }
+  ): Promise<FileChunkWriteResult>
+
+  /**
+   * Optional fast path: backend-side pull from terminal to local file.
+   */
+  downloadFileToLocalPath?(
+    ptyId: string,
+    sourcePath: string,
+    targetLocalPath: string,
+    options?: {
+      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      signal?: AbortSignal
+    }
+  ): Promise<{ totalBytes: number }>
+
+  /**
+   * Optional fast path: backend-side push from local file to terminal.
+   */
+  uploadFileFromLocalPath?(
+    ptyId: string,
+    sourceLocalPath: string,
+    targetPath: string,
+    options?: {
+      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      signal?: AbortSignal
+    }
+  ): Promise<{ totalBytes: number }>
+
+  /**
    * Get current working directory for the session.
    */
   getCwd(ptyId: string): string | undefined
@@ -413,6 +486,36 @@ export interface TerminalBackend {
    * Stat a file through the backend connection.
    */
   statFile(ptyId: string, filePath: string): Promise<FileStatInfo>
+
+  /**
+   * List directory entries through the backend connection.
+   */
+  listDirectory(ptyId: string, dirPath: string): Promise<FileSystemEntry[]>
+
+  /**
+   * Create a new directory.
+   */
+  createDirectory(ptyId: string, dirPath: string): Promise<void>
+
+  /**
+   * Create an empty file.
+   */
+  createFile(ptyId: string, filePath: string): Promise<void>
+
+  /**
+   * Delete a file or directory.
+   */
+  deletePath(ptyId: string, targetPath: string, options?: { recursive?: boolean }): Promise<void>
+
+  /**
+   * Rename or move a file or directory.
+   */
+  renamePath(ptyId: string, sourcePath: string, targetPath: string): Promise<void>
+
+  /**
+   * Write file bytes through the backend connection.
+   */
+  writeFileBytes(ptyId: string, filePath: string, content: Buffer): Promise<void>
 
   /**
    * Optional: Hook for custom initialization logic (e.g. SSH injection)

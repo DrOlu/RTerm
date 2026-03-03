@@ -1,6 +1,11 @@
 import { ipcMain, shell, Menu, BrowserWindow } from 'electron'
 import type { StartTaskOptions, StartTaskInput, IGatewayRuntime } from '../../../backend/src/services/Gateway/types'
 import type { TerminalService } from '../../../backend/src/services/TerminalService'
+import {
+  FileSystemService,
+  FILESYSTEM_TRANSFER_CANCELLED_CODE,
+  isFileSystemTransferCancelledError
+} from '../../../backend/src/services/FileSystemService'
 import type { AgentService_v2 } from '../../../backend/src/services/AgentService_v2'
 import type { UIHistoryService, HistoryExportMode } from '../../../backend/src/services/UIHistoryService'
 import type { CommandPolicyService } from '../../../backend/src/services/CommandPolicy/CommandPolicyService'
@@ -52,7 +57,8 @@ export class ElectronGatewayIpcAdapter {
         throw new Error('Access token service is not configured.')
       },
       deleteToken: async () => false
-    }
+    },
+    private fileSystemService?: FileSystemService
   ) {}
 
   private updateWindowsThemeIfNeeded(): void {
@@ -468,6 +474,156 @@ export class ElectronGatewayIpcAdapter {
         data,
         offset
       }
+    })
+
+    // Filesystem
+    const requireFileSystemService = (): FileSystemService => {
+      if (!this.fileSystemService) {
+        throw new Error('Filesystem APIs are not configured.')
+      }
+      return this.fileSystemService
+    }
+    const activeTransferAbortControllers = new Map<string, AbortController>()
+    ipcMain.handle('filesystem:list', async (_: any, terminalId: string, dirPath?: string) => {
+      return await requireFileSystemService().listDirectory(terminalId, dirPath)
+    })
+
+    ipcMain.handle(
+      'filesystem:readTextFile',
+      async (_: any, terminalId: string, filePath: string, options?: { maxBytes?: number }) => {
+        return await requireFileSystemService().readTextFile(terminalId, filePath, options)
+      }
+    )
+
+    ipcMain.handle(
+      'filesystem:readFileBase64',
+      async (_: any, terminalId: string, filePath: string, options?: { maxBytes?: number }) => {
+        return await requireFileSystemService().readFileBase64(terminalId, filePath, options)
+      }
+    )
+
+    ipcMain.handle('filesystem:writeTextFile', async (_: any, terminalId: string, filePath: string, content: string) => {
+      await requireFileSystemService().writeTextFile(terminalId, filePath, content)
+      return { ok: true }
+    })
+
+    ipcMain.handle(
+      'filesystem:writeFileBase64',
+      async (_: any, terminalId: string, filePath: string, contentBase64: string, options?: { maxBytes?: number }) => {
+        await requireFileSystemService().writeFileBase64(terminalId, filePath, contentBase64, options)
+        return { ok: true }
+      }
+    )
+
+    ipcMain.handle(
+      'filesystem:transferEntries',
+      async (
+        event: any,
+        sourceTerminalId: string,
+        sourcePaths: string[],
+        targetTerminalId: string,
+        targetDirPath: string,
+        options?: { mode?: 'copy' | 'move'; transferId?: string; chunkSize?: number; overwrite?: boolean }
+      ) => {
+        const transferId = typeof options?.transferId === 'string' && options.transferId.trim().length > 0
+          ? options.transferId.trim()
+          : `fs-transfer:${Date.now()}`
+        const mode = options?.mode === 'move' ? 'move' : 'copy'
+        const controller = new AbortController()
+        const existingController = activeTransferAbortControllers.get(transferId)
+        if (existingController) {
+          existingController.abort()
+        }
+        activeTransferAbortControllers.set(transferId, controller)
+        let lastEmitAt = 0
+        let lastEmitBytes = -1
+
+        try {
+          return await requireFileSystemService().transferEntries(
+            sourceTerminalId,
+            sourcePaths,
+            targetTerminalId,
+            targetDirPath,
+            {
+              mode,
+              overwrite: options?.overwrite === true,
+              chunkSize: options?.chunkSize,
+              transferId,
+              signal: controller.signal,
+              onProgress: (progress) => {
+                const now = Date.now()
+                const shouldEmit = progress.eof
+                  || progress.bytesTransferred === 0
+                  || now - lastEmitAt >= 120
+                  || progress.bytesTransferred - lastEmitBytes >= 64 * 1024
+                if (!shouldEmit) {
+                  return
+                }
+                lastEmitAt = now
+                lastEmitBytes = progress.bytesTransferred
+                event.sender.send('filesystem:transferProgress', {
+                  transferId,
+                  mode,
+                  sourceTerminalId,
+                  targetTerminalId,
+                  targetDirPath,
+                  sourcePaths,
+                  bytesTransferred: progress.bytesTransferred,
+                  totalBytes: progress.totalBytes,
+                  transferredFiles: progress.transferredFiles,
+                  totalFiles: progress.totalFiles,
+                  eof: progress.eof
+                })
+              }
+            }
+          )
+        } catch (error) {
+          if (controller.signal.aborted || isFileSystemTransferCancelledError(error)) {
+            const cancelledError = new Error('Transfer cancelled by user.') as Error & { code: string }
+            cancelledError.code = FILESYSTEM_TRANSFER_CANCELLED_CODE
+            throw cancelledError
+          }
+          throw error
+        } finally {
+          activeTransferAbortControllers.delete(transferId)
+        }
+      }
+    )
+
+    ipcMain.handle('filesystem:cancelTransfer', async (_: any, transferId: string) => {
+      if (typeof transferId !== 'string' || transferId.trim().length <= 0) {
+        return { ok: false }
+      }
+      const key = transferId.trim()
+      const controller = activeTransferAbortControllers.get(key)
+      if (!controller) {
+        return { ok: false }
+      }
+      controller.abort()
+      return { ok: true }
+    })
+
+    ipcMain.handle('filesystem:createDirectory', async (_: any, terminalId: string, dirPath: string) => {
+      await requireFileSystemService().createDirectory(terminalId, dirPath)
+      return { ok: true }
+    })
+
+    ipcMain.handle('filesystem:createFile', async (_: any, terminalId: string, filePath: string) => {
+      await requireFileSystemService().createFile(terminalId, filePath)
+      return { ok: true }
+    })
+
+    ipcMain.handle(
+      'filesystem:deletePath',
+      async (_: any, terminalId: string, targetPath: string, options?: { recursive?: boolean }) => {
+        await requireFileSystemService().deletePath(terminalId, targetPath, options)
+        return { ok: true }
+      }
+    )
+
+    ipcMain.handle('filesystem:renamePath', async (_: any, terminalId: string, sourcePath: string, targetPath: string) => {
+      await requireFileSystemService().renamePath(terminalId, sourcePath, targetPath)
+      return { ok: true }
     })
 
     // UI

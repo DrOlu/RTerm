@@ -3,6 +3,7 @@ import { join, resolve } from 'path'
 import { SettingsService } from '../../../backend/src/services/SettingsService'
 import { UiSettingsStore } from '../settings/UiSettingsStore'
 import { TerminalService } from '../../../backend/src/services/TerminalService'
+import { FileSystemService } from '../../../backend/src/services/FileSystemService'
 import { AgentService_v2 } from '../../../backend/src/services/AgentService_v2'
 import { CommandPolicyService } from '../../../backend/src/services/CommandPolicy/CommandPolicyService'
 import { ModelCapabilityService } from '../../../backend/src/services/ModelCapabilityService'
@@ -37,6 +38,7 @@ let mainWindow: BrowserWindow | null = null
 let settingsService: SettingsService
 let uiSettingsStore: UiSettingsStore
 let terminalService: TerminalService
+let fileSystemService: FileSystemService
 let agentService: AgentService_v2
 let commandPolicyService: CommandPolicyService
 let modelCapabilityService: ModelCapabilityService
@@ -213,6 +215,7 @@ export async function startElectronMain(): Promise<void> {
   terminalService = new TerminalService({
     terminalStateStore
   })
+  fileSystemService = new FileSystemService(terminalService)
   commandPolicyService = new CommandPolicyService()
   mcpToolService = new McpToolService()
   themeStore = new ThemeConfigStore()
@@ -313,6 +316,44 @@ export async function startElectronMain(): Promise<void> {
             const data = terminalService.getBufferDelta(terminalId, fromOffset)
             const offset = terminalService.getCurrentOffset(terminalId)
             return { data, offset }
+          }
+        },
+        filesystemBridge: {
+          listDirectory: async (terminalId, dirPath) => {
+            return await fileSystemService.listDirectory(terminalId, dirPath)
+          },
+          readTextFile: async (terminalId, filePath, options) => {
+            return await fileSystemService.readTextFile(terminalId, filePath, options)
+          },
+          readFileBase64: async (terminalId, filePath, options) => {
+            return await fileSystemService.readFileBase64(terminalId, filePath, options)
+          },
+          writeTextFile: async (terminalId, filePath, content) => {
+            await fileSystemService.writeTextFile(terminalId, filePath, content)
+          },
+          writeFileBase64: async (terminalId, filePath, contentBase64, options) => {
+            await fileSystemService.writeFileBase64(terminalId, filePath, contentBase64, options)
+          },
+          transferEntries: async (sourceTerminalId, sourcePaths, targetTerminalId, targetDirPath, options) => {
+            return await fileSystemService.transferEntries(
+              sourceTerminalId,
+              sourcePaths,
+              targetTerminalId,
+              targetDirPath,
+              options
+            )
+          },
+          createDirectory: async (terminalId, dirPath) => {
+            await fileSystemService.createDirectory(terminalId, dirPath)
+          },
+          createFile: async (terminalId, filePath) => {
+            await fileSystemService.createFile(terminalId, filePath)
+          },
+          deletePath: async (terminalId, targetPath, options) => {
+            await fileSystemService.deletePath(terminalId, targetPath, options)
+          },
+          renamePath: async (terminalId, sourcePath, targetPath) => {
+            await fileSystemService.renamePath(terminalId, sourcePath, targetPath)
           }
         },
         profileBridge: {
@@ -531,7 +572,8 @@ export async function startElectronMain(): Promise<void> {
     themeStore,
     versionService,
     webSocketGatewayControlService,
-    accessTokenService
+    accessTokenService,
+    fileSystemService
   )
   ipcAdapter.registerHandlers()
 

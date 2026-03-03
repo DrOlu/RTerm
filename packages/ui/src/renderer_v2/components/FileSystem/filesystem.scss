@@ -1,0 +1,386 @@
+.panel-filesystem {
+  --filesystem-font-size: 14px;
+  --filesystem-font-size-sm: clamp(10px, calc(var(--filesystem-font-size) - 1px), 28px);
+  --filesystem-font-size-xs: clamp(9px, calc(var(--filesystem-font-size) - 2px), 27px);
+  background: var(--panel-bg);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.filesystem-tabs-container {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding-left: 4px;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+
+.filesystem-tabs-container.is-draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.panel-filesystem.is-dragging-source .filesystem-tabs-container.is-draggable {
+  cursor: grabbing;
+}
+
+.filesystem-tabs-bar {
+  flex: 1;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.filesystem-tabs-bar::-webkit-scrollbar {
+  display: none !important;
+}
+
+.filesystem-tab {
+  height: 32px;
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--filesystem-font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  cursor: move;
+}
+
+.filesystem-tab:hover {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  color: var(--fg);
+}
+
+.filesystem-tab.is-active {
+  background: var(--panel-bg-2);
+  color: var(--accent);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.filesystem-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.78;
+}
+
+.filesystem-tab-title {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filesystem-toolbar {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 82%, var(--fg) 2%);
+}
+
+.filesystem-toolbar .icon-btn-sm {
+  flex: 0 0 auto;
+}
+
+.filesystem-path-input {
+  flex: 1;
+  min-width: 120px;
+  height: 24px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 0 7px;
+  font-size: var(--filesystem-font-size-sm);
+  outline: none;
+}
+
+.filesystem-path-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+
+.filesystem-status-bar {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--filesystem-font-size-sm);
+  font-family: var(--font-mono);
+}
+
+.filesystem-status-error {
+  color: var(--danger);
+}
+
+.filesystem-status-message {
+  color: var(--fg-muted);
+}
+
+.filesystem-status-placeholder {
+  display: inline-block;
+  width: 1px;
+  height: 1px;
+}
+
+.panel-body.filesystem-panel-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: auto;
+}
+
+.filesystem-explorer {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.filesystem-list {
+  height: 100%;
+  overflow: auto;
+}
+
+.filesystem-row {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 0 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  cursor: pointer;
+  color: var(--fg);
+  font-size: var(--filesystem-font-size);
+}
+
+.filesystem-row:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+
+.filesystem-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: color-mix(in srgb, var(--accent) 56%, var(--fg));
+}
+
+.filesystem-row-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.filesystem-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filesystem-row-meta {
+  color: var(--fg-faint);
+  font-size: var(--filesystem-font-size-xs);
+  flex-shrink: 0;
+}
+
+.filesystem-empty-state {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--fg-faint);
+  font-size: var(--filesystem-font-size);
+  font-family: var(--font-mono);
+}
+
+.filesystem-footnote {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-faint);
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+}
+
+.filesystem-inline-action-bar {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 84%, var(--fg) 3%);
+}
+
+.filesystem-inline-action-label {
+  flex-shrink: 0;
+  font-size: var(--filesystem-font-size-xs);
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.32px;
+}
+
+.filesystem-inline-action-input {
+  flex: 1;
+  min-width: 80px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  color: var(--fg);
+  padding: 0 7px;
+  font-size: var(--filesystem-font-size-sm);
+  outline: none;
+}
+
+.filesystem-inline-action-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+}
+
+.filesystem-transfer-panel {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 88%, var(--fg) 2%);
+}
+
+.filesystem-transfer-panel-header {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+  letter-spacing: 0.32px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+}
+
+.filesystem-transfer-list {
+  max-height: 170px;
+  overflow: auto;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.filesystem-transfer-item {
+  padding: 4px 8px 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.filesystem-transfer-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.filesystem-transfer-kind {
+  color: var(--fg-faint);
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.25px;
+}
+
+.filesystem-transfer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--filesystem-font-size-sm);
+  color: var(--fg);
+}
+
+.filesystem-transfer-status {
+  color: var(--fg-muted);
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.filesystem-transfer-cancel-btn {
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.filesystem-transfer-cancel-btn:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.filesystem-transfer-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filesystem-transfer-progress-track {
+  flex: 1;
+  min-width: 50px;
+  height: 4px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.filesystem-transfer-progress-fill {
+  display: block;
+  height: 100%;
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+.filesystem-transfer-progress-label {
+  color: var(--fg-faint);
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.filesystem-transfer-message {
+  color: var(--fg-faint);
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filesystem-transfer-item.is-error .filesystem-transfer-status,
+.filesystem-transfer-item.is-error .filesystem-transfer-message {
+  color: var(--danger);
+}
+
+.filesystem-transfer-item.is-success .filesystem-transfer-status {
+  color: color-mix(in srgb, #31c761 78%, var(--fg));
+}
+
+.filesystem-transfer-item.is-cancelled .filesystem-transfer-status {
+  color: var(--fg-faint);
+}

@@ -19,6 +19,16 @@ type WebSocketRpcMethod =
   | 'terminal:kill'
   | 'terminal:setSelection'
   | 'terminal:getBufferDelta'
+  | 'filesystem:list'
+  | 'filesystem:readTextFile'
+  | 'filesystem:readFileBase64'
+  | 'filesystem:writeTextFile'
+  | 'filesystem:writeFileBase64'
+  | 'filesystem:transferEntries'
+  | 'filesystem:createDirectory'
+  | 'filesystem:createFile'
+  | 'filesystem:deletePath'
+  | 'filesystem:renamePath'
   | 'system:saveTempPaste'
   | 'system:saveImageAttachment'
   | 'models:getProfiles'
@@ -96,6 +106,42 @@ export interface WebSocketGatewayAdapterOptions {
     kill?: (terminalId: string) => void | Promise<void>;
     setSelection?: (terminalId: string, selectionText: string) => void | Promise<void>;
     getBufferDelta?: (terminalId: string, fromOffset: number) => { data: string; offset: number } | Promise<{ data: string; offset: number }>;
+  };
+  filesystemBridge?: {
+    listDirectory?: (
+      terminalId: string,
+      dirPath?: string
+    ) => Promise<{ path: string; entries: Array<Record<string, any>> }> | { path: string; entries: Array<Record<string, any>> };
+    readTextFile?: (
+      terminalId: string,
+      filePath: string,
+      options?: { maxBytes?: number }
+    ) => Promise<{ path: string; content: string; size: number; encoding: 'utf8' }> | { path: string; content: string; size: number; encoding: 'utf8' };
+    readFileBase64?: (
+      terminalId: string,
+      filePath: string,
+      options?: { maxBytes?: number }
+    ) => Promise<{ path: string; contentBase64: string; size: number; mimeType: string }> | { path: string; contentBase64: string; size: number; mimeType: string };
+    writeTextFile?: (terminalId: string, filePath: string, content: string) => Promise<void> | void;
+    writeFileBase64?: (
+      terminalId: string,
+      filePath: string,
+      contentBase64: string,
+      options?: { maxBytes?: number }
+    ) => Promise<void> | void;
+    transferEntries?: (
+      sourceTerminalId: string,
+      sourcePaths: string[],
+      targetTerminalId: string,
+      targetDirPath: string,
+      options?: { mode?: 'copy' | 'move'; transferId?: string; chunkSize?: number; overwrite?: boolean }
+    ) =>
+      | Promise<{ mode: 'copy' | 'move'; totalBytes: number; transferredFiles: number; totalFiles: number }>
+      | { mode: 'copy' | 'move'; totalBytes: number; transferredFiles: number; totalFiles: number };
+    createDirectory?: (terminalId: string, dirPath: string) => Promise<void> | void;
+    createFile?: (terminalId: string, filePath: string) => Promise<void> | void;
+    deletePath?: (terminalId: string, targetPath: string, options?: { recursive?: boolean }) => Promise<void> | void;
+    renamePath?: (terminalId: string, sourcePath: string, targetPath: string) => Promise<void> | void;
   };
   profileBridge?: {
     getProfiles: () => {
@@ -581,6 +627,162 @@ export class WebSocketGatewayAdapter {
         const fromOffset = this.readIntegerParam(params, 'fromOffset', 0, Number.MAX_SAFE_INTEGER);
         return await bridge.getBufferDelta(terminalId, fromOffset);
       }
+      case 'filesystem:list': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.listDirectory) {
+          throw new WebSocketRpcError('METHOD_NOT_FOUND', 'filesystem:list is not available on this websocket gateway.');
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const rawDirPath = params.dirPath;
+        if (rawDirPath !== undefined && rawDirPath !== null && typeof rawDirPath !== 'string') {
+          throw new WebSocketRpcError('BAD_REQUEST', 'dirPath must be string when provided.');
+        }
+        return await bridge.listDirectory(terminalId, typeof rawDirPath === 'string' ? rawDirPath : undefined);
+      }
+      case 'filesystem:readTextFile': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.readTextFile) {
+          throw new WebSocketRpcError(
+            'METHOD_NOT_FOUND',
+            'filesystem:readTextFile is not available on this websocket gateway.'
+          );
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const filePath = this.readStringParam(params, 'filePath');
+        const maxBytes = this.readOptionalPositiveIntegerParam(params, 'maxBytes');
+        return await bridge.readTextFile(terminalId, filePath, maxBytes ? { maxBytes } : undefined);
+      }
+      case 'filesystem:readFileBase64': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.readFileBase64) {
+          throw new WebSocketRpcError(
+            'METHOD_NOT_FOUND',
+            'filesystem:readFileBase64 is not available on this websocket gateway.'
+          );
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const filePath = this.readStringParam(params, 'filePath');
+        const maxBytes = this.readOptionalPositiveIntegerParam(params, 'maxBytes');
+        return await bridge.readFileBase64(terminalId, filePath, maxBytes ? { maxBytes } : undefined);
+      }
+      case 'filesystem:writeTextFile': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.writeTextFile) {
+          throw new WebSocketRpcError(
+            'METHOD_NOT_FOUND',
+            'filesystem:writeTextFile is not available on this websocket gateway.'
+          );
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const filePath = this.readStringParam(params, 'filePath');
+        const content = this.readStringParam(params, 'content');
+        await bridge.writeTextFile(terminalId, filePath, content);
+        return { ok: true };
+      }
+      case 'filesystem:writeFileBase64': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.writeFileBase64) {
+          throw new WebSocketRpcError(
+            'METHOD_NOT_FOUND',
+            'filesystem:writeFileBase64 is not available on this websocket gateway.'
+          );
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const filePath = this.readStringParam(params, 'filePath');
+        const contentBase64 = this.readStringParam(params, 'contentBase64');
+        const maxBytes = this.readOptionalPositiveIntegerParam(params, 'maxBytes');
+        await bridge.writeFileBase64(terminalId, filePath, contentBase64, maxBytes ? { maxBytes } : undefined);
+        return { ok: true };
+      }
+      case 'filesystem:transferEntries': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.transferEntries) {
+          throw new WebSocketRpcError(
+            'METHOD_NOT_FOUND',
+            'filesystem:transferEntries is not available on this websocket gateway.'
+          );
+        }
+        const sourceTerminalId = this.readStringParam(params, 'sourceTerminalId');
+        const targetTerminalId = this.readStringParam(params, 'targetTerminalId');
+        const targetDirPath = this.readStringParam(params, 'targetDirPath');
+        const rawSourcePaths = params.sourcePaths;
+        if (!Array.isArray(rawSourcePaths) || rawSourcePaths.some((item) => typeof item !== 'string')) {
+          throw new WebSocketRpcError('BAD_REQUEST', 'sourcePaths must be string[].');
+        }
+        const mode = params.mode
+        if (mode !== undefined && mode !== 'copy' && mode !== 'move') {
+          throw new WebSocketRpcError('BAD_REQUEST', 'mode must be "copy" or "move" when provided.');
+        }
+        const transferId = params.transferId
+        if (transferId !== undefined && typeof transferId !== 'string') {
+          throw new WebSocketRpcError('BAD_REQUEST', 'transferId must be string when provided.');
+        }
+        const overwrite = params.overwrite
+        if (overwrite !== undefined && typeof overwrite !== 'boolean') {
+          throw new WebSocketRpcError('BAD_REQUEST', 'overwrite must be boolean when provided.');
+        }
+        const chunkSize = this.readOptionalPositiveIntegerParam(params, 'chunkSize');
+        return await bridge.transferEntries(
+          sourceTerminalId,
+          rawSourcePaths,
+          targetTerminalId,
+          targetDirPath,
+          {
+            ...(mode !== undefined ? { mode } : {}),
+            ...(transferId !== undefined ? { transferId } : {}),
+            ...(overwrite !== undefined ? { overwrite } : {}),
+            ...(chunkSize !== undefined ? { chunkSize } : {})
+          }
+        );
+      }
+      case 'filesystem:createDirectory': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.createDirectory) {
+          throw new WebSocketRpcError(
+            'METHOD_NOT_FOUND',
+            'filesystem:createDirectory is not available on this websocket gateway.'
+          );
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const dirPath = this.readStringParam(params, 'dirPath');
+        await bridge.createDirectory(terminalId, dirPath);
+        return { ok: true };
+      }
+      case 'filesystem:createFile': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.createFile) {
+          throw new WebSocketRpcError('METHOD_NOT_FOUND', 'filesystem:createFile is not available on this websocket gateway.');
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const filePath = this.readStringParam(params, 'filePath');
+        await bridge.createFile(terminalId, filePath);
+        return { ok: true };
+      }
+      case 'filesystem:deletePath': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.deletePath) {
+          throw new WebSocketRpcError('METHOD_NOT_FOUND', 'filesystem:deletePath is not available on this websocket gateway.');
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const targetPath = this.readStringParam(params, 'targetPath');
+        const rawRecursive = params.recursive;
+        if (rawRecursive !== undefined && typeof rawRecursive !== 'boolean') {
+          throw new WebSocketRpcError('BAD_REQUEST', 'recursive must be boolean when provided.');
+        }
+        await bridge.deletePath(terminalId, targetPath, rawRecursive === undefined ? undefined : { recursive: rawRecursive });
+        return { ok: true };
+      }
+      case 'filesystem:renamePath': {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.renamePath) {
+          throw new WebSocketRpcError('METHOD_NOT_FOUND', 'filesystem:renamePath is not available on this websocket gateway.');
+        }
+        const terminalId = this.readStringParam(params, 'terminalId');
+        const sourcePath = this.readStringParam(params, 'sourcePath');
+        const targetPath = this.readStringParam(params, 'targetPath');
+        await bridge.renamePath(terminalId, sourcePath, targetPath);
+        return { ok: true };
+      }
       case 'system:saveTempPaste': {
         const bridge = this.options.systemBridge;
         if (!bridge?.saveTempPaste) {
@@ -845,6 +1047,17 @@ export class WebSocketGatewayAdapter {
     }
     if (value < min || value > max) {
       throw new WebSocketRpcError('BAD_REQUEST', `Parameter out of range: ${name}`);
+    }
+    return value;
+  }
+
+  private readOptionalPositiveIntegerParam(params: Record<string, any>, name: string): number | undefined {
+    const value = params[name];
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new WebSocketRpcError('BAD_REQUEST', `${name} must be a positive integer when provided.`);
     }
     return value;
   }

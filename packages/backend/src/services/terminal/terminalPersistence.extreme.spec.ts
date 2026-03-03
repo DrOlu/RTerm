@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { FileStatInfo, TerminalBackend, TerminalConfig, TerminalSystemInfo } from '../../types'
+import type { FileStatInfo, FileSystemEntry, TerminalBackend, TerminalConfig, TerminalSystemInfo } from '../../types'
 import { TerminalService } from '../TerminalService'
 import { TerminalStateStore } from './TerminalStateStore'
 
@@ -79,6 +79,51 @@ class FakeTerminalBackend implements TerminalBackend {
   }
 
   async writeFile(_ptyId: string, _filePath: string, _content: string): Promise<void> {}
+
+  async readFileChunk(
+    _ptyId: string,
+    _filePath: string,
+    offset: number,
+    _chunkSize: number,
+    options?: { totalSizeHint?: number }
+  ): Promise<{ chunk: Buffer; bytesRead: number; totalSize: number; nextOffset: number; eof: boolean }> {
+    const totalSize = Number.isFinite(options?.totalSizeHint) && (options?.totalSizeHint || 0) >= 0
+      ? Math.floor(options!.totalSizeHint as number)
+      : 0
+    return {
+      chunk: Buffer.alloc(0),
+      bytesRead: 0,
+      totalSize,
+      nextOffset: offset,
+      eof: true
+    }
+  }
+
+  async writeFileChunk(
+    _ptyId: string,
+    _filePath: string,
+    offset: number,
+    content: Buffer
+  ): Promise<{ writtenBytes: number; nextOffset: number }> {
+    return {
+      writtenBytes: content.length,
+      nextOffset: offset + content.length
+    }
+  }
+
+  async writeFileBytes(_ptyId: string, _filePath: string, _content: Buffer): Promise<void> {}
+
+  async listDirectory(_ptyId: string, _dirPath: string): Promise<FileSystemEntry[]> {
+    return []
+  }
+
+  async createDirectory(_ptyId: string, _dirPath: string): Promise<void> {}
+
+  async createFile(_ptyId: string, _filePath: string): Promise<void> {}
+
+  async deletePath(_ptyId: string, _targetPath: string, _options?: { recursive?: boolean }): Promise<void> {}
+
+  async renamePath(_ptyId: string, _sourcePath: string, _targetPath: string): Promise<void> {}
 
   getCwd(_ptyId: string): string | undefined {
     return '/tmp'

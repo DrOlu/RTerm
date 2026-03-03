@@ -2,6 +2,8 @@ export type BackendSettings = Awaited<ReturnType<Window['gyshell']['settings']['
 export type UiSettings = Awaited<ReturnType<Window['gyshell']['uiSettings']['get']>>
 export type AppSettings = BackendSettings & UiSettings
 export type TerminalConfig = Parameters<Window['gyshell']['terminal']['createTab']>[0]
+export type FileSystemListResult = Awaited<ReturnType<Window['gyshell']['filesystem']['list']>>
+export type FileSystemEntry = FileSystemListResult['entries'][number]
 
 export type TerminalId = string
 

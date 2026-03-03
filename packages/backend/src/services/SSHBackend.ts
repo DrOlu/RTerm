@@ -1,15 +1,26 @@
 import * as ssh2 from 'ssh2'
 import * as fs from 'fs'
 import * as net from 'net'
+import { dirname } from 'node:path'
+import { pipeline } from 'node:stream/promises'
 import { SocksClient } from 'socks'
-import type { TerminalBackend, TerminalConfig, SSHConnectionConfig } from '../types'
+import type { TerminalBackend, TerminalConfig, SSHConnectionConfig, FileSystemEntry, FileStatInfo } from '../types'
+import {
+  DEFAULT_SFTP_TRANSFER_PROFILES,
+  SftpAdaptiveTransferTuner,
+  type SftpTransferDirection,
+  type SftpTransferProfile
+} from './ssh/SftpAdaptiveTransferTuner'
 
 const GYSHELL_READY_MARKER = '__GYSHELL_READY__'
 
 interface SSHInstance {
   client: ssh2.Client
+  sshConfig?: SSHConnectionConfig
   stream?: ssh2.ClientChannel
   sftp?: ssh2.SFTPWrapper
+  sftpInitPromise?: Promise<ssh2.SFTPWrapper>
+  sftpInitError?: string
   dataCallbacks: Set<(data: string) => void>
   exitCallbacks: Set<(code: number) => void>
   isInitializing: boolean
@@ -24,8 +35,26 @@ interface SSHInstance {
   initializationState: 'initializing' | 'ready' | 'failed'
 }
 
+interface SftpChunkWriteSession {
+  sftp: ssh2.SFTPWrapper
+  handle: Buffer
+  expectedOffset: number
+  cleanupTimer?: ReturnType<typeof setTimeout>
+}
+
 export class SSHBackend implements TerminalBackend {
   private sessions: Map<string, SSHInstance> = new Map()
+  private readonly chunkWriteSessions = new Map<string, SftpChunkWriteSession>()
+  private readonly transferTuner = new SftpAdaptiveTransferTuner({
+    profiles: DEFAULT_SFTP_TRANSFER_PROFILES,
+    preferredProfileId: 'balanced-32x128k',
+    explorationInterval: 8
+  })
+  private static readonly CHUNK_SESSION_IDLE_MS = 8000
+  private static readonly MAX_SFTP_READ_REQUEST_BYTES = 64 * 1024
+  private static readonly FAST_TRANSFER_TIMEOUT_MIN_MS = 45_000
+  private static readonly FAST_TRANSFER_TIMEOUT_MAX_MS = 10 * 60 * 1000
+  private static readonly FAST_TRANSFER_TIMEOUT_PER_MB_MS = 12_000
 
   private stripReadyMarker(chunk: string): string {
     if (!chunk.includes(GYSHELL_READY_MARKER)) return chunk
@@ -439,6 +468,7 @@ Write-Output "__GYSHELL_READY__"
     
     const instance: SSHInstance = {
       client,
+      sshConfig,
       dataCallbacks: new Set(),
       exitCallbacks: new Set(),
       isInitializing: true,
@@ -493,6 +523,17 @@ Write-Output "__GYSHELL_READY__"
         }
         if (!instance.remoteOs) instance.remoteOs = 'unix'
         console.log(`[SSH] Remote OS detected: ${instance.remoteOs}`)
+
+        try {
+          emit('\x1b[36m▹ Initializing SFTP channel...\x1b[0m\r\n')
+          await this.initializeSftp(instance)
+          emit('\x1b[32m✔ SFTP channel ready.\x1b[0m\r\n')
+        } catch (error: any) {
+          const message = error instanceof Error ? error.message : String(error)
+          instance.sftpInitError = message
+          // Keep interactive shell usable even when SFTP is unavailable.
+          emit(`\x1b[33m⚠ SFTP unavailable: ${message}. File panel features may be limited.\x1b[0m\r\n`)
+        }
 
         emit('\x1b[36m▹ Opening interactive shell...\x1b[0m\r\n')
         console.log(`[SSH] Opening interactive shell...`)
@@ -600,6 +641,7 @@ Write-Output "__GYSHELL_READY__"
           stream.on('close', (code: number) => {
             for (const s of instance.forwardServers) { try { s.close() } catch {} }
             for (const rf of instance.remoteForwards) { try { instance.client.unforwardIn(rf.host, rf.port) } catch {} }
+            try { instance.sftp?.end?.() } catch {}
             instance.exitCallbacks.forEach(cb => cb(code || 0))
             client.end()
             this.sessions.delete(config.id)
@@ -683,6 +725,7 @@ Write-Output "__GYSHELL_READY__"
   kill(ptyId: string): void {
     const instance = this.sessions.get(ptyId)
     if (instance) {
+      this.closeChunkSessionsForPty(ptyId)
       for (const s of instance.forwardServers) { try { s.close() } catch {} }
       for (const rf of instance.remoteForwards) { try { instance.client.unforwardIn(rf.host, rf.port) } catch {} }
       try { instance.sftp?.end?.() } catch {}
@@ -802,6 +845,44 @@ Write-Output "__GYSHELL_READY__"
     }
   }
 
+  private normalizeRemotePath(filePath: string): string {
+    return filePath.replace(/\\/g, '/')
+  }
+
+  private isAbsoluteRemotePath(remotePath: string): boolean {
+    return remotePath.startsWith('/') || /^[A-Za-z]:\//.test(remotePath)
+  }
+
+  private formatSftpError(error: unknown): string {
+    if (error instanceof Error && typeof error.message === 'string' && error.message.trim().length > 0) {
+      const code = (error as any)?.code
+      return code !== undefined ? `${error.message} (code: ${String(code)})` : error.message
+    }
+    if (typeof error === 'string' && error.trim().length > 0) {
+      return error
+    }
+    return 'Unknown SFTP error'
+  }
+
+  private async initializeSftp(instance: SSHInstance): Promise<ssh2.SFTPWrapper> {
+    if (instance.sftp) return instance.sftp
+    if (!instance.sftpInitPromise) {
+      instance.sftpInitPromise = new Promise<ssh2.SFTPWrapper>((resolve, reject) => {
+        instance.client.sftp((err, sftpClient) => {
+          if (err || !sftpClient) {
+            reject(err || new Error('Failed to initialize SFTP'))
+            return
+          }
+          resolve(sftpClient)
+        })
+      })
+    }
+    const sftp = await instance.sftpInitPromise
+    instance.sftp = sftp
+    instance.sftpInitError = undefined
+    return sftp
+  }
+
   private getUnixInjectionScript(): string {
     // Minified script to reduce payload size and potential TTY buffer issues
     const script = `
@@ -839,23 +920,331 @@ echo "__GYSHELL_READY__"
   }
 
   async getHomeDir(ptyId: string): Promise<string | undefined> {
-    return this.sessions.get(ptyId)?.homeDir
+    const instance = this.sessions.get(ptyId)
+    if (!instance) return undefined
+    if (instance.homeDir) return instance.homeDir
+    try {
+      const sftp = await this.getSftp(ptyId)
+      const resolvedPath = await this.sftpRealpath(sftp, '.')
+      instance.homeDir = resolvedPath
+      if (!instance.cwd) {
+        instance.cwd = resolvedPath
+      }
+      return resolvedPath
+    } catch {
+      return instance.homeDir
+    }
   }
 
-  async statFile(ptyId: string, filePath: string): Promise<{ exists: boolean; isDirectory: boolean }> {
-    const sftp = await this.getSftp(ptyId)
-    const normalizedPath = filePath.replace(/\\/g, '/')
+  private async getSftp(ptyId: string): Promise<ssh2.SFTPWrapper> {
+    const instance = this.sessions.get(ptyId)
+    if (!instance) {
+      throw new Error(`SSH session ${ptyId} not found`)
+    }
+    if (instance.sftp) return instance.sftp
+    if (instance.sftpInitError) {
+      throw new Error(`SFTP unavailable for session ${ptyId}: ${instance.sftpInitError}`)
+    }
+    if (!instance.sftpInitPromise) {
+      throw new Error(`SFTP channel has not been initialized for session ${ptyId}`)
+    }
     try {
-      const stat = await new Promise<ssh2.Stats>((resolve, reject) => {
-        sftp.stat(normalizedPath, (err, stats) => {
-          if (err || !stats) {
-            reject(err || new Error('Failed to stat file'))
-            return
-          }
-          resolve(stats)
-        })
+      const sftp = await instance.sftpInitPromise
+      instance.sftp = sftp
+      return sftp
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      instance.sftpInitError = message
+      throw new Error(`SFTP unavailable for session ${ptyId}: ${message}`)
+    }
+  }
+
+  private async createDedicatedSftp(ptyId: string): Promise<ssh2.SFTPWrapper> {
+    const instance = this.sessions.get(ptyId)
+    if (!instance) {
+      throw new Error(`No SSH session found for ${ptyId}`)
+    }
+    return await new Promise<ssh2.SFTPWrapper>((resolve, reject) => {
+      instance.client.sftp((err, sftpClient) => {
+        if (err || !sftpClient) {
+          reject(err || new Error('Failed to open dedicated SFTP channel.'))
+          return
+        }
+        resolve(sftpClient)
       })
-      return { exists: true, isDirectory: stat.isDirectory() }
+    })
+  }
+
+  private getTransferEndpointKey(ptyId: string): string {
+    const instance = this.sessions.get(ptyId)
+    if (!instance) {
+      return `pty:${ptyId}`
+    }
+    const cfg = instance.sshConfig
+    if (!cfg) {
+      return `pty:${ptyId}`
+    }
+    const username = typeof cfg.username === 'string' && cfg.username.length > 0 ? cfg.username : 'unknown-user'
+    const host = typeof cfg.host === 'string' && cfg.host.length > 0 ? cfg.host : 'unknown-host'
+    const port = Number.isFinite(cfg.port) ? Number(cfg.port) : 22
+    return `${username}@${host}:${port}`
+  }
+
+  private selectAdaptiveFastTransferProfile(
+    ptyId: string,
+    direction: SftpTransferDirection
+  ): { endpointKey: string; profile: SftpTransferProfile } {
+    const endpointKey = this.getTransferEndpointKey(ptyId)
+    const profile = this.transferTuner.selectProfile(endpointKey, direction)
+    return { endpointKey, profile }
+  }
+
+  private getFastTransferTimeoutMs(totalBytes: number): number {
+    const sizeInMb = Math.max(1, Math.ceil(Math.max(0, Number(totalBytes) || 0) / (1024 * 1024)))
+    const timeoutBySize = sizeInMb * SSHBackend.FAST_TRANSFER_TIMEOUT_PER_MB_MS
+    return Math.max(
+      SSHBackend.FAST_TRANSFER_TIMEOUT_MIN_MS,
+      Math.min(SSHBackend.FAST_TRANSFER_TIMEOUT_MAX_MS, timeoutBySize)
+    )
+  }
+
+  private joinRemotePath(basePath: string, childName: string): string {
+    if (!basePath) return childName
+    if (basePath === '/') return `/${childName}`
+    if (/^[A-Za-z]:\/$/.test(basePath)) return `${basePath}${childName}`
+    return `${basePath.replace(/\/+$/, '')}/${childName}`
+  }
+
+  private getChunkSessionKey(kind: 'write', ptyId: string, normalizedPath: string): string {
+    return `${kind}:${ptyId}:${normalizedPath}`
+  }
+
+  private refreshWriteSessionCleanupTimer(key: string, session: SftpChunkWriteSession): void {
+    if (session.cleanupTimer) {
+      clearTimeout(session.cleanupTimer)
+    }
+    session.cleanupTimer = setTimeout(() => {
+      void this.disposeWriteSession(key)
+    }, SSHBackend.CHUNK_SESSION_IDLE_MS)
+  }
+
+  private async disposeWriteSession(key: string): Promise<void> {
+    const session = this.chunkWriteSessions.get(key)
+    if (!session) return
+    this.chunkWriteSessions.delete(key)
+    if (session.cleanupTimer) {
+      clearTimeout(session.cleanupTimer)
+    }
+    await this.sftpClose(session.sftp, session.handle).catch(() => {})
+  }
+
+  private closeChunkSessionsForPty(ptyId: string): void {
+    const writeKeys = Array.from(this.chunkWriteSessions.keys()).filter((key) => key.startsWith(`write:${ptyId}:`))
+    writeKeys.forEach((key) => { void this.disposeWriteSession(key) })
+  }
+
+  private async closeChunkSessionsForPath(ptyId: string, normalizedPath: string): Promise<void> {
+    const writeKey = this.getChunkSessionKey('write', ptyId, normalizedPath)
+    await this.disposeWriteSession(writeKey)
+  }
+
+  private async sftpOpen(sftp: ssh2.SFTPWrapper, normalizedPath: string, flags: ssh2.OpenMode): Promise<Buffer> {
+    return await new Promise<Buffer>((resolve, reject) => {
+      sftp.open(normalizedPath, flags, (err, handle) => {
+        if (err || !handle) {
+          reject(err || new Error(`Failed to open path: ${normalizedPath}`))
+          return
+        }
+        resolve(handle)
+      })
+    })
+  }
+
+  private async sftpClose(sftp: ssh2.SFTPWrapper, handle: Buffer): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      sftp.close(handle, (err) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  private async sftpWrite(
+    sftp: ssh2.SFTPWrapper,
+    handle: Buffer,
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      sftp.write(handle, buffer, offset, length, position, (err) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  /**
+   * Low-level: read bytes from an already-open SFTP handle at a given position.
+   * Returns the number of bytes actually read (may be less than requested at EOF).
+   */
+  private async sftpReadDirect(
+    sftp: ssh2.SFTPWrapper,
+    handle: Buffer,
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number
+  ): Promise<number> {
+    return await new Promise<number>((resolve, reject) => {
+      sftp.read(handle, buffer, offset, length, position, (err, bytesRead) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        resolve(bytesRead)
+      })
+    })
+  }
+
+  private async sftpStat(sftp: ssh2.SFTPWrapper, normalizedPath: string): Promise<ssh2.Stats> {
+    return await new Promise<ssh2.Stats>((resolve, reject) => {
+      sftp.stat(normalizedPath, (err, stats) => {
+        if (err || !stats) {
+          reject(err || new Error(`Failed to stat path: ${normalizedPath}`))
+          return
+        }
+        resolve(stats)
+      })
+    })
+  }
+
+  private async sftpLstat(sftp: ssh2.SFTPWrapper, normalizedPath: string): Promise<ssh2.Stats> {
+    return await new Promise<ssh2.Stats>((resolve, reject) => {
+      sftp.lstat(normalizedPath, (err, stats) => {
+        if (err || !stats) {
+          reject(err || new Error(`Failed to lstat path: ${normalizedPath}`))
+          return
+        }
+        resolve(stats)
+      })
+    })
+  }
+
+  private async sftpReaddir(sftp: ssh2.SFTPWrapper, normalizedPath: string): Promise<ssh2.FileEntry[]> {
+    return await new Promise<ssh2.FileEntry[]>((resolve, reject) => {
+      sftp.readdir(normalizedPath, (err, list) => {
+        if (err || !list) {
+          reject(err || new Error(`Failed to read directory: ${normalizedPath}`))
+          return
+        }
+        resolve(list)
+      })
+    })
+  }
+
+  private async sftpRealpath(sftp: ssh2.SFTPWrapper, normalizedPath: string): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      sftp.realpath(normalizedPath, (err, absolutePath) => {
+        if (err || typeof absolutePath !== 'string' || absolutePath.length === 0) {
+          reject(err || new Error(`Failed to resolve remote path: ${normalizedPath}`))
+          return
+        }
+        resolve(this.normalizeRemotePath(absolutePath))
+      })
+    })
+  }
+
+  private async sftpMkdir(sftp: ssh2.SFTPWrapper, normalizedPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      sftp.mkdir(normalizedPath, (err) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  private async sftpRmdir(sftp: ssh2.SFTPWrapper, normalizedPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      sftp.rmdir(normalizedPath, (err) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  private async sftpUnlink(sftp: ssh2.SFTPWrapper, normalizedPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      sftp.unlink(normalizedPath, (err) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  private async sftpRename(sftp: ssh2.SFTPWrapper, sourcePath: string, targetPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      sftp.rename(sourcePath, targetPath, (err) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  private async sftpWriteFile(sftp: ssh2.SFTPWrapper, normalizedPath: string, content: Buffer): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      sftp.writeFile(normalizedPath, content, (err) => {
+        if (err) {
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+
+  private async removePathRecursive(sftp: ssh2.SFTPWrapper, normalizedPath: string): Promise<void> {
+    const stats = await this.sftpLstat(sftp, normalizedPath)
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      await this.sftpUnlink(sftp, normalizedPath)
+      return
+    }
+
+    const list = await this.sftpReaddir(sftp, normalizedPath)
+    const children = list.filter((item) => item.filename !== '.' && item.filename !== '..')
+    for (const child of children) {
+      const childPath = this.joinRemotePath(normalizedPath, child.filename)
+      await this.removePathRecursive(sftp, childPath)
+    }
+    await this.sftpRmdir(sftp, normalizedPath)
+  }
+
+  async statFile(ptyId: string, filePath: string): Promise<FileStatInfo> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedPath = this.normalizeRemotePath(filePath)
+    try {
+      const stat = await this.sftpStat(sftp, normalizedPath)
+      const isDirectory = stat.isDirectory()
+      return { exists: true, isDirectory, size: isDirectory ? undefined : stat.size }
     } catch (err: any) {
       if (err?.code === 2 || err?.code === 'ENOENT') {
         return { exists: false, isDirectory: false }
@@ -864,26 +1253,96 @@ echo "__GYSHELL_READY__"
     }
   }
 
-  private async getSftp(ptyId: string): Promise<ssh2.SFTPWrapper> {
-    const instance = this.sessions.get(ptyId)
-    if (!instance) { throw new Error(`SSH session ${ptyId} not found`) }
-    if (instance.sftp) return instance.sftp
-    const sftp = await new Promise<ssh2.SFTPWrapper>((resolve, reject) => {
-      instance.client.sftp((err, sftpClient) => {
-        if (err || !sftpClient) {
-          reject(err || new Error('Failed to initialize SFTP'))
-          return
-        }
-        resolve(sftpClient)
+  async listDirectory(ptyId: string, dirPath: string): Promise<FileSystemEntry[]> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedPath = this.normalizeRemotePath(dirPath)
+    const resolvedPath = this.isAbsoluteRemotePath(normalizedPath)
+      ? normalizedPath
+      : await this.sftpRealpath(sftp, normalizedPath)
+    let list: ssh2.FileEntry[]
+    try {
+      list = await this.sftpReaddir(sftp, resolvedPath)
+    } catch (error) {
+      throw new Error(
+        `Failed to list remote directory "${resolvedPath}": ${this.formatSftpError(error)}`
+      )
+    }
+    const mapped = list
+      .filter((item) => item.filename !== '.' && item.filename !== '..')
+      .map((item) => {
+        const attrs = item.attrs
+        const modeValue = typeof attrs?.mode === 'number' ? attrs.mode : 0
+        const typeBits = modeValue & 0o170000
+        const isDirectory = typeBits === 0o040000 || item.longname?.startsWith('d') === true
+        const isSymbolicLink = typeBits === 0o120000 || item.longname?.startsWith('l') === true
+        const mode = typeof attrs?.mode === 'number' ? `0${(attrs.mode & 0o777).toString(8)}` : undefined
+        const modifiedAt = typeof attrs?.mtime === 'number' ? new Date(attrs.mtime * 1000).toISOString() : undefined
+        return {
+          name: item.filename,
+          path: this.joinRemotePath(resolvedPath, item.filename),
+          isDirectory,
+          isSymbolicLink,
+          size: typeof attrs?.size === 'number' ? attrs.size : 0,
+          mode,
+          modifiedAt
+        } satisfies FileSystemEntry
       })
+
+    return mapped.sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
     })
-    instance.sftp = sftp
-    return sftp
+  }
+
+  async createDirectory(ptyId: string, dirPath: string): Promise<void> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedPath = this.normalizeRemotePath(dirPath)
+    await this.sftpMkdir(sftp, normalizedPath)
+  }
+
+  async createFile(ptyId: string, filePath: string): Promise<void> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedPath = this.normalizeRemotePath(filePath)
+    await this.closeChunkSessionsForPath(ptyId, normalizedPath)
+    try {
+      await this.sftpLstat(sftp, normalizedPath)
+      throw new Error(`Path already exists: ${normalizedPath}`)
+    } catch (error: any) {
+      if (!(error?.code === 2 || error?.code === 'ENOENT')) {
+        throw error
+      }
+    }
+    await this.sftpWriteFile(sftp, normalizedPath, Buffer.alloc(0))
+  }
+
+  async deletePath(ptyId: string, targetPath: string, options?: { recursive?: boolean }): Promise<void> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedPath = this.normalizeRemotePath(targetPath)
+    await this.closeChunkSessionsForPath(ptyId, normalizedPath)
+    const stats = await this.sftpLstat(sftp, normalizedPath)
+    if (stats.isDirectory() && !stats.isSymbolicLink()) {
+      if (options?.recursive) {
+        await this.removePathRecursive(sftp, normalizedPath)
+        return
+      }
+      await this.sftpRmdir(sftp, normalizedPath)
+      return
+    }
+    await this.sftpUnlink(sftp, normalizedPath)
+  }
+
+  async renamePath(ptyId: string, sourcePath: string, targetPath: string): Promise<void> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedSource = this.normalizeRemotePath(sourcePath)
+    const normalizedTarget = this.normalizeRemotePath(targetPath)
+    await this.closeChunkSessionsForPath(ptyId, normalizedSource)
+    await this.closeChunkSessionsForPath(ptyId, normalizedTarget)
+    await this.sftpRename(sftp, normalizedSource, normalizedTarget)
   }
 
   async readFile(ptyId: string, filePath: string): Promise<Buffer> {
     const sftp = await this.getSftp(ptyId)
-    const normalizedPath = filePath.replace(/\\/g, '/')
+    const normalizedPath = this.normalizeRemotePath(filePath)
     const data = await new Promise<Buffer>((resolve, reject) => {
       sftp.readFile(normalizedPath, (err, buf) => {
         if (err || !buf) {
@@ -896,18 +1355,462 @@ echo "__GYSHELL_READY__"
     return data
   }
 
-  async writeFile(ptyId: string, filePath: string, content: string): Promise<void> {
-    const sftp = await this.getSftp(ptyId)
-    const normalizedPath = filePath.replace(/\\/g, '/')
-    await new Promise<void>((resolve, reject) => {
-      sftp.writeFile(normalizedPath, Buffer.from(content, 'utf8'), (err) => {
-        if (err) {
-          reject(err)
-          return
-        }
-        resolve()
+  async downloadFileToLocalPath(
+    ptyId: string,
+    sourcePath: string,
+    targetLocalPath: string,
+    options?: {
+      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      signal?: AbortSignal
+    }
+  ): Promise<{ totalBytes: number }> {
+    const createAbortError = (): Error => {
+      const error = new Error('Transfer cancelled by user.')
+      ;(error as Error & { name: string }).name = 'AbortError'
+      return error
+    }
+
+    const normalizedPath = this.normalizeRemotePath(sourcePath)
+    const statSftp = await this.getSftp(ptyId)
+    const totalBytes = Math.max(0, Number((await this.sftpStat(statSftp, normalizedPath)).size) || 0)
+    await fs.promises.mkdir(dirname(targetLocalPath), { recursive: true })
+
+    const runStreamFallback = async (): Promise<void> => {
+      const fallbackSftp = await this.createDedicatedSftp(ptyId)
+      const readStream = fallbackSftp.createReadStream(normalizedPath, {
+        autoClose: true,
+        highWaterMark: 512 * 1024
       })
+      const writeStream = fs.createWriteStream(targetLocalPath, { flags: 'w' })
+      let bytesTransferred = 0
+      readStream.on('data', (chunk: Buffer | string) => {
+        const byteLength = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
+        bytesTransferred += byteLength
+        options?.onProgress?.({
+          bytesTransferred,
+          totalBytes,
+          eof: bytesTransferred >= totalBytes
+        })
+      })
+
+      let abortListener: (() => void) | undefined
+      if (options?.signal) {
+        const abortError = createAbortError()
+        abortListener = () => {
+          readStream.destroy(abortError)
+          writeStream.destroy()
+          try { fallbackSftp.end?.() } catch {}
+        }
+        if (options.signal.aborted) {
+          abortListener()
+        } else {
+          options.signal.addEventListener('abort', abortListener, { once: true })
+        }
+      }
+
+      try {
+        await pipeline(readStream, writeStream)
+      } finally {
+        if (abortListener && options?.signal) {
+          options.signal.removeEventListener('abort', abortListener)
+        }
+        try { fallbackSftp.end?.() } catch {}
+      }
+    }
+
+    if (options?.signal?.aborted) {
+      throw createAbortError()
+    }
+
+    const { endpointKey, profile } = this.selectAdaptiveFastTransferProfile(ptyId, 'download')
+    const fastStartedAt = Date.now()
+    const fastTimeoutMs = this.getFastTransferTimeoutMs(totalBytes)
+    const transferSftp = await this.createDedicatedSftp(ptyId)
+    let aborted = false
+    let abortListener: (() => void) | undefined
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const finish = (error?: unknown): void => {
+          if (settled) return
+          settled = true
+          clearTimeout(timeoutTimer)
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        }
+        const timeoutTimer = setTimeout(() => {
+          finish(new Error(`SFTP fastGet timed out after ${fastTimeoutMs}ms`))
+        }, fastTimeoutMs)
+
+        if (options?.signal) {
+          abortListener = () => {
+            aborted = true
+            try { transferSftp.end?.() } catch {}
+            finish(createAbortError())
+          }
+          options.signal.addEventListener('abort', abortListener, { once: true })
+        }
+
+        transferSftp.fastGet(
+          normalizedPath,
+          targetLocalPath,
+          {
+            concurrency: profile.concurrency,
+            chunkSize: profile.chunkSize,
+            step: (totalTransferred: number, _chunk: number, total: number) => {
+              const transferred = Math.max(0, Number(totalTransferred) || 0)
+              options?.onProgress?.({
+                bytesTransferred: transferred,
+                totalBytes: Math.max(totalBytes, Math.max(0, Number(total) || 0)),
+                eof: transferred >= totalBytes
+              })
+            }
+          },
+          (error) => {
+            finish(error)
+          }
+        )
+      })
+      this.transferTuner.reportSuccess(
+        endpointKey,
+        'download',
+        profile.id,
+        totalBytes,
+        Date.now() - fastStartedAt
+      )
+    } catch (error) {
+      if (abortListener && options?.signal) {
+        options.signal.removeEventListener('abort', abortListener)
+      }
+      try { transferSftp.end?.() } catch {}
+      if (aborted || options?.signal?.aborted) {
+        await fs.promises.unlink(targetLocalPath).catch(() => {})
+        throw createAbortError()
+      }
+      this.transferTuner.reportFailure(endpointKey, 'download', profile.id)
+      await runStreamFallback()
+      options?.onProgress?.({
+        bytesTransferred: totalBytes,
+        totalBytes,
+        eof: true
+      })
+      return { totalBytes }
+    }
+
+    if (abortListener && options?.signal) {
+      options.signal.removeEventListener('abort', abortListener)
+    }
+    try { transferSftp.end?.() } catch {}
+    options?.onProgress?.({
+      bytesTransferred: totalBytes,
+      totalBytes,
+      eof: true
     })
+    return { totalBytes }
+  }
+
+  async uploadFileFromLocalPath(
+    ptyId: string,
+    sourceLocalPath: string,
+    targetPath: string,
+    options?: {
+      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      signal?: AbortSignal
+    }
+  ): Promise<{ totalBytes: number }> {
+    const createAbortError = (): Error => {
+      const error = new Error('Transfer cancelled by user.')
+      ;(error as Error & { name: string }).name = 'AbortError'
+      return error
+    }
+
+    const normalizedTargetPath = this.normalizeRemotePath(targetPath)
+    const totalBytes = Math.max(0, Number((await fs.promises.stat(sourceLocalPath)).size) || 0)
+    await this.closeChunkSessionsForPath(ptyId, normalizedTargetPath)
+
+    const runStreamFallback = async (): Promise<void> => {
+      const fallbackSftp = await this.createDedicatedSftp(ptyId)
+      const readStream = fs.createReadStream(sourceLocalPath, { highWaterMark: 512 * 1024 })
+      const writeStream = fallbackSftp.createWriteStream(normalizedTargetPath, { flags: 'w', autoClose: true })
+      let bytesTransferred = 0
+      readStream.on('data', (chunk: Buffer | string) => {
+        const byteLength = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
+        bytesTransferred += byteLength
+        options?.onProgress?.({
+          bytesTransferred,
+          totalBytes,
+          eof: bytesTransferred >= totalBytes
+        })
+      })
+
+      let abortListener: (() => void) | undefined
+      if (options?.signal) {
+        const abortError = createAbortError()
+        abortListener = () => {
+          readStream.destroy(abortError)
+          writeStream.destroy()
+          try { fallbackSftp.end?.() } catch {}
+        }
+        if (options.signal.aborted) {
+          abortListener()
+        } else {
+          options.signal.addEventListener('abort', abortListener, { once: true })
+        }
+      }
+
+      try {
+        await pipeline(readStream, writeStream)
+      } finally {
+        if (abortListener && options?.signal) {
+          options.signal.removeEventListener('abort', abortListener)
+        }
+        try { fallbackSftp.end?.() } catch {}
+      }
+    }
+
+    if (options?.signal?.aborted) {
+      throw createAbortError()
+    }
+
+    const { endpointKey, profile } = this.selectAdaptiveFastTransferProfile(ptyId, 'upload')
+    const fastStartedAt = Date.now()
+    const fastTimeoutMs = this.getFastTransferTimeoutMs(totalBytes)
+    const transferSftp = await this.createDedicatedSftp(ptyId)
+    let aborted = false
+    let abortListener: (() => void) | undefined
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const finish = (error?: unknown): void => {
+          if (settled) return
+          settled = true
+          clearTimeout(timeoutTimer)
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        }
+        const timeoutTimer = setTimeout(() => {
+          finish(new Error(`SFTP fastPut timed out after ${fastTimeoutMs}ms`))
+        }, fastTimeoutMs)
+
+        if (options?.signal) {
+          abortListener = () => {
+            aborted = true
+            try { transferSftp.end?.() } catch {}
+            finish(createAbortError())
+          }
+          options.signal.addEventListener('abort', abortListener, { once: true })
+        }
+
+        transferSftp.fastPut(
+          sourceLocalPath,
+          normalizedTargetPath,
+          {
+            concurrency: profile.concurrency,
+            chunkSize: profile.chunkSize,
+            step: (totalTransferred: number, _chunk: number, total: number) => {
+              const transferred = Math.max(0, Number(totalTransferred) || 0)
+              options?.onProgress?.({
+                bytesTransferred: transferred,
+                totalBytes: Math.max(totalBytes, Math.max(0, Number(total) || 0)),
+                eof: transferred >= totalBytes
+              })
+            }
+          },
+          (error) => {
+            finish(error)
+          }
+        )
+      })
+      this.transferTuner.reportSuccess(
+        endpointKey,
+        'upload',
+        profile.id,
+        totalBytes,
+        Date.now() - fastStartedAt
+      )
+    } catch (error) {
+      if (abortListener && options?.signal) {
+        options.signal.removeEventListener('abort', abortListener)
+      }
+      try { transferSftp.end?.() } catch {}
+      if (aborted || options?.signal?.aborted) {
+        throw createAbortError()
+      }
+      this.transferTuner.reportFailure(endpointKey, 'upload', profile.id)
+      await runStreamFallback()
+      options?.onProgress?.({
+        bytesTransferred: totalBytes,
+        totalBytes,
+        eof: true
+      })
+      return { totalBytes }
+    }
+
+    if (abortListener && options?.signal) {
+      options.signal.removeEventListener('abort', abortListener)
+    }
+    try { transferSftp.end?.() } catch {}
+    options?.onProgress?.({
+      bytesTransferred: totalBytes,
+      totalBytes,
+      eof: true
+    })
+    return { totalBytes }
+  }
+
+  async readFileChunk(
+    ptyId: string,
+    filePath: string,
+    offset: number,
+    chunkSize: number,
+    options?: { totalSizeHint?: number }
+  ): Promise<{ chunk: Buffer; bytesRead: number; totalSize: number; nextOffset: number; eof: boolean }> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedPath = this.normalizeRemotePath(filePath)
+    const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0
+    const safeChunkSize = Number.isFinite(chunkSize) && chunkSize > 0
+      ? Math.floor(chunkSize)
+      : 256 * 1024
+    const hintedTotalSize = Number.isFinite(options?.totalSizeHint) && (options?.totalSizeHint || 0) >= 0
+      ? Math.floor(options!.totalSizeHint as number)
+      : null
+    const totalSize = hintedTotalSize !== null
+      ? hintedTotalSize
+      : Math.max(0, Number((await this.sftpStat(sftp, normalizedPath)).size) || 0)
+    if (safeOffset >= totalSize) {
+      return {
+        chunk: Buffer.alloc(0),
+        bytesRead: 0,
+        totalSize,
+        nextOffset: safeOffset,
+        eof: true
+      }
+    }
+
+    const targetSize = Math.max(1, Math.min(safeChunkSize, totalSize - safeOffset))
+
+    // Open the file handle once and issue multiple sftp.read calls, avoiding the
+    // per-sub-request OPEN+READ+CLOSE round trips that sftp.createReadStream incurs.
+    const handle = await this.sftpOpen(sftp, normalizedPath, 'r')
+    try {
+      const chunks: Buffer[] = []
+      let bytesRead = 0
+      while (bytesRead < targetSize) {
+        const requestBytes = Math.min(
+          SSHBackend.MAX_SFTP_READ_REQUEST_BYTES,
+          targetSize - bytesRead
+        )
+        const buf = Buffer.allocUnsafe(requestBytes)
+        const partRead = await this.sftpReadDirect(
+          sftp,
+          handle,
+          buf,
+          0,
+          requestBytes,
+          safeOffset + bytesRead
+        )
+        if (partRead <= 0) {
+          break
+        }
+        chunks.push(buf.subarray(0, partRead))
+        bytesRead += partRead
+      }
+
+      const chunk = chunks.length > 0 ? Buffer.concat(chunks, bytesRead) : Buffer.alloc(0)
+      const nextOffset = safeOffset + bytesRead
+      const eof = nextOffset >= totalSize
+
+      return {
+        chunk,
+        bytesRead,
+        totalSize,
+        nextOffset,
+        eof
+      }
+    } finally {
+      await this.sftpClose(sftp, handle).catch(() => {})
+    }
+  }
+
+  async writeFileChunk(
+    ptyId: string,
+    filePath: string,
+    offset: number,
+    content: Buffer,
+    options?: { truncate?: boolean }
+  ): Promise<{ writtenBytes: number; nextOffset: number }> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedPath = this.normalizeRemotePath(filePath)
+    const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0
+    const payload = Buffer.isBuffer(content) ? content : Buffer.from(content)
+    const sessionKey = this.getChunkSessionKey('write', ptyId, normalizedPath)
+    const shouldTruncateAtStart = options?.truncate === true && safeOffset === 0
+
+    const existingSession = this.chunkWriteSessions.get(sessionKey)
+    if (
+      existingSession
+      && (
+        existingSession.sftp !== sftp
+        || shouldTruncateAtStart
+        || existingSession.expectedOffset !== safeOffset
+      )
+    ) {
+      await this.disposeWriteSession(sessionKey)
+    }
+
+    let session = this.chunkWriteSessions.get(sessionKey)
+    if (!session) {
+      let handle: Buffer
+      try {
+        const openFlags: ssh2.OpenMode = shouldTruncateAtStart ? 'w' : 'r+'
+        handle = await this.sftpOpen(sftp, normalizedPath, openFlags)
+      } catch (error: any) {
+        if (!(error?.code === 2 || error?.code === 'ENOENT') || safeOffset !== 0) {
+          throw error
+        }
+        handle = await this.sftpOpen(sftp, normalizedPath, 'w')
+      }
+
+      session = {
+        sftp,
+        handle,
+        expectedOffset: safeOffset
+      }
+      this.chunkWriteSessions.set(sessionKey, session)
+    }
+    this.refreshWriteSessionCleanupTimer(sessionKey, session)
+
+    try {
+      if (payload.length > 0) {
+        await this.sftpWrite(session.sftp, session.handle, payload, 0, payload.length, safeOffset)
+      }
+      session.expectedOffset = safeOffset + payload.length
+    } catch (error) {
+      await this.disposeWriteSession(sessionKey)
+      throw error
+    }
+
+    return {
+      writtenBytes: payload.length,
+      nextOffset: safeOffset + payload.length
+    }
+  }
+
+  async writeFile(ptyId: string, filePath: string, content: string): Promise<void> {
+    await this.writeFileBytes(ptyId, filePath, Buffer.from(content, 'utf8'))
+  }
+
+  async writeFileBytes(ptyId: string, filePath: string, content: Buffer): Promise<void> {
+    const sftp = await this.getSftp(ptyId)
+    const normalizedPath = this.normalizeRemotePath(filePath)
+    await this.closeChunkSessionsForPath(ptyId, normalizedPath)
+    await this.sftpWriteFile(sftp, normalizedPath, content)
   }
 
   private consumeOscMarkers(instance: SSHInstance, chunk: string): void {
@@ -926,7 +1829,8 @@ echo "__GYSHELL_READY__"
       if (cwdMatch && cwdMatch[1]) {
         try {
           const decoded = Buffer.from(cwdMatch[1], 'base64').toString('utf8')
-          if (decoded) instance.cwd = decoded
+          const normalized = this.normalizeDecodedRemotePath(decoded)
+          if (normalized) instance.cwd = normalized
         } catch {}
       }
 
@@ -934,7 +1838,8 @@ echo "__GYSHELL_READY__"
       if (homeMatch && homeMatch[1]) {
         try {
           const decoded = Buffer.from(homeMatch[1], 'base64').toString('utf8')
-          if (decoded) instance.homeDir = decoded
+          const normalized = this.normalizeDecodedRemotePath(decoded)
+          if (normalized) instance.homeDir = normalized
         } catch {}
       }
 
@@ -944,5 +1849,13 @@ echo "__GYSHELL_READY__"
     if (instance.oscBuffer.length > 8192) {
       instance.oscBuffer = instance.oscBuffer.slice(-4096)
     }
+  }
+
+  private normalizeDecodedRemotePath(decodedPath: string): string | null {
+    if (typeof decodedPath !== 'string' || decodedPath.length === 0) {
+      return null
+    }
+    const sanitized = decodedPath.replace(/[\u0000-\u001f\u007f]/g, '')
+    return sanitized.length > 0 ? sanitized : null
   }
 }

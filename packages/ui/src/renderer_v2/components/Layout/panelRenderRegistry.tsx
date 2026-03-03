@@ -2,6 +2,8 @@ import React from 'react'
 import type { AppStore } from '../../stores/AppStore'
 import { ChatPanel } from '../Chat/ChatPanel'
 import { TerminalPanel } from '../Terminal/TerminalPanel'
+import { FileSystemPanel } from '../FileSystem/FileSystemPanel'
+import { FileEditorPanel } from '../FileSystem/FileEditorPanel'
 import type { PanelKind } from '../../layout'
 
 export interface LayoutPanelRenderProps {
@@ -63,9 +65,47 @@ const ChatPanelRenderer: LayoutPanelRenderer = ({
   />
 )
 
+const FileSystemPanelRenderer: LayoutPanelRenderer = ({
+  store,
+  panelId,
+  tabIds,
+  activeTabId,
+  onSelectTab,
+  onLayoutHeaderMouseDown,
+  onLayoutHeaderContextMenu
+}) => (
+  <FileSystemPanel
+    store={store}
+    panelId={panelId}
+    tabs={tabIds
+      .map((tabId) => store.fileSystemTabs.find((tab) => tab.id === tabId))
+      .filter((tab): tab is NonNullable<typeof tab> => !!tab)}
+    activeTabId={activeTabId}
+    onSelectTab={onSelectTab}
+    onLayoutHeaderMouseDown={onLayoutHeaderMouseDown}
+    onLayoutHeaderContextMenu={onLayoutHeaderContextMenu}
+  />
+)
+
+const FileEditorPanelRenderer: LayoutPanelRenderer = ({
+  store,
+  panelId,
+  onLayoutHeaderMouseDown,
+  onLayoutHeaderContextMenu
+}) => (
+  <FileEditorPanel
+    store={store}
+    panelId={panelId}
+    onLayoutHeaderMouseDown={onLayoutHeaderMouseDown}
+    onLayoutHeaderContextMenu={onLayoutHeaderContextMenu}
+  />
+)
+
 const PANEL_RENDERERS: Record<PanelKind, LayoutPanelRenderer> = {
   terminal: TerminalPanelRenderer,
-  chat: ChatPanelRenderer
+  chat: ChatPanelRenderer,
+  filesystem: FileSystemPanelRenderer,
+  fileEditor: FileEditorPanelRenderer
 }
 
 export const renderPanelByKind = (

@@ -3,6 +3,8 @@ import type { PanelKind } from '../layout'
 
 export interface PanelKindAdapter {
   kind: PanelKind
+  supportsTabs: boolean
+  maxPanels?: number
   getOwnerTabIds: (appStore: AppStore) => string[]
   getGlobalActiveTabId: (appStore: AppStore) => string | null
   isOwnerInventoryHydrated: (appStore: AppStore) => boolean
@@ -16,6 +18,7 @@ const createPanelKindAdapter = (
 const PANEL_KIND_ADAPTERS: Record<PanelKind, PanelKindAdapter> = {
   terminal: createPanelKindAdapter({
     kind: 'terminal',
+    supportsTabs: true,
     getOwnerTabIds: (appStore) => appStore.terminalTabs.map((tab) => tab.id),
     getGlobalActiveTabId: (appStore) => appStore.activeTerminalId || null,
     isOwnerInventoryHydrated: (appStore) => appStore.terminalTabsHydrated === true,
@@ -25,11 +28,38 @@ const PANEL_KIND_ADAPTERS: Record<PanelKind, PanelKindAdapter> = {
   }),
   chat: createPanelKindAdapter({
     kind: 'chat',
+    supportsTabs: true,
     getOwnerTabIds: (appStore) => appStore.chat.sessions.map((session) => session.id),
     getGlobalActiveTabId: (appStore) => appStore.chat.activeSessionId || null,
     isOwnerInventoryHydrated: (appStore) => appStore.chat.sessionInventoryHydrated === true,
     setGlobalActiveTab: (appStore, tabId) => {
       appStore.chat.setActiveSession(tabId)
+    }
+  }),
+  filesystem: createPanelKindAdapter({
+    kind: 'filesystem',
+    supportsTabs: true,
+    getOwnerTabIds: (appStore) => appStore.fileSystemTabs.map((tab) => tab.id),
+    getGlobalActiveTabId: (appStore) => {
+      if (appStore.activeTerminalId && appStore.fileSystemTabs.some((tab) => tab.id === appStore.activeTerminalId)) {
+        return appStore.activeTerminalId
+      }
+      return appStore.fileSystemTabs[0]?.id || null
+    },
+    isOwnerInventoryHydrated: (appStore) => appStore.terminalTabsHydrated === true,
+    setGlobalActiveTab: (appStore, tabId) => {
+      appStore.setActiveTerminal(tabId)
+    }
+  }),
+  fileEditor: createPanelKindAdapter({
+    kind: 'fileEditor',
+    supportsTabs: false,
+    maxPanels: 1,
+    getOwnerTabIds: () => [],
+    getGlobalActiveTabId: () => null,
+    isOwnerInventoryHydrated: () => true,
+    setGlobalActiveTab: () => {
+      // Special panel has no tab inventory to sync.
     }
   })
 }

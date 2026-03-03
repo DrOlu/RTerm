@@ -2,6 +2,7 @@ import path from 'node:path'
 import process from 'node:process'
 import fs from 'node:fs/promises'
 import { TerminalService } from '../../services/TerminalService'
+import { FileSystemService } from '../../services/FileSystemService'
 import { AgentService_v2 } from '../../services/AgentService_v2'
 import { UIHistoryService } from '../../services/UIHistoryService'
 import { ChatHistoryService } from '../../services/ChatHistoryService'
@@ -131,6 +132,7 @@ export async function startGyBackend(): Promise<void> {
   const terminalService = new TerminalService({
     terminalStateStore
   })
+  const fileSystemService = new FileSystemService(terminalService)
   process.once('exit', () => {
     terminalService.flushPersistedState()
   })
@@ -242,6 +244,44 @@ export async function startGyBackend(): Promise<void> {
             const data = terminalService.getBufferDelta(terminalId, fromOffset)
             const offset = terminalService.getCurrentOffset(terminalId)
             return { data, offset }
+          }
+        },
+        filesystemBridge: {
+          listDirectory: async (terminalId, dirPath) => {
+            return await fileSystemService.listDirectory(terminalId, dirPath)
+          },
+          readTextFile: async (terminalId, filePath, options) => {
+            return await fileSystemService.readTextFile(terminalId, filePath, options)
+          },
+          readFileBase64: async (terminalId, filePath, options) => {
+            return await fileSystemService.readFileBase64(terminalId, filePath, options)
+          },
+          writeTextFile: async (terminalId, filePath, content) => {
+            await fileSystemService.writeTextFile(terminalId, filePath, content)
+          },
+          writeFileBase64: async (terminalId, filePath, contentBase64, options) => {
+            await fileSystemService.writeFileBase64(terminalId, filePath, contentBase64, options)
+          },
+          transferEntries: async (sourceTerminalId, sourcePaths, targetTerminalId, targetDirPath, options) => {
+            return await fileSystemService.transferEntries(
+              sourceTerminalId,
+              sourcePaths,
+              targetTerminalId,
+              targetDirPath,
+              options
+            )
+          },
+          createDirectory: async (terminalId, dirPath) => {
+            await fileSystemService.createDirectory(terminalId, dirPath)
+          },
+          createFile: async (terminalId, filePath) => {
+            await fileSystemService.createFile(terminalId, filePath)
+          },
+          deletePath: async (terminalId, targetPath, options) => {
+            await fileSystemService.deletePath(terminalId, targetPath, options)
+          },
+          renamePath: async (terminalId, sourcePath, targetPath) => {
+            await fileSystemService.renamePath(terminalId, sourcePath, targetPath)
           }
         },
         profileBridge: {

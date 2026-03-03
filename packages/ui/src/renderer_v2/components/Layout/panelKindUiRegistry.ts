@@ -1,10 +1,11 @@
 import type { LucideIcon } from 'lucide-react'
-import { MessageSquare, SquareTerminal } from 'lucide-react'
-import type { PanelKind } from '../../layout'
+import { FolderTree, MessageSquare, SquareTerminal } from 'lucide-react'
+import { PANEL_KINDS_WITH_RAIL } from '../../layout'
 import type { AppStore } from '../../stores/AppStore'
 
-type LayoutPanelKindLabelKey = 'chatKind' | 'terminalKind'
+type LayoutPanelKindLabelKey = 'chatKind' | 'terminalKind' | 'filesystemKind'
 export type RailClickIntent = 'open-panel-only' | 'create-new-tab'
+export type RailPanelKind = (typeof PANEL_KINDS_WITH_RAIL)[number]
 
 export interface RailClickContext {
   panelCount: number
@@ -19,7 +20,7 @@ export const resolveDefaultRailClickIntent = (context: RailClickContext): RailCl
 }
 
 export interface PanelKindUiRegistryItem {
-  kind: PanelKind
+  kind: RailPanelKind
   icon: LucideIcon
   labelKey: LayoutPanelKindLabelKey
   resolveRailClickIntent: (context: RailClickContext) => RailClickIntent
@@ -29,7 +30,7 @@ export interface PanelKindUiRegistryItem {
 
 const createPanelKindUiItem = (item: PanelKindUiRegistryItem): PanelKindUiRegistryItem => item
 
-export const PANEL_KIND_UI_REGISTRY: Record<PanelKind, PanelKindUiRegistryItem> = {
+export const PANEL_KIND_UI_REGISTRY: Record<RailPanelKind, PanelKindUiRegistryItem> = {
   chat: createPanelKindUiItem({
     kind: 'chat',
     icon: MessageSquare,
@@ -50,12 +51,20 @@ export const PANEL_KIND_UI_REGISTRY: Record<PanelKind, PanelKindUiRegistryItem> 
     createDefaultTab: (store, panelId) => {
       store.createLocalTab(panelId)
     }
+  }),
+  filesystem: createPanelKindUiItem({
+    kind: 'filesystem',
+    icon: FolderTree,
+    labelKey: 'filesystemKind',
+    resolveRailClickIntent: () => 'open-panel-only',
+    getOwnerTabCount: (store) => store.fileSystemTabs.length,
+    createDefaultTab: () => {
+      // Filesystem tabs are attached to terminal tabs and cannot be created independently.
+    }
   })
 }
 
-export const PANEL_KIND_UI_ORDER: readonly PanelKind[] = Object.freeze(
-  Object.keys(PANEL_KIND_UI_REGISTRY) as PanelKind[]
-)
+export const PANEL_KIND_UI_ORDER: readonly RailPanelKind[] = PANEL_KINDS_WITH_RAIL
 
-export const getPanelKindUiItem = (kind: PanelKind): PanelKindUiRegistryItem =>
+export const getPanelKindUiItem = (kind: RailPanelKind): PanelKindUiRegistryItem =>
   PANEL_KIND_UI_REGISTRY[kind]

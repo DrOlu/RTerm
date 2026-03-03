@@ -2,7 +2,8 @@ import * as pty from 'node-pty'
 import * as os from 'os'
 import * as fs from 'fs'
 import * as path from 'path'
-import type { TerminalBackend, TerminalConfig, LocalConnectionConfig } from '../types'
+import { pipeline } from 'node:stream/promises'
+import type { TerminalBackend, TerminalConfig, LocalConnectionConfig, FileSystemEntry, FileStatInfo } from '../types'
 
 interface PtyInstance {
   pty: pty.IPty
@@ -319,8 +320,185 @@ Write-Output "__GYSHELL_READY__"
     return await fs.promises.readFile(filePath)
   }
 
+  async downloadFileToLocalPath(
+    _ptyId: string,
+    sourcePath: string,
+    targetLocalPath: string,
+    options?: {
+      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      signal?: AbortSignal
+    }
+  ): Promise<{ totalBytes: number }> {
+    const sourceStat = await fs.promises.stat(sourcePath)
+    const totalBytes = Math.max(0, Number(sourceStat.size) || 0)
+    await fs.promises.mkdir(path.dirname(targetLocalPath), { recursive: true })
+
+    const readStream = fs.createReadStream(sourcePath, { highWaterMark: 512 * 1024 })
+    const writeStream = fs.createWriteStream(targetLocalPath, { flags: 'w' })
+    let bytesTransferred = 0
+    readStream.on('data', (chunk: Buffer | string) => {
+      const byteLength = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
+      bytesTransferred += byteLength
+      options?.onProgress?.({
+        bytesTransferred,
+        totalBytes,
+        eof: bytesTransferred >= totalBytes
+      })
+    })
+
+    try {
+      if (options?.signal) {
+        await pipeline(readStream, writeStream, { signal: options.signal })
+      } else {
+        await pipeline(readStream, writeStream)
+      }
+    } catch (err) {
+      // Clean up the partially-written target file on abort or any error so the
+      // caller does not see a corrupt/incomplete file on disk.
+      await fs.promises.unlink(targetLocalPath).catch(() => {})
+      throw err
+    }
+
+    options?.onProgress?.({
+      bytesTransferred: totalBytes,
+      totalBytes,
+      eof: true
+    })
+    return { totalBytes }
+  }
+
+  async uploadFileFromLocalPath(
+    _ptyId: string,
+    sourceLocalPath: string,
+    targetPath: string,
+    options?: {
+      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      signal?: AbortSignal
+    }
+  ): Promise<{ totalBytes: number }> {
+    const sourceStat = await fs.promises.stat(sourceLocalPath)
+    const totalBytes = Math.max(0, Number(sourceStat.size) || 0)
+    await fs.promises.mkdir(path.dirname(targetPath), { recursive: true })
+
+    const readStream = fs.createReadStream(sourceLocalPath, { highWaterMark: 512 * 1024 })
+    const writeStream = fs.createWriteStream(targetPath, { flags: 'w' })
+    let bytesTransferred = 0
+    readStream.on('data', (chunk: Buffer | string) => {
+      const byteLength = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk)
+      bytesTransferred += byteLength
+      options?.onProgress?.({
+        bytesTransferred,
+        totalBytes,
+        eof: bytesTransferred >= totalBytes
+      })
+    })
+
+    try {
+      if (options?.signal) {
+        await pipeline(readStream, writeStream, { signal: options.signal })
+      } else {
+        await pipeline(readStream, writeStream)
+      }
+    } catch (err) {
+      // Clean up the partially-written target file on abort or any error.
+      await fs.promises.unlink(targetPath).catch(() => {})
+      throw err
+    }
+
+    options?.onProgress?.({
+      bytesTransferred: totalBytes,
+      totalBytes,
+      eof: true
+    })
+    return { totalBytes }
+  }
+
   async writeFile(_ptyId: string, filePath: string, content: string): Promise<void> {
-    await fs.promises.writeFile(filePath, content, 'utf8')
+    await this.writeFileBytes(_ptyId, filePath, Buffer.from(content, 'utf8'))
+  }
+
+  async readFileChunk(
+    _ptyId: string,
+    filePath: string,
+    offset: number,
+    chunkSize: number,
+    options?: { totalSizeHint?: number }
+  ): Promise<{ chunk: Buffer; bytesRead: number; totalSize: number; nextOffset: number; eof: boolean }> {
+    const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0
+    const safeChunkSize = Number.isFinite(chunkSize) && chunkSize > 0
+      ? Math.floor(chunkSize)
+      : 256 * 1024
+    const hintedTotalSize = Number.isFinite(options?.totalSizeHint) && (options?.totalSizeHint || 0) >= 0
+      ? Math.floor(options!.totalSizeHint as number)
+      : null
+
+    const handle = await fs.promises.open(filePath, 'r')
+    try {
+      const totalSize = hintedTotalSize !== null
+        ? hintedTotalSize
+        : Math.max(0, Number((await handle.stat()).size) || 0)
+      if (safeOffset >= totalSize) {
+        return {
+          chunk: Buffer.alloc(0),
+          bytesRead: 0,
+          totalSize,
+          nextOffset: safeOffset,
+          eof: true
+        }
+      }
+
+      const readableSize = Math.max(0, Math.min(safeChunkSize, totalSize - safeOffset))
+      const buffer = Buffer.allocUnsafe(readableSize)
+      const { bytesRead } = await handle.read(buffer, 0, readableSize, safeOffset)
+      const chunk = bytesRead >= readableSize ? buffer : buffer.subarray(0, bytesRead)
+      const nextOffset = safeOffset + bytesRead
+      return {
+        chunk,
+        bytesRead,
+        totalSize,
+        nextOffset,
+        eof: nextOffset >= totalSize
+      }
+    } finally {
+      await handle.close()
+    }
+  }
+
+  async writeFileChunk(
+    _ptyId: string,
+    filePath: string,
+    offset: number,
+    content: Buffer,
+    options?: { truncate?: boolean }
+  ): Promise<{ writtenBytes: number; nextOffset: number }> {
+    const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0
+    const payload = Buffer.isBuffer(content) ? content : Buffer.from(content)
+
+    // When truncating at offset 0 use the 'w' flag, which atomically creates-or-truncates
+    // in a single syscall — avoiding the TOCTOU race of a separate truncate + open('r+').
+    let handle: fs.promises.FileHandle
+    if (options?.truncate && safeOffset === 0) {
+      handle = await fs.promises.open(filePath, 'w')
+    } else {
+      try {
+        handle = await fs.promises.open(filePath, 'r+')
+      } catch (error: any) {
+        if (error?.code !== 'ENOENT') {
+          throw error
+        }
+        handle = await fs.promises.open(filePath, 'w+')
+      }
+    }
+
+    try {
+      const { bytesWritten } = await handle.write(payload, 0, payload.length, safeOffset)
+      return {
+        writtenBytes: bytesWritten,
+        nextOffset: safeOffset + bytesWritten
+      }
+    } finally {
+      await handle.close()
+    }
   }
 
   getCwd(ptyId: string): string | undefined {
@@ -347,16 +525,78 @@ Write-Output "__GYSHELL_READY__"
     }
   }
 
-  async statFile(_ptyId: string, filePath: string): Promise<{ exists: boolean; isDirectory: boolean }> {
+  async statFile(_ptyId: string, filePath: string): Promise<FileStatInfo> {
     try {
       const stat = await fs.promises.stat(filePath)
-      return { exists: true, isDirectory: stat.isDirectory() }
+      const isDirectory = stat.isDirectory()
+      return { exists: true, isDirectory, size: isDirectory ? undefined : stat.size }
     } catch (err: any) {
       if (err?.code === 'ENOENT') {
         return { exists: false, isDirectory: false }
       }
       throw err
     }
+  }
+
+  async listDirectory(_ptyId: string, dirPath: string): Promise<FileSystemEntry[]> {
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
+    const mapped = await Promise.all(
+      entries.map(async (entry) => {
+        const absolutePath = path.join(dirPath, entry.name)
+        let stats: fs.Stats | null = null
+        try {
+          stats = await fs.promises.lstat(absolutePath)
+        } catch {
+          stats = null
+        }
+        const isDirectory = stats ? stats.isDirectory() : entry.isDirectory()
+        const isSymbolicLink = stats ? stats.isSymbolicLink() : entry.isSymbolicLink()
+        return {
+          name: entry.name,
+          path: absolutePath,
+          isDirectory,
+          isSymbolicLink,
+          size: stats ? stats.size : 0,
+          mode: stats ? `0${(stats.mode & 0o777).toString(8)}` : undefined,
+          modifiedAt: stats ? new Date(stats.mtimeMs).toISOString() : undefined
+        } satisfies FileSystemEntry
+      })
+    )
+
+    return mapped.sort((a, b) => {
+      if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    })
+  }
+
+  async createDirectory(_ptyId: string, dirPath: string): Promise<void> {
+    await fs.promises.mkdir(dirPath)
+  }
+
+  async createFile(_ptyId: string, filePath: string): Promise<void> {
+    const handle = await fs.promises.open(filePath, 'wx')
+    await handle.close()
+  }
+
+  async deletePath(_ptyId: string, targetPath: string, options?: { recursive?: boolean }): Promise<void> {
+    const stats = await fs.promises.lstat(targetPath)
+    if (stats.isDirectory() && !stats.isSymbolicLink()) {
+      if (options?.recursive) {
+        await fs.promises.rm(targetPath, { recursive: true, force: false })
+        return
+      }
+      await fs.promises.rmdir(targetPath)
+      return
+    }
+    await fs.promises.unlink(targetPath)
+  }
+
+  async renamePath(_ptyId: string, sourcePath: string, targetPath: string): Promise<void> {
+    await fs.promises.rename(sourcePath, targetPath)
+  }
+
+  async writeFileBytes(_ptyId: string, filePath: string, content: Buffer): Promise<void> {
+    await fs.promises.writeFile(filePath, content)
   }
 
   private consumeOscMarkers(ptyId: string, chunk: string): void {
@@ -378,7 +618,10 @@ Write-Output "__GYSHELL_READY__"
       if (cwdMatch && cwdMatch[1]) {
         try {
           const decoded = Buffer.from(cwdMatch[1], 'base64').toString('utf8')
-          if (decoded) this.cwdByPtyId.set(ptyId, decoded)
+          const normalized = this.normalizeDecodedLocalPath(decoded)
+          if (normalized) {
+            this.cwdByPtyId.set(ptyId, normalized)
+          }
         } catch {
           // ignore decode errors
         }
@@ -388,7 +631,10 @@ Write-Output "__GYSHELL_READY__"
       if (homeMatch && homeMatch[1]) {
         try {
           const decoded = Buffer.from(homeMatch[1], 'base64').toString('utf8')
-          if (decoded) this.homeDirByPtyId.set(ptyId, decoded)
+          const normalized = this.normalizeDecodedLocalPath(decoded)
+          if (normalized) {
+            this.homeDirByPtyId.set(ptyId, normalized)
+          }
         } catch {
           // ignore decode errors
         }
@@ -400,5 +646,16 @@ Write-Output "__GYSHELL_READY__"
     if (instance.oscBuffer.length > 8192) {
       instance.oscBuffer = instance.oscBuffer.slice(-4096)
     }
+  }
+
+  private normalizeDecodedLocalPath(decodedPath: string): string | null {
+    if (typeof decodedPath !== 'string' || decodedPath.length === 0) {
+      return null
+    }
+    const sanitized = decodedPath.replace(/[\u0000-\u001f\u007f]/g, '')
+    if (!path.isAbsolute(sanitized)) {
+      return null
+    }
+    return sanitized
   }
 }

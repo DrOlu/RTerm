@@ -1,0 +1,124 @@
+.panel-file-editor {
+  background: var(--panel-bg);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-editor-header {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 4px;
+  padding-right: 6px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+
+.file-editor-header.is-draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.panel-file-editor.is-dragging-source .file-editor-header.is-draggable {
+  cursor: grabbing;
+}
+
+.file-editor-header-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.file-editor-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.45px;
+  color: var(--fg-muted);
+}
+
+.file-editor-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+
+.file-editor-dirty {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--accent) 62%, var(--fg));
+}
+
+.file-editor-status-bar {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.file-editor-status-error {
+  color: var(--danger);
+}
+
+.file-editor-status-message {
+  color: var(--fg-muted);
+}
+
+.file-editor-status-placeholder {
+  display: inline-block;
+  width: 1px;
+  height: 1px;
+}
+
+.panel-body.file-editor-body {
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}
+
+.file-editor-empty-state,
+.file-editor-error {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.file-editor-empty-state {
+  color: var(--fg-faint);
+}
+
+.file-editor-error {
+  color: var(--danger);
+}
+
+.file-editor-textarea {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  padding: 10px;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+

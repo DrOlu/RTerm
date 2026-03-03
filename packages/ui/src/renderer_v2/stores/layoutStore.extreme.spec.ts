@@ -71,6 +71,7 @@ const createStore = (options?: {
     setActiveTerminal(id: string) {
       this.activeTerminalId = id
     },
+    onPanelRemoved(_kind: string) {},
     chat: {
       sessionInventoryHydrated: options?.chatInventoryHydrated ?? true,
       sessions: chatIds.map((id) => ({
@@ -298,6 +299,32 @@ const run = async (): Promise<void> => {
       0,
       'new split panel can be empty without being auto-pruned in same update'
     )
+  })
+
+  await runCase('file editor special panel stays without tabs and remains singleton', async () => {
+    const store = createStore({
+      terminalIds: ['term-a'],
+      chatIds: ['chat-a'],
+      terminalInventoryHydrated: true
+    })
+    store.bootstrap()
+    store.setViewport(1400, 900)
+
+    const terminalPrimaryId = store.getPrimaryPanelId('terminal')
+    assertCondition(Boolean(terminalPrimaryId), 'terminal primary panel should exist before creating file editor panel')
+    store.splitPanel(terminalPrimaryId!, 'fileEditor', 'horizontal', 'after')
+
+    let fileEditorPanels = store.panelNodes.filter((node) => node.panel.kind === 'fileEditor')
+    assertEqual(fileEditorPanels.length, 1, 'file editor panel should be created from split')
+    assertEqual(
+      store.getPanelTabIds(fileEditorPanels[0].panel.id).length,
+      0,
+      'file editor panel should not maintain tab bindings'
+    )
+
+    store.splitPanel(fileEditorPanels[0].panel.id, 'fileEditor', 'horizontal', 'after')
+    fileEditorPanels = store.panelNodes.filter((node) => node.panel.kind === 'fileEditor')
+    assertEqual(fileEditorPanels.length, 1, 'file editor panel should remain singleton after repeated creation attempts')
   })
 
   await runCase('chat bindings are preserved while chat inventory is not hydrated', async () => {

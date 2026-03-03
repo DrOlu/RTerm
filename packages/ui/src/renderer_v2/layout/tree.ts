@@ -11,6 +11,7 @@ import {
   type PanelKind,
   type SplitDirection
 } from './types'
+import { isPanelKind } from './panelKindMeta'
 
 interface LegacyLayoutSnapshot {
   panelOrder?: string[]
@@ -74,7 +75,8 @@ const ensureNodeShape = (node: LayoutNode | null | undefined): LayoutNode | null
   if (!node || typeof node !== 'object') return null
   if ((node as LayoutPanelNode).type === 'panel') {
     const panelNode = node as LayoutPanelNode
-    if (!panelNode.panel || (panelNode.panel.kind !== 'chat' && panelNode.panel.kind !== 'terminal')) {
+    const kind = panelNode.panel?.kind
+    if (!panelNode.panel || !isPanelKind(kind)) {
       return null
     }
     if (!panelNode.panel.id) {
@@ -142,6 +144,9 @@ const parsePersistedV2 = (raw: unknown): LayoutTree | null => {
     if (typeof manager.terminal === 'string' && manager.terminal.length > 0) {
       next.terminal = manager.terminal
     }
+    if (typeof manager.filesystem === 'string' && manager.filesystem.length > 0) {
+      next.filesystem = manager.filesystem
+    }
     return Object.keys(next).length > 0 ? next : undefined
   })()
 
@@ -157,7 +162,14 @@ const parsePersistedV2 = (raw: unknown): LayoutTree | null => {
 const createLegacyRoot = (order: string[] | undefined, sizes: number[] | undefined): LayoutNode => {
   const panelOrder = Array.isArray(order) && order.length > 0 ? order : ['chat', 'terminal']
   const nodes = panelOrder.map((panelName) => {
-    const kind: PanelKind = panelName === 'chat' ? 'chat' : 'terminal'
+    const kind: PanelKind =
+      panelName === 'chat'
+        ? 'chat'
+        : panelName === 'filesystem'
+          ? 'filesystem'
+          : panelName === 'fileEditor'
+            ? 'fileEditor'
+          : 'terminal'
     return createPanelNode(kind)
   })
 

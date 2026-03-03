@@ -178,6 +178,9 @@ export class LayoutStore {
   }
 
   getPanelsWithMissingTabBindings(kind: PanelKind, ownerTabIds: Iterable<string>): string[] {
+    if (!getPanelKindAdapter(kind).supportsTabs) {
+      return []
+    }
     const ownerSet = new Set<string>(ownerTabIds)
     const panels = this.panelNodes.filter((node) => node.panel.kind === kind)
     const missingPanels: string[] = []
@@ -216,6 +219,7 @@ export class LayoutStore {
     let pass = 0
     while (pass < MAX_LAYOUT_PANELS + 2) {
       pass += 1
+      nextTree = this.enforcePanelKindLimits(nextTree)
       const panelTabs = this.computeBindingsForTree(nextTree)
       const { managerPanels: _legacyManagerPanels, ...treeWithoutManager } = nextTree as LayoutTree & {
         managerPanels?: Partial<Record<PanelKind, string>>
@@ -335,6 +339,8 @@ export class LayoutStore {
   setPanelActiveTab(panelId: string, tabId: string) {
     const kind = this.getPanelKindById(panelId)
     if (!kind) return
+    const adapter = getPanelKindAdapter(kind)
+    if (!adapter.supportsTabs) return
     const current = this.tree.panelTabs?.[panelId]
     if (!current || !current.tabIds.includes(tabId)) return
 
@@ -411,6 +417,9 @@ export class LayoutStore {
     targetPanelId: string,
     direction: Exclude<DropDirection, 'center'>
   ) {
+    if (!getPanelKindAdapter(payload.kind).supportsTabs) {
+      return
+    }
     this.commitTabDrop(payload, targetPanelId, direction)
   }
 
@@ -515,6 +524,9 @@ export class LayoutStore {
     direction: DropDirection,
     reorderTarget?: Exclude<TabReorderTarget, null>
   ) {
+    if (!getPanelKindAdapter(payload.kind).supportsTabs) {
+      return
+    }
     if (!this.canAcceptTabDrop(payload, targetPanelId, direction)) {
       return
     }
@@ -606,6 +618,9 @@ export class LayoutStore {
   }
 
   private canAcceptTabDrop(payload: TabDragPayload, targetPanelId: string, direction: DropDirection): boolean {
+    if (!getPanelKindAdapter(payload.kind).supportsTabs) {
+      return false
+    }
     const targetKind = this.getPanelKindById(targetPanelId)
     if (!targetKind || targetKind !== payload.kind) return false
 
@@ -648,6 +663,10 @@ export class LayoutStore {
       const inventoryHydrated = adapter.isOwnerInventoryHydrated(this.appStore)
       const panelIds = panelNodes.filter((node) => node.panel.kind === kind).map((node) => node.panel.id)
       if (panelIds.length === 0) {
+        return
+      }
+
+      if (!adapter.supportsTabs) {
         return
       }
 
@@ -728,7 +747,11 @@ export class LayoutStore {
       panelCountByKind.set(kind, (panelCountByKind.get(kind) || 0) + 1)
     })
     const eligible = panels.filter((panel) => {
-      if (!getPanelKindAdapter(panel.panel.kind).isOwnerInventoryHydrated(this.appStore)) {
+      const adapter = getPanelKindAdapter(panel.panel.kind)
+      if (!adapter.supportsTabs) {
+        return false
+      }
+      if (!adapter.isOwnerInventoryHydrated(this.appStore)) {
         return false
       }
       const kindCount = panelCountByKind.get(panel.panel.kind) || 0
@@ -756,6 +779,9 @@ export class LayoutStore {
       position?: 'before' | 'after'
     }
   ) {
+    if (!getPanelKindAdapter(kind).supportsTabs) {
+      return
+    }
     const nextTree = this.createTreeWithMovedTab(this.tree, kind, tabId, targetPanelId, options)
     if (!nextTree) return
     this.tree = nextTree
@@ -774,6 +800,9 @@ export class LayoutStore {
       position?: 'before' | 'after'
     }
   ): LayoutTree | null {
+    if (!getPanelKindAdapter(kind).supportsTabs) {
+      return null
+    }
     const panelIds = listPanels(tree)
       .filter((node) => node.panel.kind === kind)
       .map((node) => node.panel.id)
@@ -824,7 +853,40 @@ export class LayoutStore {
   }
 
   private syncGlobalActiveFromPanel(kind: PanelKind, tabId: string) {
-    getPanelKindAdapter(kind).setGlobalActiveTab(this.appStore, tabId)
+    const adapter = getPanelKindAdapter(kind)
+    if (!adapter.supportsTabs) {
+      return
+    }
+    adapter.setGlobalActiveTab(this.appStore, tabId)
+  }
+
+  private enforcePanelKindLimits(tree: LayoutTree): LayoutTree {
+    let nextTree = tree
+    PANEL_KIND_LIST.forEach((kind) => {
+      const adapter = getPanelKindAdapter(kind)
+      const maxPanels = adapter.maxPanels
+      if (!Number.isFinite(maxPanels) || !maxPanels || maxPanels <= 0) {
+        return
+      }
+      let panelIds = listPanels(nextTree)
+        .filter((node) => node.panel.kind === kind)
+        .map((node) => node.panel.id)
+      while (panelIds.length > maxPanels) {
+        const panelIdToRemove = panelIds[panelIds.length - 1]
+        if (!panelIdToRemove) break
+        const pruned = removePanel(nextTree, panelIdToRemove)
+        if (pruned === nextTree) {
+          break
+        }
+        this.pinnedEmptyPanelIds.delete(panelIdToRemove)
+        nextTree = pruned
+        this.appStore.onPanelRemoved(kind)
+        panelIds = listPanels(nextTree)
+          .filter((node) => node.panel.kind === kind)
+          .map((node) => node.panel.id)
+      }
+    })
+    return nextTree
   }
 
   private applyTree(nextTree: LayoutTree) {

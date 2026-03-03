@@ -10,7 +10,8 @@ import { createImagePreviewDataUrl, readFileAsDataUrl, type InputImageAttachment
 import { I18nStore } from './I18nStore'
 import { ChatStore } from './ChatStore'
 import { LayoutStore } from './LayoutStore'
-import { buildLayoutTree, listPanels } from '../layout'
+import { FileEditorStore } from './FileEditorStore'
+import { buildLayoutTree, listPanels, type PanelKind } from '../layout'
 
 const upsertById = <T extends { id: string }>(list: T[], entry: T): T[] => {
   const idx = list.findIndex((x) => x.id === entry.id)
@@ -69,6 +70,7 @@ export class AppStore {
   customThemes: TerminalColorScheme[] = []
   i18n = new I18nStore()
   chat = new ChatStore()
+  fileEditor = new FileEditorStore(this)
   layout = new LayoutStore(this)
   mcpTools: McpToolSummary[] = []
   builtInTools: BuiltInToolSummary[] = []
@@ -95,6 +97,7 @@ export class AppStore {
       customThemes: observable,
       i18n: observable,
       chat: observable,
+      fileEditor: observable,
       layout: observable,
       mcpTools: observable,
       builtInTools: observable,
@@ -109,6 +112,7 @@ export class AppStore {
       isSettings: computed,
       isConnections: computed,
       activeTerminal: computed,
+      fileSystemTabs: computed,
       openSettings: action,
       closeSettings: action,
       toggleSettings: action,
@@ -169,6 +173,8 @@ export class AppStore {
       setTaskFinishGuardEnabled: action,
       setFirstTurnThinkingModelEnabled: action,
       sendChatMessage: action,
+      openFileEditorFromFileSystem: action,
+      onPanelRemoved: action,
       getUniqueTitle: action,
       loadVersionState: action,
       checkVersion: action,
@@ -206,6 +212,10 @@ export class AppStore {
   get activeTerminal(): TerminalTabModel | null {
     if (!this.activeTerminalId) return null
     return this.terminalTabs.find((t) => t.id === this.activeTerminalId) ?? null
+  }
+
+  get fileSystemTabs(): TerminalTabModel[] {
+    return this.terminalTabs
   }
 
   private collectPersistedChatInventoryState(layout: AppSettings['layout'] | undefined): {
@@ -1315,6 +1325,31 @@ export class AppStore {
       // ignore
     }
 
+  }
+
+  async openFileEditorFromFileSystem(terminalId: string, filePath: string): Promise<boolean> {
+    const hasTerminal = this.fileSystemTabs.some((tab) => tab.id === terminalId)
+    if (!hasTerminal) {
+      return false
+    }
+    this.setActiveTerminal(terminalId)
+    return await this.fileEditor.openFromFileSystem(terminalId, filePath)
+  }
+
+  canClosePanel(kind: PanelKind): boolean {
+    if (kind !== 'fileEditor') {
+      return true
+    }
+    if (this.fileEditor.mode !== 'text' || !this.fileEditor.dirty) {
+      return true
+    }
+    return window.confirm(this.i18n.t.fileEditor.unsavedChangesConfirm)
+  }
+
+  onPanelRemoved(kind: PanelKind): void {
+    if (kind === 'fileEditor') {
+      this.fileEditor.clear()
+    }
   }
 
   private sanitizeImageAttachmentForSend(image: InputImageAttachment): InputImageAttachment {

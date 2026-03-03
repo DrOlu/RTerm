@@ -7,6 +7,11 @@ import './panelTypeRail.scss'
 
 export const PanelTypeRail: React.FC<{ store: AppStore }> = observer(({ store }) => {
   const t = store.i18n.t
+  const railTooltipByKind: Record<(typeof PANEL_KIND_UI_ORDER)[number], string> = {
+    chat: t.layout.addChatSession,
+    terminal: t.layout.addTerminalTab,
+    filesystem: t.layout.openFilesystemPanel
+  }
 
   const handleCreate = React.useCallback(
     (kind: (typeof PANEL_KIND_UI_ORDER)[number]) => {
@@ -33,7 +38,7 @@ export const PanelTypeRail: React.FC<{ store: AppStore }> = observer(({ store })
         const ownerTabCount = item.getOwnerTabCount(store)
         const panelCount = store.layout.getPanelIdsByKind(kind).length
         const isDetached = panelCount === 0
-        const tooltip = kind === 'chat' ? t.layout.addChatSession : t.layout.addTerminalTab
+        const tooltip = railTooltipByKind[kind]
         return (
           <button
             key={kind}

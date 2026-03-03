@@ -1,4 +1,4 @@
-import { resolveDefaultRailClickIntent } from './panelKindUiRegistry'
+import { getPanelKindUiItem, PANEL_KIND_UI_ORDER, resolveDefaultRailClickIntent } from './panelKindUiRegistry'
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
   if (actual !== expected) {
@@ -33,6 +33,29 @@ runCase('rail click creates tab when panel already exists', () => {
     ownerTabCount: 5
   })
   assertEqual(intent, 'create-new-tab', 'rail click should create tab when panel exists')
+})
+
+runCase('filesystem rail click always opens panel only', () => {
+  const item = getPanelKindUiItem('filesystem')
+  const intentNoTabs = item.resolveRailClickIntent({
+    panelCount: 0,
+    ownerTabCount: 0
+  })
+  const intentWithTabs = item.resolveRailClickIntent({
+    panelCount: 2,
+    ownerTabCount: 4
+  })
+  assertEqual(intentNoTabs, 'open-panel-only', 'filesystem rail should not create tabs when empty')
+  assertEqual(intentWithTabs, 'open-panel-only', 'filesystem rail should not create tabs when tabs exist')
+})
+
+runCase('special file editor panel is hidden from rail', () => {
+  const railKinds = PANEL_KIND_UI_ORDER as readonly string[]
+  assertEqual(
+    railKinds.includes('fileEditor'),
+    false,
+    'special panel kinds without rail entry should not be rendered in rail'
+  )
 })
 
 console.log('All panel kind rail strategy extreme tests passed.')

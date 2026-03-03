@@ -492,6 +492,83 @@ const run = async (): Promise<void> => {
     const duplicateCount = restoredSession?.messageIds.filter((id) => id === 'msg-shared').length || 0
     assertEqual(duplicateCount, 1, 'deferred replay should not duplicate hydrated message ids')
   })
+
+  await runCase('canClosePanel blocks dirty file editor when user cancels discard', async () => {
+    const originalWindow = (globalThis as any).window
+    let confirmCalled = 0
+    ;(globalThis as any).window = {
+      confirm: () => {
+        confirmCalled += 1
+        return false
+      }
+    }
+    try {
+      const store = new AppStore()
+      ;(store.fileEditor as any).mode = 'text'
+      ;(store.fileEditor as any).dirty = true
+      const allowed = store.canClosePanel('fileEditor')
+      assertEqual(allowed, false, 'dirty editor close should be rejected when user cancels')
+      assertEqual(confirmCalled, 1, 'dirty editor close should ask for confirmation once')
+    } finally {
+      ;(globalThis as any).window = originalWindow
+    }
+  })
+
+  await runCase('canClosePanel allows close without prompt when editor is clean', async () => {
+    const originalWindow = (globalThis as any).window
+    let confirmCalled = 0
+    ;(globalThis as any).window = {
+      confirm: () => {
+        confirmCalled += 1
+        return true
+      }
+    }
+    try {
+      const store = new AppStore()
+      ;(store.fileEditor as any).mode = 'text'
+      ;(store.fileEditor as any).dirty = false
+      const allowed = store.canClosePanel('fileEditor')
+      assertEqual(allowed, true, 'clean editor close should pass immediately')
+      assertEqual(confirmCalled, 0, 'clean editor close should not prompt for confirmation')
+    } finally {
+      ;(globalThis as any).window = originalWindow
+    }
+  })
+
+  await runCase('fileSystemTabs inventory includes both local and ssh terminal tabs', async () => {
+    const store = new AppStore()
+    ;(store.layout as any).syncPanelBindings = () => {}
+    store.reconcileTerminalTabs({
+      terminals: [
+        {
+          id: 'local-1',
+          title: 'Local',
+          type: 'local',
+          cols: 80,
+          rows: 24,
+          runtimeState: 'ready'
+        },
+        {
+          id: 'ssh-1',
+          title: 'SSH',
+          type: 'ssh',
+          cols: 120,
+          rows: 32,
+          runtimeState: 'ready'
+        }
+      ]
+    } as any)
+
+    assertEqual(store.fileSystemTabs.length, 2, 'filesystem inventory should include local and ssh tabs')
+    assertCondition(
+      store.fileSystemTabs.some((tab) => tab.config.type === 'local'),
+      'filesystem inventory should include local tab'
+    )
+    assertCondition(
+      store.fileSystemTabs.some((tab) => tab.config.type === 'ssh'),
+      'filesystem inventory should include ssh tab'
+    )
+  })
 }
 
 void run()
