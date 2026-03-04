@@ -3,7 +3,6 @@ import {
   ArrowUp,
   Check,
   Copy,
-  ExternalLink,
   File,
   FileText,
   Folder,
@@ -431,7 +430,6 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null
   const activeTerminalId = activeTab?.id || null
-  const activeTerminalType = activeTab?.config?.type || null
   const activeState = activeTerminalId ? (stateByTabId[activeTerminalId] || createInitialTabState()) : createInitialTabState()
   const selectedEntries = React.useMemo(
     () => activeState.entries.filter((entry) => activeState.selectedPaths.includes(entry.path)),
@@ -1192,47 +1190,6 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
     resolveDragEntries
   ])
 
-  const handleRowNativeDragStart = React.useCallback((event: React.DragEvent<HTMLSpanElement>, entry: FileSystemEntry): void => {
-    event.stopPropagation()
-    event.preventDefault()
-    if (!activeTerminalId) return
-    if (activeTerminalType !== 'local') {
-      updateTabState(activeTerminalId, (current) => ({
-        ...current,
-        errorMessage: 'Drag-out to system is only available from Local filesystem tabs.',
-        statusMessage: null
-      }))
-      return
-    }
-    if (isSameMachineGateway === false) {
-      updateTabState(activeTerminalId, (current) => ({
-        ...current,
-        errorMessage: 'Drag-out to system is unavailable when frontend and backend are on different machines.',
-        statusMessage: null
-      }))
-      return
-    }
-
-    const sourcePaths = resolveDragEntries(entry)
-      .map((item) => (typeof item.path === 'string' ? item.path.trim() : ''))
-      .filter((path) => path.length > 0)
-    if (sourcePaths.length <= 0) return
-
-    void window.gyshell.filesystem.startNativeDrag(activeTerminalId, sourcePaths).catch((error) => {
-      updateTabState(activeTerminalId, (current) => ({
-        ...current,
-        errorMessage: toErrorMessage(error),
-        statusMessage: null
-      }))
-    })
-  }, [
-    activeTerminalId,
-    activeTerminalType,
-    isSameMachineGateway,
-    resolveDragEntries,
-    updateTabState
-  ])
-
   const handlePanelKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLElement>): void => {
     const target = event.target as HTMLElement | null
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
@@ -1589,26 +1546,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
                       <span className="filesystem-row-name">{entry.name}</span>
                     </span>
                     <span className="filesystem-row-meta">
-                      <span className="filesystem-row-meta-text">
-                        {entry.isDirectory ? t.filesystem.directoryLabel : formatFileSize(entry.size)}
-                      </span>
-                      {activeTerminalType === 'local' ? (
-                        <span
-                          className="filesystem-row-native-drag-handle"
-                          title="Drag to system"
-                          draggable
-                          onMouseDown={(event) => {
-                            event.stopPropagation()
-                          }}
-                          onClick={(event) => {
-                            event.preventDefault()
-                            event.stopPropagation()
-                          }}
-                          onDragStart={(event) => handleRowNativeDragStart(event, entry)}
-                        >
-                          <ExternalLink size={12} strokeWidth={2.2} />
-                        </span>
-                      ) : null}
+                      {entry.isDirectory ? t.filesystem.directoryLabel : formatFileSize(entry.size)}
                     </span>
                   </div>
                 )

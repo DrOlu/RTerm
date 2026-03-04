@@ -415,10 +415,6 @@ export interface GyShellAPI {
     createFile: (terminalId: string, filePath: string) => Promise<void>
     deletePath: (terminalId: string, targetPath: string, options?: { recursive?: boolean }) => Promise<void>
     renamePath: (terminalId: string, sourcePath: string, targetPath: string) => Promise<void>
-    startNativeDrag: (
-      sourceTerminalId: string,
-      sourcePaths: string[]
-    ) => Promise<{ ok: boolean; localPaths: string[] }>
     onTransferProgress: (
       callback: (payload: {
         transferId: string
@@ -633,8 +629,6 @@ const api: GyShellAPI = {
       ipcRenderer.invoke('filesystem:deletePath', terminalId, targetPath, options),
     renamePath: (terminalId, sourcePath, targetPath) =>
       ipcRenderer.invoke('filesystem:renamePath', terminalId, sourcePath, targetPath),
-    startNativeDrag: (sourceTerminalId, sourcePaths) =>
-      ipcRenderer.invoke('filesystem:startNativeDrag', sourceTerminalId, sourcePaths),
     onTransferProgress: (callback) => {
       const handler = (_: IpcRendererEvent, payload: {
         transferId: string

@@ -1,5 +1,4 @@
-import { ipcMain, shell, Menu, BrowserWindow, nativeImage } from 'electron'
-import path from 'node:path'
+import { ipcMain, shell, Menu, BrowserWindow } from 'electron'
 import type { StartTaskOptions, StartTaskInput, IGatewayRuntime } from '../../../backend/src/services/Gateway/types'
 import type { TerminalService } from '../../../backend/src/services/TerminalService'
 import {
@@ -32,40 +31,6 @@ type AccessTokenRuntime = {
   listTokens: () => Promise<Array<{ id: string; name: string; createdAt: number }>>
   createToken: (name: string) => Promise<{ id: string; name: string; createdAt: number; token: string }>
   deleteToken: (id: string) => Promise<boolean>
-}
-
-const NATIVE_DRAG_ICON_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO6f6xkAAAAASUVORK5CYII='
-
-const createNativeDragIcon = (): Electron.NativeImage => {
-  const fromBuffer = nativeImage.createFromBuffer(Buffer.from(NATIVE_DRAG_ICON_BASE64, 'base64'))
-  if (!fromBuffer.isEmpty()) {
-    return fromBuffer
-  }
-
-  const fromDataUrl = nativeImage.createFromDataURL(`data:image/png;base64,${NATIVE_DRAG_ICON_BASE64}`)
-  if (!fromDataUrl.isEmpty()) {
-    return fromDataUrl
-  }
-
-  const workspaceMaterialCandidates = [
-    path.resolve(process.cwd(), 'apps/electron/materials/icon.icns'),
-    path.resolve(process.cwd(), 'apps/electron/materials/icon.ico')
-  ]
-  for (const candidate of workspaceMaterialCandidates) {
-    const fromPath = nativeImage.createFromPath(candidate)
-    if (!fromPath.isEmpty()) {
-      return fromPath
-    }
-  }
-
-  if (process.platform === 'darwin') {
-    const fromNamedImage = nativeImage.createFromNamedImage('NSFolder')
-    if (!fromNamedImage.isEmpty()) {
-      return fromNamedImage
-    }
-  }
-
-  return nativeImage.createEmpty()
 }
 
 export class ElectronGatewayIpcAdapter {
@@ -663,50 +628,6 @@ export class ElectronGatewayIpcAdapter {
     ipcMain.handle('filesystem:renamePath', async (_: any, terminalId: string, sourcePath: string, targetPath: string) => {
       await requireFileSystemService().renamePath(terminalId, sourcePath, targetPath)
       return { ok: true }
-    })
-
-    ipcMain.handle('filesystem:startNativeDrag', async (event: any, sourceTerminalId: string, sourcePaths: string[]) => {
-      const normalizedTerminalId = typeof sourceTerminalId === 'string' ? sourceTerminalId.trim() : ''
-      if (!normalizedTerminalId) {
-        throw new Error('sourceTerminalId must be a non-empty string.')
-      }
-      if (!Array.isArray(sourcePaths) || sourcePaths.length <= 0) {
-        throw new Error('sourcePaths must contain at least one path.')
-      }
-      const normalizedSourcePaths = sourcePaths
-        .map((item) => (typeof item === 'string' ? item.trim() : ''))
-        .filter((item) => item.length > 0)
-      if (normalizedSourcePaths.length <= 0) {
-        throw new Error('sourcePaths must contain at least one non-empty path.')
-      }
-
-      const sourceType = this.terminalService.getTerminalType(normalizedTerminalId)
-      if (sourceType !== 'local') {
-        throw new Error('Native drag-out is only available for Local filesystem sources.')
-      }
-
-      const seen = new Set<string>()
-      const localPaths: string[] = []
-      for (const sourcePath of normalizedSourcePaths) {
-        const resolvedPath = await this.terminalService.resolvePathForFileSystem(normalizedTerminalId, sourcePath)
-        if (!resolvedPath || seen.has(resolvedPath)) continue
-        seen.add(resolvedPath)
-        localPaths.push(resolvedPath)
-      }
-      if (localPaths.length <= 0) {
-        throw new Error('Failed to resolve local paths for native drag-out.')
-      }
-
-      const dragIcon = createNativeDragIcon()
-
-      event.sender.startDrag({
-        files: localPaths,
-        icon: dragIcon
-      })
-      return {
-        ok: true,
-        localPaths
-      }
     })
 
     // UI
