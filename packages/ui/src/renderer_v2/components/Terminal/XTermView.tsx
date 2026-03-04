@@ -9,6 +9,11 @@ import type { TerminalConfig } from '../../lib/ipcTypes'
 import { isTerminalTrackedByBackend } from './runtimeRetention'
 import { resolveTerminalSize } from './terminalDimensions'
 import { isRuntimeOwnedByUi } from './runtimeOwnership'
+import {
+  hasFileSystemPanelDragPayloadType,
+  hasNativeFileDragType,
+  resolveTerminalDropPathsForTarget
+} from '../../lib/filesystemDragDrop'
 
 const SCROLLBAR_HIDE_DELAY = 2000 // ms
 const RUNTIME_RELEASE_DELAY = 4000 // ms
@@ -200,14 +205,23 @@ const createRuntime = (
   }
 
   const handleDragOver = (event: DragEvent) => {
+    const isFileDrop =
+      hasFileSystemPanelDragPayloadType(event.dataTransfer) || hasNativeFileDragType(event.dataTransfer)
+    if (!isFileDrop) return
     event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy'
+    }
   }
 
   const handleDrop = (event: DragEvent) => {
+    const isFileDrop =
+      hasFileSystemPanelDragPayloadType(event.dataTransfer) || hasNativeFileDragType(event.dataTransfer)
+    if (!isFileDrop) return
     event.preventDefault()
-    const files = Array.from(event.dataTransfer?.files || [])
-    if (!files.length) return
-    const paths = files.map((file) => file.path).filter(Boolean)
+    event.stopPropagation()
+    const paths = resolveTerminalDropPathsForTarget(event.dataTransfer, config.id)
     if (!paths.length) return
     window.gyshell.terminal.writePaths(config.id, paths).catch(() => {
       // ignore
@@ -266,8 +280,8 @@ const createRuntime = (
   }
 
   mountEl.addEventListener('paste', handlePaste)
-  mountEl.addEventListener('dragover', handleDragOver)
-  mountEl.addEventListener('drop', handleDrop)
+  mountEl.addEventListener('dragover', handleDragOver, true)
+  mountEl.addEventListener('drop', handleDrop, true)
   mountEl.addEventListener('contextmenu', handleContextMenu)
   const removeContextMenuListener = window.gyshell.ui.onContextMenuAction(onContextMenuAction)
 
@@ -350,8 +364,8 @@ const createRuntime = (
   runtime.scrollDispose = () => scrollDisposable.dispose()
   runtime.removeDomListeners = () => {
     mountEl.removeEventListener('paste', handlePaste)
-    mountEl.removeEventListener('dragover', handleDragOver)
-    mountEl.removeEventListener('drop', handleDrop)
+    mountEl.removeEventListener('dragover', handleDragOver, true)
+    mountEl.removeEventListener('drop', handleDrop, true)
     mountEl.removeEventListener('contextmenu', handleContextMenu)
   }
 

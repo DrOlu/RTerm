@@ -21,6 +21,18 @@ export interface TerminalScopedFilePath {
 
 const TERMINAL_SCOPED_FILE_PATTERN = /^@terminal\(([^)]+)\):(.*)$/
 
+const collectUniquePaths = (paths: Array<string | null | undefined>): string[] => {
+  const seen = new Set<string>()
+  const next: string[] = []
+  for (const candidate of paths) {
+    const normalized = typeof candidate === 'string' ? candidate.trim() : ''
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    next.push(normalized)
+  }
+  return next
+}
+
 export const encodeFileSystemPanelDragPayload = (payload: FileSystemPanelDragPayload): string =>
   JSON.stringify(payload)
 
@@ -82,6 +94,51 @@ export const hasNativeFileDragType = (
   if (!dataTransfer) return false
   const types = Array.from(dataTransfer.types || [])
   return types.includes('Files')
+}
+
+export const extractNativeDropFilePaths = (
+  dataTransfer: Pick<DataTransfer, 'files'> | null | undefined
+): string[] => {
+  if (!dataTransfer?.files) return []
+  const paths = Array.from(dataTransfer.files).map((file) => {
+    return typeof (file as File & { path?: unknown }).path === 'string'
+      ? String((file as File & { path?: string }).path)
+      : ''
+  })
+  return collectUniquePaths(paths)
+}
+
+export const extractFileSystemPayloadPaths = (
+  dataTransfer: Pick<DataTransfer, 'types' | 'getData'> | null | undefined
+): string[] => {
+  const payload = parseFileSystemPanelDragPayload(dataTransfer)
+  if (!payload) return []
+  return collectUniquePaths(payload.entries.map((entry) => entry.path))
+}
+
+export const resolveTerminalDropPaths = (
+  dataTransfer: Pick<DataTransfer, 'types' | 'getData' | 'files'> | null | undefined
+): string[] => {
+  const payloadPaths = extractFileSystemPayloadPaths(dataTransfer)
+  if (payloadPaths.length > 0) {
+    return payloadPaths
+  }
+  return extractNativeDropFilePaths(dataTransfer)
+}
+
+export const resolveTerminalDropPathsForTarget = (
+  dataTransfer: Pick<DataTransfer, 'types' | 'getData' | 'files'> | null | undefined,
+  targetTerminalId: string
+): string[] => {
+  const payload = parseFileSystemPanelDragPayload(dataTransfer)
+  if (payload) {
+    const normalizedTargetId = String(targetTerminalId || '').trim()
+    if (normalizedTargetId && payload.sourceTerminalId !== normalizedTargetId) {
+      return []
+    }
+    return collectUniquePaths(payload.entries.map((entry) => entry.path))
+  }
+  return extractNativeDropFilePaths(dataTransfer)
 }
 
 export const encodeTerminalScopedFilePath = (terminalId: string, filePath: string): string => {

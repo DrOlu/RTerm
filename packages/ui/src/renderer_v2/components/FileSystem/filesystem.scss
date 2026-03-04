@@ -201,9 +201,41 @@
 }
 
 .filesystem-row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--fg-faint);
   font-size: var(--filesystem-font-size-xs);
   flex-shrink: 0;
+}
+
+.filesystem-row-meta-text {
+  line-height: 1;
+}
+
+.filesystem-row-native-drag-handle {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--fg-faint);
+  cursor: grab;
+  opacity: 0.78;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+.filesystem-row-native-drag-handle:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 18%, transparent);
+  color: var(--fg);
+  opacity: 1;
+}
+
+.filesystem-row-native-drag-handle:active {
+  cursor: grabbing;
 }
 
 .filesystem-empty-state {

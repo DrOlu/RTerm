@@ -3,6 +3,7 @@ import {
   ArrowUp,
   Check,
   Copy,
+  ExternalLink,
   File,
   FileText,
   Folder,
@@ -1162,13 +1163,15 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
     }))
   }, [activeState.currentPath, activeTerminalId, handleNativePathDrop, requestClipboardTransfer, updateTabState])
 
-  const handleRowDragStart = React.useCallback((event: React.DragEvent<HTMLDivElement>, entry: FileSystemEntry): void => {
-    if (!activeTerminalId || !event.dataTransfer) return
+  const resolveDragEntries = React.useCallback((entry: FileSystemEntry): FileSystemEntry[] => {
     const selectedEntryMap = new Map(selectedEntries.map((item) => [item.path, item]))
     const includesDraggedEntry = selectedEntryMap.has(entry.path)
-    const dragEntries = includesDraggedEntry
-      ? selectedEntries
-      : [entry]
+    return includesDraggedEntry ? selectedEntries : [entry]
+  }, [selectedEntries])
+
+  const handleRowDragStart = React.useCallback((event: React.DragEvent<HTMLDivElement>, entry: FileSystemEntry): void => {
+    if (!activeTerminalId || !event.dataTransfer) return
+    const dragEntries = resolveDragEntries(entry)
     if (dragEntries.length <= 0) return
     const payload = {
       version: 1 as const,
@@ -1182,26 +1185,51 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
       }))
     }
     event.dataTransfer.setData(FILESYSTEM_PANEL_DRAG_MIME, encodeFileSystemPanelDragPayload(payload))
-    event.dataTransfer.setData('text/plain', dragEntries.map((item) => item.path).join('\n'))
     event.dataTransfer.effectAllowed = 'copyMove'
-    if (isSameMachineGateway === true && activeTerminalType === 'local') {
-      void window.gyshell.filesystem.startNativeDrag(
-        activeTerminalId,
-        dragEntries.map((item) => item.path)
-      ).catch((error) => {
-        updateTabState(activeTerminalId, (current) => ({
-          ...current,
-          errorMessage: toErrorMessage(error),
-          statusMessage: null
-        }))
-      })
-    }
   }, [
     activeState.currentPath,
     activeTerminalId,
+    resolveDragEntries
+  ])
+
+  const handleRowNativeDragStart = React.useCallback((event: React.DragEvent<HTMLSpanElement>, entry: FileSystemEntry): void => {
+    event.stopPropagation()
+    event.preventDefault()
+    if (!activeTerminalId) return
+    if (activeTerminalType !== 'local') {
+      updateTabState(activeTerminalId, (current) => ({
+        ...current,
+        errorMessage: 'Drag-out to system is only available from Local filesystem tabs.',
+        statusMessage: null
+      }))
+      return
+    }
+    if (isSameMachineGateway === false) {
+      updateTabState(activeTerminalId, (current) => ({
+        ...current,
+        errorMessage: 'Drag-out to system is unavailable when frontend and backend are on different machines.',
+        statusMessage: null
+      }))
+      return
+    }
+
+    const sourcePaths = resolveDragEntries(entry)
+      .map((item) => (typeof item.path === 'string' ? item.path.trim() : ''))
+      .filter((path) => path.length > 0)
+    if (sourcePaths.length <= 0) return
+
+    void window.gyshell.filesystem.startNativeDrag(activeTerminalId, sourcePaths).catch((error) => {
+      updateTabState(activeTerminalId, (current) => ({
+        ...current,
+        errorMessage: toErrorMessage(error),
+        statusMessage: null
+      }))
+    })
+  }, [
+    activeTerminalId,
     activeTerminalType,
     isSameMachineGateway,
-    selectedEntries,
+    resolveDragEntries,
     updateTabState
   ])
 
@@ -1561,7 +1589,26 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
                       <span className="filesystem-row-name">{entry.name}</span>
                     </span>
                     <span className="filesystem-row-meta">
-                      {entry.isDirectory ? t.filesystem.directoryLabel : formatFileSize(entry.size)}
+                      <span className="filesystem-row-meta-text">
+                        {entry.isDirectory ? t.filesystem.directoryLabel : formatFileSize(entry.size)}
+                      </span>
+                      {activeTerminalType === 'local' ? (
+                        <span
+                          className="filesystem-row-native-drag-handle"
+                          title="Drag to system"
+                          draggable
+                          onMouseDown={(event) => {
+                            event.stopPropagation()
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                          }}
+                          onDragStart={(event) => handleRowNativeDragStart(event, entry)}
+                        >
+                          <ExternalLink size={12} strokeWidth={2.2} />
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                 )

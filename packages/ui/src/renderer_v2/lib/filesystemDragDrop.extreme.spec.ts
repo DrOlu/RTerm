@@ -1,12 +1,16 @@
 import {
   FILESYSTEM_PANEL_DRAG_MIME,
   decodeTerminalScopedFilePath,
+  extractNativeDropFilePaths,
   encodeFileSystemPanelDragPayload,
   encodeTerminalScopedFilePath,
+  extractFileSystemPayloadPaths,
   hasFileSystemPanelDragPayloadType,
   hasNativeFileDragType,
   getFileMentionDisplayName,
-  parseFileSystemPanelDragPayload
+  parseFileSystemPanelDragPayload,
+  resolveTerminalDropPaths,
+  resolveTerminalDropPathsForTarget
 } from './filesystemDragDrop'
 
 const assertCondition = (condition: unknown, message: string): void => {
@@ -94,6 +98,99 @@ const run = async (): Promise<void> => {
       types: ['text/plain']
     } as unknown as Pick<DataTransfer, 'types'>)
     assertEqual(none, false, 'non-file drags should be ignored')
+  })
+
+  await runCase('resolveTerminalDropPaths prioritizes filesystem payload and does not need native files', () => {
+    const payload = {
+      version: 1 as const,
+      sourceTerminalId: 'local-1',
+      sourceBasePath: '/tmp',
+      entries: [
+        { name: 'alpha.txt', path: '/tmp/alpha.txt', isDirectory: false },
+        { name: 'alpha.txt duplicate', path: '/tmp/alpha.txt', isDirectory: false }
+      ]
+    }
+    const encoded = encodeFileSystemPanelDragPayload(payload)
+    const dataTransfer = {
+      types: [FILESYSTEM_PANEL_DRAG_MIME, 'Files'],
+      getData: (type: string) => (type === FILESYSTEM_PANEL_DRAG_MIME ? encoded : ''),
+      get files(): never {
+        throw new Error('native files should not be read when payload is present')
+      }
+    }
+    const paths = resolveTerminalDropPaths(
+      dataTransfer as unknown as Pick<DataTransfer, 'types' | 'getData' | 'files'>
+    )
+    assertEqual(paths.length, 1, 'paths should be deduplicated')
+    assertEqual(paths[0], '/tmp/alpha.txt', 'payload path should be used')
+  })
+
+  await runCase('resolveTerminalDropPaths falls back to native file paths when payload is absent', () => {
+    const nativeFileList = [
+      { path: '/tmp/beta.txt' },
+      { path: ' /tmp/beta.txt ' },
+      { path: '/tmp/gamma.txt' }
+    ] as unknown as FileList
+    const dataTransfer = {
+      types: ['Files'],
+      getData: () => '',
+      files: nativeFileList
+    }
+    const paths = resolveTerminalDropPaths(
+      dataTransfer as unknown as Pick<DataTransfer, 'types' | 'getData' | 'files'>
+    )
+    assertEqual(paths.length, 2, 'native paths should be deduplicated')
+    assertEqual(paths[0], '/tmp/beta.txt', 'first native path should be preserved')
+    assertEqual(paths[1], '/tmp/gamma.txt', 'second native path should be preserved')
+  })
+
+  await runCase('resolveTerminalDropPathsForTarget blocks cross-terminal payload drops', () => {
+    const payload = {
+      version: 1 as const,
+      sourceTerminalId: 'ssh-main',
+      sourceBasePath: '/home/demo',
+      entries: [{ name: 'notes.md', path: '/home/demo/notes.md', isDirectory: false }]
+    }
+    const encoded = encodeFileSystemPanelDragPayload(payload)
+    const dataTransfer = {
+      types: [FILESYSTEM_PANEL_DRAG_MIME],
+      getData: (type: string) => (type === FILESYSTEM_PANEL_DRAG_MIME ? encoded : ''),
+      files: [] as unknown as FileList
+    }
+    const blocked = resolveTerminalDropPathsForTarget(
+      dataTransfer as unknown as Pick<DataTransfer, 'types' | 'getData' | 'files'>,
+      'local-main'
+    )
+    assertEqual(blocked.length, 0, 'cross-terminal payload should be rejected')
+
+    const allowed = resolveTerminalDropPathsForTarget(
+      dataTransfer as unknown as Pick<DataTransfer, 'types' | 'getData' | 'files'>,
+      'ssh-main'
+    )
+    assertEqual(allowed.length, 1, 'matching terminal payload should be accepted')
+    assertEqual(allowed[0], '/home/demo/notes.md', 'accepted payload path should match source')
+  })
+
+  await runCase('standalone path extractors stay consistent', () => {
+    const payload = {
+      version: 1 as const,
+      sourceTerminalId: 'ssh-1',
+      sourceBasePath: '/home/demo',
+      entries: [{ name: 'report.md', path: '/home/demo/report.md', isDirectory: false }]
+    }
+    const encoded = encodeFileSystemPanelDragPayload(payload)
+    const payloadPaths = extractFileSystemPayloadPaths({
+      types: [FILESYSTEM_PANEL_DRAG_MIME],
+      getData: (type: string) => (type === FILESYSTEM_PANEL_DRAG_MIME ? encoded : '')
+    } as unknown as Pick<DataTransfer, 'types' | 'getData'>)
+    assertEqual(payloadPaths.length, 1, 'payload extractor should return one path')
+    assertEqual(payloadPaths[0], '/home/demo/report.md', 'payload extractor path should match')
+
+    const nativePaths = extractNativeDropFilePaths({
+      files: [{ path: '/tmp/native.txt' }] as unknown as FileList
+    } as unknown as Pick<DataTransfer, 'files'>)
+    assertEqual(nativePaths.length, 1, 'native extractor should return one path')
+    assertEqual(nativePaths[0], '/tmp/native.txt', 'native extractor path should match')
   })
 }
 
