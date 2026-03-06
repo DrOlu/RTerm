@@ -90,6 +90,8 @@ interface BackendSettings {
     runtimeThinkingCorrectionEnabled: boolean
     taskFinishGuardEnabled: boolean
     firstTurnThinkingModelEnabled: boolean
+    execCommandActionModelEnabled: boolean
+    writeStdinActionModelEnabled: boolean
   }
   gateway: {
     ws: {
@@ -332,6 +334,9 @@ export interface GyShellAPI {
   gateway: {
     isSameMachine: () => Promise<{ sameMachine: boolean }>
   }
+  windowing: {
+    openDetached: (detachedStateToken: string, sourceClientId: string) => Promise<{ ok: boolean }>
+  }
   // Settings
   settings: {
     get: () => Promise<BackendSettings>
@@ -536,6 +541,10 @@ const api: GyShellAPI = {
   },
   gateway: {
     isSameMachine: () => ipcRenderer.invoke('gateway:isSameMachine')
+  },
+  windowing: {
+    openDetached: (detachedStateToken, sourceClientId) =>
+      ipcRenderer.invoke('windowing:openDetached', detachedStateToken, sourceClientId)
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),

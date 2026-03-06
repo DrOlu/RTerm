@@ -32,9 +32,7 @@ const DEFAULT_VIEWPORT: LayoutViewport = {
 }
 
 const PREVIEW_PANEL_ID = '__layout-preview-panel__'
-const MIN_PANEL_COUNT_BY_KIND: Partial<Record<PanelKind, number>> = {
-  chat: 1
-}
+const MIN_PANEL_COUNT_BY_KIND: Partial<Record<PanelKind, number>> = {}
 
 const getMinPanelCountForKind = (kind: PanelKind): number => MIN_PANEL_COUNT_BY_KIND[kind] ?? 0
 
@@ -121,6 +119,9 @@ export class LayoutStore {
       attachTabToPanel: action,
       attachTabToPrimaryPanel: action,
       splitTabToDirection: action,
+      detachTabsFromLayout: action,
+      detachTabFromLayout: action,
+      importPanelFromExternal: action,
       setTabReorderTarget: action,
       clearTabReorderTarget: action,
       setFocusedPanel: action,
@@ -421,6 +422,166 @@ export class LayoutStore {
       return
     }
     this.commitTabDrop(payload, targetPanelId, direction)
+  }
+
+  detachTabsFromLayout(kind: PanelKind, tabIds: string[]): void {
+    if (!getPanelKindAdapter(kind).supportsTabs) {
+      return
+    }
+    if (!Array.isArray(tabIds) || tabIds.length === 0) return
+    const detachSet = new Set(
+      tabIds
+        .map((tabId) => String(tabId || '').trim())
+        .filter((tabId) => tabId.length > 0)
+    )
+    if (detachSet.size === 0) return
+
+    const panelIds = this.panelNodes
+      .filter((node) => node.panel.kind === kind)
+      .map((node) => node.panel.id)
+    if (panelIds.length === 0) return
+
+    const nextPanelTabs: Record<string, LayoutPanelTabBinding> = {
+      ...(this.tree.panelTabs || {})
+    }
+    let changed = false
+
+    panelIds.forEach((panelId) => {
+      const current = nextPanelTabs[panelId]
+      if (!current) {
+        return
+      }
+      const tabIds = current.tabIds.filter((id) => !detachSet.has(id))
+      if (tabIds.length === current.tabIds.length) {
+        return
+      }
+      const activeTabId =
+        current.activeTabId && tabIds.includes(current.activeTabId)
+          ? current.activeTabId
+          : tabIds[0]
+      nextPanelTabs[panelId] = {
+        tabIds,
+        ...(activeTabId ? { activeTabId } : {})
+      }
+      changed = true
+    })
+
+    if (!changed) {
+      return
+    }
+
+    this.tree = {
+      ...this.tree,
+      panelTabs: nextPanelTabs
+    }
+    this.syncPanelBindings({ persist: false })
+    this.saveLayoutDebounced()
+  }
+
+  detachTabFromLayout(kind: PanelKind, tabId: string): void {
+    this.detachTabsFromLayout(kind, [tabId])
+  }
+
+  importPanelFromExternal(
+    kind: PanelKind,
+    tabBinding?: LayoutPanelTabBinding,
+    dropTarget?: { panelId: string; direction: DropDirection }
+  ): string | null {
+    if (this.panelCount >= MAX_LAYOUT_PANELS) {
+      return null
+    }
+
+    let targetPanelId: string
+    let splitDirection: SplitDirection = 'horizontal'
+    let splitPosition: 'before' | 'after' = 'after'
+
+    if (dropTarget && dropTarget.direction !== 'center') {
+      const placement = toSplitPlacement(dropTarget.direction)
+      if (placement && this.panelNodes.some((node) => node.panel.id === dropTarget.panelId)) {
+        targetPanelId = dropTarget.panelId
+        splitDirection = placement.direction
+        splitPosition = placement.position
+      } else {
+        const fallback =
+          (this.tree.focusedPanelId && this.panelNodes.some((node) => node.panel.id === this.tree.focusedPanelId)
+            ? this.tree.focusedPanelId
+            : this.panelNodes[0]?.panel.id) || null
+        if (!fallback) return null
+        targetPanelId = fallback
+      }
+    } else {
+      const anchorPanelId =
+        (this.tree.focusedPanelId && this.panelNodes.some((node) => node.panel.id === this.tree.focusedPanelId)
+          ? this.tree.focusedPanelId
+          : this.panelNodes[0]?.panel.id) || null
+      if (!anchorPanelId) return null
+      targetPanelId = anchorPanelId
+    }
+
+    const normalizedTabBinding = (() => {
+      if (!getPanelKindAdapter(kind).supportsTabs || !tabBinding) {
+        return undefined
+      }
+      const tabIds = unique(
+        (tabBinding.tabIds || []).filter((tabId): tabId is string => typeof tabId === 'string' && tabId.length > 0)
+      )
+      const activeTabId =
+        typeof tabBinding.activeTabId === 'string' && tabIds.includes(tabBinding.activeTabId)
+          ? tabBinding.activeTabId
+          : tabIds[0]
+      return {
+        tabIds,
+        ...(activeTabId ? { activeTabId } : {})
+      }
+    })()
+
+    const baseTree =
+      normalizedTabBinding && normalizedTabBinding.tabIds.length > 0
+        ? this.createTreeWithoutTabs(this.tree, kind, normalizedTabBinding.tabIds)
+        : this.tree
+
+    const panelId = makeLayoutId(`panel-${kind}`)
+    const splitTree = splitPanelWithPanelId(
+      baseTree,
+      targetPanelId,
+      {
+        kind,
+        panelId
+      },
+      splitDirection,
+      splitPosition
+    )
+    if (splitTree === this.tree) {
+      return null
+    }
+
+    let nextTree = splitTree
+    if (normalizedTabBinding) {
+      nextTree = {
+        ...splitTree,
+        panelTabs: {
+          ...(splitTree.panelTabs || {}),
+          [panelId]: {
+            tabIds: normalizedTabBinding.tabIds,
+            ...(normalizedTabBinding.activeTabId ? { activeTabId: normalizedTabBinding.activeTabId } : {})
+          }
+        },
+        focusedPanelId: panelId
+      }
+    }
+
+    const treeBefore = this.tree
+    this.applyTree(nextTree)
+    if (this.tree === treeBefore) {
+      return null
+    }
+    if (getPanelKindAdapter(kind).supportsTabs) {
+      const importedActiveTabId = nextTree.panelTabs?.[panelId]?.activeTabId
+      if (importedActiveTabId) {
+        this.syncGlobalActiveFromPanel(kind, importedActiveTabId)
+      }
+    }
+    return panelId
   }
 
   setTabReorderTarget(panelId: string, anchorTabId: string | null, position: 'before' | 'after') {
@@ -790,6 +951,65 @@ export class LayoutStore {
     this.syncGlobalActiveFromPanel(kind, tabId)
   }
 
+  private createTreeWithoutTabs(
+    tree: LayoutTree,
+    kind: PanelKind,
+    tabIdsToRemove: string[]
+  ): LayoutTree {
+    if (!getPanelKindAdapter(kind).supportsTabs) {
+      return tree
+    }
+    const removalSet = new Set(
+      tabIdsToRemove
+        .map((tabId) => String(tabId || '').trim())
+        .filter((tabId) => tabId.length > 0)
+    )
+    if (removalSet.size === 0) {
+      return tree
+    }
+
+    const panelIds = listPanels(tree)
+      .filter((node) => node.panel.kind === kind)
+      .map((node) => node.panel.id)
+    if (panelIds.length === 0) {
+      return tree
+    }
+
+    const nextPanelTabs: Record<string, LayoutPanelTabBinding> = {
+      ...(tree.panelTabs || {})
+    }
+    let changed = false
+
+    panelIds.forEach((panelId) => {
+      const current = nextPanelTabs[panelId]
+      if (!current) {
+        return
+      }
+      const nextTabIds = current.tabIds.filter((tabId) => !removalSet.has(tabId))
+      if (nextTabIds.length === current.tabIds.length) {
+        return
+      }
+      const activeTabId =
+        current.activeTabId && nextTabIds.includes(current.activeTabId)
+          ? current.activeTabId
+          : nextTabIds[0]
+      nextPanelTabs[panelId] = {
+        tabIds: nextTabIds,
+        ...(activeTabId ? { activeTabId } : {})
+      }
+      changed = true
+    })
+
+    if (!changed) {
+      return tree
+    }
+
+    return {
+      ...tree,
+      panelTabs: nextPanelTabs
+    }
+  }
+
   private createTreeWithMovedTab(
     tree: LayoutTree,
     kind: PanelKind,
@@ -924,6 +1144,13 @@ export class LayoutStore {
   }
 
   private async saveLayout() {
+    if (typeof (this.appStore as any).shouldPersistLayout === 'function') {
+      const canPersist = (this.appStore as any).shouldPersistLayout()
+      if (!canPersist) {
+        return
+      }
+    }
+
     const legacy = deriveLegacyLayoutSnapshot(this.tree)
     const treeSnapshot = toJS(this.tree)
 

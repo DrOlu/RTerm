@@ -65,7 +65,10 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(({
         onMouseDown={onLayoutHeaderMouseDown}
         onContextMenu={onLayoutHeaderContextMenu}
       >
-        <div className="panel-tab-drag-handle" aria-hidden="true">
+        <div
+          className="panel-tab-drag-handle"
+          aria-hidden="true"
+        >
           <GripVertical size={12} strokeWidth={2.4} />
         </div>
         <div
@@ -129,7 +132,6 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(({
         <button className="icon-btn-sm tab-add-btn" title={t.terminal.newTab} onClick={() => setMenuOpen((v) => !v)}>
           <Plus size={14} strokeWidth={2} />
         </button>
-
         {menuOpen ? (
           <div className="tab-menu" role="menu" ref={menuRef}>
             <button

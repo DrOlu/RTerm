@@ -15,11 +15,26 @@ const createPanelKindAdapter = (
   adapter: PanelKindAdapter
 ): PanelKindAdapter => adapter
 
+const resolveOwnedTabIds = (
+  appStore: AppStore,
+  kind: PanelKind,
+  fallback: () => string[]
+): string[] => {
+  const runtime = appStore as AppStore & {
+    getOwnedTabIds?: (panelKind: PanelKind) => string[]
+  }
+  if (typeof runtime.getOwnedTabIds === 'function') {
+    return runtime.getOwnedTabIds(kind)
+  }
+  return fallback()
+}
+
 const PANEL_KIND_ADAPTERS: Record<PanelKind, PanelKindAdapter> = {
   terminal: createPanelKindAdapter({
     kind: 'terminal',
     supportsTabs: true,
-    getOwnerTabIds: (appStore) => appStore.terminalTabs.map((tab) => tab.id),
+    getOwnerTabIds: (appStore) =>
+      resolveOwnedTabIds(appStore, 'terminal', () => appStore.terminalTabs.map((tab) => tab.id)),
     getGlobalActiveTabId: (appStore) => appStore.activeTerminalId || null,
     isOwnerInventoryHydrated: (appStore) => appStore.terminalTabsHydrated === true,
     setGlobalActiveTab: (appStore, tabId) => {
@@ -29,7 +44,8 @@ const PANEL_KIND_ADAPTERS: Record<PanelKind, PanelKindAdapter> = {
   chat: createPanelKindAdapter({
     kind: 'chat',
     supportsTabs: true,
-    getOwnerTabIds: (appStore) => appStore.chat.sessions.map((session) => session.id),
+    getOwnerTabIds: (appStore) =>
+      resolveOwnedTabIds(appStore, 'chat', () => appStore.chat.sessions.map((session) => session.id)),
     getGlobalActiveTabId: (appStore) => appStore.chat.activeSessionId || null,
     isOwnerInventoryHydrated: (appStore) => appStore.chat.sessionInventoryHydrated === true,
     setGlobalActiveTab: (appStore, tabId) => {
@@ -39,7 +55,8 @@ const PANEL_KIND_ADAPTERS: Record<PanelKind, PanelKindAdapter> = {
   filesystem: createPanelKindAdapter({
     kind: 'filesystem',
     supportsTabs: true,
-    getOwnerTabIds: (appStore) => appStore.fileSystemTabs.map((tab) => tab.id),
+    getOwnerTabIds: (appStore) =>
+      resolveOwnedTabIds(appStore, 'filesystem', () => appStore.fileSystemTabs.map((tab) => tab.id)),
     getGlobalActiveTabId: (appStore) => {
       if (appStore.activeTerminalId && appStore.fileSystemTabs.some((tab) => tab.id === appStore.activeTerminalId)) {
         return appStore.activeTerminalId

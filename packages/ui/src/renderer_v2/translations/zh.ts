@@ -335,6 +335,8 @@ export const zh = {
     closeTab: '关闭',
     closeOtherTabs: '关闭其他',
     closeAllTabs: '全部关闭',
+    detachToWindow: '独立到新窗口',
+    mergeToMain: '合并回主窗口',
     chatKind: '聊天',
     terminalKind: '终端',
     filesystemKind: '文件',

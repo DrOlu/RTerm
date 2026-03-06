@@ -569,6 +569,186 @@ const run = async (): Promise<void> => {
       'filesystem inventory should include ssh tab'
     )
   })
+
+  await runCase('detached getOwnedTabIds filters terminal/filesystem to detached-visible tab set', async () => {
+    const store = new AppStore()
+    ;(store as any).windowRole = 'detached'
+    ;(store as any).detachedVisibleTabIdsByKind = {
+      chat: new Set<string>(),
+      terminal: new Set<string>(['term-b']),
+      filesystem: new Set<string>(['term-b'])
+    }
+    ;(store as any).suppressedTabIdsByKind = {
+      chat: new Set<string>(),
+      terminal: new Set<string>(),
+      filesystem: new Set<string>()
+    }
+    store.terminalTabs = [
+      {
+        id: 'term-a',
+        title: 'Local A',
+        config: { type: 'local', id: 'term-a', title: 'Local A', cols: 80, rows: 24 },
+        connectionRef: { type: 'local' },
+        runtimeState: 'ready'
+      },
+      {
+        id: 'term-b',
+        title: 'Local B',
+        config: { type: 'local', id: 'term-b', title: 'Local B', cols: 80, rows: 24 },
+        connectionRef: { type: 'local' },
+        runtimeState: 'ready'
+      }
+    ]
+    store.terminalTabsHydrated = true
+
+    assertEqual(
+      JSON.stringify(store.getOwnedTabIds('terminal')),
+      JSON.stringify(['term-b']),
+      'detached terminal owner tabs should be constrained to detached-visible set'
+    )
+    assertEqual(
+      JSON.stringify(store.getOwnedTabIds('filesystem')),
+      JSON.stringify(['term-b']),
+      'detached filesystem owner tabs should be constrained to detached-visible set'
+    )
+  })
+
+  await runCase('detached suppress/unsuppress updates detached-visible tab set for terminal/filesystem', async () => {
+    const store = new AppStore()
+    ;(store as any).windowRole = 'detached'
+    ;(store as any).detachedVisibleTabIdsByKind = {
+      chat: new Set<string>(),
+      terminal: new Set<string>(['term-a']),
+      filesystem: new Set<string>(['term-a'])
+    }
+    store.terminalTabs = [
+      {
+        id: 'term-a',
+        title: 'Local A',
+        config: { type: 'local', id: 'term-a', title: 'Local A', cols: 80, rows: 24 },
+        connectionRef: { type: 'local' },
+        runtimeState: 'ready'
+      },
+      {
+        id: 'term-b',
+        title: 'Local B',
+        config: { type: 'local', id: 'term-b', title: 'Local B', cols: 80, rows: 24 },
+        connectionRef: { type: 'local' },
+        runtimeState: 'ready'
+      }
+    ]
+    store.terminalTabsHydrated = true
+    let syncCallCount = 0
+    ;(store.layout as any).syncPanelBindings = () => {
+      syncCallCount += 1
+    }
+
+    store.unsuppressTabs('terminal', ['term-b'])
+    assertEqual(
+      JSON.stringify(store.getOwnedTabIds('terminal')),
+      JSON.stringify(['term-a', 'term-b']),
+      'unsuppress in detached should make tab visible inside detached terminal owner inventory'
+    )
+    assertEqual(
+      JSON.stringify(store.getOwnedTabIds('filesystem')),
+      JSON.stringify(['term-a', 'term-b']),
+      'unsuppress in detached should mirror visibility to filesystem owner inventory'
+    )
+
+    store.suppressTabs('filesystem', ['term-a'])
+    assertEqual(
+      JSON.stringify(store.getOwnedTabIds('terminal')),
+      JSON.stringify(['term-b']),
+      'suppress in detached should hide tab from detached terminal owner inventory'
+    )
+    assertEqual(
+      JSON.stringify(store.getOwnedTabIds('filesystem')),
+      JSON.stringify(['term-b']),
+      'suppress in detached should hide tab from detached filesystem owner inventory'
+    )
+    assertCondition(syncCallCount >= 2, 'detached visibility updates should trigger binding sync')
+  })
+
+  await runCase('main suppress terminal should not hide filesystem owner inventory', async () => {
+    const store = new AppStore()
+    ;(store as any).suppressedTabIdsByKind = {
+      chat: new Set<string>(),
+      terminal: new Set<string>(),
+      filesystem: new Set<string>()
+    }
+    store.terminalTabs = [
+      {
+        id: 'term-a',
+        title: 'Local A',
+        config: { type: 'local', id: 'term-a', title: 'Local A', cols: 80, rows: 24 },
+        connectionRef: { type: 'local' },
+        runtimeState: 'ready'
+      }
+    ]
+    store.terminalTabsHydrated = true
+    ;(store.layout as any).syncPanelBindings = () => {}
+
+    store.suppressTabs('terminal', ['term-a'])
+    assertEqual(
+      JSON.stringify(store.getOwnedTabIds('terminal')),
+      JSON.stringify([]),
+      'terminal suppression should hide terminal owner tab'
+    )
+    assertEqual(
+      JSON.stringify(store.getOwnedTabIds('filesystem')),
+      JSON.stringify(['term-a']),
+      'terminal suppression should not hide filesystem owner tab'
+    )
+  })
+
+  await runCase('collectAssignedTabsByKind reflects live layout bindings after detach', async () => {
+    const store = new AppStore()
+    ;(store.layout as any).tree = {
+      schemaVersion: 2,
+      root: {
+        type: 'split',
+        id: 'root',
+        direction: 'horizontal',
+        children: [
+          { type: 'panel', id: 'node-chat', panel: { id: 'panel-chat', kind: 'chat' } },
+          { type: 'panel', id: 'node-terminal', panel: { id: 'panel-terminal', kind: 'terminal' } }
+        ],
+        sizes: [50, 50]
+      },
+      focusedPanelId: 'panel-terminal',
+      panelTabs: {
+        'panel-chat': {
+          tabIds: ['chat-a'],
+          activeTabId: 'chat-a'
+        },
+        'panel-terminal': {
+          tabIds: ['term-a', 'term-b'],
+          activeTabId: 'term-a'
+        }
+      }
+    } as LayoutTree
+
+    assertEqual(
+      JSON.stringify(store.collectAssignedTabsByKind()),
+      JSON.stringify({
+        chat: ['chat-a'],
+        terminal: ['term-a', 'term-b'],
+        filesystem: []
+      }),
+      'assigned tabs should include currently bound ids'
+    )
+
+    store.layout.detachTabFromLayout('terminal', 'term-a')
+    assertEqual(
+      JSON.stringify(store.collectAssignedTabsByKind()),
+      JSON.stringify({
+        chat: ['chat-a'],
+        terminal: ['term-b'],
+        filesystem: []
+      }),
+      'detached tab should not remain in detached-closing payload inventory'
+    )
+  })
 }
 
 void run()

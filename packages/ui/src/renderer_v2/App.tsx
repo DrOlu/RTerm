@@ -15,6 +15,45 @@ export const App: React.FC = observer(() => {
     store.bootstrap()
   }, [])
 
+  React.useEffect(() => {
+    const canHandleNativeFileDrop = (target: EventTarget | null): boolean => {
+      const element = target as HTMLElement | null
+      if (!element || typeof element.closest !== 'function') {
+        return false
+      }
+      return Boolean(
+        element.closest('.xterm-host, .filesystem-list, .rich-input-editor')
+      )
+    }
+
+    const isNativeFileDrag = (event: DragEvent): boolean => {
+      const types = Array.from(event.dataTransfer?.types || [])
+      return types.includes('Files')
+    }
+
+    const handleDragOver = (event: DragEvent) => {
+      if (!isNativeFileDrag(event)) return
+      if (canHandleNativeFileDrop(event.target)) return
+      event.preventDefault()
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'none'
+      }
+    }
+
+    const handleDrop = (event: DragEvent) => {
+      if (!isNativeFileDrag(event)) return
+      if (canHandleNativeFileDrop(event.target)) return
+      event.preventDefault()
+    }
+
+    window.addEventListener('dragover', handleDragOver, true)
+    window.addEventListener('drop', handleDrop, true)
+    return () => {
+      window.removeEventListener('dragover', handleDragOver, true)
+      window.removeEventListener('drop', handleDrop, true)
+    }
+  }, [])
+
   const platform = (window as any)?.gyshell?.system?.platform
   const t = store.i18n.t
   const versionInfo = store.versionInfo

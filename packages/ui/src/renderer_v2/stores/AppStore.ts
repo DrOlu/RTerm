@@ -11,7 +11,12 @@ import { I18nStore } from './I18nStore'
 import { ChatStore } from './ChatStore'
 import { LayoutStore } from './LayoutStore'
 import { FileEditorStore } from './FileEditorStore'
-import { buildLayoutTree, listPanels, type PanelKind } from '../layout'
+import { buildLayoutTree, listPanels, type LayoutTree, type PanelKind } from '../layout'
+import {
+  WINDOW_CONTEXT,
+  consumeDetachedWindowState,
+  type DetachedWindowState
+} from '../lib/windowing'
 
 const upsertById = <T extends { id: string }>(list: T[], entry: T): T[] => {
   const idx = list.findIndex((x) => x.id === entry.id)
@@ -23,6 +28,24 @@ const upsertById = <T extends { id: string }>(list: T[], entry: T): T[] => {
 
 const removeById = <T extends { id: string }>(list: T[], id: string): T[] =>
   list.filter((x) => x.id !== id)
+
+type WindowScopedTabKind = 'chat' | 'terminal' | 'filesystem'
+
+const resolveVisibilityLinkedTabKinds = (kind: PanelKind): WindowScopedTabKind[] =>
+  kind === 'chat'
+    ? ['chat']
+    : kind === 'terminal' || kind === 'filesystem'
+      ? ['terminal', 'filesystem']
+      : []
+
+const resolveSuppressionKinds = (kind: PanelKind): WindowScopedTabKind[] =>
+  kind === 'chat'
+    ? ['chat']
+    : kind === 'terminal'
+      ? ['terminal']
+      : kind === 'filesystem'
+        ? ['filesystem']
+        : []
 
 export type AppView = 'main' | 'settings' | 'connections'
 export type SettingsSection =
@@ -67,6 +90,10 @@ export interface FileSystemClipboardState {
 }
 
 export class AppStore {
+  readonly windowRole = WINDOW_CONTEXT.role
+  readonly windowClientId = WINDOW_CONTEXT.clientId
+  readonly detachedSourceClientId = WINDOW_CONTEXT.sourceClientId
+
   view: AppView = 'main'
   settings: AppSettings | null = null
   isBootstrapped = false
@@ -94,6 +121,12 @@ export class AppStore {
   versionInfo: VersionCheckResult | null = null
   versionCheckInProgress = false
   showVersionUpdateDialog = false
+  private detachedVisibleTabIdsByKind: Record<'chat' | 'terminal' | 'filesystem', Set<string>> | null = null
+  private suppressedTabIdsByKind: Record<'chat' | 'terminal' | 'filesystem', Set<string>> = {
+    chat: new Set<string>(),
+    terminal: new Set<string>(),
+    filesystem: new Set<string>()
+  }
 
   constructor() {
     makeObservable(this, {
@@ -122,6 +155,7 @@ export class AppStore {
       versionInfo: observable,
       versionCheckInProgress: observable,
       showVersionUpdateDialog: observable,
+      isDetachedWindow: computed,
       isSettings: computed,
       isConnections: computed,
       activeTerminal: computed,
@@ -192,6 +226,8 @@ export class AppStore {
       sendChatMessage: action,
       openFileEditorFromFileSystem: action,
       onPanelRemoved: action,
+      suppressTabs: action,
+      unsuppressTabs: action,
       getUniqueTitle: action,
       loadVersionState: action,
       checkVersion: action,
@@ -216,6 +252,205 @@ export class AppStore {
       newTitle = `${baseTitle} (${counter})`
     }
     return newTitle
+  }
+
+  get isDetachedWindow(): boolean {
+    return this.windowRole === 'detached'
+  }
+
+  shouldPersistLayout(): boolean {
+    return !this.isDetachedWindow
+  }
+
+  getOwnedTabIds(kind: PanelKind): string[] {
+    const filterByDetachedVisibility = (tabIds: string[], scopedKind: WindowScopedTabKind): string[] => {
+      if (!this.isDetachedWindow || !this.detachedVisibleTabIdsByKind) {
+        return tabIds
+      }
+      const visibleSet = this.detachedVisibleTabIdsByKind[scopedKind]
+      return tabIds.filter((tabId) => visibleSet.has(tabId))
+    }
+
+    if (kind === 'terminal') {
+      const hidden = this.suppressedTabIdsByKind.terminal
+      const tabIds = this.terminalTabs
+        .map((tab) => tab.id)
+        .filter((id) => !hidden.has(id))
+      return filterByDetachedVisibility(tabIds, 'terminal')
+    }
+    if (kind === 'filesystem') {
+      const hidden = this.suppressedTabIdsByKind.filesystem
+      const tabIds = this.fileSystemTabs
+        .map((tab) => tab.id)
+        .filter((id) => !hidden.has(id))
+      return filterByDetachedVisibility(tabIds, 'filesystem')
+    }
+    if (kind === 'chat') {
+      const hidden = this.suppressedTabIdsByKind.chat
+      const tabIds = this.chat.sessions
+        .map((session) => session.id)
+        .filter((id) => !hidden.has(id))
+      return filterByDetachedVisibility(tabIds, 'chat')
+    }
+    return []
+  }
+
+  private collectDetachedVisibleTabIdsByKind(
+    layoutTree: LayoutTree | null | undefined
+  ): Record<WindowScopedTabKind, Set<string>> | null {
+    if (!this.isDetachedWindow) {
+      return null
+    }
+    if (!layoutTree) {
+      return {
+        chat: new Set<string>(),
+        terminal: new Set<string>(),
+        filesystem: new Set<string>()
+      }
+    }
+
+    const sets: Record<WindowScopedTabKind, Set<string>> = {
+      chat: new Set<string>(),
+      terminal: new Set<string>(),
+      filesystem: new Set<string>()
+    }
+    const panelKindById = new Map(
+      listPanels(layoutTree).map((panel) => [panel.panel.id, panel.panel.kind] as const)
+    )
+
+    Object.entries(layoutTree.panelTabs || {}).forEach(([panelId, binding]) => {
+      const panelKind = panelKindById.get(panelId)
+      if (!panelKind) {
+        return
+      }
+      const targetKinds = resolveVisibilityLinkedTabKinds(panelKind)
+      if (targetKinds.length === 0) {
+        return
+      }
+      const tabIds = Array.isArray(binding?.tabIds) ? binding.tabIds : []
+      tabIds.forEach((tabId) => {
+        const normalized = typeof tabId === 'string' ? tabId.trim() : ''
+        if (!normalized) return
+        targetKinds.forEach((targetKind) => {
+          sets[targetKind].add(normalized)
+        })
+      })
+    })
+
+    return sets
+  }
+
+  private updateDetachedVisibleTabIds(
+    kind: PanelKind,
+    tabIds: string[],
+    mode: 'add' | 'delete'
+  ): boolean {
+    if (!this.isDetachedWindow || !this.detachedVisibleTabIdsByKind) {
+      return false
+    }
+    const targetKinds = resolveVisibilityLinkedTabKinds(kind)
+    if (targetKinds.length === 0) {
+      return false
+    }
+
+    const normalizedIds = tabIds
+      .map((tabId) => String(tabId || '').trim())
+      .filter((tabId) => tabId.length > 0)
+    if (normalizedIds.length === 0) {
+      return false
+    }
+
+    let changed = false
+    targetKinds.forEach((targetKind) => {
+      const setRef = this.detachedVisibleTabIdsByKind?.[targetKind]
+      if (!setRef) return
+      normalizedIds.forEach((tabId) => {
+        if (mode === 'add') {
+          if (setRef.has(tabId)) return
+          setRef.add(tabId)
+          changed = true
+          return
+        }
+        if (!setRef.delete(tabId)) return
+        changed = true
+      })
+    })
+    return changed
+  }
+
+  suppressTabs(kind: PanelKind, tabIds: string[], options?: { syncLayout?: boolean }): void {
+    if (!Array.isArray(tabIds) || tabIds.length === 0) return
+    const shouldSyncLayout = options?.syncLayout !== false
+    const targetKinds = resolveSuppressionKinds(kind)
+    if (targetKinds.length === 0) return
+
+    let changed = false
+    const normalizedIds = tabIds
+      .map((tabId) => String(tabId || '').trim())
+      .filter((tabId) => tabId.length > 0)
+    if (normalizedIds.length === 0) return
+
+    targetKinds.forEach((targetKind) => {
+      const setRef = this.suppressedTabIdsByKind[targetKind]
+      normalizedIds.forEach((tabId) => {
+        if (setRef.has(tabId)) return
+        setRef.add(tabId)
+        changed = true
+      })
+    })
+    if (this.updateDetachedVisibleTabIds(kind, normalizedIds, 'delete')) {
+      changed = true
+    }
+    if (changed && shouldSyncLayout) {
+      this.layout.syncPanelBindings()
+    }
+  }
+
+  unsuppressTabs(kind: PanelKind, tabIds: string[], options?: { syncLayout?: boolean }): void {
+    if (!Array.isArray(tabIds) || tabIds.length === 0) return
+    const shouldSyncLayout = options?.syncLayout !== false
+    const targetKinds = resolveSuppressionKinds(kind)
+    if (targetKinds.length === 0) return
+
+    let changed = false
+    const normalizedIds = tabIds
+      .map((tabId) => String(tabId || '').trim())
+      .filter((tabId) => tabId.length > 0)
+    if (normalizedIds.length === 0) return
+
+    targetKinds.forEach((targetKind) => {
+      const setRef = this.suppressedTabIdsByKind[targetKind]
+      normalizedIds.forEach((tabId) => {
+        if (!setRef.delete(tabId)) return
+        changed = true
+      })
+    })
+    if (this.updateDetachedVisibleTabIds(kind, normalizedIds, 'add')) {
+      changed = true
+    }
+    if (changed && shouldSyncLayout) {
+      this.layout.syncPanelBindings()
+    }
+  }
+
+  collectAssignedTabsByKind(): Partial<Record<'chat' | 'terminal' | 'filesystem', string[]>> {
+    const collectForKind = (kind: Extract<PanelKind, 'chat' | 'terminal' | 'filesystem'>): string[] => {
+      const ids = new Set<string>()
+      this.layout.getPanelIdsByKind(kind).forEach((panelId) => {
+        this.layout.getPanelTabIds(panelId).forEach((tabId) => {
+          const normalized = String(tabId || '').trim()
+          if (!normalized) return
+          ids.add(normalized)
+        })
+      })
+      return Array.from(ids)
+    }
+
+    return {
+      chat: collectForKind('chat'),
+      terminal: collectForKind('terminal'),
+      filesystem: collectForKind('filesystem')
+    }
   }
 
   get isSettings(): boolean {
@@ -297,6 +532,19 @@ export class AppStore {
     } catch {
       return emptyState
     }
+  }
+
+  private isFirstLaunchDefaultLayout(layout: AppSettings['layout'] | undefined): boolean {
+    if (!layout) return true
+    if (layout.v2) return false
+    const panelOrder = Array.isArray(layout.panelOrder) ? layout.panelOrder : []
+    if (panelOrder.length === 0) {
+      return true
+    }
+    if (panelOrder.length !== 2) {
+      return false
+    }
+    return panelOrder[0] === 'chat' && panelOrder[1] === 'terminal'
   }
 
   private toTerminalConfig(item: {
@@ -937,23 +1185,44 @@ export class AppStore {
         ...backendSettings,
         ...uiSettings
       }
-      const persistedChatInventoryState = this.collectPersistedChatInventoryState(settings.layout)
+      const detachedWindowState: DetachedWindowState | null =
+        this.windowRole === 'detached' && WINDOW_CONTEXT.detachedStateToken
+          ? consumeDetachedWindowState(WINDOW_CONTEXT.detachedStateToken)
+          : null
+      const effectiveLayout = detachedWindowState
+        ? {
+            ...(settings.layout || {}),
+            v2: detachedWindowState.layoutTree
+          }
+        : settings.layout
+      const normalizedSettings = effectiveLayout
+        ? {
+            ...settings,
+            layout: effectiveLayout
+          }
+        : settings
+      const persistedChatInventoryState = this.collectPersistedChatInventoryState(effectiveLayout)
+      const detachedVisibleTabIdsByKind = this.collectDetachedVisibleTabIdsByKind(detachedWindowState?.layoutTree)
       const theme = resolveTheme(settings.themeId, customThemes)
       applyAppThemeFromTerminalScheme(theme.terminal)
       const xtermTheme = toXtermTheme(theme.terminal, { transparentBackground: true })
       deferUiUpdates = persistedChatInventoryState.tabIds.length > 0
 
       runInAction(() => {
-        this.settings = settings
+        this.settings = normalizedSettings
         this.xtermTheme = xtermTheme
         this.isBootstrapped = true
-        this.i18n.setLocale(settings.language)
+        this.detachedVisibleTabIdsByKind = detachedVisibleTabIdsByKind
+        this.i18n.setLocale(normalizedSettings.language)
         this.customThemes = customThemes
         this.chat.hydrateSessionInventoryFromLayout(
           persistedChatInventoryState.tabIds,
           persistedChatInventoryState.preferredActiveTabId
         )
         this.layout.bootstrap()
+        if (detachedWindowState?.fileEditorSnapshot) {
+          this.fileEditor.restoreSnapshot(detachedWindowState.fileEditorSnapshot)
+        }
       })
 
       // Setup deterministic UI update listener (backend is the source of truth).
@@ -1010,11 +1279,24 @@ export class AppStore {
       })
 
       const terminalSnapshot = await window.gyshell.terminal.list()
-      runInAction(() => {
-        this.reconcileTerminalTabs(terminalSnapshot)
-      })
-      if (terminalSnapshot.terminals.length === 0) {
-        this.createLocalTab()
+      if (terminalSnapshot.terminals.length > 0) {
+        runInAction(() => {
+          this.reconcileTerminalTabs(terminalSnapshot)
+        })
+      } else {
+        runInAction(() => {
+          this.terminalTabs = []
+          this.terminalTabsHydrated = true
+          this.activeTerminalId = null
+        })
+        const ensurePanelForDefault = this.windowRole === 'main' && this.isFirstLaunchDefaultLayout(effectiveLayout)
+        const targetPanelId =
+          this.layout.getPrimaryPanelId('terminal') ||
+          (ensurePanelForDefault ? this.layout.ensurePrimaryPanelForKind('terminal') : null) ||
+          undefined
+        this.createLocalTab(targetPanelId, {
+          ensurePanel: ensurePanelForDefault
+        })
       }
 
       // Load tools status
@@ -1035,7 +1317,7 @@ export class AppStore {
         this.chat.hydrateSessionInventoryFromLayout([])
       })
       if (this.terminalTabs.length === 0) {
-        this.createLocalTab()
+        this.createLocalTab(undefined, { ensurePanel: true })
       }
       void this.loadTools()
       void this.loadSkills()
@@ -1047,7 +1329,7 @@ export class AppStore {
     }
   }
 
-  createLocalTab(targetPanelId?: string): string {
+  createLocalTab(targetPanelId?: string, options?: { ensurePanel?: boolean }): string {
     const id = `local-${uuidv4()}`
     const title = this.getUniqueTitle('Local')
     const cfg: TerminalConfig = { type: 'local', id, title, cols: 80, rows: 24 }
@@ -1061,9 +1343,17 @@ export class AppStore {
     this.terminalTabs.push(tab)
     this.terminalTabsHydrated = true
     this.activeTerminalId = id
-    this.layout.syncPanelBindings()
-    if (targetPanelId) {
-      this.layout.attachTabToPanel('terminal', id, targetPanelId)
+    this.unsuppressTabs('terminal', [id], { syncLayout: false })
+    const shouldEnsurePanel = options?.ensurePanel === true
+    const resolvedPanelId =
+      targetPanelId ||
+      this.layout.getPrimaryPanelId('terminal') ||
+      (shouldEnsurePanel ? this.layout.ensurePrimaryPanelForKind('terminal') : null) ||
+      undefined
+    if (resolvedPanelId) {
+      this.layout.attachTabToPanel('terminal', id, resolvedPanelId)
+    } else {
+      this.layout.syncPanelBindings()
     }
     return id
   }
@@ -1112,9 +1402,16 @@ export class AppStore {
     this.terminalTabs.push(tab)
     this.terminalTabsHydrated = true
     this.activeTerminalId = id
-    this.layout.syncPanelBindings()
-    if (targetPanelId) {
-      this.layout.attachTabToPanel('terminal', id, targetPanelId)
+    this.unsuppressTabs('terminal', [id], { syncLayout: false })
+    const resolvedPanelId =
+      targetPanelId ||
+      this.layout.getPrimaryPanelId('terminal') ||
+      this.layout.ensurePrimaryPanelForKind('terminal') ||
+      undefined
+    if (resolvedPanelId) {
+      this.layout.attachTabToPanel('terminal', id, resolvedPanelId)
+    } else {
+      this.layout.syncPanelBindings()
     }
     return id
   }
@@ -1347,6 +1644,7 @@ export class AppStore {
       this.terminalTabs = nextTabs
       this.activeTerminalId = nextActive
     })
+    this.unsuppressTabs('terminal', [tabId], { syncLayout: false })
     this.layout.syncPanelBindings()
 
     // Kill backend session (best-effort)

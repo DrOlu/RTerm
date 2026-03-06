@@ -99,6 +99,30 @@ const run = async (): Promise<void> => {
     assertEqual(store.statusMessage, null, 'clear should reset status message')
   })
 
+  await runCase('captureSnapshot and restoreSnapshot preserve editable document state', () => {
+    const source = new FileEditorStore(makeAppStoreMock())
+    source.terminalId = 'term-a'
+    source.filePath = '/tmp/a.txt'
+    source.mode = 'text'
+    source.content = 'draft-content'
+    source.dirty = true
+    source.errorMessage = null
+    source.statusMessage = 'saved-recently'
+
+    const snapshot = source.captureSnapshot()
+
+    const target = new FileEditorStore(makeAppStoreMock())
+    const restored = target.restoreSnapshot(snapshot)
+    assertEqual(restored, true, 'restoreSnapshot should accept a valid snapshot')
+    assertEqual(target.terminalId, 'term-a', 'terminalId should be restored')
+    assertEqual(target.filePath, '/tmp/a.txt', 'filePath should be restored')
+    assertEqual(target.mode, 'text', 'mode should be restored')
+    assertEqual(target.content, 'draft-content', 'content should be restored')
+    assertEqual(target.dirty, true, 'dirty state should be restored')
+    assertEqual(target.statusMessage, 'saved-recently', 'status message should be restored')
+    assertEqual(target.busy, false, 'restoring snapshot should not keep busy state')
+  })
+
   // --- Load-cancellation race ---
   await runCase('openFromFileSystem load-cancellation: second open supersedes first, first returns false', async () => {
     let firstReadResolve: ((value: unknown) => void) | null = null
@@ -240,4 +264,3 @@ void run()
     console.error(error)
     throw error
   })
-

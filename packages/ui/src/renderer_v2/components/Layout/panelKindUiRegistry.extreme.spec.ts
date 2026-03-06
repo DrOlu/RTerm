@@ -49,6 +49,19 @@ runCase('filesystem rail click always opens panel only', () => {
   assertEqual(intentWithTabs, 'open-panel-only', 'filesystem rail should not create tabs when tabs exist')
 })
 
+runCase('owner tab count reflects global inventory', () => {
+  const mockStore = {
+    chat: {
+      sessions: [{ id: 'chat-a' }, { id: 'chat-b' }]
+    },
+    terminalTabs: [{ id: 'term-a' }],
+    fileSystemTabs: []
+  } as any
+  assertEqual(getPanelKindUiItem('chat').getOwnerTabCount(mockStore), 2, 'chat owner count should use global inventory')
+  assertEqual(getPanelKindUiItem('terminal').getOwnerTabCount(mockStore), 1, 'terminal owner count should use global inventory')
+  assertEqual(getPanelKindUiItem('filesystem').getOwnerTabCount(mockStore), 0, 'filesystem owner count should use global inventory')
+})
+
 runCase('special file editor panel is hidden from rail', () => {
   const railKinds = PANEL_KIND_UI_ORDER as readonly string[]
   assertEqual(

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
 import { join, resolve } from 'path'
 import { SettingsService } from '../../../backend/src/services/SettingsService'
 import { UiSettingsStore } from '../settings/UiSettingsStore'
@@ -53,6 +53,14 @@ let versionService: VersionService
 let accessTokenService: AccessTokenService
 let webSocketGatewayControlService: WebSocketGatewayControlService | null = null
 
+type AppWindowRole = 'main' | 'detached'
+
+interface CreateWindowOptions {
+  role?: AppWindowRole
+  detachedStateToken?: string
+  sourceClientId?: string
+}
+
 function createAutoTerminalConfig(
   terminals: Array<{ id: string; title: string }>,
   partial: Record<string, any> = {}
@@ -96,13 +104,15 @@ function createAutoTerminalConfig(
   }
 }
 
-function createWindow(): void {
+function createWindow(options?: CreateWindowOptions): BrowserWindow {
+  const role: AppWindowRole = options?.role === 'detached' ? 'detached' : 'main'
+  const isMainWindow = role === 'main'
   const settings = settingsService.getSettings()
   const uiSettings = uiSettingsStore.getSettings()
-  const savedWindow = settings.layout?.window
+  const savedWindow = isMainWindow ? settings.layout?.window : undefined
 
-  let width = 800
-  let height = 500
+  let width = isMainWindow ? 800 : 980
+  let height = isMainWindow ? 500 : 720
   let x: number | undefined
   let y: number | undefined
 
@@ -112,11 +122,16 @@ function createWindow(): void {
     x = savedWindow.x
     y = savedWindow.y
   } else {
-  // Match WaveTerm-like default sizing: fill most of the work area, but capped.
-  // (Wave uses: width/height = workArea - 200, caps 2000x1200, mins 800x500)
-  const { width: workAreaW, height: workAreaH } = screen.getPrimaryDisplay().workAreaSize
-    width = Math.min(Math.max(workAreaW - 200, 800), 2000)
-    height = Math.min(Math.max(workAreaH - 200, 500), 1200)
+    // Match WaveTerm-like default sizing: fill most of the work area, but capped.
+    // (Wave uses: width/height = workArea - 200, caps 2000x1200, mins 800x500)
+    const { width: workAreaW, height: workAreaH } = screen.getPrimaryDisplay().workAreaSize
+    if (isMainWindow) {
+      width = Math.min(Math.max(workAreaW - 200, 800), 2000)
+      height = Math.min(Math.max(workAreaH - 200, 500), 1200)
+    } else {
+      width = Math.min(Math.max(workAreaW - 280, 760), 1800)
+      height = Math.min(Math.max(workAreaH - 220, 420), 1200)
+    }
   }
 
   const platformWindowOptions = getPlatformBrowserWindowOptions(
@@ -124,13 +139,13 @@ function createWindow(): void {
     themeStore.getCustomThemes()
   )
 
-  mainWindow = new BrowserWindow({
+  const windowInstance = new BrowserWindow({
     width,
     height,
     x,
     y,
-    minWidth: 800,
-    minHeight: 500,
+    minWidth: isMainWindow ? 800 : 520,
+    minHeight: isMainWindow ? 500 : 340,
     ...platformWindowOptions,
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
@@ -141,6 +156,22 @@ function createWindow(): void {
       sandbox: false
     }
   })
+  if (isMainWindow) {
+    mainWindow = windowInstance
+  }
+
+  const query = new URLSearchParams()
+  if (!isMainWindow) {
+    query.set('windowRole', 'detached')
+    if (typeof options?.detachedStateToken === 'string' && options.detachedStateToken.trim().length > 0) {
+      query.set('detachedStateToken', options.detachedStateToken.trim())
+    }
+    if (typeof options?.sourceClientId === 'string' && options.sourceClientId.trim().length > 0) {
+      query.set('sourceClientId', options.sourceClientId.trim())
+    }
+  }
+  const queryString = query.toString()
+  const urlSuffix = queryString.length > 0 ? `?${queryString}` : ''
 
   // Load the app
   if (!app.isPackaged) {
@@ -148,20 +179,32 @@ function createWindow(): void {
     if (!devUrl) {
       throw new Error('Missing ELECTRON_RENDERER_URL (electron-vite dev server URL)')
     }
-    mainWindow.loadURL(`${devUrl}/index.html`)
-    mainWindow.webContents.openDevTools()
+    windowInstance.loadURL(`${devUrl}/index.html${urlSuffix}`)
+    if (isMainWindow) {
+      windowInstance.webContents.openDevTools()
+    }
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    if (queryString.length > 0) {
+      const queryPayload: Record<string, string> = {}
+      query.forEach((value, key) => {
+        queryPayload[key] = value
+      })
+      windowInstance.loadFile(join(__dirname, '../renderer/index.html'), { query: queryPayload })
+    } else {
+      windowInstance.loadFile(join(__dirname, '../renderer/index.html'))
+    }
   }
 
-  applyPlatformWindowTweaks(mainWindow)
+  applyPlatformWindowTweaks(windowInstance)
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
+  windowInstance.on('closed', () => {
+    if (isMainWindow) {
+      mainWindow = null
+    }
   })
 
   // Open external links in the default browser
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  windowInstance.webContents.setWindowOpenHandler(({ url }) => {
     // Only allow http/https protocols for safety
     if (url.startsWith('http:') || url.startsWith('https:')) {
       shell.openExternal(url)
@@ -169,13 +212,17 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  mainWindow.webContents.on('will-navigate', (event, url) => {
+  windowInstance.webContents.on('will-navigate', (event, url) => {
     // Check if the URL is different from the main window URL and is an external protocol
-    if (url !== mainWindow?.webContents.getURL() && (url.startsWith('http:') || url.startsWith('https:'))) {
+    if (url !== windowInstance.webContents.getURL() && (url.startsWith('http:') || url.startsWith('https:'))) {
       event.preventDefault()
       shell.openExternal(url)
     }
   })
+
+  if (!isMainWindow) {
+    return windowInstance
+  }
 
   // Save window bounds on resize or move
   const saveBounds = () => {
@@ -187,8 +234,9 @@ function createWindow(): void {
       }
     })
   }
-  mainWindow.on('resize', saveBounds)
-  mainWindow.on('move', saveBounds)
+  windowInstance.on('resize', saveBounds)
+  windowInstance.on('move', saveBounds)
+  return windowInstance
 }
 
 export async function startElectronMain(): Promise<void> {
@@ -576,6 +624,23 @@ export async function startElectronMain(): Promise<void> {
     fileSystemService
   )
   ipcAdapter.registerHandlers()
+
+  ipcMain.handle('windowing:openDetached', async (event: any, detachedStateToken: string, sourceClientId: string) => {
+    const token = String(detachedStateToken || '').trim()
+    if (!token) {
+      throw new Error('Missing detached state token.')
+    }
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!senderWindow || senderWindow.isDestroyed()) {
+      throw new Error('Failed to resolve source window.')
+    }
+    createWindow({
+      role: 'detached',
+      detachedStateToken: token,
+      sourceClientId: String(sourceClientId || '').trim()
+    })
+    return { ok: true }
+  })
 
   const settingsSnapshot = settingsService.getSettings()
   const startupPolicy = resolveWsGatewayPolicyFromEnv({

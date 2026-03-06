@@ -1,5 +1,5 @@
 import React from 'react'
-import { GripVertical, Save, X } from 'lucide-react'
+import { GripVertical, Save } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import type { AppStore } from '../../stores/AppStore'
 import './fileEditor.scss'
@@ -40,17 +40,6 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(({
   const isLayoutDragSource = store.layout.isDragging && store.layout.draggingPanelId === panelId
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const contextMenuId = React.useMemo(() => `file-editor:${panelId}`, [panelId])
-
-  const closePanel = React.useCallback(() => {
-    if (!store.layout.canRemovePanel(panelId)) {
-      return
-    }
-    if (!store.canClosePanel('fileEditor')) {
-      return
-    }
-    store.layout.removePanel(panelId)
-    store.onPanelRemoved('fileEditor')
-  }, [panelId, store])
 
   const canSave = fileEditor.canSave
   const currentPath = fileEditor.filePath || ''
@@ -94,7 +83,10 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(({
         onMouseDown={onLayoutHeaderMouseDown}
         onContextMenu={onLayoutHeaderContextMenu}
       >
-        <div className="panel-tab-drag-handle" aria-hidden="true">
+        <div
+          className="panel-tab-drag-handle"
+          aria-hidden="true"
+        >
           <GripVertical size={12} strokeWidth={2.4} />
         </div>
         <div className="file-editor-header-main">
@@ -113,9 +105,6 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(({
           disabled={!canSave}
         >
           <Save size={14} strokeWidth={2} />
-        </button>
-        <button className="icon-btn-sm" title={t.common.close} onClick={closePanel}>
-          <X size={14} strokeWidth={2} />
         </button>
       </div>
 
@@ -168,4 +157,3 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(({
     </div>
   )
 })
-

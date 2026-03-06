@@ -338,6 +338,8 @@ export const en = {
     closeTab: 'Close',
     closeOtherTabs: 'Close Other',
     closeAllTabs: 'Close All',
+    detachToWindow: 'Detach to Window',
+    mergeToMain: 'Merge to Main Window',
     chatKind: 'Chat',
     terminalKind: 'Terminal',
     filesystemKind: 'Files',

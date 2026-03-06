@@ -36,7 +36,7 @@ export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
     }
   },
   layout: {
-    panelSizes: [30, 70],
+    panelSizes: [50, 50],
     panelOrder: ['chat', 'terminal']
   },
   recursionLimit: 200,

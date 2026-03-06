@@ -1259,10 +1259,13 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
           onMouseDown={onLayoutHeaderMouseDown}
           onContextMenu={onLayoutHeaderContextMenu}
         >
-          <div className="panel-tab-drag-handle" aria-hidden="true">
-            <GripVertical size={12} strokeWidth={2.4} />
-          </div>
-          <div className="filesystem-tabs-bar" />
+        <div
+          className="panel-tab-drag-handle"
+          aria-hidden="true"
+        >
+          <GripVertical size={12} strokeWidth={2.4} />
+        </div>
+        <div className="filesystem-tabs-bar" />
         </div>
         <div className="panel-body filesystem-panel-body">
           <div className="filesystem-empty-state">{t.filesystem.noTerminalTabs}</div>
@@ -1321,7 +1324,10 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
         onMouseDown={onLayoutHeaderMouseDown}
         onContextMenu={onLayoutHeaderContextMenu}
       >
-        <div className="panel-tab-drag-handle" aria-hidden="true">
+        <div
+          className="panel-tab-drag-handle"
+          aria-hidden="true"
+        >
           <GripVertical size={12} strokeWidth={2.4} />
         </div>
         <div

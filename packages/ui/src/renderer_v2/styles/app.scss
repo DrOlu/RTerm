@@ -38,6 +38,16 @@
   display: flex;
 }
 
+.panel-tab-drag-handle {
+  pointer-events: none;
+  user-select: none;
+}
+
+.panel-tab-drag-handle > svg {
+  pointer-events: none;
+  user-select: none;
+}
+
 .gyshell-layout-canvas {
   flex: 1;
   min-height: 0;
@@ -181,25 +191,48 @@
   cursor: not-allowed;
 }
 
-.gyshell-layout-trash-drop {
+.gyshell-layout-drop-actions {
   position: absolute;
   right: 16px;
   bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+  z-index: 52;
+}
+
+.gyshell-layout-trash-drop,
+.gyshell-layout-detach-drop {
   width: 60px;
   height: 60px;
   border-radius: 10px;
-  border: 1px dashed color-mix(in srgb, var(--danger) 45%, var(--border));
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  color: color-mix(in srgb, var(--danger) 82%, var(--fg));
   display: inline-flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  z-index: 52;
+}
+
+.gyshell-layout-trash-drop {
+  border: 1px dashed color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: color-mix(in srgb, var(--danger) 82%, var(--fg));
 }
 
 .gyshell-layout-trash-drop.is-hot {
   background: color-mix(in srgb, var(--danger) 22%, transparent);
   border-color: color-mix(in srgb, var(--danger) 72%, var(--border));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 26%, transparent);
+}
+
+.gyshell-layout-detach-drop {
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: color-mix(in srgb, var(--accent) 88%, var(--fg));
+}
+
+.gyshell-layout-detach-drop.is-hot {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
 }

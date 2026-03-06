@@ -1,5 +1,9 @@
 import { action, computed, makeObservable, observable, runInAction } from 'mobx'
 import type { AppStore } from './AppStore'
+import {
+  normalizeFileEditorSnapshot,
+  type FileEditorSnapshot
+} from '../lib/fileEditorSnapshot'
 
 export type FileEditorMode = 'idle' | 'loading' | 'text' | 'error'
 
@@ -30,6 +34,8 @@ export class FileEditorStore {
       openFromFileSystem: action,
       updateContent: action,
       save: action,
+      captureSnapshot: action,
+      restoreSnapshot: action,
       clear: action
     })
   }
@@ -145,6 +151,36 @@ export class FileEditorStore {
     }
   }
 
+  captureSnapshot(): FileEditorSnapshot {
+    return {
+      terminalId: this.terminalId,
+      filePath: this.filePath,
+      mode: this.mode,
+      content: this.content,
+      dirty: this.dirty,
+      errorMessage: this.errorMessage,
+      statusMessage: this.statusMessage
+    }
+  }
+
+  restoreSnapshot(snapshot: FileEditorSnapshot | null | undefined): boolean {
+    const normalized = normalizeFileEditorSnapshot(snapshot)
+    if (!normalized) {
+      return false
+    }
+
+    this.loadRequestVersion += 1
+    this.terminalId = normalized.terminalId
+    this.filePath = normalized.filePath
+    this.mode = normalized.mode
+    this.content = normalized.content
+    this.dirty = normalized.dirty
+    this.busy = false
+    this.errorMessage = normalized.errorMessage
+    this.statusMessage = normalized.statusMessage
+    return true
+  }
+
   clear(): void {
     this.loadRequestVersion += 1
     this.terminalId = null
@@ -157,4 +193,3 @@ export class FileEditorStore {
     this.statusMessage = null
   }
 }
-

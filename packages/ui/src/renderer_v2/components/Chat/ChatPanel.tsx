@@ -498,7 +498,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(({
         title={t.chat.dragHint}
         aria-label={t.chat.dragHint}
       >
-        <div className="panel-tab-drag-handle" aria-hidden="true">
+        <div
+          className="panel-tab-drag-handle"
+          aria-hidden="true"
+        >
           <GripVertical size={12} strokeWidth={2.4} />
         </div>
         <div

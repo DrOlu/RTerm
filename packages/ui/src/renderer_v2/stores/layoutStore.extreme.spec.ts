@@ -837,6 +837,49 @@ const run = async (): Promise<void> => {
     )
   })
 
+  await runCase('importPanelFromExternal reassigns imported tabs away from existing panels', async () => {
+    const store = createStore({
+      terminalIds: ['term-a', 'term-b', 'term-c'],
+      chatIds: ['chat-a']
+    })
+    store.bootstrap()
+    store.setViewport(1400, 900)
+
+    const primaryPanelId = store.getPrimaryPanelId('terminal')
+    assertCondition(Boolean(primaryPanelId), 'terminal primary panel should exist')
+    assertEqual(
+      JSON.stringify(store.getPanelTabIds(primaryPanelId!)),
+      JSON.stringify(['term-a', 'term-b', 'term-c']),
+      'precondition: source terminal panel should initially own all terminal tabs'
+    )
+
+    const importedPanelId = store.importPanelFromExternal(
+      'terminal',
+      {
+        tabIds: ['term-b', 'term-c'],
+        activeTabId: 'term-c'
+      },
+      { panelId: primaryPanelId!, direction: 'right' }
+    )
+
+    assertCondition(Boolean(importedPanelId), 'importPanelFromExternal should create a target panel')
+    assertEqual(
+      JSON.stringify(store.getPanelTabIds(primaryPanelId!)),
+      JSON.stringify(['term-a']),
+      'existing panel should relinquish imported tabs'
+    )
+    assertEqual(
+      JSON.stringify(store.getPanelTabIds(importedPanelId!)),
+      JSON.stringify(['term-b', 'term-c']),
+      'imported panel should own the transferred tabs'
+    )
+    assertEqual(
+      store.getPanelActiveTabId(importedPanelId!),
+      'term-c',
+      'imported panel should preserve its active tab'
+    )
+  })
+
   await runCase('can remove the last panel of a kind when other kinds still exist', async () => {
     const store = createStore({
       terminalIds: ['term-a'],
@@ -863,7 +906,7 @@ const run = async (): Promise<void> => {
     )
   })
 
-  await runCase('cannot remove the final chat panel when other kinds still exist', async () => {
+  await runCase('can remove the final chat panel when other kinds still exist', async () => {
     const store = createStore({
       terminalIds: ['term-a'],
       chatIds: ['chat-a']
@@ -876,11 +919,12 @@ const run = async (): Promise<void> => {
     assertCondition(Boolean(chatPanelId), 'chat panel should exist')
     assertCondition(Boolean(terminalPanelId), 'terminal panel should exist')
     assertEqual(store.panelCount, 2, 'default layout should start with one chat and one terminal panel')
-    assertEqual(store.canRemovePanel(chatPanelId!), false, 'final chat panel should not be removable')
+    assertEqual(store.canRemovePanel(chatPanelId!), true, 'chat panel should be removable when another panel exists')
 
     store.removePanel(chatPanelId!)
-    assertEqual(store.panelCount, 2, 'attempting to remove final chat panel should be a no-op')
-    assertEqual(store.getPrimaryPanelId('chat'), chatPanelId, 'chat panel must remain present after blocked removal')
+    assertEqual(store.panelCount, 1, 'removing chat panel should leave terminal panel as the last panel')
+    assertEqual(store.getPrimaryPanelId('chat'), null, 'chat panel should be removable from layout')
+    assertEqual(store.getPrimaryPanelId('terminal'), terminalPanelId, 'terminal panel should remain after chat removal')
   })
 }
 
