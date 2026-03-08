@@ -88,10 +88,17 @@ export interface IWebSocketGatewayAdapterLogger {
   error(message: string, error?: unknown): void;
 }
 
+export interface WebSocketIpFilter {
+  mode: 'lan' | 'custom';
+  /** Parsed CIDR strings for custom mode */
+  allowedCidrs: string[];
+}
+
 export interface WebSocketGatewayAdapterOptions {
   host: string;
   port: number;
   accessTokenAuth?: WebSocketAccessTokenAuth;
+  ipFilter?: WebSocketIpFilter;
   agentBridge?: {
     exportHistory?: (sessionId: string, mode: 'simple' | 'detailed') => unknown | Promise<unknown>;
     getAllChatHistory?: () => unknown | Promise<unknown>;
@@ -302,6 +309,14 @@ export class WebSocketGatewayAdapter {
   ): Promise<void> {
     const remote = request?.socket?.remoteAddress || 'unknown';
 
+    // Check IP filter first (for lan/custom modes)
+    const ipFilterError = this.resolveIpFilterError(remote);
+    if (ipFilterError) {
+      this.logger.warn(`[WebSocketGatewayAdapter] Rejected client ${remote}: ${ipFilterError}`);
+      this.closeSocketUnauthorized(socket);
+      return;
+    }
+
     const authError = await this.resolveConnectionAuthError(request);
     if (authError) {
       this.logger.warn(`[WebSocketGatewayAdapter] Rejected client ${remote}: ${authError}`);
@@ -407,6 +422,86 @@ export class WebSocketGatewayAdapter {
       return this.isLoopbackAddress(withoutZone.slice('::ffff:'.length));
     }
     return false;
+  }
+
+  private resolveRemoteIpv4(rawAddress: string): string | null {
+    const normalized = rawAddress.trim().toLowerCase().replace(/^\[|\]$/g, '');
+    const withoutZone = normalized.split('%')[0];
+    if (withoutZone.startsWith('::ffff:')) {
+      return withoutZone.slice('::ffff:'.length);
+    }
+    // Return as-is if it looks like IPv4
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(withoutZone)) {
+      return withoutZone;
+    }
+    return null;
+  }
+
+  private parseIpv4ToNum(ipStr: string): number | null {
+    const parts = ipStr.split('.');
+    if (parts.length !== 4) return null;
+    let num = 0;
+    for (const part of parts) {
+      const n = parseInt(part, 10);
+      if (isNaN(n) || n < 0 || n > 255) return null;
+      num = (num * 256 + n) >>> 0;
+    }
+    return num;
+  }
+
+  private isIpv4InCidr(ipNum: number, cidr: string): boolean {
+    const slashIdx = cidr.indexOf('/');
+    if (slashIdx < 0) {
+      const ip = this.parseIpv4ToNum(cidr.trim());
+      return ip !== null && ip === ipNum;
+    }
+    const networkIp = this.parseIpv4ToNum(cidr.slice(0, slashIdx).trim());
+    const prefix = parseInt(cidr.slice(slashIdx + 1), 10);
+    if (networkIp === null || isNaN(prefix) || prefix < 0 || prefix > 32) return false;
+    if (prefix === 0) return true;
+    const mask = (~0 << (32 - prefix)) >>> 0;
+    return ((ipNum & mask) >>> 0) === ((networkIp & mask) >>> 0);
+  }
+
+  private isPrivateLanAddress(ipStr: string): boolean {
+    const ipNum = this.parseIpv4ToNum(ipStr);
+    if (ipNum === null) return false;
+    const LAN_CIDRS = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16'];
+    return LAN_CIDRS.some((cidr) => this.isIpv4InCidr(ipNum, cidr));
+  }
+
+  private resolveIpFilterError(rawAddress: string): string | null {
+    const filter = this.options.ipFilter;
+    if (!filter) return null;
+    if (this.isLoopbackAddress(rawAddress)) {
+      return null;
+    }
+
+    const ipv4 = this.resolveRemoteIpv4(rawAddress);
+    if (!ipv4) {
+      // Non-IPv4 addresses (pure IPv6) are blocked in lan/custom modes
+      return 'connection not allowed by IP filter';
+    }
+
+    if (filter.mode === 'lan') {
+      if (!this.isPrivateLanAddress(ipv4)) {
+        return 'not a LAN address';
+      }
+      return null;
+    }
+
+    if (filter.mode === 'custom') {
+      const allowed = filter.allowedCidrs.some((cidr) => {
+        const ipNum = this.parseIpv4ToNum(ipv4);
+        return ipNum !== null && this.isIpv4InCidr(ipNum, cidr.trim());
+      });
+      if (!allowed) {
+        return 'IP not in allowed ranges';
+      }
+      return null;
+    }
+
+    return null;
   }
 
   private closeSocketUnauthorized(socket: IWebSocketConnectionLike): void {

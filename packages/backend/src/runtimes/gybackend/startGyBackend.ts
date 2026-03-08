@@ -197,7 +197,7 @@ export async function startGyBackend(): Promise<void> {
   }
 
   const wsGatewayControlService = new WebSocketGatewayControlService({
-    createAdapter: (host, port) =>
+    createAdapter: (host, port, ipFilter) =>
       new WebSocketGatewayAdapter(gatewayService, {
         host,
         port,
@@ -205,6 +205,7 @@ export async function startGyBackend(): Promise<void> {
           verifyToken: (token: string) => accessTokenService.verifyToken(token),
           allowLocalhostWithoutToken: true
         },
+        ipFilter,
         terminalBridge: {
           listTerminals: () =>
             terminalService.getDisplayTerminals().map((terminal) => ({

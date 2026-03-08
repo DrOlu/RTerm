@@ -28,6 +28,7 @@ export const zh = {
     confirmDeleteConfig: '确定删除这个配置吗？',
     showMore: '展开',
     showLess: '收起',
+    ok: '好的',
   },
   settings: {
     title: '设置',
@@ -154,8 +155,22 @@ export const zh = {
     wsGatewayAccessModes: {
       localhost: '仅本机',
       internet: '开放网络（所有网卡）',
-      disabled: '关闭'
+      disabled: '关闭',
+      lan: '仅局域网（内网设备）',
+      custom: '自定义 IP 范围'
     },
+    wsGatewayCidrs: '允许的 IP 范围（CIDR）',
+    mobileWebServer: 'Mobile Web 服务器',
+    mobileWebPort: 'Mobile Web 端口',
+    mobileWebPortAuto: '自动',
+    mobileWebPortManual: '手动',
+    mobileWebRunning: '运行中',
+    mobileWebStopped: '已停止',
+    mobileWebAccessLinks: '访问链接',
+    mobileWebCopyLink: '复制',
+    mobileWebPortLabel: '端口',
+    mobileWebGatewayWarningTitle: '网关未对外开放',
+    mobileWebGatewayWarning: 'Mobile Web 服务器需要 WebSocket 网关对网络可访问。请先将网关访问模式修改为"仅局域网"、"自定义 IP 范围"或"开放网络"。',
     // New tooltips for other sections
     tooltips: {
       language: '切换界面的显示语言。目前支持简体中文和英文。',
@@ -171,7 +186,10 @@ export const zh = {
       wsGatewayAccess:
         '控制 websocket RPC 对外暴露方式。\n- 仅本机：绑定 127.0.0.1，只允许本地连接。\n- 开放网络：绑定 0.0.0.0，允许局域网/公网网卡接入（仍受系统防火墙影响）。\n- 关闭：不启动 websocket 监听。',
       wsGatewayPort:
-        'websocket 监听端口（1-65535）。在“仅本机/开放网络”模式下修改后会立即生效。',
+        'websocket 监听端口（1-65535）。在”仅本机/开放网络”模式下修改后会立即生效。',
+      wsGatewayCidrs: '以 CIDR 格式输入允许的 IP 段，每行一个或逗号分隔（例如 192.168.1.0/24, 10.0.0.0/8）。只有来自这些 IP 段的连接才会被允许。',
+      wsGatewayLan: '局域网模式绑定所有网卡，但只接受来自私有网络地址的连接（RFC 1918：10.x.x.x、172.16-31.x.x、192.168.x.x）。',
+      mobileWebServer: '启动本地 HTTP 服务器，在局域网内提供移动端 Web 界面。需要 WebSocket 网关对网络可访问。',
       runtimeThinkingCorrection: '每 8 次 model 循环在后台运行一次思考模型审计。若判断路径偏离，会在后续一次模型请求前注入纠正约束。',
       taskFinishGuard: '在结束前执行严格完成度审计，确认任务确实完成。关闭后，当没有工具调用时可直接结束。',
       firstTurnThinkingModel: '开启后，每次 run 的第一次 model_request 会使用 Thinking 模型，后续 model_request 自动回归 Global 模型。',

@@ -1,22 +1,46 @@
-import { action, computed, makeObservable, observable, runInAction, toJS } from 'mobx'
+import {
+  action,
+  computed,
+  makeObservable,
+  observable,
+  runInAction,
+  toJS,
+} from 'mobx'
 import { v4 as uuidv4 } from 'uuid'
 import type { ITheme } from '@xterm/xterm'
-import type { AppSettings, TerminalConfig, AppLanguage, ModelDefinition, ProxyEntry, TunnelEntry } from '../lib/ipcTypes'
+import type {
+  AppSettings,
+  TerminalConfig,
+  AppLanguage,
+  ModelDefinition,
+  ProxyEntry,
+  TunnelEntry,
+} from '../lib/ipcTypes'
 import { applyAppThemeFromTerminalScheme } from '../theme/appTheme'
 import { resolveTheme } from '../theme/themes'
 import { toXtermTheme } from '../theme/xtermTheme'
 import type { TerminalColorScheme } from '../theme/terminalColorSchemes'
-import { createImagePreviewDataUrl, readFileAsDataUrl, type InputImageAttachment, type UserInputPayload } from '../lib/userInput'
+import {
+  createImagePreviewDataUrl,
+  readFileAsDataUrl,
+  type InputImageAttachment,
+  type UserInputPayload,
+} from '../lib/userInput'
 import { I18nStore } from './I18nStore'
 import { ChatStore } from './ChatStore'
 import { LayoutStore } from './LayoutStore'
 import { FileEditorStore } from './FileEditorStore'
-import { buildLayoutTree, listPanels, type LayoutTree, type PanelKind } from '../layout'
+import {
+  buildLayoutTree,
+  listPanels,
+  type LayoutTree,
+  type PanelKind,
+} from '../layout'
 import {
   WINDOW_CONTEXT,
   readDetachedWindowState,
   type DetachedWindowState,
-  type WindowingTerminalTabSnapshot
+  type WindowingTerminalTabSnapshot,
 } from '../lib/windowing'
 
 const upsertById = <T extends { id: string }>(list: T[], entry: T): T[] => {
@@ -30,9 +54,11 @@ const upsertById = <T extends { id: string }>(list: T[], entry: T): T[] => {
 const removeById = <T extends { id: string }>(list: T[], id: string): T[] =>
   list.filter((x) => x.id !== id)
 
-type WindowScopedTabKind = 'chat' | 'terminal' | 'filesystem'
+type WindowScopedTabKind = 'chat' | 'terminal' | 'filesystem';
 
-const resolveVisibilityLinkedTabKinds = (kind: PanelKind): WindowScopedTabKind[] =>
+const resolveVisibilityLinkedTabKinds = (
+  kind: PanelKind,
+): WindowScopedTabKind[] =>
   kind === 'chat'
     ? ['chat']
     : kind === 'terminal' || kind === 'filesystem'
@@ -48,7 +74,7 @@ const resolveSuppressionKinds = (kind: PanelKind): WindowScopedTabKind[] =>
         ? ['filesystem']
         : []
 
-export type AppView = 'main' | 'settings' | 'connections'
+export type AppView = 'main' | 'settings' | 'connections';
 export type SettingsSection =
   | 'general'
   | 'theme'
@@ -58,36 +84,54 @@ export type SettingsSection =
   | 'skills'
   | 'memory'
   | 'accessTokens'
-  | 'version'
+  | 'version';
 
-export type McpToolSummary = Awaited<ReturnType<Window['gyshell']['tools']['getMcp']>>[number]
-export type BuiltInToolSummary = Awaited<ReturnType<Window['gyshell']['tools']['getBuiltIn']>>[number]
-export type SkillSummary = Awaited<ReturnType<Window['gyshell']['skills']['getAll']>>[number]
-export type SkillStatusSummary = Awaited<ReturnType<Window['gyshell']['skills']['setEnabled']>>[number]
-export type MemorySnapshot = Awaited<ReturnType<Window['gyshell']['memory']['get']>>
-export type AccessTokenSummary = Awaited<ReturnType<Window['gyshell']['accessTokens']['list']>>[number]
-export type CommandPolicyLists = Awaited<ReturnType<Window['gyshell']['settings']['getCommandPolicyLists']>>
-export type VersionCheckResult = Awaited<ReturnType<Window['gyshell']['version']['check']>>
+export type McpToolSummary = Awaited<
+  ReturnType<Window['gyshell']['tools']['getMcp']>
+>[number];
+export type BuiltInToolSummary = Awaited<
+  ReturnType<Window['gyshell']['tools']['getBuiltIn']>
+>[number];
+export type SkillSummary = Awaited<
+  ReturnType<Window['gyshell']['skills']['getAll']>
+>[number];
+export type SkillStatusSummary = Awaited<
+  ReturnType<Window['gyshell']['skills']['setEnabled']>
+>[number];
+export type MemorySnapshot = Awaited<
+  ReturnType<Window['gyshell']['memory']['get']>
+>;
+export type AccessTokenSummary = Awaited<
+  ReturnType<Window['gyshell']['accessTokens']['list']>
+>[number];
+export type CommandPolicyLists = Awaited<
+  ReturnType<Window['gyshell']['settings']['getCommandPolicyLists']>
+>;
+export type VersionCheckResult = Awaited<
+  ReturnType<Window['gyshell']['version']['check']>
+>;
 
 export interface TerminalTabModel {
-  id: string
-  title: string
-  config: TerminalConfig
-  connectionRef?: { type: 'local' } | { type: 'ssh'; entryId: string }
-  runtimeState?: 'initializing' | 'ready' | 'exited'
-  lastExitCode?: number
+  id: string;
+  title: string;
+  config: TerminalConfig;
+  connectionRef?: { type: 'local' } | { type: 'ssh'; entryId: string };
+  runtimeState?: 'initializing' | 'ready' | 'exited';
+  lastExitCode?: number;
 }
-type TerminalListPayload = Awaited<ReturnType<Window['gyshell']['terminal']['list']>>
+type TerminalListPayload = Awaited<
+  ReturnType<Window['gyshell']['terminal']['list']>
+>;
 
-export type FileSystemClipboardMode = 'copy' | 'move'
+export type FileSystemClipboardMode = 'copy' | 'move';
 
 export interface FileSystemClipboardState {
-  mode: FileSystemClipboardMode
-  sourceTerminalId: string
-  sourcePaths: string[]
-  itemNames: string[]
-  sourceBasePath: string
-  createdAt: number
+  mode: FileSystemClipboardMode;
+  sourceTerminalId: string;
+  sourcePaths: string[];
+  itemNames: string[];
+  sourceBasePath: string;
+  createdAt: number;
 }
 
 export class AppStore {
@@ -118,16 +162,29 @@ export class AppStore {
   memoryFilePath = ''
   memoryContent = ''
   accessTokens: AccessTokenSummary[] = []
-  commandPolicyLists: CommandPolicyLists = { allowlist: [], denylist: [], asklist: [] }
+  commandPolicyLists: CommandPolicyLists = {
+    allowlist: [],
+    denylist: [],
+    asklist: [],
+  }
   versionInfo: VersionCheckResult | null = null
   versionCheckInProgress = false
   showVersionUpdateDialog = false
-  private detachedVisibleTabIdsByKind: Record<'chat' | 'terminal' | 'filesystem', Set<string>> | null = null
+  mobileWebStatus: { running: boolean; port?: number; urls?: string[] } = {
+    running: false,
+  }
+  private detachedVisibleTabIdsByKind: Record<
+    'chat' | 'terminal' | 'filesystem',
+    Set<string>
+  > | null = null
   private lastKnownChatSessionIds = new Set<string>()
-  private suppressedTabIdsByKind: Record<'chat' | 'terminal' | 'filesystem', Set<string>> = {
+  private suppressedTabIdsByKind: Record<
+    'chat' | 'terminal' | 'filesystem',
+    Set<string>
+  > = {
     chat: new Set<string>(),
     terminal: new Set<string>(),
-    filesystem: new Set<string>()
+    filesystem: new Set<string>(),
   }
 
   constructor() {
@@ -218,8 +275,15 @@ export class AppStore {
       setMemoryEnabled: action,
       setRecursionLimit: action,
       setDebugMode: action,
+      mobileWebStatus: observable,
+      setMobileWebStatus: action,
+      startMobileWeb: action,
+      stopMobileWeb: action,
+      setMobileWebPort: action,
       setWsGatewayAccess: action,
       setWsGatewayPort: action,
+      setWsGatewayCidrs: action,
+      setWsGatewayCustomCidrs: action,
       setRuntimeThinkingCorrectionEnabled: action,
       setTaskFinishGuardEnabled: action,
       setFirstTurnThinkingModelEnabled: action,
@@ -239,11 +303,17 @@ export class AppStore {
       checkVersion: action,
       closeVersionUpdateDialog: action,
       openVersionDownload: action,
-      reconcileTerminalTabs: action
+      reconcileTerminalTabs: action,
     })
-    this.chat.setQueueRunner((sessionId, input) => this.sendChatMessage(sessionId, input, { mode: 'queue' }))
-    this.chat.setSessionsChangedListener((sessionIds) => this.handleChatSessionsChanged(sessionIds))
-    this.lastKnownChatSessionIds = new Set(this.chat.sessions.map((session) => session.id))
+    this.chat.setQueueRunner((sessionId, input) =>
+      this.sendChatMessage(sessionId, input, { mode: 'queue' }),
+    )
+    this.chat.setSessionsChangedListener((sessionIds) =>
+      this.handleChatSessionsChanged(sessionIds),
+    )
+    this.lastKnownChatSessionIds = new Set(
+      this.chat.sessions.map((session) => session.id),
+    )
   }
 
   getUniqueTitle(baseTitle: string): string {
@@ -270,7 +340,10 @@ export class AppStore {
   }
 
   getOwnedTabIds(kind: PanelKind): string[] {
-    const filterByDetachedVisibility = (tabIds: string[], scopedKind: WindowScopedTabKind): string[] => {
+    const filterByDetachedVisibility = (
+      tabIds: string[],
+      scopedKind: WindowScopedTabKind,
+    ): string[] => {
       if (!this.isDetachedWindow || !this.detachedVisibleTabIdsByKind) {
         return tabIds
       }
@@ -303,7 +376,7 @@ export class AppStore {
   }
 
   private collectDetachedVisibleTabIdsByKind(
-    layoutTree: LayoutTree | null | undefined
+    layoutTree: LayoutTree | null | undefined,
   ): Record<WindowScopedTabKind, Set<string>> | null {
     if (!this.isDetachedWindow) {
       return null
@@ -312,17 +385,19 @@ export class AppStore {
       return {
         chat: new Set<string>(),
         terminal: new Set<string>(),
-        filesystem: new Set<string>()
+        filesystem: new Set<string>(),
       }
     }
 
     const sets: Record<WindowScopedTabKind, Set<string>> = {
       chat: new Set<string>(),
       terminal: new Set<string>(),
-      filesystem: new Set<string>()
+      filesystem: new Set<string>(),
     }
     const panelKindById = new Map(
-      listPanels(layoutTree).map((panel) => [panel.panel.id, panel.panel.kind] as const)
+      listPanels(layoutTree).map(
+        (panel) => [panel.panel.id, panel.panel.kind] as const,
+      ),
     )
 
     Object.entries(layoutTree.panelTabs || {}).forEach(([panelId, binding]) => {
@@ -350,7 +425,7 @@ export class AppStore {
   private updateDetachedVisibleTabIds(
     kind: PanelKind,
     tabIds: string[],
-    mode: 'add' | 'delete'
+    mode: 'add' | 'delete',
   ): boolean {
     if (!this.isDetachedWindow || !this.detachedVisibleTabIdsByKind) {
       return false
@@ -390,8 +465,12 @@ export class AppStore {
       .map((sessionId) => String(sessionId || '').trim())
       .filter((sessionId) => sessionId.length > 0)
     const nextIds = new Set(normalizedIds)
-    const addedIds = normalizedIds.filter((sessionId) => !this.lastKnownChatSessionIds.has(sessionId))
-    const removedIds = Array.from(this.lastKnownChatSessionIds).filter((sessionId) => !nextIds.has(sessionId))
+    const addedIds = normalizedIds.filter(
+      (sessionId) => !this.lastKnownChatSessionIds.has(sessionId),
+    )
+    const removedIds = Array.from(this.lastKnownChatSessionIds).filter(
+      (sessionId) => !nextIds.has(sessionId),
+    )
 
     // Detached chat windows keep a visibility filter separate from the global
     // chat inventory. Newly created sessions must be added here immediately or
@@ -407,7 +486,9 @@ export class AppStore {
     this.layout.syncPanelBindings()
   }
 
-  private upsertTransferredTerminalTab(snapshot: WindowingTerminalTabSnapshot): void {
+  private upsertTransferredTerminalTab(
+    snapshot: WindowingTerminalTabSnapshot,
+  ): void {
     const normalizedId = String(snapshot.id || '').trim()
     if (!normalizedId) {
       return
@@ -416,9 +497,13 @@ export class AppStore {
       id: normalizedId,
       title: String(snapshot.title || '').trim() || normalizedId,
       config: snapshot.config,
-      ...(snapshot.connectionRef ? { connectionRef: snapshot.connectionRef } : {}),
+      ...(snapshot.connectionRef
+        ? { connectionRef: snapshot.connectionRef }
+        : {}),
       ...(snapshot.runtimeState ? { runtimeState: snapshot.runtimeState } : {}),
-      ...(typeof snapshot.lastExitCode === 'number' ? { lastExitCode: snapshot.lastExitCode } : {})
+      ...(typeof snapshot.lastExitCode === 'number'
+        ? { lastExitCode: snapshot.lastExitCode }
+        : {}),
     }
     this.terminalTabs = upsertById(this.terminalTabs, nextTab)
     if (!this.activeTerminalId) {
@@ -430,8 +515,8 @@ export class AppStore {
     kind: PanelKind,
     tabId: string,
     options?: {
-      terminalTab?: WindowingTerminalTabSnapshot
-    }
+      terminalTab?: WindowingTerminalTabSnapshot;
+    },
   ): void {
     const normalizedTabId = String(tabId || '').trim()
     if (!normalizedTabId) {
@@ -445,7 +530,10 @@ export class AppStore {
       this.chat.ensureSession(normalizedTabId)
       return
     }
-    if ((kind === 'terminal' || kind === 'filesystem') && options?.terminalTab?.id === normalizedTabId) {
+    if (
+      (kind === 'terminal' || kind === 'filesystem') &&
+      options?.terminalTab?.id === normalizedTabId
+    ) {
       // Terminal/filesystem tabs share backend inventory, but a target renderer
       // may still be one onTabsUpdated tick behind when a tab is dragged across
       // windows. Seed a lightweight placeholder so syncPanelBindings() does not
@@ -458,30 +546,33 @@ export class AppStore {
     kind: PanelKind,
     tabIds: string[],
     options?: {
-      terminalTabs?: WindowingTerminalTabSnapshot[]
-    }
+      terminalTabs?: WindowingTerminalTabSnapshot[];
+    },
   ): string[] {
     const normalizedTabIds = Array.from(
       new Set(
         (tabIds || [])
           .map((tabId) => String(tabId || '').trim())
-          .filter((tabId) => tabId.length > 0)
-      )
+          .filter((tabId) => tabId.length > 0),
+      ),
     )
     if (normalizedTabIds.length === 0) {
       return normalizedTabIds
     }
     const terminalTabById = new Map(
       (options?.terminalTabs || [])
-        .map((terminalTab) => [String(terminalTab.id || '').trim(), terminalTab] as const)
-        .filter(([tabId]) => tabId.length > 0)
+        .map(
+          (terminalTab) =>
+            [String(terminalTab.id || '').trim(), terminalTab] as const,
+        )
+        .filter(([tabId]) => tabId.length > 0),
     )
     // Cross-window transferred tabs must create owner inventory entries before
     // any layout sync runs, otherwise syncPanelBindings() can strip them back
     // out of the restored binding as "unknown" ids.
     normalizedTabIds.forEach((tabId) => {
       this.ensureTabInventoryEntry(kind, tabId, {
-        terminalTab: terminalTabById.get(tabId)
+        terminalTab: terminalTabById.get(tabId),
       })
     })
     return normalizedTabIds
@@ -497,13 +588,15 @@ export class AppStore {
       return
     }
     this.chat.ensureSession(normalizedTabId)
-    void this.chat.hydrateSessionFromBackend(normalizedTabId, {
-      activate: false,
-      loadAgentContext: false
-    }).catch(() => {
-      // A brand-new local chat may not exist in backend history yet. Keep the
-      // placeholder session so cross-window tab/panel moves still succeed.
-    })
+    void this.chat
+      .hydrateSessionFromBackend(normalizedTabId, {
+        activate: false,
+        loadAgentContext: false,
+      })
+      .catch(() => {
+        // A brand-new local chat may not exist in backend history yet. Keep the
+        // placeholder session so cross-window tab/panel moves still succeed.
+      })
   }
 
   hydrateTransferredTabs(kind: PanelKind, tabIds: string[]): string[] {
@@ -511,8 +604,8 @@ export class AppStore {
       new Set(
         (tabIds || [])
           .map((tabId) => String(tabId || '').trim())
-          .filter((tabId) => tabId.length > 0)
-      )
+          .filter((tabId) => tabId.length > 0),
+      ),
     )
     normalizedTabIds.forEach((tabId) => {
       this.hydrateTransferredTabEntry(kind, tabId)
@@ -520,7 +613,11 @@ export class AppStore {
     return normalizedTabIds
   }
 
-  suppressTabs(kind: PanelKind, tabIds: string[], options?: { syncLayout?: boolean }): void {
+  suppressTabs(
+    kind: PanelKind,
+    tabIds: string[],
+    options?: { syncLayout?: boolean },
+  ): void {
     if (!Array.isArray(tabIds) || tabIds.length === 0) return
     const shouldSyncLayout = options?.syncLayout !== false
     const targetKinds = resolveSuppressionKinds(kind)
@@ -548,7 +645,11 @@ export class AppStore {
     }
   }
 
-  unsuppressTabs(kind: PanelKind, tabIds: string[], options?: { syncLayout?: boolean }): void {
+  unsuppressTabs(
+    kind: PanelKind,
+    tabIds: string[],
+    options?: { syncLayout?: boolean },
+  ): void {
     if (!Array.isArray(tabIds) || tabIds.length === 0) return
     const shouldSyncLayout = options?.syncLayout !== false
     const targetKinds = resolveSuppressionKinds(kind)
@@ -575,8 +676,12 @@ export class AppStore {
     }
   }
 
-  collectAssignedTabsByKind(): Partial<Record<'chat' | 'terminal' | 'filesystem', string[]>> {
-    const collectForKind = (kind: Extract<PanelKind, 'chat' | 'terminal' | 'filesystem'>): string[] => {
+  collectAssignedTabsByKind(): Partial<
+    Record<'chat' | 'terminal' | 'filesystem', string[]>
+  > {
+    const collectForKind = (
+      kind: Extract<PanelKind, 'chat' | 'terminal' | 'filesystem'>,
+    ): string[] => {
       const ids = new Set<string>()
       this.layout.getPanelIdsByKind(kind).forEach((panelId) => {
         this.layout.getPanelTabIds(panelId).forEach((tabId) => {
@@ -591,7 +696,7 @@ export class AppStore {
     return {
       chat: collectForKind('chat'),
       terminal: collectForKind('terminal'),
-      filesystem: collectForKind('filesystem')
+      filesystem: collectForKind('filesystem'),
     }
   }
 
@@ -605,25 +710,31 @@ export class AppStore {
 
   get activeTerminal(): TerminalTabModel | null {
     if (!this.activeTerminalId) return null
-    return this.terminalTabs.find((t) => t.id === this.activeTerminalId) ?? null
+    return (
+      this.terminalTabs.find((t) => t.id === this.activeTerminalId) ?? null
+    )
   }
 
   get fileSystemTabs(): TerminalTabModel[] {
     return this.terminalTabs
   }
 
-  private collectPersistedChatInventoryState(layout: AppSettings['layout'] | undefined): {
-    tabIds: string[]
-    preferredActiveTabId: string | null
+  private collectPersistedChatInventoryState(
+    layout: AppSettings['layout'] | undefined,
+  ): {
+    tabIds: string[];
+    preferredActiveTabId: string | null;
   } {
     const emptyState = {
       tabIds: [],
-      preferredActiveTabId: null
+      preferredActiveTabId: null,
     }
 
     try {
       const tree = buildLayoutTree(layout)
-      const chatPanels = listPanels(tree).filter((panel) => panel.panel.kind === 'chat')
+      const chatPanels = listPanels(tree).filter(
+        (panel) => panel.panel.kind === 'chat',
+      )
       const chatPanelIds = chatPanels.map((panel) => panel.panel.id)
       if (chatPanelIds.length === 0) {
         return emptyState
@@ -633,16 +744,20 @@ export class AppStore {
       const chatBindings = chatPanelIds.map((panelId) => {
         const binding = tree.panelTabs?.[panelId]
         const tabIds = Array.isArray(binding?.tabIds)
-          ? binding.tabIds.filter((tabId): tabId is string => typeof tabId === 'string' && tabId.length > 0)
+          ? binding.tabIds.filter(
+              (tabId): tabId is string =>
+                typeof tabId === 'string' && tabId.length > 0,
+            )
           : []
         const activeTabId =
-          typeof binding?.activeTabId === 'string' && tabIds.includes(binding.activeTabId)
+          typeof binding?.activeTabId === 'string' &&
+          tabIds.includes(binding.activeTabId)
             ? binding.activeTabId
             : null
         return {
           panelId,
           tabIds,
-          activeTabId
+          activeTabId,
         }
       })
       const seen = new Set<string>()
@@ -661,25 +776,35 @@ export class AppStore {
         if (!focusedPanelId || !chatPanelSet.has(focusedPanelId)) {
           return null
         }
-        return chatBindings.find((binding) => binding.panelId === focusedPanelId)?.activeTabId || null
+        return (
+          chatBindings.find((binding) => binding.panelId === focusedPanelId)
+            ?.activeTabId || null
+        )
       })()
 
-      const fallbackActiveTabId = chatBindings.find((binding) => !!binding.activeTabId)?.activeTabId || null
-      const preferredActiveTabId = focusedActiveTabId || fallbackActiveTabId || tabIds[0] || null
+      const fallbackActiveTabId =
+        chatBindings.find((binding) => !!binding.activeTabId)?.activeTabId ||
+        null
+      const preferredActiveTabId =
+        focusedActiveTabId || fallbackActiveTabId || tabIds[0] || null
 
       return {
         tabIds,
-        preferredActiveTabId
+        preferredActiveTabId,
       }
     } catch {
       return emptyState
     }
   }
 
-  private isFirstLaunchDefaultLayout(layout: AppSettings['layout'] | undefined): boolean {
+  private isFirstLaunchDefaultLayout(
+    layout: AppSettings['layout'] | undefined,
+  ): boolean {
     if (!layout) return true
     if (layout.v2) return false
-    const panelOrder = Array.isArray(layout.panelOrder) ? layout.panelOrder : []
+    const panelOrder = Array.isArray(layout.panelOrder)
+      ? layout.panelOrder
+      : []
     if (panelOrder.length === 0) {
       return true
     }
@@ -690,27 +815,32 @@ export class AppStore {
   }
 
   private toTerminalConfig(item: {
-    id: string
-    title: string
-    type: TerminalConfig['type']
-    cols: number
-    rows: number
+    id: string;
+    title: string;
+    type: TerminalConfig['type'];
+    cols: number;
+    rows: number;
   }): TerminalConfig {
     return {
       type: item.type,
       id: item.id,
       title: item.title,
       cols: item.cols > 0 ? item.cols : 80,
-      rows: item.rows > 0 ? item.rows : 24
+      rows: item.rows > 0 ? item.rows : 24,
     } as TerminalConfig
   }
 
   reconcileTerminalTabs(payload: TerminalListPayload): void {
     const firstHydration = this.terminalTabsHydrated !== true
     const incoming = payload?.terminals || []
-    const incomingIds = incoming.map((item) => item.id).filter((id): id is string => typeof id === 'string' && id.length > 0)
+    const incomingIds = incoming
+      .map((item) => item.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
     if (firstHydration) {
-      const unresolvedPanelIds = this.layout.getPanelsWithMissingTabBindings('terminal', incomingIds)
+      const unresolvedPanelIds = this.layout.getPanelsWithMissingTabBindings(
+        'terminal',
+        incomingIds,
+      )
       this.layout.pinPanelsAsRestorePlaceholder(unresolvedPanelIds)
     }
     const existingById = new Map(this.terminalTabs.map((tab) => [tab.id, tab]))
@@ -726,8 +856,8 @@ export class AppStore {
             ...existing.config,
             title: item.title,
             cols: item.cols > 0 ? item.cols : existing.config.cols,
-            rows: item.rows > 0 ? item.rows : existing.config.rows
-          }
+            rows: item.rows > 0 ? item.rows : existing.config.rows,
+          },
         }
       }
       return {
@@ -736,7 +866,7 @@ export class AppStore {
         config: this.toTerminalConfig(item),
         connectionRef: item.type === 'local' ? { type: 'local' } : undefined,
         runtimeState: item.runtimeState,
-        lastExitCode: item.lastExitCode
+        lastExitCode: item.lastExitCode,
       }
     })
 
@@ -754,11 +884,11 @@ export class AppStore {
   private async fetchCombinedSettings(): Promise<AppSettings> {
     const [backendSettings, uiSettings] = await Promise.all([
       window.gyshell.settings.get(),
-      window.gyshell.uiSettings.get()
+      window.gyshell.uiSettings.get(),
     ])
     return {
       ...backendSettings,
-      ...uiSettings
+      ...uiSettings,
     }
   }
 
@@ -774,9 +904,9 @@ export class AppStore {
       enabledByName.has(skill.name)
         ? {
             ...skill,
-            enabled: enabledByName.get(skill.name)
+            enabled: enabledByName.get(skill.name),
           }
-        : skill
+        : skill,
     )
 
     if (!this.settings) return
@@ -788,8 +918,8 @@ export class AppStore {
       ...this.settings,
       tools: {
         builtIn: this.settings.tools?.builtIn ?? {},
-        skills: nextToolsSkills
-      }
+        skills: nextToolsSkills,
+      },
     }
   }
 
@@ -804,8 +934,8 @@ export class AppStore {
       ...this.settings,
       tools: {
         builtIn: nextToolsBuiltIn,
-        skills: this.settings.tools?.skills ?? {}
-      }
+        skills: this.settings.tools?.skills ?? {},
+      },
     }
   }
 
@@ -844,7 +974,9 @@ export class AppStore {
     }
   }
 
-  async checkVersion(options?: { showPopupOnVersionChange?: boolean }): Promise<void> {
+  async checkVersion(options?: {
+    showPopupOnVersionChange?: boolean;
+  }): Promise<void> {
     if (this.versionCheckInProgress) return
     runInAction(() => {
       this.versionCheckInProgress = true
@@ -892,13 +1024,15 @@ export class AppStore {
     await window.gyshell.uiSettings.set({ language: lang })
   }
 
-  async setTerminalSettings(terminal: Partial<AppSettings['terminal']>): Promise<void> {
+  async setTerminalSettings(
+    terminal: Partial<AppSettings['terminal']>,
+  ): Promise<void> {
     let nextTerminal: AppSettings['terminal'] | undefined
     runInAction(() => {
       if (this.settings) {
         this.settings.terminal = {
           ...this.settings.terminal,
-          ...terminal
+          ...terminal,
         }
         nextTerminal = toJS(this.settings.terminal)
       }
@@ -912,7 +1046,9 @@ export class AppStore {
     // optimistic UI: apply immediately
     const theme = resolveTheme(themeId, this.customThemes)
     applyAppThemeFromTerminalScheme(theme.terminal)
-    const xtermTheme = toXtermTheme(theme.terminal, { transparentBackground: true })
+    const xtermTheme = toXtermTheme(theme.terminal, {
+      transparentBackground: true,
+    })
     runInAction(() => {
       this.xtermTheme = xtermTheme
       if (this.settings) {
@@ -928,17 +1064,19 @@ export class AppStore {
       try {
         const [backendSettings, uiSettings] = await Promise.all([
           window.gyshell.settings.get(),
-          window.gyshell.uiSettings.get()
+          window.gyshell.uiSettings.get(),
         ])
         const settings = {
           ...backendSettings,
-          ...uiSettings
+          ...uiSettings,
         }
         const t = resolveTheme(settings.themeId, this.customThemes)
         applyAppThemeFromTerminalScheme(t.terminal)
         runInAction(() => {
           this.settings = settings
-          this.xtermTheme = toXtermTheme(t.terminal, { transparentBackground: true })
+          this.xtermTheme = toXtermTheme(t.terminal, {
+            transparentBackground: true,
+          })
         })
       } catch {
         // ignore
@@ -946,7 +1084,9 @@ export class AppStore {
     }
   }
 
-  async setCommandPolicyMode(mode: AppSettings['commandPolicyMode']): Promise<void> {
+  async setCommandPolicyMode(
+    mode: AppSettings['commandPolicyMode'],
+  ): Promise<void> {
     runInAction(() => {
       if (this.settings) {
         this.settings = { ...this.settings, commandPolicyMode: mode }
@@ -970,15 +1110,27 @@ export class AppStore {
     }
   }
 
-  async addCommandPolicyRule(listName: 'allowlist' | 'denylist' | 'asklist', rule: string): Promise<void> {
-    const lists = await window.gyshell.settings.addCommandPolicyRule(listName, rule)
+  async addCommandPolicyRule(
+    listName: 'allowlist' | 'denylist' | 'asklist',
+    rule: string,
+  ): Promise<void> {
+    const lists = await window.gyshell.settings.addCommandPolicyRule(
+      listName,
+      rule,
+    )
     runInAction(() => {
       this.commandPolicyLists = lists
     })
   }
 
-  async deleteCommandPolicyRule(listName: 'allowlist' | 'denylist' | 'asklist', rule: string): Promise<void> {
-    const lists = await window.gyshell.settings.deleteCommandPolicyRule(listName, rule)
+  async deleteCommandPolicyRule(
+    listName: 'allowlist' | 'denylist' | 'asklist',
+    rule: string,
+  ): Promise<void> {
+    const lists = await window.gyshell.settings.deleteCommandPolicyRule(
+      listName,
+      rule,
+    )
     runInAction(() => {
       this.commandPolicyLists = lists
     })
@@ -988,7 +1140,7 @@ export class AppStore {
     try {
       const [mcpTools, builtInTools] = await Promise.all([
         window.gyshell.tools.getMcp(),
-        window.gyshell.tools.getBuiltIn()
+        window.gyshell.tools.getBuiltIn(),
       ])
       runInAction(() => {
         this.mcpTools = mcpTools
@@ -1004,14 +1156,14 @@ export class AppStore {
       const [skills, enabledSkills, settings] = await Promise.all([
         window.gyshell.skills.getAll(),
         window.gyshell.skills.getEnabled(),
-        this.fetchCombinedSettings()
+        this.fetchCombinedSettings(),
       ])
       const enabledByName = new Set(enabledSkills.map((skill) => skill.name))
       runInAction(() => {
         this.settings = settings
         this.skills = skills.map((skill) => ({
           ...skill,
-          enabled: enabledByName.has(skill.name)
+          enabled: enabledByName.has(skill.name),
         }))
       })
     } catch (err) {
@@ -1027,14 +1179,14 @@ export class AppStore {
     const [skills, enabledSkills, settings] = await Promise.all([
       window.gyshell.skills.reload(),
       window.gyshell.skills.getEnabled(),
-      this.fetchCombinedSettings()
+      this.fetchCombinedSettings(),
     ])
     const enabledByName = new Set(enabledSkills.map((skill) => skill.name))
     runInAction(() => {
       this.settings = settings
       this.skills = skills.map((skill) => ({
         ...skill,
-        enabled: enabledByName.has(skill.name)
+        enabled: enabledByName.has(skill.name),
       }))
     })
   }
@@ -1091,19 +1243,23 @@ export class AppStore {
     try {
       const items = await window.gyshell.accessTokens.list()
       runInAction(() => {
-        this.accessTokens = [...items].sort((left, right) => right.createdAt - left.createdAt)
+        this.accessTokens = [...items].sort(
+          (left, right) => right.createdAt - left.createdAt,
+        )
       })
     } catch (error) {
       console.error('Failed to load access tokens', error)
     }
   }
 
-  async createAccessToken(name: string): Promise<Awaited<ReturnType<Window['gyshell']['accessTokens']['create']>>> {
+  async createAccessToken(
+    name: string,
+  ): Promise<Awaited<ReturnType<Window['gyshell']['accessTokens']['create']>>> {
     const created = await window.gyshell.accessTokens.create(name)
     runInAction(() => {
       this.accessTokens = [
         { id: created.id, name: created.name, createdAt: created.createdAt },
-        ...this.accessTokens.filter((item) => item.id !== created.id)
+        ...this.accessTokens.filter((item) => item.id !== created.id),
       ]
     })
     return created
@@ -1137,7 +1293,10 @@ export class AppStore {
   }
 
   async setBuiltInToolEnabled(name: string, enabled: boolean): Promise<void> {
-    const builtInTools = await window.gyshell.tools.setBuiltInEnabled(name, enabled)
+    const builtInTools = await window.gyshell.tools.setBuiltInEnabled(
+      name,
+      enabled,
+    )
     runInAction(() => {
       this.applyBuiltInToolStatusUpdate(builtInTools)
     })
@@ -1158,15 +1317,15 @@ export class AppStore {
         this.settings = {
           ...this.settings,
           memory: {
-            enabled
-          }
+            enabled,
+          },
         }
       }
     })
     await window.gyshell.settings.set({
       memory: {
-        enabled
-      }
+        enabled,
+      },
     })
   }
 
@@ -1188,69 +1347,226 @@ export class AppStore {
     await window.gyshell.settings.set({ debugMode: enabled })
   }
 
-  private async updateWsGatewaySettings(nextWs: NonNullable<AppSettings['gateway']>['ws']): Promise<void> {
-    const previous = this.settings?.gateway?.ws
+  setMobileWebStatus(status: {
+    running: boolean;
+    port?: number;
+    urls?: string[];
+  }): void {
+    this.mobileWebStatus = status
+  }
+
+  async loadMobileWebStatus(): Promise<void> {
+    try {
+      const status = await window.gyshell.mobileWeb.getStatus()
+      runInAction(() => {
+        this.mobileWebStatus = status
+      })
+    } catch (error) {
+      console.error('Failed to load mobile web status', error)
+    }
+  }
+
+  async startMobileWeb(): Promise<void> {
+    try {
+      const status = await window.gyshell.mobileWeb.start()
+      runInAction(() => {
+        this.mobileWebStatus = status
+      })
+    } catch (error) {
+      console.error('Failed to start mobile web server', error)
+    }
+  }
+
+  async stopMobileWeb(): Promise<void> {
+    try {
+      await window.gyshell.mobileWeb.stop()
+      runInAction(() => {
+        this.mobileWebStatus = { running: false }
+      })
+    } catch (error) {
+      console.error('Failed to stop mobile web server', error)
+    }
+  }
+
+  async setMobileWebPort(port: number | null): Promise<void> {
+    const current = this.settings?.gateway?.mobileWeb
     runInAction(() => {
       if (this.settings) {
-        this.settings.gateway = {
-          ws: nextWs
+        this.settings = {
+          ...this.settings,
+          gateway: {
+            ...this.settings.gateway,
+            mobileWeb: { port },
+          },
         }
       }
     })
     try {
-      const next = await window.gyshell.settings.setWsGatewayConfig(nextWs)
+      await window.gyshell.mobileWeb.setPort(port)
+    } catch (error) {
+      runInAction(() => {
+        if (this.settings && current !== undefined) {
+          this.settings = {
+            ...this.settings,
+            gateway: {
+              ...this.settings.gateway,
+              mobileWeb: current,
+            },
+          }
+        }
+      })
+      console.error('Failed to set mobile web port', error)
+    }
+  }
+
+  private async updateWsGatewaySettings(
+    nextWs: NonNullable<AppSettings['gateway']>['ws'],
+  ): Promise<void> {
+    const previous = this.settings?.gateway?.ws
+    runInAction(() => {
+      if (this.settings) {
+        this.settings = {
+          ...this.settings,
+          gateway: {
+            ...this.settings.gateway,
+            ws: nextWs,
+          },
+        }
+      }
+    })
+    try {
+      const plainNextWs = {
+        access: nextWs.access,
+        port: nextWs.port,
+        allowedCidrs: Array.from(nextWs.allowedCidrs ?? []),
+      }
+      const next =
+        await window.gyshell.settings.setWsGatewayConfig(plainNextWs)
       runInAction(() => {
         if (this.settings) {
-          this.settings.gateway = { ws: next }
+          this.settings = {
+            ...this.settings,
+            gateway: {
+              ...this.settings.gateway,
+              ws: next,
+            },
+          }
         }
       })
     } catch (error) {
       runInAction(() => {
         if (this.settings && previous) {
-          this.settings.gateway = { ws: previous }
+          this.settings = {
+            ...this.settings,
+            gateway: {
+              ...this.settings.gateway,
+              ws: previous,
+            },
+          }
         }
       })
       console.error('Failed to update websocket gateway settings', error)
     }
   }
 
-  async setWsGatewayAccess(access: NonNullable<AppSettings['gateway']>['ws']['access']): Promise<void> {
-    const current = this.settings?.gateway?.ws || { access: 'localhost', port: 17888 }
+  async setWsGatewayAccess(
+    access: NonNullable<AppSettings['gateway']>['ws']['access'],
+  ): Promise<void> {
+    const current = this.settings?.gateway?.ws || {
+      access: 'localhost' as const,
+      port: 17888,
+      allowedCidrs: [] as string[],
+    }
     await this.updateWsGatewaySettings({
       access,
-      port: current.port
+      port: current.port,
+      allowedCidrs: current.allowedCidrs ?? [],
     })
   }
 
   async setWsGatewayPort(port: number): Promise<void> {
-    const current = this.settings?.gateway?.ws || { access: 'localhost', port: 17888 }
+    const current = this.settings?.gateway?.ws || {
+      access: 'localhost' as const,
+      port: 17888,
+      allowedCidrs: [] as string[],
+    }
     const rounded = Math.floor(port)
     if (!Number.isInteger(rounded) || rounded <= 0 || rounded >= 65536) {
       return
     }
     await this.updateWsGatewaySettings({
       access: current.access,
-      port: rounded
+      port: rounded,
+      allowedCidrs: current.allowedCidrs ?? [],
     })
   }
 
-  private getExperimentalSettingsSnapshot(): NonNullable<AppSettings['experimental']> {
+  private parseWsGatewayCidrsInput(cidrs: string): string[] {
+    return cidrs
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  }
+
+  async setWsGatewayCidrs(cidrs: string): Promise<boolean> {
+    const parsed = this.parseWsGatewayCidrsInput(cidrs)
+    const current = this.settings?.gateway?.ws || {
+      access: 'localhost' as const,
+      port: 17888,
+      allowedCidrs: [] as string[],
+    }
+    if (current.access === 'custom' && parsed.length === 0) {
+      return false
+    }
+    await this.updateWsGatewaySettings({
+      access: current.access,
+      port: current.port,
+      allowedCidrs: parsed,
+    })
+    return true
+  }
+
+  async setWsGatewayCustomCidrs(cidrs: string): Promise<boolean> {
+    const parsed = this.parseWsGatewayCidrsInput(cidrs)
+    if (parsed.length === 0) {
+      return false
+    }
+    const current = this.settings?.gateway?.ws || {
+      access: 'localhost' as const,
+      port: 17888,
+      allowedCidrs: [] as string[],
+    }
+    await this.updateWsGatewaySettings({
+      access: 'custom',
+      port: current.port,
+      allowedCidrs: parsed,
+    })
+    return true
+  }
+
+  private getExperimentalSettingsSnapshot(): NonNullable<
+    AppSettings['experimental']
+  > {
     return {
       runtimeThinkingCorrectionEnabled:
         this.settings?.experimental?.runtimeThinkingCorrectionEnabled !== false,
-      taskFinishGuardEnabled: this.settings?.experimental?.taskFinishGuardEnabled !== false,
-      firstTurnThinkingModelEnabled: this.settings?.experimental?.firstTurnThinkingModelEnabled === true,
-      execCommandActionModelEnabled: this.settings?.experimental?.execCommandActionModelEnabled !== false,
-      writeStdinActionModelEnabled: this.settings?.experimental?.writeStdinActionModelEnabled !== false
+      taskFinishGuardEnabled:
+        this.settings?.experimental?.taskFinishGuardEnabled !== false,
+      firstTurnThinkingModelEnabled:
+        this.settings?.experimental?.firstTurnThinkingModelEnabled === true,
+      execCommandActionModelEnabled:
+        this.settings?.experimental?.execCommandActionModelEnabled !== false,
+      writeStdinActionModelEnabled:
+        this.settings?.experimental?.writeStdinActionModelEnabled !== false,
     }
   }
 
   private async updateExperimentalSettings(
-    patch: Partial<NonNullable<AppSettings['experimental']>>
+    patch: Partial<NonNullable<AppSettings['experimental']>>,
   ): Promise<void> {
     const next = {
       ...this.getExperimentalSettingsSnapshot(),
-      ...patch
+      ...patch,
     }
     runInAction(() => {
       if (this.settings) {
@@ -1258,37 +1574,37 @@ export class AppStore {
       }
     })
     await window.gyshell.settings.set({
-      experimental: next
+      experimental: next,
     })
   }
 
   async setRuntimeThinkingCorrectionEnabled(enabled: boolean): Promise<void> {
     await this.updateExperimentalSettings({
-      runtimeThinkingCorrectionEnabled: enabled
+      runtimeThinkingCorrectionEnabled: enabled,
     })
   }
 
   async setTaskFinishGuardEnabled(enabled: boolean): Promise<void> {
     await this.updateExperimentalSettings({
-      taskFinishGuardEnabled: enabled
+      taskFinishGuardEnabled: enabled,
     })
   }
 
   async setFirstTurnThinkingModelEnabled(enabled: boolean): Promise<void> {
     await this.updateExperimentalSettings({
-      firstTurnThinkingModelEnabled: enabled
+      firstTurnThinkingModelEnabled: enabled,
     })
   }
 
   async setExecCommandActionModelEnabled(enabled: boolean): Promise<void> {
     await this.updateExperimentalSettings({
-      execCommandActionModelEnabled: enabled
+      execCommandActionModelEnabled: enabled,
     })
   }
 
   async setWriteStdinActionModelEnabled(enabled: boolean): Promise<void> {
     await this.updateExperimentalSettings({
-      writeStdinActionModelEnabled: enabled
+      writeStdinActionModelEnabled: enabled,
     })
   }
 
@@ -1321,11 +1637,11 @@ export class AppStore {
       const [backendSettings, uiSettings, customThemes] = await Promise.all([
         window.gyshell.settings.get(),
         window.gyshell.uiSettings.get(),
-        window.gyshell.themes.getCustom()
+        window.gyshell.themes.getCustom(),
       ])
       const settings = {
         ...backendSettings,
-        ...uiSettings
+        ...uiSettings,
       }
       const detachedWindowState: DetachedWindowState | null =
         this.windowRole === 'detached' && WINDOW_CONTEXT.detachedStateToken
@@ -1334,20 +1650,26 @@ export class AppStore {
       const effectiveLayout = detachedWindowState
         ? {
             ...(settings.layout || {}),
-            v2: detachedWindowState.layoutTree
+            v2: detachedWindowState.layoutTree,
           }
         : settings.layout
       const normalizedSettings = effectiveLayout
         ? {
             ...settings,
-            layout: effectiveLayout
+            layout: effectiveLayout,
           }
         : settings
-      const persistedChatInventoryState = this.collectPersistedChatInventoryState(effectiveLayout)
-      const detachedVisibleTabIdsByKind = this.collectDetachedVisibleTabIdsByKind(detachedWindowState?.layoutTree)
+      const persistedChatInventoryState =
+        this.collectPersistedChatInventoryState(effectiveLayout)
+      const detachedVisibleTabIdsByKind =
+        this.collectDetachedVisibleTabIdsByKind(
+          detachedWindowState?.layoutTree,
+        )
       const theme = resolveTheme(settings.themeId, customThemes)
       applyAppThemeFromTerminalScheme(theme.terminal)
-      const xtermTheme = toXtermTheme(theme.terminal, { transparentBackground: true })
+      const xtermTheme = toXtermTheme(theme.terminal, {
+        transparentBackground: true,
+      })
       deferUiUpdates = persistedChatInventoryState.tabIds.length > 0
 
       runInAction(() => {
@@ -1359,11 +1681,13 @@ export class AppStore {
         this.customThemes = customThemes
         this.chat.hydrateSessionInventoryFromLayout(
           persistedChatInventoryState.tabIds,
-          persistedChatInventoryState.preferredActiveTabId
+          persistedChatInventoryState.preferredActiveTabId,
         )
         this.layout.bootstrap()
         if (detachedWindowState?.fileEditorSnapshot) {
-          this.fileEditor.restoreSnapshot(detachedWindowState.fileEditorSnapshot)
+          this.fileEditor.restoreSnapshot(
+            detachedWindowState.fileEditorSnapshot,
+          )
         }
       })
 
@@ -1382,7 +1706,7 @@ export class AppStore {
       if (persistedChatInventoryState.tabIds.length > 0) {
         await this.chat.hydrateSessionsFromBackend(
           persistedChatInventoryState.tabIds,
-          persistedChatInventoryState.preferredActiveTabId
+          persistedChatInventoryState.preferredActiveTabId,
         )
       }
       runInAction(() => {
@@ -1431,13 +1755,17 @@ export class AppStore {
           this.terminalTabsHydrated = true
           this.activeTerminalId = null
         })
-        const ensurePanelForDefault = this.windowRole === 'main' && this.isFirstLaunchDefaultLayout(effectiveLayout)
+        const ensurePanelForDefault =
+          this.windowRole === 'main' &&
+          this.isFirstLaunchDefaultLayout(effectiveLayout)
         const targetPanelId =
           this.layout.getPrimaryPanelId('terminal') ||
-          (ensurePanelForDefault ? this.layout.ensurePrimaryPanelForKind('terminal') : null) ||
+          (ensurePanelForDefault
+            ? this.layout.ensurePrimaryPanelForKind('terminal')
+            : null) ||
           undefined
         this.createLocalTab(targetPanelId, {
-          ensurePanel: ensurePanelForDefault
+          ensurePanel: ensurePanelForDefault,
         })
       }
 
@@ -1448,6 +1776,7 @@ export class AppStore {
       void this.loadCommandPolicyLists()
       void this.loadAccessTokens()
       void this.loadVersionState()
+      void this.loadMobileWebStatus()
       void this.checkVersion({ showPopupOnVersionChange: true })
     } catch (err) {
       runInAction(() => {
@@ -1467,20 +1796,30 @@ export class AppStore {
       void this.loadCommandPolicyLists()
       void this.loadAccessTokens()
       void this.loadVersionState()
+      void this.loadMobileWebStatus()
       void this.checkVersion({ showPopupOnVersionChange: true })
     }
   }
 
-  createLocalTab(targetPanelId?: string, options?: { ensurePanel?: boolean }): string {
+  createLocalTab(
+    targetPanelId?: string,
+    options?: { ensurePanel?: boolean },
+  ): string {
     const id = `local-${uuidv4()}`
     const title = this.getUniqueTitle('Local')
-    const cfg: TerminalConfig = { type: 'local', id, title, cols: 80, rows: 24 }
+    const cfg: TerminalConfig = {
+      type: 'local',
+      id,
+      title,
+      cols: 80,
+      rows: 24,
+    }
     const tab: TerminalTabModel = {
       id,
       title,
       config: cfg,
       connectionRef: { type: 'local' },
-      runtimeState: 'initializing'
+      runtimeState: 'initializing',
     }
     this.terminalTabs.push(tab)
     this.terminalTabsHydrated = true
@@ -1490,7 +1829,9 @@ export class AppStore {
     const resolvedPanelId =
       targetPanelId ||
       this.layout.getPrimaryPanelId('terminal') ||
-      (shouldEnsurePanel ? this.layout.ensurePrimaryPanelForKind('terminal') : null) ||
+      (shouldEnsurePanel
+        ? this.layout.ensurePrimaryPanelForKind('terminal')
+        : null) ||
       undefined
     if (resolvedPanelId) {
       this.layout.attachTabToPanel('terminal', id, resolvedPanelId)
@@ -1501,7 +1842,9 @@ export class AppStore {
   }
 
   createSshTab(entryId: string, targetPanelId?: string): string | null {
-    const entry = this.settings?.connections?.ssh?.find((x) => x.id === entryId)
+    const entry = this.settings?.connections?.ssh?.find(
+      (x) => x.id === entryId,
+    )
     if (!entry) {
       console.warn('SSH entry not found', entryId)
       return null
@@ -1510,12 +1853,16 @@ export class AppStore {
       ? this.settings?.connections?.proxies?.find((p) => p.id === entry.proxyId)
       : undefined
     const tunnels = (entry.tunnelIds ?? [])
-      .map((id) => this.settings?.connections?.tunnels?.find((t) => t.id === id))
+      .map((id) =>
+        this.settings?.connections?.tunnels?.find((t) => t.id === id),
+      )
       .filter(Boolean) as any[]
     const id = `ssh-${uuidv4()}`
     const baseTitle = entry.name || `${entry.username}@${entry.host}`
     const title = this.getUniqueTitle(baseTitle)
-    const jumpHost = (entry as any).jumpHost ? (toJS((entry as any).jumpHost) as any) : undefined
+    const jumpHost = (entry as any).jumpHost
+      ? (toJS((entry as any).jumpHost) as any)
+      : undefined
     const cfg: TerminalConfig = {
       type: 'ssh',
       id,
@@ -1532,14 +1879,14 @@ export class AppStore {
       passphrase: entry.passphrase,
       proxy,
       tunnels,
-      jumpHost
+      jumpHost,
     } as any
     const tab: TerminalTabModel = {
       id,
       title,
       config: cfg,
       connectionRef: { type: 'ssh', entryId },
-      runtimeState: 'initializing'
+      runtimeState: 'initializing',
     }
     this.terminalTabs.push(tab)
     this.terminalTabsHydrated = true
@@ -1558,7 +1905,9 @@ export class AppStore {
     return id
   }
 
-  async saveSshConnection(entry: AppSettings['connections']['ssh'][number]): Promise<void> {
+  async saveSshConnection(
+    entry: AppSettings['connections']['ssh'][number],
+  ): Promise<void> {
     const current = this.settings ?? (await this.fetchCombinedSettings())
     const plainEntry = toJS(entry)
     const list = current.connections.ssh.slice().map((x) => toJS(x))
@@ -1592,7 +1941,8 @@ export class AppStore {
     const items = current.models.items.slice().map((x) => toJS(x))
     const modelSnapshot = toJS(model)
     const structuredOutputMode: 'auto' | 'on' | 'off' =
-      modelSnapshot.structuredOutputMode === 'on' || modelSnapshot.structuredOutputMode === 'off'
+      modelSnapshot.structuredOutputMode === 'on' ||
+      modelSnapshot.structuredOutputMode === 'off'
         ? modelSnapshot.structuredOutputMode
         : 'auto'
     const plainModel: ModelDefinition = {
@@ -1601,7 +1951,7 @@ export class AppStore {
       supportsStructuredOutput: structuredOutputMode === 'on',
       supportsObjectToolChoice: false,
       // Ensure profile is a plain object for IPC cloning
-      profile: modelSnapshot.profile ? toJS(modelSnapshot.profile) : undefined
+      profile: modelSnapshot.profile ? toJS(modelSnapshot.profile) : undefined,
     }
     let nextProfile: ModelDefinition['profile'] = {
       imageInputs: false,
@@ -1610,7 +1960,7 @@ export class AppStore {
       supportsObjectToolChoice: false,
       testedAt: Date.now(),
       ok: false,
-      error: 'Probe failed'
+      error: 'Probe failed',
     }
     try {
       const probeResult = await window.gyshell.models.probe(plainModel)
@@ -1621,7 +1971,7 @@ export class AppStore {
         supportsObjectToolChoice: probeResult.supportsObjectToolChoice,
         testedAt: probeResult.testedAt,
         ok: probeResult.ok,
-        error: probeResult.error
+        error: probeResult.error,
       }
     } catch (err) {
       nextProfile = {
@@ -1631,7 +1981,7 @@ export class AppStore {
         supportsObjectToolChoice: false,
         testedAt: Date.now(),
         ok: false,
-        error: err instanceof Error ? err.message : String(err)
+        error: err instanceof Error ? err.message : String(err),
       }
     }
     const nextModel: ModelDefinition = {
@@ -1641,7 +1991,7 @@ export class AppStore {
           ? nextProfile.supportsStructuredOutput === true
           : structuredOutputMode === 'on',
       supportsObjectToolChoice: nextProfile.supportsObjectToolChoice === true,
-      profile: nextProfile
+      profile: nextProfile,
     }
     const nextItems = upsertById(items, nextModel)
 
@@ -1668,7 +2018,9 @@ export class AppStore {
     await window.gyshell.settings.set({ models: nextModels })
   }
 
-  async saveProfile(profile: AppSettings['models']['profiles'][number]): Promise<void> {
+  async saveProfile(
+    profile: AppSettings['models']['profiles'][number],
+  ): Promise<void> {
     const current = this.settings ?? (await this.fetchCombinedSettings())
     const profiles = current.models.profiles.slice().map((x) => toJS(x))
     const plainProfile = toJS(profile)
@@ -1686,11 +2038,13 @@ export class AppStore {
 
   async deleteProfile(id: string): Promise<void> {
     const current = this.settings ?? (await this.fetchCombinedSettings())
-    const profiles = removeById(current.models.profiles, id).map((x) => toJS(x))
+    const profiles = removeById(current.models.profiles, id).map((x) =>
+      toJS(x),
+    )
     // If active profile is deleted, reset to first available or default
     let activeProfileId = current.models.activeProfileId
     if (activeProfileId === id) {
-        activeProfileId = profiles[0]?.id || ''
+      activeProfileId = profiles[0]?.id || ''
     }
 
     const nextModels = { ...toJS(current.models), profiles, activeProfileId }
@@ -1732,7 +2086,9 @@ export class AppStore {
 
   async deleteProxy(id: string): Promise<void> {
     const current = this.settings ?? (await this.fetchCombinedSettings())
-    const list = removeById(current.connections.proxies, id).map((x) => toJS(x))
+    const list = removeById(current.connections.proxies, id).map((x) =>
+      toJS(x),
+    )
     const nextConnections = { ...toJS(current.connections), proxies: list }
     runInAction(() => {
       if (this.settings) {
@@ -1759,7 +2115,9 @@ export class AppStore {
 
   async deleteTunnel(id: string): Promise<void> {
     const current = this.settings ?? (await this.fetchCombinedSettings())
-    const list = removeById(current.connections.tunnels, id).map((x) => toJS(x))
+    const list = removeById(current.connections.tunnels, id).map((x) =>
+      toJS(x),
+    )
     const nextConnections = { ...toJS(current.connections), tunnels: list }
     runInAction(() => {
       if (this.settings) {
@@ -1795,11 +2153,15 @@ export class AppStore {
     } catch {
       // ignore
     }
-
   }
 
-  async openFileEditorFromFileSystem(terminalId: string, filePath: string): Promise<boolean> {
-    const hasTerminal = this.fileSystemTabs.some((tab) => tab.id === terminalId)
+  async openFileEditorFromFileSystem(
+    terminalId: string,
+    filePath: string,
+  ): Promise<boolean> {
+    const hasTerminal = this.fileSystemTabs.some(
+      (tab) => tab.id === terminalId,
+    )
     if (!hasTerminal) {
       return false
     }
@@ -1826,25 +2188,35 @@ export class AppStore {
     }
   }
 
-  private sanitizeImageAttachmentForSend(image: InputImageAttachment): InputImageAttachment {
+  private sanitizeImageAttachmentForSend(
+    image: InputImageAttachment,
+  ): InputImageAttachment {
     const attachmentId = String(image.attachmentId || '').trim()
     const fileName = String(image.fileName || '').trim()
     const mimeType = String(image.mimeType || '').trim()
     const previewDataUrl = String(image.previewDataUrl || '').trim()
     const sha256 = String(image.sha256 || '').trim()
-    const status = image.status === 'ready' || image.status === 'missing' ? image.status : undefined
+    const status =
+      image.status === 'ready' || image.status === 'missing'
+        ? image.status
+        : undefined
     return {
       ...(attachmentId ? { attachmentId } : {}),
       ...(fileName ? { fileName } : {}),
       ...(mimeType ? { mimeType } : {}),
-      ...(typeof image.sizeBytes === 'number' && Number.isFinite(image.sizeBytes) ? { sizeBytes: image.sizeBytes } : {}),
+      ...(typeof image.sizeBytes === 'number' &&
+      Number.isFinite(image.sizeBytes)
+        ? { sizeBytes: image.sizeBytes }
+        : {}),
       ...(sha256 ? { sha256 } : {}),
       ...(previewDataUrl ? { previewDataUrl } : {}),
-      ...(status ? { status } : {})
+      ...(status ? { status } : {}),
     }
   }
 
-  private async resolveInputImagesForSend(images: InputImageAttachment[] | undefined): Promise<InputImageAttachment[]> {
+  private async resolveInputImagesForSend(
+    images: InputImageAttachment[] | undefined,
+  ): Promise<InputImageAttachment[]> {
     if (!Array.isArray(images) || images.length === 0) return []
     const resolved: InputImageAttachment[] = []
     for (const image of images) {
@@ -1864,7 +2236,7 @@ export class AppStore {
           dataBase64,
           fileName: image.fileName || localFile.name || undefined,
           mimeType: image.mimeType || localFile.type || undefined,
-          ...(previewDataUrl ? { previewDataUrl } : {})
+          ...(previewDataUrl ? { previewDataUrl } : {}),
         })
         resolved.push(
           this.sanitizeImageAttachmentForSend({
@@ -1872,38 +2244,39 @@ export class AppStore {
             fileName: image.fileName || saved.fileName,
             mimeType: image.mimeType || saved.mimeType,
             sizeBytes: image.sizeBytes || saved.sizeBytes,
-            previewDataUrl: previewDataUrl || saved.previewDataUrl
-          })
+            previewDataUrl: previewDataUrl || saved.previewDataUrl,
+          }),
         )
         continue
       }
-
     }
     return resolved
   }
 
-  private async resolveUserInputPayloadForSend(content: string | UserInputPayload): Promise<string | UserInputPayload> {
+  private async resolveUserInputPayloadForSend(
+    content: string | UserInputPayload,
+  ): Promise<string | UserInputPayload> {
     if (typeof content === 'string') return content
     const text = typeof content?.text === 'string' ? content.text : ''
     const images = await this.resolveInputImagesForSend(content?.images)
     return {
       text,
-      ...(images.length > 0 ? { images } : {})
+      ...(images.length > 0 ? { images } : {}),
     }
   }
 
   async sendChatMessage(
     sessionId: string,
     content: string | UserInputPayload,
-    options?: { mode?: 'normal' | 'queue' }
+    options?: { mode?: 'normal' | 'queue' },
   ): Promise<boolean> {
     const mode = options?.mode || 'normal'
     let targetSessionId = sessionId
     if (!targetSessionId) {
       targetSessionId = this.chat.createSession()
     }
-    
-    const session = this.chat.sessions.find(s => s.id === targetSessionId)
+
+    const session = this.chat.sessions.find((s) => s.id === targetSessionId)
     const wasBusy = !!session?.isSessionBusy
     if (mode === 'queue' && session?.isSessionBusy) {
       console.warn('[AppStore] Session is busy, ignoring message.')
@@ -1914,7 +2287,10 @@ export class AppStore {
     try {
       resolvedContent = await this.resolveUserInputPayloadForSend(content)
     } catch (error) {
-      console.error('[AppStore] Failed to resolve image attachments before send:', error)
+      console.error(
+        '[AppStore] Failed to resolve image attachments before send:',
+        error,
+      )
       return false
     }
 
@@ -1922,11 +2298,16 @@ export class AppStore {
     this.chat.setSessionBusy(true, targetSessionId)
     if (!wasBusy) {
       const activeProfileId = this.settings?.models.activeProfileId || ''
-      this.chat.setSessionLockedProfile(targetSessionId, activeProfileId || null)
+      this.chat.setSessionLockedProfile(
+        targetSessionId,
+        activeProfileId || null,
+      )
     }
 
     const startMode = wasBusy && mode === 'normal' ? 'inserted' : 'normal'
-    window.gyshell.agent.startTask(targetSessionId, resolvedContent, { startMode })
+    window.gyshell.agent.startTask(targetSessionId, resolvedContent, {
+      startMode,
+    })
     return true
   }
 
@@ -1939,7 +2320,9 @@ export class AppStore {
     if (active?.config?.type === 'local') {
       return active.id
     }
-    const fallback = this.terminalTabs.find((tab) => tab.config?.type === 'local')
+    const fallback = this.terminalTabs.find(
+      (tab) => tab.config?.type === 'local',
+    )
     return fallback?.id || null
   }
 
@@ -1952,7 +2335,10 @@ export class AppStore {
   }
 
   setTerminalSelection(terminalId: string, selectionText: string): void {
-    this.terminalSelections = { ...this.terminalSelections, [terminalId]: selectionText }
+    this.terminalSelections = {
+      ...this.terminalSelections,
+      [terminalId]: selectionText,
+    }
   }
 
   getTerminalSelection(terminalId: string): string {
@@ -1968,7 +2354,9 @@ export class AppStore {
     } else {
       applyAppThemeFromTerminalScheme(theme.terminal)
       runInAction(() => {
-        this.xtermTheme = toXtermTheme(theme.terminal, { transparentBackground: true })
+        this.xtermTheme = toXtermTheme(theme.terminal, {
+          transparentBackground: true,
+        })
       })
     }
   }

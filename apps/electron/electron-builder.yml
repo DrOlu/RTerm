@@ -16,6 +16,10 @@ extraResources:
     to: cli
     filter:
       - '**/*'
+  - from: apps/electron/mobile-web-runtime
+    to: mobile-web
+    filter:
+      - '**/*'
 asarUnpack:
   - '**/*.node'
 mac:

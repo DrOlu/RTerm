@@ -33,6 +33,7 @@ import {
   buildSkillStatusSummary
 } from '../../../backend/src/services/Gateway/toolingSummary'
 import { TerminalStateStore } from '../../../backend/src/services/terminal/TerminalStateStore'
+import { MobileWebServerService } from '../services/MobileWebServerService'
 
 let mainWindow: BrowserWindow | null = null
 let settingsService: SettingsService
@@ -52,6 +53,7 @@ let imageAttachmentService: ImageAttachmentService
 let versionService: VersionService
 let accessTokenService: AccessTokenService
 let webSocketGatewayControlService: WebSocketGatewayControlService | null = null
+let mobileWebServerService: MobileWebServerService | null = null
 
 type AppWindowRole = 'main' | 'detached'
 
@@ -265,12 +267,13 @@ function createWindow(options?: CreateWindowOptions): BrowserWindow {
 
 export async function startElectronMain(): Promise<void> {
   await app.whenReady()
+  const projectRoot = resolve(__dirname, '../..')
 
   try {
     installCliLaunchers({
       isPackaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
-      projectRoot: resolve(__dirname, '../../../../')
+      projectRoot
     })
   } catch (error) {
     console.warn('[Main] Failed to install CLI launchers:', error)
@@ -341,7 +344,7 @@ export async function startElectronMain(): Promise<void> {
   }
   gatewayService.registerTransport(new ElectronWindowTransport())
   webSocketGatewayControlService = new WebSocketGatewayControlService({
-    createAdapter: (host, port) =>
+    createAdapter: (host, port, ipFilter) =>
       new WebSocketGatewayAdapter(gatewayService, {
         host,
         port,
@@ -349,6 +352,7 @@ export async function startElectronMain(): Promise<void> {
           verifyToken: (token: string) => accessTokenService.verifyToken(token),
           allowLocalhostWithoutToken: true
         },
+        ipFilter,
         terminalBridge: {
           listTerminals: () =>
             terminalService.getDisplayTerminals().map((terminal) => ({
@@ -627,6 +631,22 @@ export async function startElectronMain(): Promise<void> {
         }
       })
   })
+  // Initialize mobile web server
+  // Packaged: bundled into app resources via electron-builder extraResources
+  // Dev: point directly to the mobile-web build output (no copy needed)
+  const mobileWebRuntimePath = app.isPackaged
+    ? join(process.resourcesPath, 'mobile-web')
+    : join(projectRoot, 'apps', 'mobile-web', 'dist')
+  mobileWebServerService = new MobileWebServerService(mobileWebRuntimePath, () => {
+    const gatewayState = webSocketGatewayControlService?.getState()
+    if (!gatewayState?.running) {
+      return null
+    }
+    return {
+      port: gatewayState.port
+    }
+  })
+
   const ipcAdapter = new ElectronGatewayIpcAdapter(
     gatewayService,
     terminalService,
@@ -645,7 +665,8 @@ export async function startElectronMain(): Promise<void> {
     versionService,
     webSocketGatewayControlService,
     accessTokenService,
-    fileSystemService
+    fileSystemService,
+    mobileWebServerService
   )
   ipcAdapter.registerHandlers()
 
@@ -671,7 +692,8 @@ export async function startElectronMain(): Promise<void> {
     env: process.env,
     defaultPolicy: {
       access: settingsSnapshot.gateway.ws.access,
-      port: settingsSnapshot.gateway.ws.port
+      port: settingsSnapshot.gateway.ws.port,
+      allowedCidrs: settingsSnapshot.gateway.ws.allowedCidrs
     },
     enableVarName: 'GYSHELL_WS_ENABLE',
     hostVarName: 'GYSHELL_WS_HOST',
@@ -711,6 +733,15 @@ app.on('window-all-closed', async () => {
       console.error('[Main] Failed to stop websocket gateway server:', error)
     } finally {
       webSocketGatewayControlService = null
+    }
+  }
+  if (mobileWebServerService) {
+    try {
+      await mobileWebServerService.stop()
+    } catch (error) {
+      console.error('[Main] Failed to stop mobile web server:', error)
+    } finally {
+      mobileWebServerService = null
     }
   }
   if (tempFileService) {

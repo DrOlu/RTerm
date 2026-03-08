@@ -101,11 +101,13 @@ export interface TunnelEntry {
   viaConnectionId?: string
 }
 
-export type WsGatewayAccess = 'disabled' | 'localhost' | 'internet'
+export type WsGatewayAccess = 'disabled' | 'localhost' | 'internet' | 'lan' | 'custom'
 
 export interface WsGatewaySettings {
   access: WsGatewayAccess
   port: number
+  /** Allowed CIDR ranges when access === 'custom'. Comma or newline separated. */
+  allowedCidrs?: string[]
 }
 
 export interface BackendSettings {
@@ -173,6 +175,10 @@ export interface BackendSettings {
   /** WebSocket gateway exposure policy */
   gateway: {
     ws: WsGatewaySettings
+    mobileWeb?: {
+      /** Preferred port, null means auto-select */
+      port: number | null
+    }
   }
 }
 

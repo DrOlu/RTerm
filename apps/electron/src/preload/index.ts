@@ -95,8 +95,12 @@ interface BackendSettings {
   }
   gateway: {
     ws: {
-      access: 'disabled' | 'localhost' | 'internet'
+      access: 'disabled' | 'localhost' | 'internet' | 'lan' | 'custom'
       port: number
+      allowedCidrs?: string[]
+    }
+    mobileWeb?: {
+      port: number | null
     }
   }
 }
@@ -531,6 +535,13 @@ export interface GyShellAPI {
     getState: () => Promise<VersionCheckResult>
     check: () => Promise<VersionCheckResult>
   }
+
+  mobileWeb: {
+    getStatus: () => Promise<{ running: boolean; port?: number; urls?: string[] }>
+    start: () => Promise<{ running: boolean; port?: number; urls?: string[] }>
+    stop: () => Promise<{ ok: boolean }>
+    setPort: (port: number | null) => Promise<{ ok: boolean }>
+  }
 }
 
 const api: GyShellAPI = {
@@ -758,7 +769,13 @@ const api: GyShellAPI = {
   version: {
     getState: () => ipcRenderer.invoke('version:getState'),
     check: () => ipcRenderer.invoke('version:check')
-  }
+  },
+  mobileWeb: {
+    getStatus: () => ipcRenderer.invoke('mobileWeb:getStatus'),
+    start: () => ipcRenderer.invoke('mobileWeb:start'),
+    stop: () => ipcRenderer.invoke('mobileWeb:stop'),
+    setPort: (port) => ipcRenderer.invoke('mobileWeb:setPort', port),
+  },
 }
 
 contextBridge.exposeInMainWorld('gyshell', api)

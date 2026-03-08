@@ -2,6 +2,18 @@ export const GATEWAY_URL_STORAGE_KEY = 'gyshell-mobile-gateway-url'
 export const GATEWAY_AUTO_CONNECT_STORAGE_KEY = 'gyshell-mobile-gateway-auto-connect'
 export const GATEWAY_ACCESS_TOKEN_STORAGE_KEY = 'gyshell-mobile-gateway-access-token'
 
+function gatewayUrlFromQuery(): string | null {
+  try {
+    const raw = new URLSearchParams(window.location.search).get('gateway')
+    if (!raw || !raw.trim()) {
+      return null
+    }
+    return normalizeGatewayUrl(raw)
+  } catch {
+    return null
+  }
+}
+
 export function defaultGatewayUrl(): string {
   const host = window.location.hostname || '127.0.0.1'
   return `ws://${host}:17888`
@@ -17,7 +29,7 @@ export function normalizeGatewayUrl(raw: string): string {
 }
 
 export function loadGatewayUrlFromStorage(): string {
-  return window.localStorage.getItem(GATEWAY_URL_STORAGE_KEY) || defaultGatewayUrl()
+  return gatewayUrlFromQuery() || window.localStorage.getItem(GATEWAY_URL_STORAGE_KEY) || defaultGatewayUrl()
 }
 
 export function saveGatewayUrlToStorage(url: string): void {
