@@ -51,6 +51,29 @@ nsis:
   artifactName: "${productName}.Setup.${version}-${arch}.${ext}"
 portable:
   artifactName: "${productName}.Portable.${version}-${arch}.${ext}"
+linux:
+  icon: apps/electron/materials/icon.png
+  executableName: gyshell
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
+  category: Development
+  desktop:
+    Name: GyShell
+    Comment: AI-Native Terminal App
+    StartupWMClass: GyShell
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+appImage:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+deb:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  maintainer: "TUOTUO <tuotuo@gyshell.com>"
 dmg:
   artifactName: "${productName}-${version}-${arch}.${ext}"
   contents:

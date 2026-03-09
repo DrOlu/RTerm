@@ -38,6 +38,8 @@
     "dist": "npm run build:backend && npm run build:electron && npm run prepare:cli-runtime && npm run prepare:mobile-web && electron-builder --config apps/electron/electron-builder.yml",
     "dist:mac": "npm run build:backend && export CSC_IDENTITY_AUTO_DISCOVERY=false && npm run build:electron && npm run prepare:cli-runtime -- --target darwin-arm64 && npm run prepare:mobile-web && electron-builder --config apps/electron/electron-builder.yml --mac --dir && bash apps/electron/scripts/fix-mac-signatures.sh && electron-builder --config apps/electron/electron-builder.yml --mac --prepackaged dist/mac-arm64",
     "dist:win": "npm run build:backend && npm run build:electron && npm run prepare:cli-runtime -- --target windows-x64 && npm run prepare:mobile-web && electron-builder --config apps/electron/electron-builder.yml --win --x64",
+    "dist:linux": "npm run build:backend && npm run build:electron && npm run prepare:cli-runtime -- --target linux-x64 && npm run prepare:mobile-web && electron-builder --config apps/electron/electron-builder.yml --linux --x64",
+    "dist:linux-arm64": "npm run build:backend && npm run build:electron && npm run prepare:cli-runtime -- --target linux-arm64 && npm run prepare:mobile-web && electron-builder --config apps/electron/electron-builder.yml --linux --arm64",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
