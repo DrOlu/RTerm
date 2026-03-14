@@ -17,6 +17,7 @@ import type { UIHistoryService } from './UIHistoryService'
 import { v4 as uuidv4 } from 'uuid'
 import type { z } from 'zod'
 import type { StartTaskInput } from './Gateway/types'
+import type { StoredChatSession } from './ChatHistoryService'
 import {
   buildToolsForModel,
   execCommandSchema,
@@ -2070,6 +2071,10 @@ export class AgentService_v2 {
 
   loadChatSession(sessionId: string): ChatSession | null {
     return this.chatHistoryService.loadSession(sessionId)
+  }
+
+  listStoredChatSessions(): StoredChatSession[] {
+    return this.chatHistoryService.getAllSessions()
   }
 
   deleteChatSession(sessionId: string): void {

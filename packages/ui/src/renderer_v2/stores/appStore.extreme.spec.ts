@@ -87,6 +87,7 @@ const installBootstrapWindowMock = (
     allChatHistory?: Array<{ id: string; title?: string }>;
     uiMessagesBySessionId?: Record<string, any[]>;
     getUiMessages?: (sessionId: string) => Promise<any[]>;
+    getSessionSnapshot?: (sessionId: string) => Promise<any>;
     runtimeSnapshotsBySessionId?: Record<string, any>;
     onUiUpdateRegister?: (callback: (action: any) => void) => void;
     loadChatSessionCalls?: string[];
@@ -145,12 +146,16 @@ const installBootstrapWindowMock = (
           }
           return options?.uiMessagesBySessionId?.[sessionId] || [];
         },
-        getSessionSnapshot: async (sessionId: string) =>
-          options?.runtimeSnapshotsBySessionId?.[sessionId] || {
+        getSessionSnapshot: async (sessionId: string) => {
+          if (options?.getSessionSnapshot) {
+            return await options.getSessionSnapshot(sessionId);
+          }
+          return options?.runtimeSnapshotsBySessionId?.[sessionId] || {
             id: sessionId,
             isBusy: false,
             lockedProfileId: null,
-          },
+          };
+        },
         loadChatSession: async (sessionId: string) => {
           options?.loadChatSessionCalls?.push(sessionId);
           return null;
@@ -1346,6 +1351,156 @@ const run = async (): Promise<void> => {
         JSON.stringify(hydratedSessionIds),
         JSON.stringify(["chat-1:false:false", "chat-2:false:false"]),
         "bulk transferred chat hydration should preserve the non-activating background load contract",
+      );
+    },
+  );
+
+  await runCase(
+    "openChatSessionFromHistory restores a moved chat session to the current window",
+    async () => {
+      const loadChatSessionCalls: string[] = [];
+      installBootstrapWindowMock(buildPersistedTree(), {
+        allChatHistory: [
+          { id: "chat-a", title: "Chat A" },
+          { id: "chat-b", title: "Chat B" },
+          { id: "chat-c", title: "Chat C" },
+          { id: "chat-remote", title: "Remote Session" },
+        ],
+        uiMessagesBySessionId: {
+          "chat-remote": [
+            {
+              id: "msg-remote",
+              role: "assistant",
+              type: "text",
+              content: "Recovered remote message",
+              timestamp: 1,
+            },
+          ],
+        },
+        runtimeSnapshotsBySessionId: {
+          "chat-a": {
+            id: "chat-a",
+            title: "Chat A",
+            isBusy: false,
+            lockedProfileId: null,
+          },
+          "chat-b": {
+            id: "chat-b",
+            title: "Chat B",
+            isBusy: false,
+            lockedProfileId: null,
+          },
+          "chat-c": {
+            id: "chat-c",
+            title: "Chat C",
+            isBusy: false,
+            lockedProfileId: null,
+          },
+          "chat-remote": {
+            id: "chat-remote",
+            title: "Remote Session",
+            isBusy: false,
+            lockedProfileId: null,
+          },
+        },
+        loadChatSessionCalls,
+      });
+
+      const store = new AppStore();
+      await store.bootstrap();
+
+      store.suppressTabs("chat", ["chat-remote"]);
+      await store.openChatSessionFromHistory("chat-remote");
+
+      assertEqual(
+        store.chat.activeSessionId,
+        "chat-remote",
+        "history reopen should activate the restored session",
+      );
+      assertCondition(
+        store.getOwnedTabIds("chat").includes("chat-remote"),
+        "history reopen should unsuppress the moved chat session",
+      );
+      assertCondition(
+        store
+          .layout
+          .getPanelIdsByKind("chat")
+          .some((panelId) =>
+            store.layout.getPanelTabIds(panelId).includes("chat-remote"),
+          ),
+        "history reopen should bind the restored chat session back into a chat panel",
+      );
+      assertCondition(
+        loadChatSessionCalls.includes("chat-remote"),
+        "history reopen should restore backend agent context for the selected session",
+      );
+    },
+  );
+
+  await runCase(
+    "bootstrap prunes stale chat session ids from persisted layout inventory",
+    async () => {
+      const orphanLayoutTree: LayoutTree = {
+        schemaVersion: 2,
+        root: {
+          type: "split",
+          id: "root",
+          direction: "horizontal",
+          children: [
+            {
+              type: "panel",
+              id: "node-chat",
+              panel: { id: "panel-chat", kind: "chat" },
+            },
+            {
+              type: "panel",
+              id: "node-terminal",
+              panel: { id: "panel-terminal", kind: "terminal" },
+            },
+          ],
+          sizes: [50, 50],
+        },
+        focusedPanelId: "panel-chat",
+        panelTabs: {
+          "panel-chat": {
+            tabIds: ["chat-stale"],
+            activeTabId: "chat-stale",
+          },
+          "panel-terminal": {
+            tabIds: ["term-a"],
+            activeTabId: "term-a",
+          },
+        },
+      };
+
+      installBootstrapWindowMock(orphanLayoutTree, {
+        allChatHistory: [],
+        getSessionSnapshot: async (sessionId: string) => {
+          if (sessionId === "chat-stale") {
+            throw new Error("Session not found: chat-stale");
+          }
+          return {
+            id: sessionId,
+            isBusy: false,
+            lockedProfileId: null,
+          };
+        },
+      });
+
+      const store = new AppStore();
+      await store.bootstrap();
+
+      assertCondition(
+        !store.chat.sessions.some((session) => session.id === "chat-stale"),
+        "bootstrap should drop stale chat sessions that no longer exist in backend or UI history",
+      );
+      assertCondition(
+        !store
+          .layout
+          .getPanelIdsByKind("chat")
+          .flatMap((panelId) => store.layout.getPanelTabIds(panelId))
+          .includes("chat-stale"),
+        "layout sync should remove stale chat session ids after bootstrap pruning",
       );
     },
   );

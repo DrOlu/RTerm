@@ -98,7 +98,7 @@ export const ChatHistoryPanel: React.FC<ChatHistoryPanelProps> = observer(({ sto
   const handleLoadSession = async (sessionId: string) => {
     if (editingId) return
     try {
-      await store.chat.loadChatHistory(sessionId)
+      await store.openChatSessionFromHistory(sessionId)
       onClose()
     } catch (error) {
       console.error('Failed to load session:', error)

@@ -338,6 +338,7 @@ export class AppStore {
       ensureTabInventoryEntry: action,
       hydrateTransferredTabs: action,
       hydrateTransferredTabEntry: action,
+      openChatSessionFromHistory: action,
       openFileEditorFromFileSystem: action,
       onPanelRemoved: action,
       suppressTabs: action,
@@ -2450,6 +2451,28 @@ export class AppStore {
     }
     this.setActiveTerminal(terminalId)
     return await this.fileEditor.openFromFileSystem(terminalId, filePath)
+  }
+
+  async openChatSessionFromHistory(
+    sessionId: string,
+    options?: {
+      loadAgentContext?: boolean
+    }
+  ): Promise<void> {
+    const normalizedSessionId = String(sessionId || '').trim()
+    if (!normalizedSessionId) {
+      return
+    }
+
+    this.chat.ensureSession(normalizedSessionId)
+    if (!this.layout.getPrimaryPanelId('chat')) {
+      this.layout.ensurePrimaryPanelForKind('chat')
+    }
+    this.unsuppressTabs('chat', [normalizedSessionId])
+    await this.chat.loadChatHistory(normalizedSessionId, {
+      activate: true,
+      loadAgentContext: options?.loadAgentContext !== false
+    })
   }
 
   async openDetachedFileEditorForPath(

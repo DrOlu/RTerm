@@ -12,6 +12,7 @@ import type {
   GatewaySessionSummary
 } from './types';
 import type { UIHistoryService } from '../UIHistoryService';
+import type { StoredChatSession } from '../ChatHistoryService';
 import type {
   IAgentRuntime,
   ICommandPolicyRuntime,
@@ -200,50 +201,75 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
   }
 
   listSessionSummaries(): GatewaySessionSummary[] {
-    const summarySource = typeof (this.uiHistoryService as any).getAllSessionSummaries === 'function'
-      ? (this.uiHistoryService as any).getAllSessionSummaries()
-      : this.uiHistoryService.getAllSessions().map((session) => {
-          const latestVisible = [...session.messages]
-            .reverse()
-            .find((message) => message.type !== 'tokens_count');
-          return {
-            id: session.id,
-            title: session.title,
-            updatedAt: session.updatedAt,
-            messagesCount: session.messages.length,
-            lastMessagePreview: latestVisible?.content || latestVisible?.metadata?.output || ''
-          };
-        });
+    const uiSummaryById = new Map(
+      this.uiHistoryService
+        .getAllSessionSummaries()
+        .map((session) => [session.id, session] as const)
+    );
+    const storedById = new Map(
+      this.agentService
+        .listStoredChatSessions()
+        .map((session) => [session.id, session] as const)
+    );
+    const knownSessionIds = new Set<string>([
+      ...uiSummaryById.keys(),
+      ...storedById.keys(),
+      ...this.sessions.keys()
+    ]);
 
-    return summarySource.map((session: any) => {
-      const context = this.sessions.get(session.id);
-      const isBusy = context ? context.status !== 'idle' : false;
-      const lockedProfileId = isBusy ? context?.lockedProfileId || null : null;
+    return Array.from(knownSessionIds)
+      .map((sessionId) => {
+        const uiSummary = uiSummaryById.get(sessionId);
+        const storedSession = storedById.get(sessionId);
+        const context = this.sessions.get(sessionId);
+        const isBusy = context ? context.status !== 'idle' : false;
+        const lockedProfileId = isBusy && context ? context.lockedProfileId || null : null;
 
-      return {
-        id: session.id,
-        title: session.title,
-        updatedAt: session.updatedAt,
-        messagesCount: session.messagesCount,
-        lastMessagePreview: this.normalizeSessionPreview(session.lastMessagePreview || ''),
-        isBusy,
-        lockedProfileId
-      };
-    });
+        return {
+          id: sessionId,
+          title: this.resolveSessionTitle(
+            uiSummary?.title,
+            storedSession?.title,
+            context
+          ),
+          updatedAt: this.resolveSessionUpdatedAt(
+            uiSummary?.updatedAt,
+            storedSession?.updatedAt,
+            context
+          ),
+          messagesCount: this.resolveSessionMessageCount(uiSummary, storedSession),
+          lastMessagePreview: this.normalizeSessionPreview(
+            uiSummary?.lastMessagePreview || ''
+          ),
+          isBusy,
+          lockedProfileId
+        };
+      })
+      .sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
   getSessionSnapshot(sessionId: string): GatewaySessionSnapshot | null {
     const session = this.uiHistoryService.getSession(sessionId);
-    if (!session) return null;
+    const storedSession = this.agentService.exportChatSession(sessionId);
+    const context = this.sessions.get(sessionId);
+    if (!session && !storedSession && !context) return null;
 
-    const context = this.sessions.get(session.id);
+    const resolvedSessionId = session?.id || storedSession?.id || sessionId;
     const isBusy = context ? context.status !== 'idle' : false;
     const lockedProfileId = isBusy ? context?.lockedProfileId || null : null;
     return {
-      id: session.id,
-      title: session.title,
-      updatedAt: session.updatedAt,
-      messages: session.messages.map((message) => ({
+      id: resolvedSessionId,
+      title: this.resolveSessionTitle(
+        session?.title,
+        storedSession?.title,
+        context
+      ),
+      updatedAt: this.resolveSessionUpdatedAt(
+        session?.updatedAt,
+        storedSession?.updatedAt,
+        context
+      ),
+      messages: (session?.messages || []).map((message) => ({
         ...message,
         metadata: message.metadata ? { ...message.metadata } : undefined
       })),
@@ -319,8 +345,62 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
       lockedExperimentalFlags: null,
       abortController: null,
       status: 'idle',
-      metadata: {}
+      metadata: {
+        createdAt: Date.now()
+      }
     };
+  }
+
+  private resolveSessionTitle(
+    uiTitle?: string,
+    storedTitle?: string,
+    context?: SessionContext
+  ): string {
+    const preferredTitle = [uiTitle, storedTitle]
+      .find((value) => typeof value === 'string' && value.trim().length > 0);
+    if (preferredTitle) {
+      return preferredTitle;
+    }
+    if (context) {
+      return 'New Chat';
+    }
+    return 'Recovered Session';
+  }
+
+  private resolveSessionUpdatedAt(
+    uiUpdatedAt?: number,
+    storedUpdatedAt?: number,
+    context?: SessionContext
+  ): number {
+    if (typeof uiUpdatedAt === 'number' && Number.isFinite(uiUpdatedAt)) {
+      return uiUpdatedAt;
+    }
+    if (typeof storedUpdatedAt === 'number' && Number.isFinite(storedUpdatedAt)) {
+      return storedUpdatedAt;
+    }
+    const contextCreatedAt = context?.metadata?.createdAt;
+    if (typeof contextCreatedAt === 'number' && Number.isFinite(contextCreatedAt)) {
+      return contextCreatedAt;
+    }
+    return Date.now();
+  }
+
+  private resolveSessionMessageCount(
+    uiSummary:
+      | { messagesCount?: number }
+      | undefined,
+    storedSession?: StoredChatSession
+  ): number {
+    if (
+      typeof uiSummary?.messagesCount === 'number' &&
+      Number.isFinite(uiSummary.messagesCount)
+    ) {
+      return uiSummary.messagesCount;
+    }
+    if (Array.isArray(storedSession?.messages)) {
+      return storedSession.messages.length;
+    }
+    return 0;
   }
 
   private ensureSessionProfileLock(context: SessionContext): void {

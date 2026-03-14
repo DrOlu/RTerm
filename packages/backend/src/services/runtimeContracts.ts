@@ -5,6 +5,7 @@ import type { SkillInfo, CreateSkillResult } from './SkillService'
 import type { McpServerSummary } from './McpToolService'
 import type { MemorySnapshot } from '../memory/FileMemoryStore'
 import type { StartTaskInput } from './Gateway/types'
+import type { StoredChatSession } from './ChatHistoryService'
 
 export interface ISettingsRuntime {
   getSettings(): BackendSettings
@@ -14,10 +15,10 @@ export interface ISettingsRuntime {
 export interface IChatHistoryRuntime {
   saveSession(session: ChatSession): void
   loadSession(sessionId: string): ChatSession | null
-  getAllSessions(): any[]
+  getAllSessions(): StoredChatSession[]
   deleteSession(sessionId: string): void
   renameSession(sessionId: string, newTitle: string): void
-  exportSession(sessionId: string): any | null
+  exportSession(sessionId: string): StoredChatSession | null
 }
 
 export interface ICommandPolicyRuntime {
@@ -81,9 +82,10 @@ export interface IAgentRuntime {
   run(context: any, input: StartTaskInput, signal: AbortSignal, startMode?: 'normal' | 'inserted'): Promise<void>
   isAbortError(error: unknown): boolean
   releaseSessionModelBinding(sessionId: string): void
+  listStoredChatSessions(): StoredChatSession[]
   loadChatSession(sessionId: string): ChatSession | null
   deleteChatSession(sessionId: string): void
   renameChatSession(sessionId: string, newTitle: string): void
-  exportChatSession(sessionId: string): any | null
+  exportChatSession(sessionId: string): StoredChatSession | null
   rollbackToMessage(sessionId: string, messageId: string): { ok: boolean; removedCount: number }
 }

@@ -767,6 +767,13 @@ app.on('window-all-closed', async () => {
   if (terminalService) {
     terminalService.flushPersistedState()
   }
+  if (uiHistoryService) {
+    try {
+      uiHistoryService.flush()
+    } catch (error) {
+      console.error('[Main] Failed to flush UI history state:', error)
+    }
+  }
   if (webSocketGatewayControlService) {
     try {
       await webSocketGatewayControlService.stop()
