@@ -40,3 +40,11 @@ export const normalizeTerminalRecoveryReason = (value: unknown): TerminalRecover
   }
   return null
 }
+
+export const shouldScheduleTerminalRecoveryOnActivate = (options: {
+  recoveryEpoch: number
+  lastHandledRecoveryEpoch: number
+  pendingRecoveryRefit?: boolean
+}): boolean =>
+  options.pendingRecoveryRefit === true ||
+  options.lastHandledRecoveryEpoch < options.recoveryEpoch

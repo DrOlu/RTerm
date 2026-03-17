@@ -270,6 +270,28 @@ interface VersionCheckResult {
   warning?: string
 }
 
+interface TerminalSystemInfo {
+  os: string
+  platform: string
+  release: string
+  arch: string
+  hostname: string
+  isRemote: boolean
+  shell?: string
+}
+
+interface TerminalSummary {
+  id: string
+  title: string
+  type: ConnectionType
+  cols: number
+  rows: number
+  runtimeState?: 'initializing' | 'ready' | 'exited'
+  lastExitCode?: number
+  remoteOs?: 'unix' | 'windows'
+  systemInfo?: TerminalSystemInfo
+}
+
 // Connection Config Types
 export type ConnectionType = 'local' | 'ssh'
 
@@ -373,15 +395,7 @@ export interface GyShellAPI {
   // Terminal
   terminal: {
     list: () => Promise<{
-      terminals: Array<{
-        id: string
-        title: string
-        type: ConnectionType
-        cols: number
-        rows: number
-        runtimeState?: 'initializing' | 'ready' | 'exited'
-        lastExitCode?: number
-      }>
+      terminals: TerminalSummary[]
     }>
     createTab: (config: TerminalConfig) => Promise<{ id: string }>
     write: (terminalId: string, data: string) => Promise<void>
@@ -393,17 +407,7 @@ export interface GyShellAPI {
     onData: (callback: (data: { terminalId: string; data: string; offset?: number }) => void) => () => void
     onExit: (callback: (data: { terminalId: string; code: number }) => void) => () => void
     onTabsUpdated: (
-      callback: (data: {
-        terminals: Array<{
-          id: string
-          title: string
-          type: ConnectionType
-          cols: number
-          rows: number
-          runtimeState?: 'initializing' | 'ready' | 'exited'
-          lastExitCode?: number
-        }>
-      }) => void
+      callback: (data: { terminals: TerminalSummary[] }) => void
     ) => () => void
     onRecoveryHint: (callback: (data: { reason: TerminalRecoveryReason }) => void) => () => void
   }
@@ -637,17 +641,7 @@ const api: GyShellAPI = {
     onTabsUpdated: (callback) => {
       const handler = (
         _: IpcRendererEvent,
-        data: {
-          terminals: Array<{
-            id: string
-            title: string
-            type: ConnectionType
-            cols: number
-            rows: number
-            runtimeState?: 'initializing' | 'ready' | 'exited'
-            lastExitCode?: number
-          }>
-        }
+        data: { terminals: TerminalSummary[] }
       ) => callback(data)
       ipcRenderer.on('terminal:tabs', handler)
       return () => ipcRenderer.off('terminal:tabs', handler)

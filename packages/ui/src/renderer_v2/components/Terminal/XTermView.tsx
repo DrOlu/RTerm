@@ -13,6 +13,7 @@ import {
   NORMAL_TERMINAL_REFIT_REQUEST,
   normalizeTerminalRecoveryReason,
   RECOVERY_TERMINAL_REFIT_REQUEST,
+  shouldScheduleTerminalRecoveryOnActivate,
   shouldSendTerminalBackendResize,
   type TerminalRefitRequest
 } from './terminalRecovery'
@@ -22,6 +23,12 @@ import {
   hasNativeFileDragType,
   resolveTerminalDropPathsForTarget
 } from '../../lib/filesystemDragDrop'
+import {
+  resolveTerminalWindowsPty,
+  windowsPtyOptionsEqual,
+  type TerminalRemoteOs,
+  type TerminalSystemInfoLike
+} from './terminalWindowsPty'
 
 const SCROLLBAR_HIDE_DELAY = 2000 // ms
 const RUNTIME_RELEASE_DELAY = 4000 // ms
@@ -60,6 +67,7 @@ interface TerminalRuntime {
   settleRefitFrame: number | null
   pendingRefitRequest: TerminalRefitRequest
   lastHandledRecoveryEpoch: number
+  pendingRecoveryRefit: boolean
 }
 
 const runtimePool = new Map<string, TerminalRuntime>()
@@ -145,6 +153,7 @@ const scheduleRuntimeRefit = (
 
 const scheduleRuntimeRecoveryRefit = (runtime: TerminalRuntime, recoveryEpoch = terminalRecoveryEpoch): void => {
   runtime.lastHandledRecoveryEpoch = Math.max(runtime.lastHandledRecoveryEpoch, recoveryEpoch)
+  runtime.pendingRecoveryRefit = false
   scheduleRuntimeRefit(runtime, RECOVERY_TERMINAL_REFIT_REQUEST)
 }
 
@@ -179,8 +188,11 @@ const disposeRuntime = (runtime: TerminalRuntime): void => {
 const createRuntime = (
   config: TerminalConfig,
   theme: ITheme,
-  settings: TerminalSettings | undefined
+  settings: TerminalSettings | undefined,
+  remoteOs?: TerminalRemoteOs,
+  systemInfo?: TerminalSystemInfoLike
 ): TerminalRuntime => {
+  const windowsPty = resolveTerminalWindowsPty(remoteOs, systemInfo)
   const term = new Terminal({
     allowTransparency: true,
     cursorBlink: settings?.cursorBlink ?? true,
@@ -189,6 +201,7 @@ const createRuntime = (
     lineHeight: Math.max(1, settings?.lineHeight ?? 1.2),
     scrollback: settings?.scrollback ?? 5000,
     theme,
+    windowsPty,
     allowProposedApi: true
   })
 
@@ -237,7 +250,8 @@ const createRuntime = (
     refitFrame: null,
     settleRefitFrame: null,
     pendingRefitRequest: { ...NORMAL_TERMINAL_REFIT_REQUEST },
-    lastHandledRecoveryEpoch: terminalRecoveryEpoch
+    lastHandledRecoveryEpoch: terminalRecoveryEpoch,
+    pendingRecoveryRefit: false
   }
 
   const showScrollbar = () => {
@@ -454,11 +468,13 @@ const acquireRuntime = (
   config: TerminalConfig,
   theme: ITheme,
   settings: TerminalSettings | undefined,
-  uiOwnershipCheck?: () => boolean
+  uiOwnershipCheck?: () => boolean,
+  remoteOs?: TerminalRemoteOs,
+  systemInfo?: TerminalSystemInfoLike
 ): TerminalRuntime => {
   let runtime = runtimePool.get(config.id)
   if (!runtime) {
-    runtime = createRuntime(config, theme, settings)
+    runtime = createRuntime(config, theme, settings, remoteOs, systemInfo)
     runtimePool.set(config.id, runtime)
   }
   if (uiOwnershipCheck) {
@@ -519,6 +535,8 @@ export function XTermView(props: {
   config: TerminalConfig
   theme: ITheme
   terminalSettings?: TerminalSettings
+  remoteOs?: TerminalRemoteOs
+  systemInfo?: TerminalSystemInfoLike
   isOwnedByUi?: () => boolean
   isActive?: boolean
   layoutSignature?: string
@@ -531,7 +549,14 @@ export function XTermView(props: {
     const hostEl = hostRef.current
     if (!hostEl) return
 
-    const runtime = acquireRuntime(props.config, props.theme, props.terminalSettings, props.isOwnedByUi)
+    const runtime = acquireRuntime(
+      props.config,
+      props.theme,
+      props.terminalSettings,
+      props.isOwnedByUi,
+      props.remoteOs,
+      props.systemInfo
+    )
     runtime.selectionHandler = props.onSelectionChange
     runtime.settings = props.terminalSettings
     runtime.uiOwnershipCheck = props.isOwnedByUi
@@ -615,13 +640,40 @@ export function XTermView(props: {
     if (!runtime) return
     runtime.isActive = props.isActive ?? false
     if (runtime.isActive) {
-      if (runtime.lastHandledRecoveryEpoch < terminalRecoveryEpoch) {
+      if (shouldScheduleTerminalRecoveryOnActivate({
+        recoveryEpoch: terminalRecoveryEpoch,
+        lastHandledRecoveryEpoch: runtime.lastHandledRecoveryEpoch,
+        pendingRecoveryRefit: runtime.pendingRecoveryRefit
+      })) {
         scheduleRuntimeRecoveryRefit(runtime, terminalRecoveryEpoch)
       } else {
         scheduleRuntimeRefit(runtime)
       }
     }
   }, [props.isActive, props.config.id])
+
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (!runtime) return
+
+    const nextWindowsPty = resolveTerminalWindowsPty(props.remoteOs, props.systemInfo)
+    const currentWindowsPty = runtime.term.options.windowsPty
+    if (windowsPtyOptionsEqual(currentWindowsPty, nextWindowsPty)) {
+      return
+    }
+
+    runtime.term.options.windowsPty = nextWindowsPty ?? {}
+    if (runtime.isActive) {
+      requestAnimationFrame(() => {
+        const activeRuntime = runtimeRef.current
+        if (!activeRuntime || activeRuntime.terminalId !== props.config.id) return
+        scheduleRuntimeRecoveryRefit(activeRuntime)
+      })
+      return
+    }
+
+    runtime.pendingRecoveryRefit = true
+  }, [props.remoteOs, props.systemInfo?.release, props.config.id])
 
   // Live-update theme (Tabby-style behavior)
   useEffect(() => {

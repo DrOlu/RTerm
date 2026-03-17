@@ -127,10 +127,13 @@ export interface TerminalTabModel {
   connectionRef?: TerminalConnectionRef;
   runtimeState?: 'initializing' | 'ready' | 'exited';
   lastExitCode?: number;
+  remoteOs?: TerminalListEntry['remoteOs'];
+  systemInfo?: TerminalListEntry['systemInfo'];
 }
 type TerminalListPayload = Awaited<
   ReturnType<Window['gyshell']['terminal']['list']>
 >;
+type TerminalListEntry = TerminalListPayload['terminals'][number];
 
 export type FileSystemClipboardMode = 'copy' | 'move';
 
@@ -1103,6 +1106,8 @@ export class AppStore {
           title: item.title,
           runtimeState: item.runtimeState,
           lastExitCode: item.lastExitCode,
+          remoteOs: item.remoteOs ?? existing.remoteOs,
+          systemInfo: item.systemInfo ?? existing.systemInfo,
           capabilities: resolveTerminalConnectionCapabilities({
             type: item.type,
           }),
@@ -1124,6 +1129,8 @@ export class AppStore {
         connectionRef: item.type === 'local' ? { type: 'local' } : undefined,
         runtimeState: item.runtimeState,
         lastExitCode: item.lastExitCode,
+        remoteOs: item.remoteOs,
+        systemInfo: item.systemInfo,
       }
     })
 

@@ -556,6 +556,8 @@ export class ElectronGatewayIpcAdapter {
             rows: terminal.rows,
             runtimeState: terminal.runtimeState,
             lastExitCode: terminal.lastExitCode,
+            remoteOs: terminal.remoteOs,
+            systemInfo: terminal.systemInfo,
           })),
       };
     });

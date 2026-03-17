@@ -2,6 +2,7 @@ import {
   mergeTerminalRefitRequests,
   normalizeTerminalRecoveryReason,
   RECOVERY_TERMINAL_REFIT_REQUEST,
+  shouldScheduleTerminalRecoveryOnActivate,
   shouldSendTerminalBackendResize,
   NORMAL_TERMINAL_REFIT_REQUEST
 } from './terminalRecovery'
@@ -64,6 +65,27 @@ runCase('normalizeTerminalRecoveryReason rejects unexpected renderer payloads', 
     normalizeTerminalRecoveryReason('window-focus'),
     null,
     'unknown recovery reasons should be ignored'
+  )
+})
+
+runCase('shouldScheduleTerminalRecoveryOnActivate preserves deferred recovery work for hidden tabs', () => {
+  assertEqual(
+    shouldScheduleTerminalRecoveryOnActivate({
+      recoveryEpoch: 3,
+      lastHandledRecoveryEpoch: 3,
+      pendingRecoveryRefit: true
+    }),
+    true,
+    'pending recovery should force a recovery refit even when the global epoch did not change'
+  )
+  assertEqual(
+    shouldScheduleTerminalRecoveryOnActivate({
+      recoveryEpoch: 5,
+      lastHandledRecoveryEpoch: 5,
+      pendingRecoveryRefit: false
+    }),
+    false,
+    'activation should stay on the cheap path when there is no pending or global recovery work'
   )
 })
 

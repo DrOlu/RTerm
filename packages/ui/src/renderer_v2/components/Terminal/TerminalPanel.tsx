@@ -383,6 +383,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                       config={tab.config}
                       theme={store.xtermTheme}
                       terminalSettings={store.settings?.terminal}
+                      remoteOs={tab.remoteOs}
+                      systemInfo={tab.systemInfo}
                       isOwnedByUi={() =>
                         store.terminalTabs.some(
                           (candidate) => candidate.id === tab.id,

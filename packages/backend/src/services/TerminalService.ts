@@ -65,6 +65,8 @@ type TerminalTabSnapshot = {
   rows: number
   runtimeState?: 'initializing' | 'ready' | 'exited'
   lastExitCode?: number
+  remoteOs?: 'unix' | 'windows'
+  systemInfo?: TerminalTab['systemInfo']
 }
 
 interface TerminalServiceOptions {
@@ -126,7 +128,9 @@ export class TerminalService {
       cols: terminal.cols,
       rows: terminal.rows,
       runtimeState: terminal.runtimeState,
-      lastExitCode: terminal.lastExitCode
+      lastExitCode: terminal.lastExitCode,
+      remoteOs: terminal.remoteOs,
+      systemInfo: terminal.systemInfo
     }))
   }
 
@@ -134,6 +138,76 @@ export class TerminalService {
     this.sendToRenderer('terminal:tabs', {
       terminals: this.listRenderableTerminals()
     })
+  }
+
+  private inferRemoteOsFromSystemInfo(
+    systemInfo?: TerminalTab['systemInfo']
+  ): 'unix' | 'windows' | undefined {
+    if (!systemInfo) return undefined
+
+    const platform = String(systemInfo.platform || '').trim().toLowerCase()
+    if (platform === 'win32' || platform === 'windows') {
+      return 'windows'
+    }
+    if (platform === 'linux' || platform === 'darwin' || platform === 'unix') {
+      return 'unix'
+    }
+
+    const osName = String(systemInfo.os || '').trim().toLowerCase()
+    if (osName.includes('windows')) {
+      return 'windows'
+    }
+    if (osName) {
+      return 'unix'
+    }
+
+    return undefined
+  }
+
+  private hydrateTerminalRuntimeMetadata(terminalId: string): boolean {
+    const terminal = this.terminals.get(terminalId)
+    if (!terminal) return false
+
+    const backend = this.getBackend(terminal.type)
+    let shouldPublishTabsChanged = false
+
+    const remoteOs = backend.getRemoteOs(terminal.ptyId) ?? this.inferRemoteOsFromSystemInfo(terminal.systemInfo)
+    if (remoteOs && terminal.remoteOs !== remoteOs) {
+      terminal.remoteOs = remoteOs
+      shouldPublishTabsChanged = true
+    }
+
+    if (!terminal.systemInfo) {
+      void backend.getSystemInfo(terminal.ptyId).then((info) => {
+        if (!info) return
+
+        const latest = this.terminals.get(terminalId)
+        if (!latest) return
+
+        let shouldPublishLatest = false
+        if (!latest.systemInfo) {
+          latest.systemInfo = info
+          shouldPublishLatest = true
+        }
+
+        const nextRemoteOs =
+          latest.remoteOs ??
+          backend.getRemoteOs(latest.ptyId) ??
+          this.inferRemoteOsFromSystemInfo(info)
+        if (nextRemoteOs && latest.remoteOs !== nextRemoteOs) {
+          latest.remoteOs = nextRemoteOs
+          shouldPublishLatest = true
+        }
+
+        if (shouldPublishLatest) {
+          this.publishTerminalTabsChanged()
+        }
+      }).catch(() => {
+        // Runtime metadata discovery is best-effort.
+      })
+    }
+
+    return shouldPublishTabsChanged
   }
 
   private getBackend(type: ConnectionType): TerminalBackend {
@@ -300,6 +374,10 @@ export class TerminalService {
       this.terminalConfigs.set(config.id, mergedConfig)
       this.schedulePersistTerminalState()
 
+      if (this.hydrateTerminalRuntimeMetadata(config.id)) {
+        this.publishTerminalTabsChanged()
+      }
+
       return existing
     }
 
@@ -344,6 +422,8 @@ export class TerminalService {
       this.handleExit(config.id, code)
     })
 
+    this.hydrateTerminalRuntimeMetadata(config.id)
+
     // Print banner for the first local terminal
     if (config.type === 'local' && this.primaryLocalTerminalId === config.id) {
       this.printBanner(config.id)
@@ -359,6 +439,8 @@ export class TerminalService {
     const sanitizedData = stripInternalControlMarkers(data)
     const tab = this.terminals.get(terminalId)
     if (tab) {
+      let shouldPublishTabsChanged = false
+
       // Sync initialization state and remote OS
       if (tab.isInitializing) {
         if (tab.type === 'ssh') {
@@ -367,39 +449,26 @@ export class TerminalService {
           if (initState === 'ready') {
             tab.isInitializing = false
             tab.runtimeState = 'ready'
-            this.publishTerminalTabsChanged()
+            shouldPublishTabsChanged = true
           } else if (initState === 'failed') {
             tab.isInitializing = false
             tab.runtimeState = 'exited'
             tab.lastExitCode = -1
-            this.publishTerminalTabsChanged()
+            shouldPublishTabsChanged = true
           }
         } else {
           // For local silence mode, first meaningful output means shell is ready.
           tab.isInitializing = false
           tab.runtimeState = 'ready'
-          this.publishTerminalTabsChanged()
+          shouldPublishTabsChanged = true
         }
       }
 
-      if (tab.type === 'ssh') {
-        const backend = this.getBackend('ssh') as SSHBackend
-        if (!tab.remoteOs) {
-          tab.remoteOs = backend.getRemoteOs(tab.ptyId)
-        }
-        if (!tab.systemInfo) {
-          backend.getSystemInfo(tab.ptyId).then(info => {
-            if (info) tab.systemInfo = info
-          })
-        }
-      } else if (tab.type === 'local' && !tab.remoteOs) {
-        const backend = this.getBackend('local')
-        tab.remoteOs = backend.getRemoteOs(tab.ptyId)
-        if (!tab.systemInfo) {
-          backend.getSystemInfo(tab.ptyId).then(info => {
-            if (info) tab.systemInfo = info
-          })
-        }
+      shouldPublishTabsChanged =
+        this.hydrateTerminalRuntimeMetadata(terminalId) || shouldPublishTabsChanged
+
+      if (shouldPublishTabsChanged) {
+        this.publishTerminalTabsChanged()
       }
     }
 

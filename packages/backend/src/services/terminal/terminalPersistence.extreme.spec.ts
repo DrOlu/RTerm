@@ -52,6 +52,46 @@ type FakeSession = {
 class FakeTerminalBackend implements TerminalBackend {
   private readonly sessions = new Map<string, FakeSession>()
   private readonly spawnFailures = new Set<string>()
+  private readonly remoteOsByPtyId = new Map<string, 'unix' | 'windows' | undefined>()
+  private readonly systemInfoByPtyId = new Map<string, TerminalSystemInfo | undefined>()
+
+  private getPtyIdForTerminalId(terminalId: string): string {
+    return `pty-${terminalId}`
+  }
+
+  private createDefaultSystemInfo(
+    remoteOs: 'unix' | 'windows',
+    isRemote: boolean
+  ): TerminalSystemInfo {
+    if (remoteOs === 'windows') {
+      return {
+        os: 'Windows',
+        platform: 'win32',
+        release: '10.0.19045',
+        arch: 'x64',
+        hostname: 'test-win',
+        isRemote,
+        shell: 'powershell.exe'
+      }
+    }
+
+    return {
+      os: 'unix',
+      platform: 'linux',
+      release: 'test',
+      arch: 'x64',
+      hostname: 'test',
+      isRemote
+    }
+  }
+
+  setRemoteOsForTerminalId(terminalId: string, remoteOs: 'unix' | 'windows' | undefined): void {
+    this.remoteOsByPtyId.set(this.getPtyIdForTerminalId(terminalId), remoteOs)
+  }
+
+  setSystemInfoForTerminalId(terminalId: string, systemInfo: TerminalSystemInfo | undefined): void {
+    this.systemInfoByPtyId.set(this.getPtyIdForTerminalId(terminalId), systemInfo)
+  }
 
   failSpawnForTerminalId(terminalId: string): void {
     this.spawnFailures.add(terminalId)
@@ -67,13 +107,23 @@ class FakeTerminalBackend implements TerminalBackend {
     if (this.spawnFailures.has(config.id)) {
       throw new Error(`intentional spawn failure for ${config.id}`)
     }
-    const id = `pty-${config.id}`
+    const id = this.getPtyIdForTerminalId(config.id)
     this.sessions.set(id, {
       id,
       cwd: '/tmp',
       dataCallbacks: [],
       exitCallbacks: []
     })
+    if (!this.remoteOsByPtyId.has(id)) {
+      this.remoteOsByPtyId.set(id, 'unix')
+    }
+    if (!this.systemInfoByPtyId.has(id)) {
+      const remoteOs = this.remoteOsByPtyId.get(id) === 'windows' ? 'windows' : 'unix'
+      this.systemInfoByPtyId.set(
+        id,
+        this.createDefaultSystemInfo(remoteOs, config.type === 'ssh')
+      )
+    }
     return id
   }
 
@@ -86,6 +136,8 @@ class FakeTerminalBackend implements TerminalBackend {
     if (!session) return
     session.exitCallbacks.forEach((callback) => callback(0))
     this.sessions.delete(ptyId)
+    this.remoteOsByPtyId.delete(ptyId)
+    this.systemInfoByPtyId.delete(ptyId)
   }
 
   onData(ptyId: string, callback: (data: string) => void): void {
@@ -160,18 +212,11 @@ class FakeTerminalBackend implements TerminalBackend {
   }
 
   getRemoteOs(_ptyId: string): 'unix' | 'windows' | undefined {
-    return 'unix'
+    return this.remoteOsByPtyId.get(_ptyId)
   }
 
   async getSystemInfo(_ptyId: string): Promise<TerminalSystemInfo | undefined> {
-    return {
-      os: 'unix',
-      platform: 'linux',
-      release: 'test',
-      arch: 'x64',
-      hostname: 'test',
-      isRemote: false
-    }
+    return this.systemInfoByPtyId.get(_ptyId)
   }
 
   async statFile(_ptyId: string, _filePath: string): Promise<FileStatInfo> {
@@ -338,6 +383,86 @@ const run = async (): Promise<void> => {
       assertCondition(
         service2.getDisplayTerminals().some((item) => item.id === 'local-restore-a'),
         'restored terminal must exist in display list'
+      )
+    })
+
+    await runCase('restored idle windows terminals publish runtime metadata before any new output', async () => {
+      const store = new TerminalStateStore(stateFilePath)
+      store.save([
+        {
+          id: 'ssh-win-idle',
+          config: {
+            type: 'ssh',
+            id: 'ssh-win-idle',
+            title: 'Idle Windows',
+            cols: 120,
+            rows: 32,
+            host: '10.0.0.10',
+            port: 22,
+            username: 'Administrator',
+            authMethod: 'password',
+            password: 'secret-password'
+          }
+        }
+      ])
+
+      const backend = new FakeTerminalBackend()
+      backend.setRemoteOsForTerminalId('ssh-win-idle', 'windows')
+      backend.setSystemInfoForTerminalId('ssh-win-idle', {
+        os: 'Windows',
+        platform: 'win32',
+        release: '10.0.19045',
+        arch: 'x64',
+        hostname: 'test-win',
+        isRemote: true,
+        shell: 'powershell.exe'
+      })
+
+      const terminalTabEvents: Array<{
+        terminals: Array<{
+          id: string
+          remoteOs?: 'unix' | 'windows'
+          systemInfo?: TerminalSystemInfo
+        }>
+      }> = []
+
+      const service = createService(stateFilePath, backend)
+      service.setRawEventPublisher((channel, payload) => {
+        if (channel !== 'terminal:tabs') return
+        terminalTabEvents.push(payload as {
+          terminals: Array<{
+            id: string
+            remoteOs?: 'unix' | 'windows'
+            systemInfo?: TerminalSystemInfo
+          }>
+        })
+      })
+
+      const restore = await service.restorePersistedTerminals()
+      assertCondition(
+        restore.restored.includes('ssh-win-idle'),
+        'windows terminal should restore from persisted state'
+      )
+
+      await sleep(20)
+
+      const restored = service.getDisplayTerminals().find((item) => item.id === 'ssh-win-idle')
+      assertEqual(restored?.remoteOs, 'windows', 'restored terminal should learn windows PTY metadata without new output')
+      assertEqual(
+        restored?.systemInfo?.platform,
+        'win32',
+        'restored terminal should hydrate system info without waiting for handleData'
+      )
+      assertCondition(
+        terminalTabEvents.some((event) =>
+          event.terminals.some(
+            (terminal) =>
+              terminal.id === 'ssh-win-idle' &&
+              terminal.remoteOs === 'windows' &&
+              terminal.systemInfo?.platform === 'win32'
+          )
+        ),
+        'renderer tab snapshots should be republished once restored windows metadata is available'
       )
     })
 

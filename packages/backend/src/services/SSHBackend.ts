@@ -173,8 +173,8 @@ function Global:prompt {
   $ec = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } else { if ($?) { 0 } else { 1 } }
   $cwd_b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($PWD.Path))
   $home_b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($HOME))
-  Write-Host -NoNewline "$([char]27)]1337;gyshell_precmd;ec=$ec;cwd_b64=$cwd_b64;home_b64=$home_b64$([char]7)"
-  return "PS $($PWD.Path)> "
+  $osc = "$([char]27)]1337;gyshell_precmd;ec=$ec;cwd_b64=$cwd_b64;home_b64=$home_b64$([char]7)"
+  return "$oscPS $($PWD.Path)> "
 }
 Clear-Host
 Write-Output "__GYSHELL_READY__"
