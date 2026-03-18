@@ -27,7 +27,7 @@ import {
   resolveTerminalConnectionCapabilities,
 } from './terminal/terminalConnectionSupport'
 
-const MAX_BUFFER_SIZE = 100000 // 100KB
+const MAX_BUFFER_SIZE = 200000 // 200KB
 const SCROLLBACK_SIZE = 5000 // Keep up to 5000 lines in virtual terminal
 const PERSIST_FLUSH_DELAY_MS = 120
 // We do NOT print any wrapper/marker commands in the terminal.
