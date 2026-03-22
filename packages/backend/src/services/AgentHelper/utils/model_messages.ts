@@ -33,6 +33,7 @@ export function stripRawResponseFromStoredMessages(storedMessages: any[]): boole
 export async function invokeWithRetryAndSanitizedInput<T>(opts: {
   helpers: RetryCapableHelpers
   messages: BaseMessage[]
+  modelSupportsImage?: boolean
   signal: AbortSignal | undefined
   operation: (sanitizedMessages: BaseMessage[]) => Promise<T>
   onRetry?: (attempt: number) => void
@@ -44,7 +45,10 @@ export async function invokeWithRetryAndSanitizedInput<T>(opts: {
       if (attempt > 0) {
         opts.onRetry?.(attempt)
       }
-      const sanitizedMessages = stripRawResponseForModelInput(opts.messages)
+      const sanitizedMessages = sanitizeModelInputMessages(
+        stripRawResponseForModelInput(opts.messages),
+        { modelSupportsImage: opts.modelSupportsImage }
+      )
       return await opts.operation(sanitizedMessages)
     },
     opts.maxRetries,
@@ -53,9 +57,13 @@ export async function invokeWithRetryAndSanitizedInput<T>(opts: {
   )
 }
 
-export function buildDynamicRequestHistory(messages: BaseMessage[]): BaseMessage[] {
+export function buildDynamicRequestHistory(
+  messages: BaseMessage[],
+  options?: { modelSupportsImage?: boolean }
+): BaseMessage[] {
   const compacted = applyCompactionBoundary(messages)
-  return applyPruneMaterialization(compacted)
+  const materialized = applyPruneMaterialization(compacted)
+  return sanitizeModelInputMessages(materialized, options)
 }
 
 function applyCompactionBoundary(messages: BaseMessage[]): BaseMessage[] {
@@ -91,6 +99,87 @@ function applyPruneMaterialization(messages: BaseMessage[]): BaseMessage[] {
     })
   })
   return changed ? nextMessages : messages
+}
+
+export function sanitizeModelInputMessages(
+  messages: BaseMessage[],
+  options?: { modelSupportsImage?: boolean }
+): BaseMessage[] {
+  if (options?.modelSupportsImage !== false) {
+    return messages
+  }
+
+  let changed = false
+  const nextMessages = messages.map((message) => {
+    const sanitized = sanitizeMessageContentForTextOnlyModel(message.content)
+    if (!sanitized.changed) {
+      return message
+    }
+    changed = true
+    return cloneMessageWithPatch(message, {
+      content: sanitized.content
+    })
+  })
+  return changed ? nextMessages : messages
+}
+
+function sanitizeMessageContentForTextOnlyModel(
+  content: unknown
+): { content: unknown; changed: boolean } {
+  if (!Array.isArray(content)) {
+    return { content, changed: false }
+  }
+
+  let changed = false
+  const nextParts: unknown[] = []
+  const textParts: string[] = []
+
+  for (const part of content) {
+    if (isImageContentPart(part)) {
+      changed = true
+      continue
+    }
+    nextParts.push(part)
+    if (isTextContentPart(part)) {
+      textParts.push(part.text)
+    } else if (typeof part === 'string') {
+      textParts.push(part)
+    }
+  }
+
+  if (!changed) {
+    return { content, changed: false }
+  }
+
+  const mergedText = textParts.join('').trim()
+  if (nextParts.length === 0) {
+    return {
+      content: mergedText || '[Image content omitted because the target model does not support image inputs.]',
+      changed: true
+    }
+  }
+
+  if (nextParts.every((part) => isTextContentPart(part) || typeof part === 'string')) {
+    return {
+      content: mergedText || '[Image content omitted because the target model does not support image inputs.]',
+      changed: true
+    }
+  }
+
+  return { content: nextParts, changed: true }
+}
+
+function isImageContentPart(part: unknown): boolean {
+  return !!part && typeof part === 'object' && (part as { type?: unknown }).type === 'image_url'
+}
+
+function isTextContentPart(part: unknown): part is { type: 'text'; text: string } {
+  return (
+    !!part &&
+    typeof part === 'object' &&
+    (part as { type?: unknown }).type === 'text' &&
+    typeof (part as { text?: unknown }).text === 'string'
+  )
 }
 
 function buildPrunedPlaceholder(content: unknown): string {

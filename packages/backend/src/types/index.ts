@@ -41,6 +41,7 @@ export interface ModelProfile {
   // reserved for future:
   actionModelId?: string
   thinkingModelId?: string
+  compactionModelId?: string
 }
 
 export interface ExperimentalFlags {

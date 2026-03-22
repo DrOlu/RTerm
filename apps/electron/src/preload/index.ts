@@ -32,7 +32,14 @@ interface BackendSettings {
         error?: string
       }
     }>
-    profiles: Array<{ id: string; name: string; globalModelId: string; actionModelId?: string; thinkingModelId?: string }>
+    profiles: Array<{
+      id: string
+      name: string
+      globalModelId: string
+      actionModelId?: string
+      thinkingModelId?: string
+      compactionModelId?: string
+    }>
     activeProfileId: string
   }
   connections: {

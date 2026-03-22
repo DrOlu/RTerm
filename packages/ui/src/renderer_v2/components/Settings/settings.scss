@@ -894,6 +894,12 @@
   opacity: 0.8;
 }
 
+.profile-field-label-with-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .profile-field select {
   display: none; /* Replaced by Select component */
 }

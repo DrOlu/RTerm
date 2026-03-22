@@ -164,14 +164,18 @@ interface SessionModelBinding {
   model: ChatOpenAI
   actionModel: ChatOpenAI
   thinkingModel: ChatOpenAI
+  compactionModel: ChatOpenAI
   actionModelSupportsStructuredOutput: boolean
   actionModelSupportsObjectToolChoice: boolean
   thinkingModelSupportsStructuredOutput: boolean
   thinkingModelSupportsObjectToolChoice: boolean
+  compactionModelSupportsStructuredOutput: boolean
+  compactionModelSupportsObjectToolChoice: boolean
   readFileSupport: { image: boolean }
   toolsForModel: any[]
   globalMaxTokens: number
   thinkingMaxTokens: number
+  compactionMaxTokens: number
 }
 
 export class AgentService_v2 {
@@ -324,10 +328,16 @@ export class AgentService_v2 {
     const thinkingItem = profile.thinkingModelId
       ? settings.models.items.find((m) => m.id === profile.thinkingModelId)
       : undefined
+    const compactionItem = profile.compactionModelId
+      ? settings.models.items.find((m) => m.id === profile.compactionModelId)
+      : undefined
 
     const model = this.helpers.createChatModel(globalItem, 0.7)
     const actionModel = actionItem?.apiKey ? this.helpers.createChatModel(actionItem, 0.1) : model
     const thinkingModel = thinkingItem?.apiKey ? this.helpers.createChatModel(thinkingItem, 0.2) : model
+    const compactionModel = compactionItem?.apiKey
+      ? this.helpers.createChatModel(compactionItem, 0.2)
+      : (thinkingItem?.apiKey ? thinkingModel : model)
     const actionModelSupportsStructuredOutput = actionItem?.apiKey
       ? actionItem.supportsStructuredOutput === true
       : globalItem.supportsStructuredOutput === true
@@ -340,9 +350,21 @@ export class AgentService_v2 {
     const thinkingModelSupportsObjectToolChoice = thinkingItem?.apiKey
       ? thinkingItem.supportsObjectToolChoice === true
       : globalItem.supportsObjectToolChoice === true
+    const compactionModelSupportsStructuredOutput = compactionItem?.apiKey
+      ? compactionItem.supportsStructuredOutput === true
+      : (thinkingItem?.apiKey
+          ? thinkingItem.supportsStructuredOutput === true
+          : globalItem.supportsStructuredOutput === true)
+    const compactionModelSupportsObjectToolChoice = compactionItem?.apiKey
+      ? compactionItem.supportsObjectToolChoice === true
+      : (thinkingItem?.apiKey
+          ? thinkingItem.supportsObjectToolChoice === true
+          : globalItem.supportsObjectToolChoice === true)
     const readFileSupport = this.helpers.computeReadFileSupport(
       globalItem.profile,
-      thinkingItem?.profile ?? globalItem.profile
+      actionItem?.apiKey ? actionItem.profile : undefined,
+      thinkingItem?.apiKey ? thinkingItem.profile : undefined,
+      compactionItem?.apiKey ? compactionItem.profile : undefined
     )
     const toolsForModel = buildToolsForModel(readFileSupport)
 
@@ -351,16 +373,24 @@ export class AgentService_v2 {
       model,
       actionModel,
       thinkingModel,
+      compactionModel,
       actionModelSupportsStructuredOutput,
       actionModelSupportsObjectToolChoice,
       thinkingModelSupportsStructuredOutput,
       thinkingModelSupportsObjectToolChoice,
+      compactionModelSupportsStructuredOutput,
+      compactionModelSupportsObjectToolChoice,
       readFileSupport,
       toolsForModel,
       globalMaxTokens: typeof globalItem.maxTokens === 'number' ? globalItem.maxTokens : 200000,
       thinkingMaxTokens: typeof thinkingItem?.maxTokens === 'number'
         ? thinkingItem.maxTokens
-        : (typeof globalItem.maxTokens === 'number' ? globalItem.maxTokens : 200000)
+        : (typeof globalItem.maxTokens === 'number' ? globalItem.maxTokens : 200000),
+      compactionMaxTokens: typeof compactionItem?.maxTokens === 'number'
+        ? compactionItem.maxTokens
+        : (typeof thinkingItem?.maxTokens === 'number'
+            ? thinkingItem.maxTokens
+            : (typeof globalItem.maxTokens === 'number' ? globalItem.maxTokens : 200000))
     }
   }
 
@@ -388,7 +418,7 @@ export class AgentService_v2 {
   }
 
   private getEffectiveMaxTokensFromBinding(binding: SessionModelBinding): number {
-    return Math.min(binding.globalMaxTokens, binding.thinkingMaxTokens)
+    return Math.min(binding.globalMaxTokens, binding.thinkingMaxTokens, binding.compactionMaxTokens)
   }
 
   private getEffectiveMaxTokensForSession(sessionId: string): number | undefined {
@@ -522,7 +552,7 @@ export class AgentService_v2 {
       const baseSystemText = createBaseSystemPromptText(memoryPrompt)
       const newMessages = upsertSingleSystemMessageByText([...messages, humanMessage], baseSystemText)
 
-      const maxTokens = Math.min(sessionBinding.globalMaxTokens, sessionBinding.thinkingMaxTokens)
+      const maxTokens = this.getEffectiveMaxTokensFromBinding(sessionBinding)
 
       let currentTokens = 0
       for (let i = newMessages.length - 1; i >= 0; i--) {
@@ -565,8 +595,6 @@ export class AgentService_v2 {
         fullHistoryMessages = [...fullHistoryMessages, selfCorrectionMessage]
       }
 
-      const modelInputMessages = buildDynamicRequestHistory(fullHistoryMessages)
-
       const prevPassCount = typeof state.modelRequestPassCount === 'number' ? state.modelRequestPassCount : 0
       const nextPassCount = prevPassCount + 1
       if (runtimeThinkingCorrectionEnabled && nextPassCount % 8 === 0) {
@@ -589,6 +617,9 @@ export class AgentService_v2 {
       const mcpTools = this.mcpToolService.getActiveTools()
       const shouldUseThinkingModelOnThisPass =
         state.firstTurnThinkingModelEnabled === true && nextPassCount === 1
+      const modelInputMessages = buildDynamicRequestHistory(fullHistoryMessages, {
+        modelSupportsImage: sessionBinding.readFileSupport.image
+      })
       const baseModel = shouldUseThinkingModelOnThisPass
         ? (sessionBinding.thinkingModel || sessionBinding.model)
         : sessionBinding.model
@@ -602,6 +633,7 @@ export class AgentService_v2 {
       const fullResponse = await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
         messages: modelInputMessages,
+        modelSupportsImage: sessionBinding.readFileSupport.image,
         signal: config?.signal,
         operation: async (streamInputMessages) => {
           const stream = await modelWithTools.stream(streamInputMessages, {
@@ -1441,7 +1473,7 @@ export class AgentService_v2 {
     const historyBeforeProtectedRounds = messages.slice(0, insertionIndex)
     let summaryDecision: z.infer<typeof COMPACTION_SUMMARY_SCHEMA>
     try {
-      summaryDecision = await this.getThinkingModelDecision(
+      summaryDecision = await this.getCompactionModelDecision(
         sessionId,
         [
           ...historyBeforeProtectedRounds,
@@ -1688,6 +1720,7 @@ export class AgentService_v2 {
       return await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
         messages,
+        modelSupportsImage: sessionBinding.readFileSupport.image,
         signal,
         operation: async (sanitizedMessages) => {
           return await structuredModel.invoke(sanitizedMessages, { signal }) as any
@@ -1733,6 +1766,7 @@ export class AgentService_v2 {
     const result = await invokeWithRetryAndSanitizedInput({
       helpers: this.helpers,
       messages,
+      modelSupportsImage: sessionBinding.readFileSupport.image,
       signal,
       operation: async (sanitizedMessages) => {
         return await functionCallingModel.invoke(sanitizedMessages, { signal }) as any
@@ -1755,13 +1789,16 @@ export class AgentService_v2 {
   ): Promise<z.infer<T>> {
     const sessionBinding = this.getSessionModelBinding(sessionId)
     const model = sessionBinding.thinkingModel || sessionBinding.model
-    const processedMessages = buildDynamicRequestHistory(messages)
+    const processedMessages = buildDynamicRequestHistory(messages, {
+      modelSupportsImage: sessionBinding.readFileSupport.image
+    })
 
     if (sessionBinding.thinkingModelSupportsStructuredOutput) {
       const structuredModel = model.withStructuredOutput(schema, { method: 'jsonSchema' })
       return await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
         messages: processedMessages,
+        modelSupportsImage: sessionBinding.readFileSupport.image,
         signal,
         operation: async (sanitizedMessages) => {
           return await structuredModel.invoke(sanitizedMessages, { signal }) as any
@@ -1779,6 +1816,7 @@ export class AgentService_v2 {
       return await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
         messages: processedMessages,
+        modelSupportsImage: sessionBinding.readFileSupport.image,
         signal,
         operation: async (sanitizedMessages) => {
           return await functionCallingModel.invoke(sanitizedMessages, { signal }) as any
@@ -1801,17 +1839,78 @@ export class AgentService_v2 {
     )
   }
 
+  private async getCompactionModelDecision<T extends z.ZodTypeAny>(
+    sessionId: string,
+    messages: BaseMessage[],
+    schema: T,
+    signal: AbortSignal | undefined,
+    decisionName: string
+  ): Promise<z.infer<T>> {
+    const sessionBinding = this.getSessionModelBinding(sessionId)
+    const model = sessionBinding.compactionModel
+    const processedMessages = buildDynamicRequestHistory(messages, {
+      modelSupportsImage: sessionBinding.readFileSupport.image
+    })
+
+    if (sessionBinding.compactionModelSupportsStructuredOutput) {
+      const structuredModel = model.withStructuredOutput(schema, { method: 'jsonSchema' })
+      return await invokeWithRetryAndSanitizedInput({
+        helpers: this.helpers,
+        messages: processedMessages,
+        modelSupportsImage: sessionBinding.readFileSupport.image,
+        signal,
+        operation: async (sanitizedMessages) => {
+          return await structuredModel.invoke(sanitizedMessages, { signal }) as any
+        },
+        onRetry: (attempt) => {
+          console.log(`[AgentService_v2] Retrying compaction model decision for ${decisionName} (attempt ${attempt + 1})...`)
+        },
+        maxRetries: MODEL_RETRY_MAX,
+        delaysMs: MODEL_RETRY_DELAYS_MS
+      })
+    }
+
+    if (sessionBinding.compactionModelSupportsObjectToolChoice) {
+      const functionCallingModel = model.withStructuredOutput(schema, { method: 'functionCalling' })
+      return await invokeWithRetryAndSanitizedInput({
+        helpers: this.helpers,
+        messages: processedMessages,
+        modelSupportsImage: sessionBinding.readFileSupport.image,
+        signal,
+        operation: async (sanitizedMessages) => {
+          return await functionCallingModel.invoke(sanitizedMessages, { signal }) as any
+        },
+        onRetry: (attempt) => {
+          console.log(`[AgentService_v2] Retrying tool-call compaction decision for ${decisionName} (attempt ${attempt + 1})...`)
+        },
+        maxRetries: MODEL_RETRY_MAX,
+        delaysMs: MODEL_RETRY_DELAYS_MS
+      })
+    }
+
+    return await this.invokeModelDecisionByPlainToolCall(
+      sessionId,
+      processedMessages,
+      schema,
+      signal,
+      decisionName,
+      'compaction'
+    )
+  }
+
   private async invokeModelDecisionByPlainToolCall<T extends z.ZodTypeAny>(
     sessionId: string,
     messages: BaseMessage[],
     schema: T,
     signal: AbortSignal | undefined,
     decisionName: string,
-    kind: 'action' | 'thinking'
+    kind: 'action' | 'thinking' | 'compaction'
   ): Promise<z.infer<T>> {
     const sessionBinding = this.getSessionModelBinding(sessionId)
     const model = kind === 'action'
       ? sessionBinding.actionModel
+      : kind === 'compaction'
+        ? sessionBinding.compactionModel
       : (sessionBinding.thinkingModel || sessionBinding.model)
     const toolName = `decision_${decisionName.replace(/[^a-zA-Z0-9_]/g, '_')}`.slice(0, 60)
     const tool = convertToOpenAITool({
@@ -1831,6 +1930,7 @@ export class AgentService_v2 {
     return await invokeWithRetryAndSanitizedInput({
       helpers: this.helpers,
       messages: decisionMessages,
+      modelSupportsImage: sessionBinding.readFileSupport.image,
       signal,
       operation: async (sanitizedMessages) => {
         const stream = await modelWithTool.stream(sanitizedMessages, { signal })

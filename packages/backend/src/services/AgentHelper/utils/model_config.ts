@@ -30,10 +30,11 @@ export function getMaxTokensForModel(modelName: string, settings: BackendSetting
 }
 
 export function computeReadFileSupport(
-  globalProfile?: ModelDefinition['profile'],
-  thinkingProfile?: ModelDefinition['profile']
+  ...profiles: Array<ModelDefinition['profile'] | undefined>
 ): { image: boolean } {
-  const image = Boolean(globalProfile?.imageInputs) && Boolean(thinkingProfile?.imageInputs)
+  const image = profiles
+    .filter((profile) => profile !== undefined)
+    .every((profile) => profile?.imageInputs === true)
   return { image }
 }
 

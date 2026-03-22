@@ -101,10 +101,9 @@ export class AgentHelpers {
   }
 
   computeReadFileSupport(
-    globalProfile?: ModelDefinition['profile'],
-    thinkingProfile?: ModelDefinition['profile']
+    ...profiles: Array<ModelDefinition['profile'] | undefined>
   ): { image: boolean } {
-    return computeReadFileSupport(globalProfile, thinkingProfile)
+    return computeReadFileSupport(...profiles)
   }
 
   /**

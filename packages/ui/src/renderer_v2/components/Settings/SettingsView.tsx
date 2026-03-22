@@ -1407,6 +1407,28 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                             ]}
                           />
                         </div>
+                        <div className="profile-field">
+                          <div className="profile-field-label-with-info">
+                            <label>{t.settings.compactionModel}</label>
+                            <InfoTooltip content={t.settings.tooltips.compactionModel} />
+                          </div>
+                          <Select
+                              value={p.compactionModelId || ""}
+                              onChange={(id) =>
+                                store.saveProfile({
+                                  ...p,
+                                  compactionModelId: id || undefined,
+                                })
+                              }
+                            options={[
+                                { value: "", label: "(None)" },
+                                ...(store.settings?.models.items.map((m) => ({
+                                  value: m.id,
+                                  label: m.name,
+                                })) || []),
+                            ]}
+                          />
+                        </div>
                       </div>
                     </div>
                     );
