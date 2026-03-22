@@ -37,6 +37,32 @@ const useBannerSelection = <T extends HTMLElement>() => {
   return { ref, isSelected, setSelected }
 }
 
+const useControllableBoolean = (
+  controlledValue: boolean | undefined,
+  defaultValue: boolean,
+  onChange?: (nextValue: boolean) => void,
+) => {
+  const [uncontrolledValue, setUncontrolledValue] = React.useState(defaultValue)
+  const isControlled = typeof controlledValue === 'boolean'
+  const value = isControlled ? controlledValue : uncontrolledValue
+
+  const setValue = React.useCallback(
+    (nextValue: boolean | ((currentValue: boolean) => boolean)) => {
+      const resolvedValue =
+        typeof nextValue === 'function'
+          ? nextValue(value)
+          : nextValue
+      if (!isControlled) {
+        setUncontrolledValue(resolvedValue)
+      }
+      onChange?.(resolvedValue)
+    },
+    [isControlled, onChange, value],
+  )
+
+  return [value, setValue] as const
+}
+
 const parseDiff = (diff: string) => {
   const lines = diff ? diff.split('\n') : []
   let added = 0
@@ -64,13 +90,39 @@ const parseDiff = (diff: string) => {
   return { items, added, removed }
 }
 
-export const CommandBanner = observer(({ msg }: { msg: ChatMessage }) => {
+export const CommandBanner = observer(({
+  msg,
+  expanded: expandedProp,
+  onExpandedChange,
+  isSkipping: isSkippingProp,
+  onSkippingChange,
+}: {
+  msg: ChatMessage
+  expanded?: boolean
+  onExpandedChange?: (nextValue: boolean) => void
+  isSkipping?: boolean
+  onSkippingChange?: (nextValue: boolean) => void
+}) => {
   const isDone = msg.metadata?.exitCode !== undefined
   const isError = msg.metadata?.exitCode !== 0 && isDone
   const isNowait = msg.metadata?.isNowait || false
-  const [expanded, setExpanded] = React.useState(true)
-  const [isSkipping, setIsSkipping] = React.useState(false)
+  const [expanded, setExpanded] = useControllableBoolean(
+    expandedProp,
+    true,
+    onExpandedChange,
+  )
+  const [isSkipping, setIsSkipping] = useControllableBoolean(
+    isSkippingProp,
+    false,
+    onSkippingChange,
+  )
   const { ref, isSelected, setSelected } = useBannerSelection<HTMLDivElement>()
+
+  React.useEffect(() => {
+    if (isSkipping && (isDone || isNowait)) {
+      setIsSkipping(false)
+    }
+  }, [isDone, isNowait, isSkipping, setIsSkipping])
 
   const handleSkipWait = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -136,8 +188,20 @@ export const CommandBanner = observer(({ msg }: { msg: ChatMessage }) => {
   )
 })
 
-export const ToolCallBanner = observer(({ msg }: { msg: ChatMessage }) => {
-  const [expanded, setExpanded] = React.useState(true)
+export const ToolCallBanner = observer(({
+  msg,
+  expanded: expandedProp,
+  onExpandedChange,
+}: {
+  msg: ChatMessage
+  expanded?: boolean
+  onExpandedChange?: (nextValue: boolean) => void
+}) => {
+  const [expanded, setExpanded] = useControllableBoolean(
+    expandedProp,
+    true,
+    onExpandedChange,
+  )
   const toolName = msg.metadata?.toolName || 'Tool Call'
   const { ref, isSelected, setSelected } = useBannerSelection<HTMLDivElement>()
   return (
@@ -174,8 +238,20 @@ export const ToolCallBanner = observer(({ msg }: { msg: ChatMessage }) => {
   )
 })
 
-export const FileEditBanner = observer(({ msg }: { msg: ChatMessage }) => {
-  const [expanded, setExpanded] = React.useState(false)
+export const FileEditBanner = observer(({
+  msg,
+  expanded: expandedProp,
+  onExpandedChange,
+}: {
+  msg: ChatMessage
+  expanded?: boolean
+  onExpandedChange?: (nextValue: boolean) => void
+}) => {
+  const [expanded, setExpanded] = useControllableBoolean(
+    expandedProp,
+    false,
+    onExpandedChange,
+  )
   const { ref, isSelected, setSelected } = useBannerSelection<HTMLDivElement>()
   const diff = msg.metadata?.diff || ''
   const { items, added, removed } = parseDiff(diff)
@@ -233,6 +309,8 @@ export const FileEditBanner = observer(({ msg }: { msg: ChatMessage }) => {
 
 interface SubToolBannerProps {
   msg: ChatMessage
+  expanded?: boolean
+  onExpandedChange?: (nextValue: boolean) => void
   forceExpanded?: boolean
   lockExpanded?: boolean
   variant?: 'default' | 'reasoning' | 'compaction'
@@ -243,6 +321,8 @@ interface SubToolBannerProps {
 
 export const SubToolBanner = observer(({
   msg,
+  expanded: expandedProp,
+  onExpandedChange,
   forceExpanded = false,
   lockExpanded = false,
   variant = 'default',
@@ -250,7 +330,11 @@ export const SubToolBanner = observer(({
   hideContent = false,
   hideHint = false
 }: SubToolBannerProps) => {
-  const [expanded, setExpanded] = React.useState(forceExpanded && !disableExpand)
+  const [expanded, setExpanded] = useControllableBoolean(
+    expandedProp,
+    forceExpanded && !disableExpand,
+    onExpandedChange,
+  )
   const fullTitle = msg.metadata?.subToolTitle || 'Sub Tool'
   const maxLen = 40
   const renderTitle = (text: string) => {
@@ -323,9 +407,26 @@ export const SubToolBanner = observer(({
   )
 })
 
-export const ReasoningBanner = observer(({ msg }: { msg: ChatMessage }) => {
+export const ReasoningBanner = observer(({
+  msg,
+  expanded,
+  onExpandedChange,
+}: {
+  msg: ChatMessage
+  expanded?: boolean
+  onExpandedChange?: (nextValue: boolean) => void
+}) => {
   const isStreaming = !!msg.streaming
-  return <SubToolBanner msg={msg} forceExpanded={isStreaming} lockExpanded={isStreaming} variant="reasoning" />
+  return (
+    <SubToolBanner
+      msg={msg}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+      forceExpanded={isStreaming}
+      lockExpanded={isStreaming}
+      variant="reasoning"
+    />
+  )
 })
 
 export const CompactionBanner = observer(({ msg }: { msg: ChatMessage }) => {
@@ -344,14 +445,22 @@ export const CompactionBanner = observer(({ msg }: { msg: ChatMessage }) => {
 export const AskBanner = observer(
   ({
     msg,
+    expanded: expandedProp,
+    onExpandedChange,
     onDecision,
     labels
   }: {
     msg: ChatMessage
+    expanded?: boolean
+    onExpandedChange?: (nextValue: boolean) => void
     onDecision: (messageId: string, decision: 'allow' | 'deny') => void
     labels: { allow: string; deny: string; allowed: string; denied: string }
   }) => {
-    const [expanded, setExpanded] = React.useState(true)
+    const [expanded, setExpanded] = useControllableBoolean(
+      expandedProp,
+      true,
+      onExpandedChange,
+    )
     const decision = msg.metadata?.decision
     const toolName = msg.metadata?.toolName || 'Command'
     const { ref, isSelected, setSelected } = useBannerSelection<HTMLDivElement>()
@@ -417,15 +526,23 @@ export const AskBanner = observer(
 
 export const AlertBanner = observer(({ 
   msg,
-  onRemove
+  onRemove,
+  showDetails: showDetailsProp,
+  onShowDetailsChange,
 }: { 
   msg: ChatMessage,
   onRemove?: () => void
+  showDetails?: boolean
+  onShowDetailsChange?: (nextValue: boolean) => void
 }) => {
   const isError = msg.type === 'error'
   const isRetry = msg.type === 'alert' && msg.metadata?.subToolLevel === 'info'
   const label = isError ? 'ERROR' : isRetry ? 'RETRYING' : 'ALERT'
-  const [showDetails, setShowDetails] = React.useState(false)
+  const [showDetails, setShowDetails] = useControllableBoolean(
+    showDetailsProp,
+    false,
+    onShowDetailsChange,
+  )
 
   return (
     <>

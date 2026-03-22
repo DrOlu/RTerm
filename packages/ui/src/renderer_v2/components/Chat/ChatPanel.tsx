@@ -19,7 +19,7 @@ import { observer } from "mobx-react-lite";
 import type { AppStore } from "../../stores/AppStore";
 import type { ChatMessage } from "../../stores/ChatStore";
 import { ChatHistoryPanel } from "./ChatHistoryPanel";
-import { MessageRow } from "./MessageRow";
+import { ChatMessageList } from "./ChatMessageList";
 import { ConfirmDialog } from "../Common/ConfirmDialog";
 import { Select } from "../../platform/Select";
 import type { SelectHandle } from "../../platform/windows/WindowsSelect";
@@ -105,8 +105,6 @@ const TokenTooltip: React.FC<{
   );
 };
 
-// MessageRow replaces MessageItem for fine-grained reactivity
-
 interface ChatPanelProps {
   store: AppStore;
   panelId: string;
@@ -127,7 +125,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
     onRequestCloseTabs,
     onLayoutHeaderContextMenu,
   }) => {
-    const scrollRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const richInputRef = useRef<RichInputHandle>(null);
     const profileSelectRef = useRef<SelectHandle>(null);
@@ -141,7 +138,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       );
     }, []);
     const [showHistory, setShowHistory] = useState(false);
-    const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
     const [rollbackTarget, setRollbackTarget] = useState<ChatMessage | null>(
       null,
     );
@@ -175,7 +171,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
     const activeHeaderSession =
       activeSession || store.chat.getSessionById(sessionIds[0] || "");
     const isOverlayOpen = store.view !== "main";
-    const messageIds = activeSession?.messageIds || [];
     const isThinking = activeSession?.isThinking || false;
     const isQueueMode = activeSessionId
       ? store.chat.queue.isQueueMode(activeSessionId)
@@ -204,45 +199,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       if (isLinux()) return "is-platform-linux";
       return "";
     }, []);
-
-    const renderItems = (() => {
-      if (!activeSession) return [];
-      const items: Array<{ kind: "message"; id: string }> = [];
-
-      messageIds.forEach((msgId) => {
-        const msg = activeSession.messagesById.get(msgId);
-        if (!msg) return;
-        if (msg.type === "tokens_count") return;
-        items.push({ kind: "message", id: msgId });
-      });
-
-      return items;
-    })();
-
-    const handleScroll = () => {
-      if (scrollRef.current) {
-        const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-        // If within 50px of bottom, enable auto-scroll
-        const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
-        setShouldAutoScroll(isAtBottom);
-      }
-    };
-
-    // Auto-scroll
-    useEffect(() => {
-      if (scrollRef.current && activeSession) {
-        const lastMsgId = messageIds[messageIds.length - 1];
-        const lastMsg = lastMsgId
-          ? activeSession.messagesById.get(lastMsgId)
-          : null;
-        const isNewUserMsg = lastMsg?.role === "user";
-
-        if (isNewUserMsg || shouldAutoScroll) {
-          scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-          if (isNewUserMsg) setShouldAutoScroll(true);
-        }
-      }
-    }, [messageIds.length, activeSession]);
 
     // Auto-resize input - removed as RichInput handles its own size via contentEditable
 
@@ -627,8 +583,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       <div
         className={`panel panel-chat${isLayoutDragSource ? " is-dragging-source" : ""}`}
         ref={panelRef}
-      >
-        <div
+        >
+            <div
           className="panel-header-minimal is-draggable"
           draggable
           data-layout-panel-draggable="true"
@@ -829,28 +785,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           onConfirm={handleQueueEditConfirm}
         />
 
-        <div className="panel-body" ref={scrollRef} onScroll={handleScroll}>
-          <div className="message-list">
-            {renderItems.map((item) => {
-              if (!activeSessionId) return null;
-              return (
-                <MessageRow
-                  key={item.id}
-                  store={store}
-                  sessionId={activeSessionId}
-                  messageId={item.id}
-                  onAskDecision={handleAskDecision}
-                  onRollback={(m) => setRollbackTarget(m)}
-                  askLabels={askLabels}
-                  isThinking={isThinking}
-                />
-              );
-            })}
-            {messageIds.length === 0 && (
-              <div className="placeholder">{t.chat.placeholder}</div>
-            )}
-          </div>
-        </div>
+        <ChatMessageList
+          store={store}
+          sessionId={activeSessionId}
+          isThinking={isThinking}
+          placeholder={t.chat.placeholder}
+          askLabels={askLabels}
+          onAskDecision={handleAskDecision}
+          onRollback={(message) => setRollbackTarget(message)}
+        />
 
         <div className="chat-input-area">
           {isQueueMode && activeSessionId && queueItems.length > 0 && (

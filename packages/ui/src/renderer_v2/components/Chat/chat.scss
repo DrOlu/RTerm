@@ -195,17 +195,20 @@ body.chat-drag-selection-suppressed * {
   > * {
     min-width: 0;
   }
+}
 
-  /* Handle merging: if two assistant rows follow each other, remove border/padding between them */
-  .message-row-container.role-assistant + .message-row-container.role-assistant {
-    border-top: none;
-    padding-top: 0;
-    margin-top: 0;
+.message-list-empty {
+  min-height: 100%;
+}
 
-    .message-role-label {
-      display: none;
-    }
-  }
+.message-list-virtual {
+  position: relative;
+  display: block;
+  padding-bottom: 0;
+}
+
+.message-list-row-shell {
+  min-width: 0;
 }
 
 /* CLI Style Message Rows */
@@ -223,6 +226,16 @@ body.chat-drag-selection-suppressed * {
   
   &.role-assistant {
     background: transparent;
+  }
+
+  &.role-assistant.is-group-continuation {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+
+    .message-role-label {
+      display: none;
+    }
   }
 
   /* Section Divider Line */

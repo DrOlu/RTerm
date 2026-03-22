@@ -60,6 +60,7 @@ export interface ChatSession {
   title: string
   messagesById: ObservableMap<string, ChatMessage>
   messageIds: string[]
+  renderListVersion: number
   isThinking: boolean
   isSessionBusy: boolean
   lockedProfileId: string | null
@@ -130,10 +131,15 @@ export class ChatStore {
       title,
       messagesById: observable.map<string, ChatMessage>(),
       messageIds: [],
+      renderListVersion: 0,
       isThinking: false,
       isSessionBusy: false,
       lockedProfileId: null
     }
+  }
+
+  private bumpSessionRenderListVersion(session: ChatSession): void {
+    session.renderListVersion += 1
   }
 
   get activeSession(): ChatSession | null {
@@ -294,6 +300,7 @@ export class ChatStore {
               existing.messagesById.set(message.id, message)
               existing.messageIds.push(message.id)
             })
+            this.bumpSessionRenderListVersion(existing)
             existing.isThinking = payload.isBusy
             existing.isSessionBusy = payload.isBusy
             existing.lockedProfileId = payload.lockedProfileId
@@ -408,6 +415,7 @@ export class ChatStore {
       if (session) {
         session.messagesById.set(id, fullMsg)
         session.messageIds.push(id)
+        this.bumpSessionRenderListVersion(session)
         // Auto-update title based on first user message if title is default
         if (msg.role === 'user') {
           const userMsgCount = session.messageIds.filter(msgId => {
@@ -431,6 +439,7 @@ export class ChatStore {
     if (msg) {
       runInAction(() => {
         Object.assign(msg, patch)
+        this.bumpSessionRenderListVersion(session)
       })
     }
   }
@@ -441,6 +450,7 @@ export class ChatStore {
     runInAction(() => {
       session.messagesById.delete(id)
       session.messageIds = session.messageIds.filter(msgId => msgId !== id)
+      this.bumpSessionRenderListVersion(session)
     })
   }
 
@@ -477,6 +487,7 @@ export class ChatStore {
         runInAction(() => {
             session.messagesById.clear()
             session.messageIds = []
+            this.bumpSessionRenderListVersion(session)
         })
     }
   }
@@ -502,6 +513,7 @@ export class ChatStore {
           session.messagesById.set(msg.id, msg)
           if (!existed) {
             session.messageIds.push(msg.id)
+            this.bumpSessionRenderListVersion(session)
           }
           // Auto-update title logic if needed (backend also does this, but for UX we can do it here too)
           if (!existed && msg.role === 'user') {
@@ -518,6 +530,7 @@ export class ChatStore {
         case 'REMOVE_MESSAGE': {
           session.messagesById.delete(update.messageId)
           session.messageIds = session.messageIds.filter((id) => id !== update.messageId)
+          this.bumpSessionRenderListVersion(session)
           break
         }
         case 'APPEND_CONTENT': {
@@ -538,6 +551,7 @@ export class ChatStore {
           const msg = session.messagesById.get(update.messageId)
           if (msg) {
             Object.assign(msg, update.patch)
+            this.bumpSessionRenderListVersion(session)
           }
           break
         }
@@ -564,6 +578,7 @@ export class ChatStore {
             const removedIds = session.messageIds.slice(rollbackIndex)
             removedIds.forEach((messageId) => session.messagesById.delete(messageId))
             session.messageIds = session.messageIds.slice(0, rollbackIndex)
+            this.bumpSessionRenderListVersion(session)
           }
           session.isThinking = false
           session.isSessionBusy = false
@@ -612,6 +627,7 @@ export class ChatStore {
             existingSession.messagesById.set(msg.id, msg)
             existingSession.messageIds.push(msg.id)
           })
+          this.bumpSessionRenderListVersion(existingSession)
           existingSession.isThinking = payload.isBusy
           existingSession.isSessionBusy = payload.isBusy
           existingSession.lockedProfileId = payload.lockedProfileId
@@ -630,6 +646,7 @@ export class ChatStore {
             title: payload.title || 'Loaded Session',
             messagesById,
             messageIds,
+            renderListVersion: 0,
             isThinking: payload.isBusy,
             isSessionBusy: payload.isBusy,
             lockedProfileId: payload.lockedProfileId
@@ -740,6 +757,7 @@ export class ChatStore {
       
       // Update IDs array
       session.messageIds = keptIds
+      this.bumpSessionRenderListVersion(session)
       session.isThinking = false
     })
   }

@@ -7,6 +7,7 @@ import type { AppStore } from '../../stores/AppStore'
 import type { ChatMessage } from '../../stores/ChatStore'
 import { renderMentionContent } from '../../lib/MentionParser'
 import { CommandBanner, ToolCallBanner, FileEditBanner, SubToolBanner, ReasoningBanner, CompactionBanner, AskBanner, AlertBanner } from './ChatBanner'
+import type { ChatBannerUiState } from './chatBannerUiState'
 
 interface MessageRowProps {
   store: AppStore
@@ -16,40 +17,14 @@ interface MessageRowProps {
   onRollback: (msg: ChatMessage) => void
   askLabels: { allow: string; deny: string; allowed: string; denied: string }
   isThinking: boolean
+  mergeWithPreviousAssistant?: boolean
+  showAssistantGroupCopy?: boolean
+  assistantGroupMessageIds?: string[]
+  bannerUiState?: ChatBannerUiState
+  onBannerUiStateChange?: (patch: Partial<ChatBannerUiState>) => void
 }
 
 const COPY_FEEDBACK_MS = 1200
-const SPECIAL_ASSISTANT_TYPES: ReadonlySet<ChatMessage['type']> = new Set([
-  'command',
-  'tool_call',
-  'file_edit',
-  'sub_tool',
-  'reasoning',
-  'compaction',
-  'ask',
-  'alert',
-  'error'
-])
-
-interface MessageSessionShape {
-  messageIds: string[]
-  messagesById: { get: (id: string) => ChatMessage | undefined }
-}
-
-interface VisibleRow {
-  id: string
-  index: number
-  kind: 'assistant' | 'user'
-  msg: ChatMessage
-}
-
-interface AssistantRun {
-  start: number
-  end: number
-  isTail: boolean
-  nextVisibleKind: RowDisplayKind | 'none'
-  messages: ChatMessage[]
-}
 
 const extractNodeText = (node: React.ReactNode): string => {
   if (typeof node === 'string' || typeof node === 'number') return String(node)
@@ -59,64 +34,11 @@ const extractNodeText = (node: React.ReactNode): string => {
   return ''
 }
 
-type RowDisplayKind = 'assistant' | 'user' | 'hidden'
-
 const isCompletedWhitespaceAssistantText = (message: ChatMessage): boolean =>
   message.role === 'assistant' &&
   message.type === 'text' &&
   message.streaming !== true &&
   !/\S/.test(String(message.content || ''))
-
-const getRowDisplayKind = (session: MessageSessionShape, messageId: string): RowDisplayKind => {
-  const candidate = session.messagesById.get(messageId)
-  if (!candidate) return 'hidden'
-  if (candidate.type === 'tokens_count') return 'hidden'
-  if (candidate.role === 'user') return 'user'
-  if (isCompletedWhitespaceAssistantText(candidate)) return 'hidden'
-  const isLastInSession = session.messageIds[session.messageIds.length - 1] === messageId
-  const isRetryHint = candidate.type === 'alert' && candidate.metadata?.subToolLevel === 'info'
-  if (isRetryHint && !isLastInSession) return 'hidden'
-  if ((candidate.type === 'reasoning' || candidate.type === 'compaction') && !isLastInSession) return 'hidden'
-  if (SPECIAL_ASSISTANT_TYPES.has(candidate.type)) return 'assistant'
-  return candidate.role === 'assistant' ? 'assistant' : 'hidden'
-}
-
-const collectConnectedAssistantRun = (session: MessageSessionShape, messageId: string): AssistantRun | null => {
-  const visibleRows: VisibleRow[] = session.messageIds
-    .map((id, index) => {
-      const msg = session.messagesById.get(id)
-      if (!msg) return null
-      const kind = getRowDisplayKind(session, id)
-      if (kind === 'hidden') return null
-      return { id, index, kind, msg }
-    })
-    .filter((item): item is VisibleRow => item !== null)
-
-  const visibleIndex = visibleRows.findIndex((row) => row.id === messageId)
-  if (visibleIndex < 0) return null
-  const currentVisible = visibleRows[visibleIndex]
-  if (!currentVisible || currentVisible.kind !== 'assistant') return null
-
-  let startVisible = visibleIndex
-  let endVisible = visibleIndex
-  while (startVisible > 0 && visibleRows[startVisible - 1].kind === 'assistant') {
-    startVisible -= 1
-  }
-  while (endVisible < visibleRows.length - 1 && visibleRows[endVisible + 1].kind === 'assistant') {
-    endVisible += 1
-  }
-
-  const runRows = visibleRows.slice(startVisible, endVisible + 1)
-  const nextVisible = visibleRows[endVisible + 1]
-
-  return {
-    start: runRows[0]?.index ?? currentVisible.index,
-    end: runRows[runRows.length - 1]?.index ?? currentVisible.index,
-    isTail: visibleIndex === endVisible,
-    nextVisibleKind: nextVisible?.kind ?? 'none',
-    messages: runRows.map((row) => row.msg)
-  }
-}
 
 export const MessageRow: React.FC<MessageRowProps> = observer(({ 
   store,
@@ -125,9 +47,14 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
   onAskDecision, 
   onRollback,
   askLabels,
-  isThinking 
+  isThinking,
+  mergeWithPreviousAssistant = false,
+  showAssistantGroupCopy = false,
+  assistantGroupMessageIds = [],
+  bannerUiState,
+  onBannerUiStateChange,
 }) => {
-  const session = store.chat.sessions.find(s => s.id === sessionId)
+  const session = store.chat.getSessionById(sessionId)
   const msg = session?.messagesById.get(messageId)
 
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null)
@@ -151,27 +78,33 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
     }, COPY_FEEDBACK_MS)
   }, [])
 
-  const assistantRun = session ? collectConnectedAssistantRun(session, messageId) : null
-  const groupCopyKey = assistantRun ? `assistant-group:${assistantRun.start}:${assistantRun.end}` : ''
+  const normalizedAssistantGroupMessageIds = assistantGroupMessageIds.filter(
+    (id) => typeof id === 'string' && id.length > 0,
+  )
+  const groupCopyKey =
+    normalizedAssistantGroupMessageIds.length > 0
+      ? `assistant-group:${normalizedAssistantGroupMessageIds.join(':')}`
+      : ''
   const shouldShowGroupCopy =
-    !!assistantRun &&
-    assistantRun.isTail &&
-    assistantRun.messages.length > 0 &&
-    assistantRun.messages.every((item) => !item.streaming) &&
-    (
-      assistantRun.nextVisibleKind === 'user' ||
-      (assistantRun.nextVisibleKind === 'none' && !isThinking)
-    )
+    showAssistantGroupCopy && normalizedAssistantGroupMessageIds.length > 0
 
   const copyConnectedAssistantRun = React.useCallback(async () => {
-    if (!assistantRun || assistantRun.messages.length === 0) return
-    const messageIds = assistantRun.messages.map((item) => item.id)
-    const formatted = await window.gyshell.agent.formatMessagesMarkdown(sessionId, messageIds)
+    if (!shouldShowGroupCopy) return
+    const formatted = await window.gyshell.agent.formatMessagesMarkdown(
+      sessionId,
+      normalizedAssistantGroupMessageIds,
+    )
     const payload = String(formatted || '').trim()
     if (!payload) return
     await navigator.clipboard.writeText(payload)
     markCopied(groupCopyKey)
-  }, [assistantRun, groupCopyKey, markCopied, sessionId])
+  }, [
+    groupCopyKey,
+    markCopied,
+    normalizedAssistantGroupMessageIds,
+    sessionId,
+    shouldShowGroupCopy,
+  ])
 
   const copyCodeBlock = React.useCallback(
     async (rawCode: string) => {
@@ -209,7 +142,9 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
   const canRollback = isUser && !!msg.backendMessageId && !msg.streaming && !isThinking
 
   const renderAssistantRow = (children: React.ReactNode) => (
-    <div className="message-row-container role-assistant">
+    <div
+      className={`message-row-container role-assistant${mergeWithPreviousAssistant ? ' is-group-continuation' : ''}`}
+    >
       {children}
       {shouldShowGroupCopy && (
         <div className="message-assistant-group-actions">
@@ -264,19 +199,53 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
   }
 
   if (msg.type === 'command') {
-    return renderAssistantRow(<CommandBanner msg={msg} />)
+    return renderAssistantRow(
+      <CommandBanner
+        msg={msg}
+        expanded={bannerUiState?.expanded}
+        onExpandedChange={(expanded) => onBannerUiStateChange?.({ expanded })}
+        isSkipping={bannerUiState?.isSkipping}
+        onSkippingChange={(isSkipping) =>
+          onBannerUiStateChange?.({ isSkipping })
+        }
+      />,
+    )
   }
   if (msg.type === 'tool_call') {
-    return renderAssistantRow(<ToolCallBanner msg={msg} />)
+    return renderAssistantRow(
+      <ToolCallBanner
+        msg={msg}
+        expanded={bannerUiState?.expanded}
+        onExpandedChange={(expanded) => onBannerUiStateChange?.({ expanded })}
+      />,
+    )
   }
   if (msg.type === 'file_edit') {
-    return renderAssistantRow(<FileEditBanner msg={msg} />)
+    return renderAssistantRow(
+      <FileEditBanner
+        msg={msg}
+        expanded={bannerUiState?.expanded}
+        onExpandedChange={(expanded) => onBannerUiStateChange?.({ expanded })}
+      />,
+    )
   }
   if (msg.type === 'sub_tool') {
-    return renderAssistantRow(<SubToolBanner msg={msg} />)
+    return renderAssistantRow(
+      <SubToolBanner
+        msg={msg}
+        expanded={bannerUiState?.expanded}
+        onExpandedChange={(expanded) => onBannerUiStateChange?.({ expanded })}
+      />,
+    )
   }
   if (msg.type === 'reasoning') {
-    return renderAssistantRow(<ReasoningBanner msg={msg} />)
+    return renderAssistantRow(
+      <ReasoningBanner
+        msg={msg}
+        expanded={bannerUiState?.expanded}
+        onExpandedChange={(expanded) => onBannerUiStateChange?.({ expanded })}
+      />,
+    )
   }
   if (msg.type === 'compaction') {
     return renderAssistantRow(<CompactionBanner msg={msg} />)
@@ -285,6 +254,8 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
     return renderAssistantRow(
       <AskBanner
         msg={msg}
+        expanded={bannerUiState?.expanded}
+        onExpandedChange={(expanded) => onBannerUiStateChange?.({ expanded })}
         onDecision={(id, decision) => onAskDecision(id, decision)}
         labels={askLabels}
       />
@@ -295,6 +266,10 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
       <AlertBanner
         msg={msg}
         onRemove={() => store.chat.removeMessage(msg.id, sessionId)}
+        showDetails={bannerUiState?.showDetails}
+        onShowDetailsChange={(showDetails) =>
+          onBannerUiStateChange?.({ showDetails })
+        }
       />
     )
   }
