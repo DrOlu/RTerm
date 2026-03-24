@@ -59,6 +59,9 @@ const formatBytesPerSec = (bytesPerSec: number | undefined): string => {
 const formatPercent = (value: number | undefined): string =>
   value === undefined ? '--' : `${value.toFixed(1)}%`
 
+const formatMiB = (value: number | undefined): string =>
+  formatBytes((Number.isFinite(value) ? Number(value) : 0) * 1024 ** 2)
+
 const formatUptime = (seconds: number | undefined): string => {
   if (seconds === undefined || !Number.isFinite(seconds)) return '--'
   const days = Math.floor(seconds / 86400)
@@ -97,6 +100,53 @@ const sumNetwork = (network: ResourceSnapshot['network']) =>
     },
     { rx: 0, tx: 0 }
   )
+
+const resolveGpuMemoryUsagePercent = (gpu: GpuEntry): number | undefined => {
+  if (typeof gpu.memoryUsagePercent === 'number' && Number.isFinite(gpu.memoryUsagePercent)) {
+    return gpu.memoryUsagePercent
+  }
+  if (gpu.memoryTotalMiB > 0) {
+    return (gpu.memoryUsedMiB / gpu.memoryTotalMiB) * 100
+  }
+  return undefined
+}
+
+const formatGpuMemoryFootprint = (gpu: GpuEntry): string => {
+  const parts: string[] = []
+  if (gpu.memoryTotalMiB > 0) {
+    parts.push(`VRAM ${formatMiB(gpu.memoryUsedMiB)} / ${formatMiB(gpu.memoryTotalMiB)}`)
+  } else if (gpu.memoryUsedMiB > 0) {
+    parts.push(`VRAM ${formatMiB(gpu.memoryUsedMiB)} used`)
+  }
+  if ((gpu.sharedMemoryUsedMiB || 0) > 0) {
+    parts.push(`shared ${formatMiB(gpu.sharedMemoryUsedMiB)}`)
+  }
+  return parts.join(' · ') || 'VRAM unavailable'
+}
+
+const formatGpuCompactValue = (gpu: GpuEntry): string => {
+  const parts = [`GPU ${formatPercent(gpu.utilizationPercent)}`]
+  const memoryUsagePercent = resolveGpuMemoryUsagePercent(gpu)
+  if (memoryUsagePercent !== undefined) {
+    parts.push(`VRAM ${formatPercent(memoryUsagePercent)}`)
+  } else if (
+    typeof gpu.memoryUtilizationPercent === 'number' &&
+    Number.isFinite(gpu.memoryUtilizationPercent)
+  ) {
+    parts.push(`MEM ${formatPercent(gpu.memoryUtilizationPercent)}`)
+  }
+  if (gpu.temperatureC !== undefined) {
+    parts.push(`${gpu.temperatureC}°C`)
+  }
+  return parts.join(' · ')
+}
+
+const resolveGpuMemoryTone = (percent: number | undefined): MeterTone => {
+  if (percent === undefined) return 'default'
+  if (percent >= 90) return 'danger'
+  if (percent >= 75) return 'warn'
+  return 'rx'
+}
 
 const MiniHistory: React.FC<{
   values: number[]
@@ -792,8 +842,8 @@ const MonitorTabView: React.FC<{
                         rows={visibleGpus.map((gpu: GpuEntry, index: number) => ({
                           id: `compact-gpu-${index}`,
                           label: gpu.name || `GPU ${index + 1}`,
-                          detail: `VRAM ${gpu.memoryUsedMiB} / ${gpu.memoryTotalMiB} MiB`,
-                          value: `${formatPercent(gpu.utilizationPercent)}${gpu.temperatureC !== undefined ? ` · ${gpu.temperatureC}°C` : ''}`,
+                          detail: formatGpuMemoryFootprint(gpu),
+                          value: formatGpuCompactValue(gpu),
                         }))}
                       />
                       <OverflowHint
@@ -1385,8 +1435,8 @@ const MonitorTabView: React.FC<{
                       rows={visibleGpus.map((gpu: GpuEntry, index: number) => ({
                         id: `gpu-${index}`,
                         label: gpu.name || `GPU ${index + 1}`,
-                        detail: `VRAM ${gpu.memoryUsedMiB} / ${gpu.memoryTotalMiB} MiB`,
-                        value: `${formatPercent(gpu.utilizationPercent)}${gpu.temperatureC !== undefined ? ` · ${gpu.temperatureC}°C` : ''}`,
+                        detail: formatGpuMemoryFootprint(gpu),
+                        value: formatGpuCompactValue(gpu),
                       }))}
                     />
                     <OverflowHint
@@ -1396,30 +1446,50 @@ const MonitorTabView: React.FC<{
                   </>
                 ) : (
                 <div className="monitor-disk-list">
-                  {visibleGpus.map((gpu: GpuEntry, index: number) => (
-                    <div key={`gpu-${index}`} className="monitor-disk-row">
-                      <div className="monitor-disk-row-head">
-                        <span className="monitor-disk-name">
-                          {gpu.name || `GPU ${index + 1}`}
-                        </span>
-                        <span className="monitor-disk-meta">
-                          {formatPercent(gpu.utilizationPercent)}
-                        </span>
+                  {visibleGpus.map((gpu: GpuEntry, index: number) => {
+                    const memoryUsagePercent = resolveGpuMemoryUsagePercent(gpu)
+                    return (
+                      <div key={`gpu-${index}`} className="monitor-disk-row">
+                        <div className="monitor-disk-row-head">
+                          <span className="monitor-disk-name">
+                            {gpu.name || `GPU ${index + 1}`}
+                          </span>
+                          <span className="monitor-disk-meta">
+                            {formatPercent(gpu.utilizationPercent)}
+                          </span>
+                        </div>
+                        <div className="monitor-meter-grid">
+                          <InlineMeter
+                            label="GPU"
+                            value={formatPercent(gpu.utilizationPercent)}
+                            percent={gpu.utilizationPercent || 0}
+                            tone="warn"
+                          />
+                          <InlineMeter
+                            label="VRAM"
+                            value={formatGpuMemoryFootprint(gpu)}
+                            percent={memoryUsagePercent || 0}
+                            tone={resolveGpuMemoryTone(memoryUsagePercent)}
+                          />
+                          {typeof gpu.memoryUtilizationPercent === 'number' &&
+                            Number.isFinite(gpu.memoryUtilizationPercent) && (
+                              <InlineMeter
+                                label="MEM"
+                                value={formatPercent(gpu.memoryUtilizationPercent)}
+                                percent={gpu.memoryUtilizationPercent}
+                                tone="rx"
+                              />
+                            )}
+                        </div>
+                        <div className="monitor-disk-row-foot">
+                          <span>{formatGpuMemoryFootprint(gpu)}</span>
+                          <span>
+                            {gpu.temperatureC !== undefined ? `${gpu.temperatureC}°C` : '--'}
+                          </span>
+                        </div>
                       </div>
-                      <div className="monitor-core-track">
-                        <div
-                          className="monitor-core-fill"
-                          style={{ width: `${clampPercent(gpu.utilizationPercent)}%` }}
-                        />
-                      </div>
-                      <div className="monitor-disk-row-foot">
-                        <span>
-                          VRAM {gpu.memoryUsedMiB} / {gpu.memoryTotalMiB} MiB
-                        </span>
-                        <span>{gpu.temperatureC !== undefined ? `${gpu.temperatureC}°C` : '--'}</span>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
                 )}
               </div>

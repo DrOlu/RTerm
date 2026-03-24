@@ -1,4 +1,5 @@
 import os from 'os'
+import { gzipSync } from 'zlib'
 import type { TerminalService } from './TerminalService'
 import type {
   ResourceSnapshot,
@@ -72,10 +73,11 @@ interface DarwinDiskMetadata {
 }
 
 interface MonitorSession {
-  terminalId: string
+  sourceKey: string
+  sourceTerminalId: string
   timer: ReturnType<typeof setInterval>
   intervalMs: number
-  ownerIds: Set<string>
+  ownerIdsByTerminalId: Map<string, Set<string>>
   inFlight: boolean
   previousCpuCounters?: CpuCounters[]
   previousNetCounters?: NetCounters
@@ -91,6 +93,7 @@ type SnapshotPublisher = (channel: string, data: unknown) => void
 
 export class ResourceMonitorService {
   private sessions = new Map<string, MonitorSession>()
+  private sourceKeyByTerminalId = new Map<string, string>()
   private publisher: SnapshotPublisher | null = null
 
   constructor(private terminalService: TerminalService) {}
@@ -100,10 +103,16 @@ export class ResourceMonitorService {
   }
 
   start(terminalId: string, ownerId = 'default', intervalMs?: number): void {
+    const normalizedTerminalId = String(terminalId || '').trim()
+    if (!normalizedTerminalId) {
+      return
+    }
     const normalizedOwnerId = String(ownerId || 'default').trim() || 'default'
-    const existing = this.sessions.get(terminalId)
+    const sourceKey = this.resolveSourceKey(normalizedTerminalId)
+    const existing = this.sessions.get(sourceKey)
     if (existing) {
-      existing.ownerIds.add(normalizedOwnerId)
+      this.addOwner(existing, normalizedTerminalId, normalizedOwnerId)
+      this.ensureSourceTerminal(existing, normalizedTerminalId)
       return
     }
 
@@ -113,29 +122,44 @@ export class ResourceMonitorService {
     )
 
     const session: MonitorSession = {
-      terminalId,
+      sourceKey,
+      sourceTerminalId: normalizedTerminalId,
       intervalMs: interval,
-      ownerIds: new Set([normalizedOwnerId]),
+      ownerIdsByTerminalId: new Map<string, Set<string>>(),
       inFlight: false,
       timer: setInterval(() => {
-        void this.collectAndPublish(terminalId)
+        void this.collectAndPublish(sourceKey)
       }, interval),
     }
 
-    this.sessions.set(terminalId, session)
-    void this.collectAndPublish(terminalId)
+    this.addOwner(session, normalizedTerminalId, normalizedOwnerId)
+    this.sessions.set(sourceKey, session)
+    void this.collectAndPublish(sourceKey)
   }
 
   stop(terminalId: string, ownerId = 'default'): void {
-    const session = this.sessions.get(terminalId)
-    if (!session) return
-    const normalizedOwnerId = String(ownerId || 'default').trim() || 'default'
-    if (!session.ownerIds.delete(normalizedOwnerId)) {
+    const normalizedTerminalId = String(terminalId || '').trim()
+    if (!normalizedTerminalId) {
       return
     }
-    if (session.ownerIds.size > 0) return
+    const sourceKey =
+      this.sourceKeyByTerminalId.get(normalizedTerminalId) ||
+      this.resolveSourceKey(normalizedTerminalId)
+    const session = this.sessions.get(sourceKey)
+    if (!session) return
+    const normalizedOwnerId = String(ownerId || 'default').trim() || 'default'
+    const owners = session.ownerIdsByTerminalId.get(normalizedTerminalId)
+    if (!owners?.delete(normalizedOwnerId)) {
+      return
+    }
+    if (owners.size === 0) {
+      session.ownerIdsByTerminalId.delete(normalizedTerminalId)
+      this.sourceKeyByTerminalId.delete(normalizedTerminalId)
+      this.ensureSourceTerminal(session)
+    }
+    if (session.ownerIdsByTerminalId.size > 0) return
     clearInterval(session.timer)
-    this.sessions.delete(terminalId)
+    this.sessions.delete(sourceKey)
   }
 
   stopAll(): void {
@@ -143,23 +167,33 @@ export class ResourceMonitorService {
       clearInterval(session.timer)
     }
     this.sessions.clear()
+    this.sourceKeyByTerminalId.clear()
   }
 
   isMonitoring(terminalId: string): boolean {
-    return this.sessions.has(terminalId)
+    const normalizedTerminalId = String(terminalId || '').trim()
+    if (!normalizedTerminalId) {
+      return false
+    }
+    const session = this.getSessionForTerminal(normalizedTerminalId)
+    return !!session?.ownerIdsByTerminalId.has(normalizedTerminalId)
   }
 
   async collectSnapshot(terminalId: string): Promise<ResourceSnapshot> {
-    const terminal = this.terminalService.getTerminalById(terminalId)
+    const normalizedTerminalId = String(terminalId || '').trim()
+    const session = this.getSessionForTerminal(normalizedTerminalId)
+    const sourceTerminalId = this.resolveCollectTerminalId(normalizedTerminalId, session)
+    const terminal = sourceTerminalId
+      ? this.terminalService.getTerminalById(sourceTerminalId)
+      : this.terminalService.getTerminalById(normalizedTerminalId)
     if (!terminal) {
       return {
         timestamp: Date.now(),
-        terminalId,
+        terminalId: normalizedTerminalId,
         error: 'Terminal not found',
       }
     }
 
-    const session = this.sessions.get(terminalId)
     const now = Date.now()
 
     try {
@@ -167,39 +201,39 @@ export class ResourceMonitorService {
       const baseSystem = this.buildSystemSnapshot(terminal, platform)
 
       if (platform === 'windows') {
-        const snapshot = await this.collectWindowsSnapshot(terminalId)
+        const snapshot = await this.collectWindowsSnapshot(terminal.id)
         const { system, ...rest } = snapshot
         return {
           timestamp: now,
-          terminalId,
+          terminalId: normalizedTerminalId,
           ...rest,
           system: this.mergeSystemSnapshot(baseSystem, system),
         }
       }
 
       if (platform === 'darwin') {
-        const snapshot = await this.collectDarwinSnapshot(terminalId, session)
+        const snapshot = await this.collectDarwinSnapshot(terminal.id, session)
         if (session) {
           session.previousSampleTime = now
         }
         const { system, ...rest } = snapshot
         return {
           timestamp: now,
-          terminalId,
+          terminalId: normalizedTerminalId,
           ...rest,
           system: this.mergeSystemSnapshot(baseSystem, system),
         }
       }
 
       if (platform === 'linux') {
-        const snapshot = await this.collectLinuxSnapshot(terminalId, session)
+        const snapshot = await this.collectLinuxSnapshot(terminal.id, session)
         if (session) {
           session.previousSampleTime = now
         }
         const { system, ...rest } = snapshot
         return {
           timestamp: now,
-          terminalId,
+          terminalId: normalizedTerminalId,
           ...rest,
           system: this.mergeSystemSnapshot(baseSystem, system),
         }
@@ -207,36 +241,139 @@ export class ResourceMonitorService {
 
       return {
         timestamp: now,
-        terminalId,
+        terminalId: normalizedTerminalId,
         system: baseSystem,
         error: 'Unsupported monitor platform',
       }
     } catch (error) {
       return {
         timestamp: now,
-        terminalId,
+        terminalId: normalizedTerminalId,
         error: error instanceof Error ? error.message : String(error),
       }
     }
   }
 
-  private async collectAndPublish(terminalId: string): Promise<void> {
-    const session = this.sessions.get(terminalId)
-    if (session?.inFlight) {
+  private addOwner(session: MonitorSession, terminalId: string, ownerId: string): void {
+    const existing = session.ownerIdsByTerminalId.get(terminalId)
+    if (existing) {
+      existing.add(ownerId)
+    } else {
+      session.ownerIdsByTerminalId.set(terminalId, new Set([ownerId]))
+    }
+    this.sourceKeyByTerminalId.set(terminalId, session.sourceKey)
+  }
+
+  private getMonitorIdentity(terminalId: string): string | null {
+    try {
+      return this.terminalService.getMonitorIdentity(terminalId)
+    } catch {
+      return null
+    }
+  }
+
+  private resolveSourceKey(terminalId: string): string {
+    const existing = this.sourceKeyByTerminalId.get(terminalId)
+    if (existing) {
+      return existing
+    }
+    return this.getMonitorIdentity(terminalId) || `terminal://${terminalId}`
+  }
+
+  private getSessionForTerminal(terminalId: string): MonitorSession | undefined {
+    if (!terminalId) {
+      return undefined
+    }
+    const sourceKey =
+      this.sourceKeyByTerminalId.get(terminalId) ||
+      this.getMonitorIdentity(terminalId)
+    if (!sourceKey) {
+      return undefined
+    }
+    return this.sessions.get(sourceKey)
+  }
+
+  private ensureSourceTerminal(
+    session: MonitorSession,
+    preferredTerminalId?: string
+  ): void {
+    if (this.isReadyMonitorTerminal(session.sourceTerminalId)) {
       return
     }
-    if (session) {
-      session.inFlight = true
+
+    if (
+      preferredTerminalId &&
+      this.isReadyMonitorTerminal(preferredTerminalId)
+    ) {
+      if (session.sourceTerminalId !== preferredTerminalId) {
+        session.sourceTerminalId = preferredTerminalId
+        session.targetPlatform = undefined
+      }
+      return
     }
+
+    for (const terminalId of session.ownerIdsByTerminalId.keys()) {
+      if (this.isReadyMonitorTerminal(terminalId)) {
+        session.sourceTerminalId = terminalId
+        session.targetPlatform = undefined
+        return
+      }
+    }
+
+    const fallback = session.ownerIdsByTerminalId.keys().next().value
+    if (typeof fallback === 'string' && fallback.length > 0) {
+      session.sourceTerminalId = fallback
+      session.targetPlatform = undefined
+    }
+  }
+
+  private isReadyMonitorTerminal(terminalId: string | undefined): boolean {
+    if (!terminalId) {
+      return false
+    }
+    const terminal = this.terminalService.getTerminalById(terminalId)
+    return (
+      !!terminal &&
+      terminal.runtimeState === 'ready' &&
+      terminal.capabilities?.supportsMonitor !== false
+    )
+  }
+
+  private resolveCollectTerminalId(
+    requestedTerminalId: string,
+    session?: MonitorSession
+  ): string | null {
+    if (!session) {
+      return requestedTerminalId || null
+    }
+    this.ensureSourceTerminal(session, requestedTerminalId)
+    return session.sourceTerminalId || requestedTerminalId || null
+  }
+
+  private async collectAndPublish(sourceKey: string): Promise<void> {
+    const session = this.sessions.get(sourceKey)
+    if (!session || session.inFlight) {
+      return
+    }
+    session.inFlight = true
     try {
-      const snapshot = await this.collectSnapshot(terminalId)
+      this.ensureSourceTerminal(session)
+      const terminalIds = Array.from(session.ownerIdsByTerminalId.keys())
+      if (terminalIds.length === 0) {
+        return
+      }
+      const sourceTerminalId = session.sourceTerminalId || terminalIds[0]
+      const snapshot = await this.collectSnapshot(sourceTerminalId)
       if (this.publisher) {
-        this.publisher('monitor:snapshot', snapshot)
+        terminalIds.forEach((terminalId) => {
+          this.publisher?.(
+            'monitor:snapshot',
+            terminalId === snapshot.terminalId ? snapshot : { ...snapshot, terminalId }
+          )
+        })
       }
     } finally {
-      if (session) {
-        session.inFlight = false
-      }
+      session.inFlight = false
     }
   }
 
@@ -556,6 +693,7 @@ export class ResourceMonitorService {
     const parsedNetwork = parsed.network ?? parsed.n
     const parsedProcesses = parsed.processes ?? parsed.p
     const parsedSockets = parsed.sockets ?? parsed.k
+    const parsedGpus = parsed.gpus ?? parsed.g
     const parsedUptime = parsed.uptimeSeconds ?? parsed.u
 
     const socketEntries: RawSocketEntry[] = Array.isArray(parsedSockets)
@@ -574,7 +712,9 @@ export class ResourceMonitorService {
             .filter((entry: DiskSnapshot) => entry.totalBytes > 0)
             .sort((left: DiskSnapshot, right: DiskSnapshot) => right.usedBytes - left.usedBytes)
         : undefined,
-      gpus: Array.isArray(parsed.gpus) ? parsed.gpus.map((entry: any) => this.normalizeGpu(entry)) : undefined,
+      gpus: Array.isArray(parsedGpus)
+        ? parsedGpus.map((entry: any) => this.normalizeGpu(entry))
+        : undefined,
       network: Array.isArray(parsedNetwork)
         ? parsedNetwork
             .map((entry: any) => this.normalizeNetwork(entry))
@@ -602,7 +742,7 @@ export class ResourceMonitorService {
       ['disks', 'df -P -k'],
       [
         'gpu',
-        'if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits; fi',
+        'if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,utilization.memory,temperature.gpu --format=csv,noheader,nounits; fi',
       ],
       ['network', 'cat /proc/net/dev'],
       ['load', 'cat /proc/loadavg'],
@@ -630,7 +770,7 @@ export class ResourceMonitorService {
       ['diskApfs', 'diskutil apfs list -plist | plutil -convert json -o - -'],
       [
         'gpu',
-        'if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu --format=csv,noheader,nounits; fi',
+        'if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,utilization.memory,temperature.gpu --format=csv,noheader,nounits; fi',
       ],
       ['network', 'netstat -ibn'],
       ['load', 'sysctl -n vm.loadavg'],
@@ -649,6 +789,11 @@ export class ResourceMonitorService {
       '$utf8=[System.Text.UTF8Encoding]::new($false)',
       '[Console]::OutputEncoding=$utf8',
       '$OutputEncoding=$utf8',
+      "function nd($v){$t=[string]$v;if(!$t -or $t -match '^(N/A|\\[.*\\])$'){return $null};try{return [double]$t}catch{return $null}}",
+      "function gn($o,$ns){foreach($n in $ns){$p=$o.PSObject.Properties[$n];if($p -and $null -ne $p.Value){$v=nd $p.Value;if($null -ne $v){return $v}}};$null}",
+      "function gk($n){if($n -match 'phys_(\\d+)'){return 'phys:'+ $Matches[1]};if($n -match 'luid_0x[0-9A-Fa-f]+_0x[0-9A-Fa-f]+'){return $Matches[0]};$null}",
+      "function gpi($n){if($n -match 'phys_(\\d+)'){return [int]$Matches[1]};$null}",
+      "function gek($n){if($n -match 'eng_(\\d+)'){return 'eng:'+ $Matches[1]};if($n -match 'engtype_([A-Za-z0-9_]+)'){return 'type:'+ $Matches[1]};$n}",
       '$o=gcim Win32_OperatingSystem',
       '$c=gcim Win32_PerfFormattedData_PerfOS_Processor',
       "$t=$c|? Name -eq '_Total'|select -f 1",
@@ -665,14 +810,25 @@ export class ResourceMonitorService {
       '$mf=[int64]$o.FreePhysicalMemory*1024',
       '$st=[int64]$o.SizeStoredInPagingFiles*1024',
       '$sf=[int64]$o.FreeSpaceInPagingFiles*1024',
-      "$j=[pscustomobject]@{s=[pscustomobject]@{h=$o.CSName;o='Windows';r=$o.Version;a=$(if([Environment]::Is64BitOperatingSystem){'x64'}else{'x86'});sh='powershell.exe'};c=[pscustomobject]@{u=[double]$t.PercentProcessorTime;c=$r;l=[Environment]::ProcessorCount};m=[pscustomobject]@{t=$mt;u=($mt-$mf);a=$mf;f=$mf;p=$(if($mt -gt 0){[math]::Round((($mt-$mf)/$mt)*100,1)}else{0});s=$(if($st -gt 0){[pscustomobject]@{t=$st;u=($st-$sf)}}else{$null})};d=$d;n=$n;p=$p;k=$k;u=[int]((Get-Date)-$o.LastBootUpTime).TotalSeconds}",
+      "$vc=@(gcim Win32_VideoController|?{$_.Name -and $_.Name -notmatch 'Microsoft Basic|Remote Display'})",
+      '$g=@()',
+      '$ng=@()',
+      "if(gcm nvidia-smi -ea 0){$ng=@((& nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,utilization.memory,temperature.gpu --format=csv,noheader,nounits 2>$null)|?{$_ -and $_.Trim()}|%{$v=@($_.Split(',')|%{$_.Trim()});$u=$(if($v.Count -gt 1){nd $v[1]}else{$null});$m=$(if($v.Count -gt 2){nd $v[2]}else{$null});$tt=$(if($v.Count -gt 3){nd $v[3]}else{$null});if($v.Count -ge 4 -and $null -ne $u -and $null -ne $m -and $null -ne $tt){$mu=$(if($v.Count -gt 4){nd $v[4]}else{$null});$tc=$(if($v.Count -gt 5){nd $v[5]}else{$null});[pscustomobject]@{n=$v[0];u=$u;m=$m;t=$tt;p=$(if($tt -gt 0){[math]::Round(($m/$tt)*100,1)}else{$null});mu=$mu;tc=$tc}}})}",
+      "$g=$(if($ng.Count -gt 0){$ng}else{$gx=@{};@(gcim Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine)|%{$nm=[string]$_.Name;$k=gk $nm;if($k){if(!$gx.ContainsKey($k)){$gx[$k]=[ordered]@{x=(gpi $nm);e=@{};m=$null;s=$null}};$ek=gek $nm;$u=gn $_ @('UtilizationPercentage');if($null -ne $u){$cur=$(if($gx[$k].e.ContainsKey($ek)){[double]$gx[$k].e[$ek]}else{0});$gx[$k].e[$ek]=[math]::Min(100,[math]::Round($cur+$u,1))}}};@(gcim Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory)|%{$nm=[string]$_.Name;$k=gk $nm;if($k){if(!$gx.ContainsKey($k)){$gx[$k]=[ordered]@{x=(gpi $nm);e=@{};m=$null;s=$null}};$du=gn $_ @('DedicatedUsage');$su=gn $_ @('SharedUsage');if($null -ne $du){$gx[$k].m=[math]::Round($du/1MB,1)};if($null -ne $su){$gx[$k].s=[math]::Round($su/1MB,1)}}};$gi=0;$gg=@(($gx.GetEnumerator()|sort {$_.Value.x})|%{$gi=$gi+1;$ix=$_.Value.x;$v=$(if($null -ne $ix -and $ix -lt $vc.Count){$vc[$ix]}elseif(($gi-1) -lt $vc.Count){$vc[$gi-1]}else{$null});$busy=0;foreach($q in $_.Value.e.Values){if([double]$q -gt $busy){$busy=[double]$q}};$tt=$(if($v -and [double]$v.AdapterRAM -gt 0){[math]::Round([double]$v.AdapterRAM/1MB,1)}else{$null});$mm=$_.Value.m;$pp=$(if($null -ne $mm -and $null -ne $tt -and $tt -gt 0){[math]::Round(($mm/$tt)*100,1)}else{$null});[pscustomobject]@{n=$(if($v -and $v.Name){[string]$v.Name}else{\"GPU $gi\"});u=[math]::Round($busy,1);m=$(if($null -ne $mm){$mm}else{0});t=$(if($null -ne $tt){$tt}else{0});p=$pp;s=$_.Value.s}});if($gg.Count -gt 0){$gg}else{$gi=0;@($vc|%{$gi=$gi+1;$tt=$(if([double]$_.AdapterRAM -gt 0){[math]::Round([double]$_.AdapterRAM/1MB,1)}else{0});[pscustomobject]@{n=[string]$_.Name;u=0;m=0;t=$tt;p=$null}})}})",
+      "$j=[pscustomobject]@{s=[pscustomobject]@{h=$o.CSName;o='Windows';r=$o.Version;a=$(if([Environment]::Is64BitOperatingSystem){'x64'}else{'x86'});sh='powershell.exe'};c=[pscustomobject]@{u=[double]$t.PercentProcessorTime;c=$r;l=[Environment]::ProcessorCount};m=[pscustomobject]@{t=$mt;u=($mt-$mf);a=$mf;f=$mf;p=$(if($mt -gt 0){[math]::Round((($mt-$mf)/$mt)*100,1)}else{0});s=$(if($st -gt 0){[pscustomobject]@{t=$st;u=($st-$sf)}}else{$null})};d=$d;g=$g;n=$n;p=$p;k=$k;u=[int]((Get-Date)-$o.LastBootUpTime).TotalSeconds}",
       '$json=$j|ConvertTo-Json -Depth 6 -Compress',
       '$bytes=$utf8.GetBytes($json)',
       '[Console]::OpenStandardOutput().Write($bytes,0,$bytes.Length)',
     ].join(';')
 
-    const encoded = Buffer.from(script, 'utf16le').toString('base64')
-    return `powershell -nop -noni -enc ${encoded}`
+    const compressed = gzipSync(Buffer.from(script, 'utf8')).toString('base64')
+    const bootstrap =
+      `iex ([IO.StreamReader]::new(` +
+      `[IO.Compression.GzipStream]::new(` +
+      `[IO.MemoryStream]::new([Convert]::FromBase64String('${compressed}')),` +
+      `[IO.Compression.CompressionMode]::Decompress),` +
+      `[Text.Encoding]::UTF8)).ReadToEnd()`
+    return `powershell -nop -noni -c "${bootstrap}"`
   }
 
   private buildSectionedCommand(sections: Array<[string, string]>): string {
@@ -1130,11 +1286,15 @@ export class ResourceMonitorService {
     for (const line of output.trim().split('\n')) {
       const parts = line.split(',').map((part) => part.trim())
       if (parts.length < 4) continue
-      const util = parseFloat(parts[1])
-      const memUsed = parseFloat(parts[2])
-      const memTotal = parseFloat(parts[3])
-      const temperature = parts[4] ? parseFloat(parts[4]) : undefined
-      if ([util, memUsed, memTotal].some((value) => Number.isNaN(value))) {
+      const util = this.asNumber(parts[1])
+      const memUsed = this.asNumber(parts[2])
+      const memTotal = this.asNumber(parts[3])
+      const memoryUtilization =
+        parts.length > 4 ? this.asNumber(parts[4]) : undefined
+      const temperatureIndex = parts.length > 5 ? 5 : 4
+      const temperature =
+        parts.length > temperatureIndex ? this.asNumber(parts[temperatureIndex]) : undefined
+      if (util === undefined || memUsed === undefined || memTotal === undefined) {
         continue
       }
       entries.push({
@@ -1142,6 +1302,8 @@ export class ResourceMonitorService {
         utilizationPercent: util,
         memoryUsedMiB: memUsed,
         memoryTotalMiB: memTotal,
+        memoryUsagePercent: memTotal > 0 ? this.percent(memUsed, memTotal) : undefined,
+        memoryUtilizationPercent: memoryUtilization,
         temperatureC:
           temperature !== undefined && !Number.isNaN(temperature) ? temperature : undefined,
       })
@@ -1902,12 +2064,23 @@ export class ResourceMonitorService {
   }
 
   private normalizeGpu(entry: any): GpuSnapshot {
+    const utilizationPercent = this.asNumber(entry.utilizationPercent ?? entry.u) || 0
+    const memoryUsedMiB = this.asNumber(entry.memoryUsedMiB ?? entry.m) || 0
+    const memoryTotalMiB = this.asNumber(entry.memoryTotalMiB ?? entry.t) || 0
+    const derivedMemoryUsagePercent =
+      memoryTotalMiB > 0 ? this.percent(memoryUsedMiB, memoryTotalMiB) : undefined
     return {
-      name: entry.name ? String(entry.name) : undefined,
-      utilizationPercent: this.asNumber(entry.utilizationPercent) || 0,
-      memoryUsedMiB: this.asNumber(entry.memoryUsedMiB) || 0,
-      memoryTotalMiB: this.asNumber(entry.memoryTotalMiB) || 0,
-      temperatureC: this.asNumber(entry.temperatureC),
+      name: entry.name ?? entry.n ? String(entry.name ?? entry.n) : undefined,
+      utilizationPercent,
+      memoryUsedMiB,
+      memoryTotalMiB,
+      memoryUsagePercent:
+        this.asNumber(entry.memoryUsagePercent ?? entry.p) ?? derivedMemoryUsagePercent,
+      memoryUtilizationPercent: this.asNumber(
+        entry.memoryUtilizationPercent ?? entry.mu
+      ),
+      sharedMemoryUsedMiB: this.asNumber(entry.sharedMemoryUsedMiB ?? entry.s),
+      temperatureC: this.asNumber(entry.temperatureC ?? entry.tc),
     }
   }
 

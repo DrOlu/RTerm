@@ -463,6 +463,12 @@ export interface GpuSnapshot {
   memoryUsedMiB: number
   /** Total memory in MiB */
   memoryTotalMiB: number
+  /** Memory usage percentage derived from used/total when available */
+  memoryUsagePercent?: number
+  /** GPU memory-controller utilization percentage (0–100) when available */
+  memoryUtilizationPercent?: number
+  /** Shared/system memory currently used by the GPU in MiB when available */
+  sharedMemoryUsedMiB?: number
   /** GPU temperature in Celsius */
   temperatureC?: number
 }

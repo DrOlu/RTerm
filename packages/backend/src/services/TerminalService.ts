@@ -734,14 +734,10 @@ export class TerminalService {
     return terminal.type
   }
 
-  getFileSystemIdentity(terminalId: string): string | null {
-    const terminal = this.getTerminalOrThrow(terminalId)
-    if (!terminal.capabilities.supportsFilesystem) {
-      return null
-    }
-    if (terminal.type === 'local') {
-      return 'local://default'
-    }
+  private getSshConnectionIdentity(
+    terminalId: string,
+    options: { includeUsername: boolean }
+  ): string | null {
     const config = this.terminalConfigs.get(terminalId)
     if (!config || !isSshConnectionConfig(config)) {
       return null
@@ -750,9 +746,34 @@ export class TerminalService {
     if (!host) {
       return null
     }
-    const username = String(config.username || '').trim().toLowerCase()
     const port = Number.isFinite(config.port) && config.port > 0 ? Math.floor(config.port) : 22
+    if (!options.includeUsername) {
+      return `ssh://${host}:${port}`
+    }
+    const username = String(config.username || '').trim().toLowerCase()
     return `ssh://${username}@${host}:${port}`
+  }
+
+  getFileSystemIdentity(terminalId: string): string | null {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    if (!terminal.capabilities.supportsFilesystem) {
+      return null
+    }
+    if (terminal.type === 'local') {
+      return 'local://default'
+    }
+    return this.getSshConnectionIdentity(terminalId, { includeUsername: true })
+  }
+
+  getMonitorIdentity(terminalId: string): string | null {
+    const terminal = this.getTerminalOrThrow(terminalId)
+    if (!terminal.capabilities.supportsMonitor) {
+      return null
+    }
+    if (terminal.type === 'local') {
+      return 'local://default'
+    }
+    return this.getSshConnectionIdentity(terminalId, { includeUsername: true })
   }
 
   async resolvePathForFileSystem(terminalId: string, filePath: string): Promise<string> {

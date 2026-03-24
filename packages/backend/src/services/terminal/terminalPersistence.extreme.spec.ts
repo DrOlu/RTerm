@@ -678,6 +678,48 @@ const run = async (): Promise<void> => {
       )
     })
 
+    await runCase('monitor identity scopes ssh tabs by username on the same host', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'ssh-root',
+        title: 'Root',
+        host: 'shared.example.com',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        password: 'secret',
+        cols: 80,
+        rows: 24,
+      } as any)
+
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'ssh-app',
+        title: 'App',
+        host: 'shared.example.com',
+        port: 22,
+        username: 'app',
+        authMethod: 'password',
+        password: 'secret',
+        cols: 80,
+        rows: 24,
+      } as any)
+
+      assertEqual(
+        service.getMonitorIdentity('ssh-root'),
+        'ssh://root@shared.example.com:22',
+        'monitor identity should include the ssh username for privileged session isolation'
+      )
+      assertEqual(
+        service.getMonitorIdentity('ssh-app'),
+        'ssh://app@shared.example.com:22',
+        'monitor identity should distinguish different usernames on the same host'
+      )
+    })
+
     await runCase('terminal-only configs survive persistence and restore', async () => {
       const backend1 = new FakeTerminalBackend()
       const service1 = createService(stateFilePath, backend1)

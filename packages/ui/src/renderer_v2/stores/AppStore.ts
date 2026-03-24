@@ -397,6 +397,14 @@ export class AppStore {
     return this.monitorStateByTerminalId[terminalId] || null
   }
 
+  private getAssignedMonitorTabIds(): string[] {
+    const availableMonitorIds = new Set(this.monitorTabs.map((tab) => tab.id))
+    const suppressedMonitorIds = this.suppressedTabIdsByKind.monitor
+    return (this.collectAssignedTabsByKind().monitor || []).filter((terminalId) =>
+      availableMonitorIds.has(terminalId) && !suppressedMonitorIds.has(terminalId)
+    )
+  }
+
   private ensureMonitorListener(): void {
     if (this.monitorSnapshotUnsubscribe || typeof window === 'undefined' || !window.gyshell?.monitor) {
       return
@@ -413,10 +421,7 @@ export class AppStore {
       return
     }
 
-    const monitorTabIds = new Set(this.monitorTabs.map((tab) => tab.id))
-    const desiredSubscriptionIds = new Set(
-      this.getOwnedTabIds('monitor').filter((terminalId) => monitorTabIds.has(terminalId)),
-    )
+    const desiredSubscriptionIds = new Set(this.getAssignedMonitorTabIds())
 
     const nextMonitorState = { ...this.monitorStateByTerminalId }
     let stateChanged = false
@@ -459,14 +464,11 @@ export class AppStore {
 
     this.syncMonitorSnapshotSubscriptions()
 
-    if (this.windowRole !== 'main') {
-      return
-    }
-
     const desiredMonitorIds = new Set(
-      this.terminalTabs
-        .filter((tab) => tab.capabilities.supportsMonitor && tab.runtimeState === 'ready')
-        .map((tab) => tab.id)
+      this.getAssignedMonitorTabIds().filter((terminalId) => {
+        const tab = this.terminalTabs.find((entry) => entry.id === terminalId)
+        return tab?.runtimeState === 'ready'
+      })
     )
 
     Array.from(this.monitorRetainedTabIds).forEach((terminalId) => {

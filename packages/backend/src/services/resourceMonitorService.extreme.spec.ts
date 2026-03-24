@@ -1,4 +1,5 @@
 import { ResourceMonitorService } from './ResourceMonitorService'
+import { gunzipSync } from 'zlib'
 
 const SECTION_MARKER = '__GYSHELL_MONITOR_SECTION__::'
 
@@ -24,12 +25,29 @@ const buildSectionedOutput = (sections: Record<string, string>): string =>
     .map(([key, value]) => `${SECTION_MARKER}${key}\n${value}`)
     .join('\n')
 
+const resolveMonitorIdentity = (terminal: Record<string, unknown>): string | null => {
+  const id = String(terminal.id || '').trim()
+  const type = String(terminal.type || '').trim()
+  if (!id) {
+    return null
+  }
+  if (type === 'local') {
+    return 'local://default'
+  }
+  if (type === 'ssh') {
+    return `ssh://${id}`
+  }
+  return `terminal://${id}`
+}
+
 const createService = (
   terminal: Record<string, unknown>,
   output: string
 ): ResourceMonitorService =>
   new ResourceMonitorService({
-    getTerminalById: () => terminal,
+    getTerminalById: (terminalId: string) =>
+      terminalId === terminal.id ? terminal : undefined,
+    getMonitorIdentity: () => resolveMonitorIdentity(terminal),
     execOnTerminal: async () => ({ stdout: output, stderr: '' }),
   } as any)
 
@@ -77,7 +95,7 @@ const run = async (): Promise<void> => {
         'Filesystem     1024-blocks     Used Available Capacity Mounted on',
         '/dev/sda1        20971520 10485760  10485760      50% /',
       ].join('\n'),
-      gpu: '',
+      gpu: 'NVIDIA RTX 4090, 65, 4096, 24564, 38, 72',
       network: [
         'Inter-|   Receive                                                |  Transmit',
         ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
@@ -104,6 +122,8 @@ const run = async (): Promise<void> => {
     assertEqual(snapshot.system?.hostname, 'demo-linux', 'linux hostname should merge from monitor output')
     assertEqual(snapshot.system?.osName, 'Ubuntu 24.04.4 LTS', 'linux os name should merge from monitor output')
     assertEqual(snapshot.cpu?.logicalCoreCount, 2, 'core count should match /proc/stat')
+    assertEqual(snapshot.gpus?.[0]?.memoryUtilizationPercent, 38, 'linux gpu memory utilization should parse from nvidia-smi')
+    assertEqual(snapshot.gpus?.[0]?.memoryUsagePercent, 16.7, 'linux vram usage percentage should be derived from nvidia-smi memory fields')
     assert(snapshot.memory?.cachedBytes !== undefined, 'linux cached memory should be populated')
     assertEqual(snapshot.processes?.length, 2, 'process list should parse')
     assertEqual(snapshot.networkConnections?.[0]?.localPort, 22, 'listener port should parse')
@@ -415,7 +435,18 @@ const run = async (): Promise<void> => {
           processName: 'sshd',
         },
       ],
-      gpus: [],
+      g: [
+        {
+          n: 'NVIDIA RTX 4090',
+          u: 51.2,
+          m: 4096,
+          t: 16384,
+          p: 25,
+          mu: 34.5,
+          tc: 61,
+          s: 512,
+        },
+      ],
       uptimeSeconds: 7200,
     })
 
@@ -440,6 +471,10 @@ const run = async (): Promise<void> => {
       snapshot.disks?.some((entry) => entry.mountPoint === 'F:\\' && entry.filesystem === 'NTFS'),
       'windows corrupted labels should collapse back to the filesystem name instead of mojibake'
     )
+    assertEqual(snapshot.gpus?.[0]?.name, 'NVIDIA RTX 4090', 'windows gpu name should parse from compact gpu payloads')
+    assertEqual(snapshot.gpus?.[0]?.memoryUsagePercent, 25, 'windows gpu vram usage percentage should parse')
+    assertEqual(snapshot.gpus?.[0]?.memoryUtilizationPercent, 34.5, 'windows gpu memory utilization should parse')
+    assertEqual(snapshot.gpus?.[0]?.sharedMemoryUsedMiB, 512, 'windows shared gpu memory should parse')
     assertEqual(snapshot.networkConnections?.[0]?.localPort, 22, 'windows socket should aggregate by local port')
     assertEqual(snapshot.networkConnections?.[0]?.remoteHostCount, 1, 'windows listener should track unique remote hosts')
     assertEqual(snapshot.networkConnections?.[0]?.connectionCount, 1, 'windows listener should track connection count')
@@ -456,8 +491,13 @@ const run = async (): Promise<void> => {
     )
 
     const windowsCommand = (service as any).buildWindowsMonitorCommand() as string
-    const encodedPayload = windowsCommand.split(' -enc ')[1] || ''
-    const decodedScript = Buffer.from(encodedPayload, 'base64').toString('utf16le')
+    const bootstrapMatch = windowsCommand.match(/ -c "(.+)"$/)
+    assert(bootstrapMatch, 'windows command should invoke powershell with an inline bootstrap command')
+    const compressedScriptMatch = (bootstrapMatch?.[1] || '').match(/FromBase64String\('([^']+)'\)/)
+    assert(compressedScriptMatch, 'windows command should embed a compressed powershell payload')
+    const decodedScript = gunzipSync(
+      Buffer.from(compressedScriptMatch?.[1] || '', 'base64')
+    ).toString('utf8')
     assert(
       decodedScript.includes('Win32_Volume'),
       'windows command should enumerate Win32_Volume for multi-volume coverage'
@@ -467,9 +507,134 @@ const run = async (): Promise<void> => {
       'windows command should no longer rely on Win32_LogicalDisk only'
     )
     assert(
+      decodedScript.includes('Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine') &&
+        decodedScript.includes('Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory'),
+      'windows command should query WMI GPU performance counter classes for generic GPU telemetry'
+    )
+    assert(
+      decodedScript.includes(
+        'nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,utilization.memory,temperature.gpu'
+      ),
+      'windows command should use nvidia-smi when available for NVIDIA GPU telemetry'
+    )
+    assert(
       decodedScript.includes('UTF8Encoding') &&
         decodedScript.includes('OpenStandardOutput().Write($bytes,0,$bytes.Length)'),
       'windows command should write utf-8 json bytes explicitly'
+    )
+  })
+
+  await runCase('shared monitor sources collect once and fan snapshots out to every retained terminal id', async () => {
+    const terminals = new Map(
+      ['ssh-a', 'ssh-b'].map((id) => [
+        id,
+        {
+          id,
+          type: 'ssh',
+          title: id,
+          runtimeState: 'ready',
+          remoteOs: 'unix',
+          systemInfo: {
+            platform: 'linux',
+            os: 'linux',
+            release: '6.8.0',
+            arch: 'x86_64',
+            hostname: 'shared-box',
+            isRemote: true,
+            shell: '/bin/bash',
+          },
+        },
+      ])
+    )
+    const output = buildSectionedOutput({
+      system: ['shared-box', 'Ubuntu', '6.8.0', 'x86_64', '/bin/bash'].join('\n'),
+      cpu: [
+        'cpu  4705 0 4313 1362393 17 0 12 0 0 0',
+        'cpu0 2300 0 2100 680000 9 0 6 0 0 0',
+        'cpu1 2405 0 2213 682393 8 0 6 0 0 0',
+      ].join('\n'),
+      memory: [
+        'MemTotal:        16384000 kB',
+        'MemFree:          2048000 kB',
+        'MemAvailable:     8192000 kB',
+      ].join('\n'),
+      disks: [
+        'Filesystem     1024-blocks     Used Available Capacity Mounted on',
+        '/dev/sda1        20971520 10485760  10485760      50% /',
+      ].join('\n'),
+      gpu: '',
+      network: [
+        'Inter-|   Receive                                                |  Transmit',
+        ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+        'eth0: 1048576 0 0 0 0 0 0 0 524288 0 0 0 0 0 0 0',
+      ].join('\n'),
+      load: '0.42 0.37 0.31 1/256 1234',
+      uptime: '3600.00 0.00',
+      processes: '',
+      sockets: '',
+    })
+    const execCalls: string[] = []
+    const published: Array<{ terminalId: string; cpu?: { usagePercent: number } }> = []
+    const service = new ResourceMonitorService({
+      getTerminalById: (terminalId: string) => terminals.get(terminalId),
+      getMonitorIdentity: (terminalId: string) =>
+        terminalId === 'ssh-a' || terminalId === 'ssh-b'
+          ? 'ssh://shared-host:22'
+          : null,
+      execOnTerminal: async (terminalId: string) => {
+        execCalls.push(terminalId)
+        return { stdout: output, stderr: '' }
+      },
+    } as any)
+    service.setPublisher((_channel, snapshot) => {
+      published.push(snapshot as any)
+    })
+
+    ;(service as any).collectAndPublish = async () => {}
+
+    service.start('ssh-a', 'window:1')
+    service.start('ssh-b', 'window:1')
+
+    await (ResourceMonitorService.prototype as any).collectAndPublish.call(
+      service,
+      'ssh://shared-host:22'
+    )
+
+    assertEqual(execCalls.length, 1, 'shared source should execute only one monitor command')
+    assertEqual(
+      JSON.stringify(published.map((entry) => entry.terminalId).sort()),
+      JSON.stringify(['ssh-a', 'ssh-b']),
+      'one collected snapshot should fan out to every retained terminal id'
+    )
+
+    const exitedSource = terminals.get('ssh-a')
+    assert(exitedSource, 'shared source test should keep the original source terminal')
+    ;(exitedSource as any).runtimeState = 'exited'
+
+    await service.collectSnapshot('ssh-b')
+
+    const session = (service as any).sessions.get('ssh://shared-host:22')
+    assert(session, 'shared session should remain while another terminal retains the same source')
+    assertEqual(
+      session.sourceTerminalId,
+      'ssh-b',
+      'source execution should move to another retained terminal when the current source exits'
+    )
+    assertEqual(
+      execCalls[1],
+      'ssh-b',
+      'shared source collection should fail over to a ready retained terminal instead of reusing an exited one'
+    )
+
+    service.stop('ssh-a', 'window:1')
+    assertEqual(service.isMonitoring('ssh-a'), false, 'released terminal should no longer report monitoring')
+    assertEqual(service.isMonitoring('ssh-b'), true, 'remaining shared terminal should keep the source active')
+
+    service.stop('ssh-b', 'window:1')
+    assertEqual(
+      (service as any).sessions.has('ssh://shared-host:22'),
+      false,
+      'shared source should stop after the last retained terminal releases it'
     )
   })
 
@@ -487,13 +652,21 @@ const run = async (): Promise<void> => {
 
     service.start('local-linux', 'win-main')
     service.start('local-linux', 'win-main')
-    let session = (service as any).sessions.get('local-linux')
+    let session = (service as any).sessions.get('local://default')
     assert(session, 'session should be created on first start')
-    assertEqual(session.ownerIds.size, 1, 'duplicate starts from the same owner should not leak owners')
+    assertEqual(
+      session.ownerIdsByTerminalId.get('local-linux')?.size,
+      1,
+      'duplicate starts from the same owner should not leak owners'
+    )
 
     service.start('local-linux', 'win-detached')
-    session = (service as any).sessions.get('local-linux')
-    assertEqual(session.ownerIds.size, 2, 'distinct owners should both retain the session')
+    session = (service as any).sessions.get('local://default')
+    assertEqual(
+      session.ownerIdsByTerminalId.get('local-linux')?.size,
+      2,
+      'distinct owners should both retain the session'
+    )
 
     service.stop('local-linux', 'win-main')
     assertEqual(service.isMonitoring('local-linux'), true, 'session should remain while another owner is active')

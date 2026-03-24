@@ -32,6 +32,22 @@ export class NodePtyBackend implements TerminalBackend {
   private cwdByPtyId: Map<string, string> = new Map()
   private homeDirByPtyId: Map<string, string> = new Map()
 
+  private buildExecInvocation(
+    command: string,
+    platform = os.platform()
+  ): { shell: string; args: string[] } {
+    if (platform === 'win32') {
+      return {
+        shell: 'powershell.exe',
+        args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
+      }
+    }
+    return {
+      shell: '/bin/sh',
+      args: ['-c', command],
+    }
+  }
+
   private buildMonitorExecEnv(): Record<string, string> {
     const env = this.getSafeEnv()
     if (os.platform() !== 'win32') {
@@ -51,8 +67,7 @@ export class NodePtyBackend implements TerminalBackend {
     timeoutMs = 6000
   ): Promise<{ stdout: string; stderr: string } | null> {
     try {
-      const shell = os.platform() === 'win32' ? 'cmd.exe' : '/bin/sh'
-      const args = os.platform() === 'win32' ? ['/c', command] : ['-c', command]
+      const { shell, args } = this.buildExecInvocation(command)
       const { stdout, stderr } = await execFileAsync(shell, args, {
         timeout: timeoutMs,
         env: this.buildMonitorExecEnv(),

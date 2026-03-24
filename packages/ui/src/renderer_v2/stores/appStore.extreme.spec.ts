@@ -1774,7 +1774,7 @@ const run = async (): Promise<void> => {
   );
 
   await runCase(
-    "reconcileTerminalTabs starts and stops backend monitor sessions from the main window",
+    "monitor sessions follow assigned monitor tabs and stop after the last one closes",
     async () => {
       const startCalls: Array<{ terminalId: string; intervalMs?: number }> = [];
       const stopCalls: string[] = [];
@@ -1810,6 +1810,13 @@ const run = async (): Promise<void> => {
       const store = new AppStore();
       (store as any).isBootstrapped = true;
       (store.layout as any).syncPanelBindings = () => {};
+      let assignedMonitorTabIds = ["term-a", "term-b"];
+      (store as any).collectAssignedTabsByKind = () => ({
+        chat: [],
+        terminal: [],
+        filesystem: [],
+        monitor: assignedMonitorTabIds,
+      });
 
       store.reconcileTerminalTabs({
         terminals: [
@@ -1827,7 +1834,15 @@ const run = async (): Promise<void> => {
             type: "ssh",
             cols: 80,
             rows: 24,
-            runtimeState: "initializing",
+            runtimeState: "ready",
+          },
+          {
+            id: "term-c",
+            title: "SSH C",
+            type: "ssh",
+            cols: 80,
+            rows: 24,
+            runtimeState: "ready",
           },
         ],
       } as any);
@@ -1835,38 +1850,46 @@ const run = async (): Promise<void> => {
 
       assertEqual(
         JSON.stringify(startCalls),
-        JSON.stringify([{ terminalId: "term-a", intervalMs: 3500 }]),
-        "ready monitor-capable terminals should start monitor sessions with the shared interval",
+        JSON.stringify([
+          { terminalId: "term-a", intervalMs: 3500 },
+          { terminalId: "term-b", intervalMs: 3500 },
+        ]),
+        "only ready terminals with assigned monitor tabs should retain backend monitor sessions",
       );
       assertEqual(
         JSON.stringify(subscribeCalls),
         JSON.stringify(["term-a", "term-b"]),
-        "main window should subscribe only its monitor-capable terminal ids for snapshot delivery",
+        "only assigned monitor tabs should subscribe for snapshot delivery",
       );
 
-      store.reconcileTerminalTabs({
-        terminals: [
-          {
-            id: "term-a",
-            title: "Linux A",
-            type: "local",
-            cols: 80,
-            rows: 24,
-            runtimeState: "exited",
-          },
-        ],
-      } as any);
+      assignedMonitorTabIds = ["term-b"];
+      await (store as any).syncMonitorSessions();
       await Promise.resolve();
 
       assertEqual(
         JSON.stringify(stopCalls),
         JSON.stringify(["term-a"]),
-        "monitor sessions should stop when the terminal is no longer ready",
+        "closing one monitor tab should release only that tab's backend monitor retention",
       );
       assertEqual(
         JSON.stringify(unsubscribeCalls),
-        JSON.stringify(["term-b"]),
-        "removed terminals should be unsubscribed from per-window monitor snapshots",
+        JSON.stringify(["term-a"]),
+        "closing one monitor tab should unsubscribe only that tab",
+      );
+
+      assignedMonitorTabIds = [];
+      await (store as any).syncMonitorSessions();
+      await Promise.resolve();
+
+      assertEqual(
+        JSON.stringify(stopCalls),
+        JSON.stringify(["term-a", "term-b"]),
+        "closing the last monitor tab for a terminal should stop its backend retention",
+      );
+      assertEqual(
+        JSON.stringify(unsubscribeCalls),
+        JSON.stringify(["term-a", "term-b"]),
+        "closing the last monitor tab should also unsubscribe that terminal snapshot stream",
       );
     },
   );
@@ -1897,6 +1920,97 @@ const run = async (): Promise<void> => {
         30,
         "subscribed monitor snapshots should still populate window-local state",
       );
+    },
+  );
+
+  await runCase(
+    "suppressing a monitor tab releases monitor retention even before layout bindings update",
+    async () => {
+      const originalWindow = (globalThis as unknown as { window?: unknown }).window;
+      const startCalls: Array<{ terminalId: string; intervalMs?: number }> = [];
+      const stopCalls: string[] = [];
+      const subscribeCalls: string[] = [];
+      const unsubscribeCalls: string[] = [];
+
+      try {
+        (globalThis as unknown as { window: unknown }).window = {
+          gyshell: {
+            settings: {
+              set: async () => {},
+            },
+            monitor: {
+              start: async (terminalId: string, intervalMs?: number) => {
+                startCalls.push({ terminalId, intervalMs });
+                return { ok: true };
+              },
+              stop: async (terminalId: string) => {
+                stopCalls.push(terminalId);
+                return { ok: true };
+              },
+              subscribe: async (terminalId: string) => {
+                subscribeCalls.push(terminalId);
+                return { ok: true };
+              },
+              unsubscribe: async (terminalId: string) => {
+                unsubscribeCalls.push(terminalId);
+                return { ok: true };
+              },
+              onSnapshot: () => () => {},
+            },
+          },
+        };
+
+        const store = new AppStore();
+        (store as any).isBootstrapped = true;
+        (store.layout as any).syncPanelBindings = () => {};
+        (store as any).collectAssignedTabsByKind = () => ({
+          chat: [],
+          terminal: [],
+          filesystem: [],
+          monitor: ["term-a"],
+        });
+
+        store.reconcileTerminalTabs({
+          terminals: [
+            {
+              id: "term-a",
+              title: "Local A",
+              type: "local",
+              cols: 80,
+              rows: 24,
+              runtimeState: "ready",
+            },
+          ],
+        } as any);
+        await Promise.resolve();
+
+        assertEqual(
+          JSON.stringify(startCalls),
+          JSON.stringify([{ terminalId: "term-a", intervalMs: 3500 }]),
+          "assigned ready monitor tabs should start a retained backend session",
+        );
+        assertEqual(
+          JSON.stringify(subscribeCalls),
+          JSON.stringify(["term-a"]),
+          "assigned ready monitor tabs should subscribe before suppression",
+        );
+
+        store.suppressTabs("monitor", ["term-a"], { syncLayout: false });
+        await Promise.resolve();
+
+        assertEqual(
+          JSON.stringify(stopCalls),
+          JSON.stringify(["term-a"]),
+          "suppressed monitor tabs should stop backend retention immediately even before layout mutation",
+        );
+        assertEqual(
+          JSON.stringify(unsubscribeCalls),
+          JSON.stringify(["term-a"]),
+          "suppressed monitor tabs should unsubscribe immediately even before layout mutation",
+        );
+      } finally {
+        (globalThis as unknown as { window?: unknown }).window = originalWindow;
+      }
     },
   );
 
