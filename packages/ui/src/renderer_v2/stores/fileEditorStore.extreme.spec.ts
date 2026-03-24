@@ -125,6 +125,113 @@ const run = async (): Promise<void> => {
     assertEqual(store.dirty, false, 'save should clear dirty state')
   })
 
+  await runCase('refresh reloads the current file content from disk', async () => {
+    let readCallCount = 0
+    ;(globalThis as unknown as { window: unknown }).window = {
+      gyshell: {
+        filesystem: {
+          readTextFile: async (_terminalId: string, filePath: string) => {
+            readCallCount += 1
+            return {
+              path: filePath,
+              content: `content-${readCallCount}`,
+              size: 10,
+              encoding: 'utf8' as const
+            }
+          },
+          writeTextFile: async () => {}
+        }
+      },
+      confirm: () => true
+    }
+
+    const store = new FileEditorStore(makeAppStoreMock())
+    await store.openFromFileSystem('term-a', '/tmp/a.txt')
+    store.statusMessage = 'stale-status'
+
+    const refreshed = await store.refresh()
+
+    assertEqual(refreshed, true, 'refresh should succeed when an active document exists')
+    assertEqual(readCallCount, 2, 'refresh should trigger a new readTextFile call')
+    assertEqual(store.content, 'content-2', 'refresh should replace the current content with the latest disk content')
+    assertEqual(store.dirty, false, 'refresh should leave the reloaded document clean')
+    assertEqual(store.statusMessage, null, 'refresh should clear stale status messages')
+  })
+
+  await runCase('refresh aborts when user cancels the unsaved-changes dialog', async () => {
+    let readCallCount = 0
+    let confirmCallCount = 0
+    ;(globalThis as unknown as { window: unknown }).window = {
+      gyshell: {
+        filesystem: {
+          readTextFile: async (_terminalId: string, filePath: string) => {
+            readCallCount += 1
+            return {
+              path: filePath,
+              content: `content-${readCallCount}`,
+              size: 10,
+              encoding: 'utf8' as const
+            }
+          },
+          writeTextFile: async () => {}
+        }
+      },
+      confirm: () => {
+        confirmCallCount += 1
+        return false
+      }
+    }
+
+    const store = new FileEditorStore(makeAppStoreMock())
+    await store.openFromFileSystem('term-a', '/tmp/a.txt')
+    store.updateContent('dirty-edit')
+
+    const refreshed = await store.refresh()
+
+    assertEqual(refreshed, false, 'refresh should return false when the user cancels')
+    assertEqual(confirmCallCount, 1, 'refresh should prompt once before discarding dirty edits')
+    assertEqual(readCallCount, 1, 'refresh must not read the file again when the user cancels')
+    assertEqual(store.content, 'dirty-edit', 'refresh must preserve local dirty content when cancelled')
+    assertEqual(store.dirty, true, 'refresh must preserve dirty state when cancelled')
+  })
+
+  await runCase('refresh replaces dirty content after user confirms discard', async () => {
+    let readCallCount = 0
+    let confirmCallCount = 0
+    ;(globalThis as unknown as { window: unknown }).window = {
+      gyshell: {
+        filesystem: {
+          readTextFile: async (_terminalId: string, filePath: string) => {
+            readCallCount += 1
+            return {
+              path: filePath,
+              content: `content-${readCallCount}`,
+              size: 10,
+              encoding: 'utf8' as const
+            }
+          },
+          writeTextFile: async () => {}
+        }
+      },
+      confirm: () => {
+        confirmCallCount += 1
+        return true
+      }
+    }
+
+    const store = new FileEditorStore(makeAppStoreMock())
+    await store.openFromFileSystem('term-a', '/tmp/a.txt')
+    store.updateContent('dirty-edit')
+
+    const refreshed = await store.refresh()
+
+    assertEqual(refreshed, true, 'refresh should succeed when the user confirms discarding dirty edits')
+    assertEqual(confirmCallCount, 1, 'refresh should prompt once before reloading dirty content')
+    assertEqual(readCallCount, 2, 'refresh should reread the file after confirmation')
+    assertEqual(store.content, 'content-2', 'refresh should replace dirty content with disk content after confirmation')
+    assertEqual(store.dirty, false, 'refresh should clear dirty state after reloading')
+  })
+
   await runCase('clear resets editor state', () => {
     const store = new FileEditorStore(makeAppStoreMock())
     store.terminalId = 'term-a'

@@ -33,6 +33,7 @@ export class FileEditorStore {
       canSave: computed,
       openFromFileSystem: action,
       updateContent: action,
+      refresh: action,
       save: action,
       captureSnapshot: action,
       restoreSnapshot: action,
@@ -136,6 +137,33 @@ export class FileEditorStore {
     }
     this.content = nextContent
     this.dirty = true
+  }
+
+  async refresh(): Promise<boolean> {
+    if (!this.hasActiveDocument || !this.terminalId || !this.filePath || this.busy || this.mode === 'loading') {
+      return false
+    }
+
+    if (this.mode === 'text' && this.dirty) {
+      const confirmed = window.confirm(this.appStore.i18n.t.fileEditor.unsavedChangesConfirm)
+      if (!confirmed) {
+        return false
+      }
+    }
+
+    const terminalId = this.terminalId
+    const filePath = this.filePath
+    const requestVersion = this.loadRequestVersion + 1
+    this.loadRequestVersion = requestVersion
+
+    this.mode = 'loading'
+    this.content = ''
+    this.dirty = false
+    this.busy = false
+    this.errorMessage = null
+    this.statusMessage = null
+
+    return await this.loadTextFileForRequest(terminalId, filePath, requestVersion)
   }
 
   async save(): Promise<boolean> {

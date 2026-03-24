@@ -17,7 +17,8 @@
   min-height: var(--panel-tab-header-height);
   display: flex;
   align-items: center;
-  padding: 0 4px;
+  padding-left: 4px;
+  padding-right: 0;
   background: color-mix(in srgb, var(--fg) 3%, transparent); /* Match terminal tab bar background */
   border-bottom: 1px solid var(--border);
   min-width: 0;
@@ -139,6 +140,7 @@ body.chat-drag-selection-suppressed * {
   line-height: 0;
   padding: 0;
   margin: 0;
+  flex: 0 0 auto;
 }
 
 .chat-tab-history:hover,
@@ -154,6 +156,7 @@ body.chat-drag-selection-suppressed * {
   gap: 4px;
   margin-left: auto;
   padding-right: 4px;
+  flex: 0 0 auto;
 }
 
 .chat-tabs-select {

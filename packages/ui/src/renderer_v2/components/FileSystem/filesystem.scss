@@ -44,6 +44,45 @@
   display: none !important;
 }
 
+.filesystem-tabs-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding-right: 4px;
+  flex: 0 0 auto;
+}
+
+.filesystem-tab-more-btn {
+  height: 22px;
+  width: 22px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  line-height: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.filesystem-tab-more-btn:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  color: var(--fg);
+}
+
+.filesystem-tab-more-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.filesystem-tab-more-btn:disabled:hover {
+  background: transparent;
+  color: var(--fg-muted);
+}
+
 .filesystem-tab {
   height: var(--panel-tab-header-height);
   padding: 0 7px;
@@ -129,6 +168,60 @@
 
 .filesystem-toolbar .icon-btn-sm {
   flex: 0 0 auto;
+}
+
+.filesystem-toolbar-view-btn {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+}
+
+.filesystem-toolbar-menu {
+  min-width: 196px;
+  z-index: 3000;
+  padding: 3px;
+}
+
+.filesystem-toolbar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 8px;
+}
+
+.filesystem-toolbar-menu-marker {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+  flex: 0 0 auto;
+}
+
+.filesystem-toolbar-menu-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0;
+}
+
+.filesystem-toolbar-menu-marker.is-selected {
+  color: var(--accent);
+}
+
+.filesystem-toolbar-menu-marker.is-selected .filesystem-toolbar-menu-dot {
+  opacity: 1;
+}
+
+.filesystem-toolbar-menu-label {
+  min-width: 0;
+  flex: 1;
 }
 
 .filesystem-path-input {

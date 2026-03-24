@@ -146,6 +146,33 @@ export interface FileSystemClipboardState {
   createdAt: number;
 }
 
+const cloneFileSystemClipboardState = (
+  payload: FileSystemClipboardState | null,
+): FileSystemClipboardState | null => {
+  if (!payload) {
+    return null
+  }
+  return {
+    mode: payload.mode === 'move' ? 'move' : 'copy',
+    sourceTerminalId: String(payload.sourceTerminalId || ''),
+    sourcePaths: Array.isArray(payload.sourcePaths)
+      ? payload.sourcePaths
+          .map((path) => String(path || ''))
+          .filter((path) => path.length > 0)
+      : [],
+    itemNames: Array.isArray(payload.itemNames)
+      ? payload.itemNames.map((name) => String(name || ''))
+      : [],
+    sourceBasePath:
+      typeof payload.sourceBasePath === 'string' && payload.sourceBasePath.length > 0
+        ? payload.sourceBasePath
+        : '.',
+    createdAt: Number.isFinite(payload.createdAt)
+      ? Number(payload.createdAt)
+      : Date.now(),
+  }
+}
+
 export interface MonitorTerminalState {
   snapshot: MonitorSnapshot | null
   lastError: string | null
@@ -241,7 +268,7 @@ export class AppStore {
       activeTerminalId: observable,
       monitorStateByTerminalId: observable,
       terminalSelections: observable,
-      fileSystemClipboard: observable,
+      fileSystemClipboard: observable.ref,
       xtermTheme: observable,
       customThemes: observable,
       i18n: observable,
@@ -2704,7 +2731,7 @@ export class AppStore {
   }
 
   setFileSystemClipboard(payload: FileSystemClipboardState | null): void {
-    this.fileSystemClipboard = payload
+    this.fileSystemClipboard = cloneFileSystemClipboardState(payload)
   }
 
   clearFileSystemClipboard(): void {

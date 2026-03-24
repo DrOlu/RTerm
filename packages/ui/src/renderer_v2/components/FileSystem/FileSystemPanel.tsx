@@ -1,6 +1,8 @@
 import React from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowUp,
+  ArrowUpDown,
   Check,
   Copy,
   File,
@@ -8,6 +10,7 @@ import {
   Folder,
   FolderPlus,
   GripVertical,
+  MoreVertical,
   Pencil,
   RefreshCw,
   Scissors,
@@ -31,6 +34,15 @@ import {
   resolveFilesystemToolbarMode,
   resolvePanelTabBarMode
 } from '../Layout/panelHeaderPresentation'
+import { resolveFloatingMenuPlacement } from '../../lib/menuPlacement'
+import {
+  DEFAULT_FILESYSTEM_SORT_MODE,
+  filterFileSystemEntriesByHidden,
+  isFileSystemSortMode,
+  sortFileSystemEntries,
+  type FileSystemSortMode
+} from './filesystemSort'
+import { isLinux, isWindows } from '../../platform/platform'
 import './filesystem.scss'
 
 interface FileSystemPanelProps {
@@ -47,6 +59,8 @@ interface BrowserTabState {
   currentPath: string
   pathInput: string
   entries: FileSystemEntry[]
+  sortMode: FileSystemSortMode
+  showHiddenFiles: boolean
   loading: boolean
   busy: boolean
   errorMessage: string | null
@@ -60,6 +74,8 @@ const createInitialTabState = (): BrowserTabState => ({
   currentPath: '',
   pathInput: '',
   entries: [],
+  sortMode: DEFAULT_FILESYSTEM_SORT_MODE,
+  showHiddenFiles: true,
   loading: false,
   busy: false,
   errorMessage: null,
@@ -241,6 +257,8 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
   const [isOverwriteConfirmLoading, setOverwriteConfirmLoading] = React.useState(false)
   const [isExplorerDropHot, setExplorerDropHot] = React.useState(false)
   const [isSameMachineGateway, setSameMachineGateway] = React.useState<boolean | null>(null)
+  const [openToolbarMenu, setOpenToolbarMenu] = React.useState<'sort' | 'more' | null>(null)
+  const [toolbarMenuStyle, setToolbarMenuStyle] = React.useState<React.CSSProperties | undefined>(undefined)
   const pendingOverwriteRef = React.useRef<{
     clipboard: FileSystemClipboardState
     targetTerminalId: string
@@ -257,6 +275,9 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
   const reloadDirectoryTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const transferPumpRef = React.useRef<() => void>(() => {})
   const inlineActionInputRef = React.useRef<HTMLInputElement | null>(null)
+  const sortMenuButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const moreMenuButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const toolbarMenuRef = React.useRef<HTMLDivElement | null>(null)
 
   React.useEffect(() => {
     transferTasksRef.current = transferTasks
@@ -377,7 +398,11 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
         const result = await window.gyshell.filesystem.list(terminalId, dirPath)
         if (requestVersionRef.current[terminalId] !== requestVersion) return
         updateTabState(terminalId, (current) => {
-          const selectedPaths = current.selectedPaths.filter((path) => result.entries.some((entry) => entry.path === path))
+          const visibleEntries = filterFileSystemEntriesByHidden(
+            sortFileSystemEntries(result.entries, current.sortMode),
+            current.showHiddenFiles
+          )
+          const selectedPaths = current.selectedPaths.filter((path) => visibleEntries.some((entry) => entry.path === path))
           const selectionAnchorPath = current.selectionAnchorPath && selectedPaths.includes(current.selectionAnchorPath)
             ? current.selectionAnchorPath
             : selectedPaths[0] || null
@@ -434,12 +459,39 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null
   const activeTerminalId = activeTab?.id || null
   const activeState = activeTerminalId ? (stateByTabId[activeTerminalId] || createInitialTabState()) : createInitialTabState()
+  const menuPlatformClassName = React.useMemo(() => {
+    if (isWindows()) return 'is-platform-windows'
+    if (isLinux()) return 'is-platform-linux'
+    return ''
+  }, [])
+  const sortedEntries = React.useMemo(
+    () => sortFileSystemEntries(activeState.entries, activeState.sortMode),
+    [activeState.entries, activeState.sortMode]
+  )
+  const visibleEntries = React.useMemo(
+    () => filterFileSystemEntriesByHidden(sortedEntries, activeState.showHiddenFiles),
+    [activeState.showHiddenFiles, sortedEntries]
+  )
   const selectedEntries = React.useMemo(
-    () => activeState.entries.filter((entry) => activeState.selectedPaths.includes(entry.path)),
-    [activeState.entries, activeState.selectedPaths]
+    () => visibleEntries.filter((entry) => activeState.selectedPaths.includes(entry.path)),
+    [activeState.selectedPaths, visibleEntries]
   )
   const singleSelectedEntry = selectedEntries.length === 1 ? selectedEntries[0] : null
   const selectedCount = selectedEntries.length
+  const sortOptions = React.useMemo(() => ([
+    { value: 'name-asc', label: t.filesystem.sortNameAsc },
+    { value: 'name-desc', label: t.filesystem.sortNameDesc },
+    { value: 'modified-desc', label: t.filesystem.sortModifiedNewest },
+    { value: 'modified-asc', label: t.filesystem.sortModifiedOldest },
+    { value: 'size-desc', label: t.filesystem.sortSizeLargest },
+    { value: 'size-asc', label: t.filesystem.sortSizeSmallest },
+    { value: 'type-asc', label: t.filesystem.sortTypeAsc },
+    { value: 'type-desc', label: t.filesystem.sortTypeDesc }
+  ]), [t.filesystem])
+  const activeSortOption = React.useMemo(
+    () => sortOptions.find((option) => option.value === activeState.sortMode) || sortOptions[0],
+    [activeState.sortMode, sortOptions]
+  )
 
   React.useEffect(() => {
     setInlinePathAction(null)
@@ -448,7 +500,86 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
     setOverwriteConfirmOpen(false)
     setOverwriteConfirmLoading(false)
     pendingOverwriteRef.current = null
+    setOpenToolbarMenu(null)
   }, [activeTerminalId])
+
+  const recomputeToolbarMenuPosition = React.useCallback(() => {
+    const trigger = openToolbarMenu === 'sort'
+      ? sortMenuButtonRef.current
+      : openToolbarMenu === 'more'
+        ? moreMenuButtonRef.current
+        : null
+    const menu = toolbarMenuRef.current
+    if (!trigger || !menu) return
+
+    const rect = trigger.getBoundingClientRect()
+    const measured = menu.getBoundingClientRect()
+    const placement = resolveFloatingMenuPlacement({
+      anchorRect: {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height
+      },
+      menuWidth: Math.ceil(measured.width),
+      menuHeight: Math.ceil(measured.height),
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      margin: 8,
+      gap: 4,
+      preferredMaxHeight: 240
+    })
+
+    setToolbarMenuStyle({
+      position: 'fixed',
+      top: placement.top,
+      left: placement.left,
+      maxHeight: placement.maxHeight,
+      maxWidth: placement.maxWidth
+    })
+  }, [openToolbarMenu])
+
+  React.useEffect(() => {
+    if (!openToolbarMenu) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      const target = event.target as Node | null
+      if (!target) return
+      if (toolbarMenuRef.current?.contains(target)) {
+        return
+      }
+      if (sortMenuButtonRef.current?.contains(target) || moreMenuButtonRef.current?.contains(target)) {
+        return
+      }
+      setOpenToolbarMenu(null)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenToolbarMenu(null)
+      }
+    }
+
+    const onReflow = () => {
+      recomputeToolbarMenuPosition()
+    }
+
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', onReflow)
+    window.addEventListener('scroll', onReflow, true)
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', onReflow)
+      window.removeEventListener('scroll', onReflow, true)
+    }
+  }, [openToolbarMenu, recomputeToolbarMenuPosition])
+
+  React.useLayoutEffect(() => {
+    if (!openToolbarMenu) return
+    recomputeToolbarMenuPosition()
+  }, [openToolbarMenu, recomputeToolbarMenuPosition])
 
   const inlineActionSessionKey = React.useMemo(() => {
     if (!inlinePathAction) return null
@@ -622,7 +753,10 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
     (event: React.MouseEvent<HTMLElement>, entry: FileSystemEntry): void => {
       if (!activeTerminalId) return
       updateTabState(activeTerminalId, (current) => {
-        const paths = current.entries.map((item) => item.path)
+        const paths = filterFileSystemEntriesByHidden(
+          sortFileSystemEntries(current.entries, current.sortMode),
+          current.showHiddenFiles
+        ).map((item) => item.path)
         const currentSelection = new Set(current.selectedPaths)
         let nextSelectedPaths: string[] = []
         let nextAnchorPath = current.selectionAnchorPath
@@ -662,6 +796,59 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
     },
     [activeTerminalId, updateTabState]
   )
+
+  const handleSortModeChange = React.useCallback((nextValue: string): void => {
+    if (!activeTerminalId || !isFileSystemSortMode(nextValue)) return
+    updateTabState(activeTerminalId, (current) => ({
+      ...current,
+      sortMode: nextValue
+    }))
+  }, [activeTerminalId, updateTabState])
+
+  const handleToolbarMenuToggle = React.useCallback((menu: 'sort' | 'more'): void => {
+    setOpenToolbarMenu((current) => current === menu ? null : menu)
+  }, [])
+
+  const handleSortMenuToggle = React.useCallback((): void => {
+    handleToolbarMenuToggle('sort')
+  }, [handleToolbarMenuToggle])
+
+  const handleMoreMenuToggle = React.useCallback((): void => {
+    handleToolbarMenuToggle('more')
+  }, [handleToolbarMenuToggle])
+
+  const handleSortMenuSelect = React.useCallback((nextValue: string): void => {
+    handleSortModeChange(nextValue)
+    setOpenToolbarMenu(null)
+  }, [handleSortModeChange])
+
+  const handleToggleHiddenFiles = React.useCallback((): void => {
+    if (!activeTerminalId) return
+    updateTabState(activeTerminalId, (current) => {
+      const nextShowHiddenFiles = !current.showHiddenFiles
+      const nextVisibleEntries = filterFileSystemEntriesByHidden(
+        sortFileSystemEntries(current.entries, current.sortMode),
+        nextShowHiddenFiles
+      )
+      const visiblePathSet = new Set(nextVisibleEntries.map((entry) => entry.path))
+      const selectedPaths = current.selectedPaths.filter((path) => visiblePathSet.has(path))
+      const selectionAnchorPath = current.selectionAnchorPath && visiblePathSet.has(current.selectionAnchorPath)
+        ? current.selectionAnchorPath
+        : selectedPaths[0] || null
+      return {
+        ...current,
+        showHiddenFiles: nextShowHiddenFiles,
+        selectedPaths,
+        selectionAnchorPath,
+        statusMessage: null
+      }
+    })
+  }, [activeTerminalId, updateTabState])
+
+  const handleHiddenFilesMenuToggle = React.useCallback((): void => {
+    handleToggleHiddenFiles()
+    setOpenToolbarMenu(null)
+  }, [handleToggleHiddenFiles])
 
   const navigateDirectory = React.useCallback(
     (targetPath?: string): void => {
@@ -884,10 +1071,12 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
     overwrite: boolean
   ): void => {
     const mode = clipboardPayload.mode
+    const sourcePaths = Array.from(clipboardPayload.sourcePaths || [])
+    const itemNames = Array.from(clipboardPayload.itemNames || [])
     const kind: TransferTaskKind = mode
     const statusMessage = mode === 'move'
-      ? t.filesystem.movingItems(clipboardPayload.itemNames.length)
-      : t.filesystem.copyingItems(clipboardPayload.itemNames.length)
+      ? t.filesystem.movingItems(itemNames.length)
+      : t.filesystem.copyingItems(itemNames.length)
 
     updateTabState(targetTerminalId, (current) => ({
       ...current,
@@ -901,7 +1090,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
         sourceTerminalId: clipboardPayload.sourceTerminalId,
         targetTerminalId,
         targetPath,
-        itemNames: clipboardPayload.itemNames,
+        itemNames,
         totalBytes: 0,
         message: t.filesystem.transferQueued
       },
@@ -948,7 +1137,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
         try {
           const result = await window.gyshell.filesystem.transferEntries(
             clipboardPayload.sourceTerminalId,
-            clipboardPayload.sourcePaths,
+            sourcePaths,
             targetTerminalId,
             targetPath,
             {
@@ -1418,6 +1607,20 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
             })}
           </div>
         )}
+        <div className="filesystem-tabs-actions">
+          <button
+            ref={moreMenuButtonRef}
+            className="filesystem-tab-more-btn"
+            title={t.common.showMore}
+            aria-label={t.common.showMore}
+            aria-haspopup="menu"
+            aria-expanded={openToolbarMenu === 'more'}
+            onClick={handleMoreMenuToggle}
+            disabled={isBusy}
+          >
+            <MoreVertical size={14} strokeWidth={2} />
+          </button>
+        </div>
       </div>
 
       <div className={`filesystem-toolbar ${filesystemToolbarMode === 'stacked' ? 'is-stacked' : ''}`}>
@@ -1484,8 +1687,66 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
               </button>
             </>
           )}
+          <button
+            ref={sortMenuButtonRef}
+            type="button"
+            className="icon-btn-sm filesystem-toolbar-view-btn"
+            title={activeSortOption?.label || t.filesystem.sortNameAsc}
+            aria-label={activeSortOption?.label || t.filesystem.sortNameAsc}
+            aria-haspopup="menu"
+            aria-expanded={openToolbarMenu === 'sort'}
+            onClick={handleSortMenuToggle}
+            disabled={isBusy || activeState.entries.length <= 1}
+          >
+            <ArrowUpDown size={14} strokeWidth={2} />
+          </button>
         </div>
       </div>
+      {openToolbarMenu
+        ? createPortal(
+            <div
+              className={menuPlatformClassName ? `win-select-menu filesystem-toolbar-menu ${menuPlatformClassName}` : 'win-select-menu filesystem-toolbar-menu'}
+              role="menu"
+              ref={toolbarMenuRef}
+              style={toolbarMenuStyle}
+            >
+              {openToolbarMenu === 'sort'
+                ? sortOptions.map((option) => {
+                    const isSelected = option.value === activeState.sortMode
+                    return (
+                      <button
+                        key={option.value}
+                        className={isSelected ? 'win-select-option filesystem-toolbar-menu-item is-selected' : 'win-select-option filesystem-toolbar-menu-item'}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={isSelected}
+                        onClick={() => handleSortMenuSelect(option.value)}
+                      >
+                        <span className={isSelected ? 'filesystem-toolbar-menu-marker is-selected' : 'filesystem-toolbar-menu-marker'} aria-hidden="true">
+                          <span className="filesystem-toolbar-menu-dot" />
+                        </span>
+                        <span className="filesystem-toolbar-menu-label">{option.label}</span>
+                      </button>
+                    )
+                  })
+                : (
+                    <button
+                      className={activeState.showHiddenFiles ? 'win-select-option filesystem-toolbar-menu-item is-selected' : 'win-select-option filesystem-toolbar-menu-item'}
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={activeState.showHiddenFiles}
+                      onClick={handleHiddenFilesMenuToggle}
+                    >
+                      <span className={activeState.showHiddenFiles ? 'filesystem-toolbar-menu-marker is-selected' : 'filesystem-toolbar-menu-marker'} aria-hidden="true">
+                        <span className="filesystem-toolbar-menu-dot" />
+                      </span>
+                      <span className="filesystem-toolbar-menu-label">{t.filesystem.showHiddenFiles}</span>
+                    </button>
+                  )}
+            </div>,
+            document.body
+          )
+        : null}
 
       {inlinePathAction ? (
         <div className="filesystem-inline-action-bar">
@@ -1553,10 +1814,10 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(({
             onDragOver={handleExplorerDragOver}
             onDrop={handleExplorerDrop}
           >
-            {activeState.entries.length === 0 && !activeState.loading ? (
+            {visibleEntries.length === 0 && !activeState.loading ? (
               <div className="filesystem-empty-state">{t.filesystem.emptyDirectory}</div>
             ) : (
-              activeState.entries.map((entry) => {
+              visibleEntries.map((entry) => {
                 const isSelected = activeState.selectedPaths.includes(entry.path)
                 const Icon = entry.isDirectory ? Folder : File
                 return (

@@ -1,5 +1,5 @@
 import React from 'react'
-import { GripVertical, Save } from 'lucide-react'
+import { GripVertical, RefreshCw, Save } from 'lucide-react'
 import { observer } from 'mobx-react-lite'
 import type { AppStore } from '../../stores/AppStore'
 import './fileEditor.scss'
@@ -97,6 +97,16 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(({
         {fileEditor.mode === 'text' && fileEditor.dirty ? (
           <span className="file-editor-dirty">{t.fileEditor.unsavedChanges}</span>
         ) : null}
+        <button
+          className="icon-btn-sm"
+          title={t.common.refresh}
+          onClick={() => {
+            void fileEditor.refresh()
+          }}
+          disabled={!fileEditor.hasActiveDocument || fileEditor.mode === 'loading' || fileEditor.busy}
+        >
+          <RefreshCw size={14} strokeWidth={2} />
+        </button>
         <button
           className="icon-btn-sm primary"
           title={t.common.save}

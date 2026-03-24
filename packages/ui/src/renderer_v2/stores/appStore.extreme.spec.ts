@@ -1,3 +1,4 @@
+import { isObservable, isObservableArray } from "mobx";
 import { AppStore } from "./AppStore";
 import { ChatStore } from "./ChatStore";
 import type { LayoutTree } from "../layout";
@@ -211,6 +212,51 @@ const installBootstrapWindowMock = (
 };
 
 const run = async (): Promise<void> => {
+  await runCase(
+    "filesystem clipboard snapshots remain plain structured-cloneable data",
+    () => {
+      const store = new AppStore();
+
+      store.setFileSystemClipboard({
+        mode: "copy",
+        sourceTerminalId: "term-a",
+        sourcePaths: ["/tmp/a.txt", "/tmp/b.txt"],
+        itemNames: ["a.txt", "b.txt"],
+        sourceBasePath: "/tmp",
+        createdAt: 123,
+      });
+
+      const clipboard = store.fileSystemClipboard;
+      assertCondition(!!clipboard, "clipboard should be populated");
+      assertCondition(
+        !isObservable(clipboard),
+        "clipboard snapshot should not be wrapped by MobX",
+      );
+      assertCondition(
+        !isObservableArray(clipboard!.sourcePaths),
+        "clipboard source paths should stay plain arrays",
+      );
+      assertCondition(
+        !isObservableArray(clipboard!.itemNames),
+        "clipboard item names should stay plain arrays",
+      );
+
+      const cloned = structuredClone(clipboard);
+      assertEqual(
+        JSON.stringify(cloned),
+        JSON.stringify({
+          mode: "copy",
+          sourceTerminalId: "term-a",
+          sourcePaths: ["/tmp/a.txt", "/tmp/b.txt"],
+          itemNames: ["a.txt", "b.txt"],
+          sourceBasePath: "/tmp",
+          createdAt: 123,
+        }),
+        "clipboard snapshot should survive structured cloning",
+      );
+    },
+  );
+
   await runCase(
     "collectPersistedChatInventoryState preserves focused chat active tab",
     async () => {
