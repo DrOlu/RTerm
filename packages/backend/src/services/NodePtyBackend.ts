@@ -9,6 +9,7 @@ import {
   isLocalConnectionConfig,
   type TerminalBackend,
   type TerminalConfig,
+  type TerminalExecOptions,
   type FileSystemEntry,
   type FileStatInfo,
 } from '../types'
@@ -64,7 +65,8 @@ export class NodePtyBackend implements TerminalBackend {
   async execOnSession(
     _ptyId: string,
     command: string,
-    timeoutMs = 6000
+    timeoutMs = 6000,
+    _options?: TerminalExecOptions
   ): Promise<{ stdout: string; stderr: string } | null> {
     try {
       const { shell, args } = this.buildExecInvocation(command)

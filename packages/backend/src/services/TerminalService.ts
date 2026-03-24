@@ -5,6 +5,7 @@ import path from 'path'
 import os from 'os'
 import type {
   TerminalBackend,
+  TerminalExecOptions,
   TerminalFileSystemBackend,
   TerminalConfig,
   TerminalTab,
@@ -1093,7 +1094,8 @@ export class TerminalService {
   async execOnTerminal(
     terminalId: string,
     command: string,
-    timeoutMs = 6000
+    timeoutMs = 6000,
+    options?: TerminalExecOptions
   ): Promise<{ stdout: string; stderr: string } | null> {
     const tab = this.terminals.get(terminalId)
     if (!tab) return null
@@ -1102,7 +1104,7 @@ export class TerminalService {
     if (!backend) return null
 
     if (typeof backend.execOnSession === 'function') {
-      return await backend.execOnSession(tab.ptyId, command, timeoutMs)
+      return await backend.execOnSession(tab.ptyId, command, timeoutMs, options)
     }
 
     return null

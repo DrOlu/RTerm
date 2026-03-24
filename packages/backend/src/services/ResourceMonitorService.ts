@@ -1,5 +1,4 @@
 import os from 'os'
-import { gzipSync } from 'zlib'
 import type { TerminalService } from './TerminalService'
 import type {
   ResourceSnapshot,
@@ -658,10 +657,13 @@ export class ResourceMonitorService {
   private async collectWindowsSnapshot(
     terminalId: string
   ): Promise<CollectedSnapshot> {
+    const terminal = this.terminalService.getTerminalById(terminalId)
+    const monitorScript = this.buildWindowsMonitorScript()
     const result = await this.terminalService.execOnTerminal(
       terminalId,
-      this.buildWindowsMonitorCommand(),
-      SNAPSHOT_COMMAND_TIMEOUT_MS
+      terminal?.type === 'local' ? monitorScript : this.buildWindowsMonitorCommand(),
+      SNAPSHOT_COMMAND_TIMEOUT_MS,
+      terminal?.type === 'local' ? undefined : { stdin: `${monitorScript}\n` }
     )
     if (!result) {
       return { error: 'Failed to execute Windows monitor command' }
@@ -676,7 +678,7 @@ export class ResourceMonitorService {
 
     let parsed: any
     try {
-      parsed = JSON.parse(raw)
+      parsed = this.parseWindowsMonitorPayload(raw)
     } catch (error) {
       return {
         error:
@@ -783,8 +785,8 @@ export class ResourceMonitorService {
     ])
   }
 
-  private buildWindowsMonitorCommand(): string {
-    const script = [
+  private buildWindowsMonitorScript(): string {
+    return [
       "$ErrorActionPreference='SilentlyContinue'",
       '$utf8=[System.Text.UTF8Encoding]::new($false)',
       '[Console]::OutputEncoding=$utf8',
@@ -820,15 +822,26 @@ export class ResourceMonitorService {
       '$bytes=$utf8.GetBytes($json)',
       '[Console]::OpenStandardOutput().Write($bytes,0,$bytes.Length)',
     ].join(';')
+  }
 
-    const compressed = gzipSync(Buffer.from(script, 'utf8')).toString('base64')
-    const bootstrap =
-      `iex ([IO.StreamReader]::new(` +
-      `[IO.Compression.GzipStream]::new(` +
-      `[IO.MemoryStream]::new([Convert]::FromBase64String('${compressed}')),` +
-      `[IO.Compression.CompressionMode]::Decompress),` +
-      `[Text.Encoding]::UTF8)).ReadToEnd()`
-    return `powershell -nop -noni -c "${bootstrap}"`
+  private buildWindowsMonitorCommand(): string {
+    return 'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -'
+  }
+
+  private parseWindowsMonitorPayload(raw: string): any {
+    try {
+      return JSON.parse(raw)
+    } catch (error) {
+      const lines = raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+      const jsonLine = [...lines].reverse().find((line) => line.startsWith('{') && line.endsWith('}'))
+      if (jsonLine) {
+        return JSON.parse(jsonLine)
+      }
+      throw error
+    }
   }
 
   private buildSectionedCommand(sections: Array<[string, string]>): string {

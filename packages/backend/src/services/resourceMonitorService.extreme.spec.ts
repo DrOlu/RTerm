@@ -1,5 +1,4 @@
 import { ResourceMonitorService } from './ResourceMonitorService'
-import { gunzipSync } from 'zlib'
 
 const SECTION_MARKER = '__GYSHELL_MONITOR_SECTION__::'
 
@@ -480,7 +479,7 @@ const run = async (): Promise<void> => {
     assertEqual(snapshot.networkConnections?.[0]?.connectionCount, 1, 'windows listener should track connection count')
   })
 
-  await runCase('windows monitor command enumerates volumes instead of logical disks only', async () => {
+  await runCase('windows monitor launcher keeps the payload plain and unobfuscated', async () => {
     const service = createService(
       {
         id: 'local-win',
@@ -491,36 +490,223 @@ const run = async (): Promise<void> => {
     )
 
     const windowsCommand = (service as any).buildWindowsMonitorCommand() as string
-    const bootstrapMatch = windowsCommand.match(/ -c "(.+)"$/)
-    assert(bootstrapMatch, 'windows command should invoke powershell with an inline bootstrap command')
-    const compressedScriptMatch = (bootstrapMatch?.[1] || '').match(/FromBase64String\('([^']+)'\)/)
-    assert(compressedScriptMatch, 'windows command should embed a compressed powershell payload')
-    const decodedScript = gunzipSync(
-      Buffer.from(compressedScriptMatch?.[1] || '', 'base64')
-    ).toString('utf8')
-    assert(
-      decodedScript.includes('Win32_Volume'),
-      'windows command should enumerate Win32_Volume for multi-volume coverage'
+    const windowsScript = (service as any).buildWindowsMonitorScript() as string
+    assertEqual(
+      windowsCommand,
+      'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      'windows monitor should launch PowerShell in stdin script mode'
     )
     assert(
-      !decodedScript.includes('Win32_LogicalDisk'),
+      !windowsCommand.includes('EncodedCommand') &&
+        !windowsCommand.includes('FromBase64String') &&
+        !windowsCommand.includes('iex '),
+      'windows monitor launcher should not use encoded or self-decompressing bootstrap patterns'
+    )
+    assert(
+      windowsScript.includes('Win32_Volume'),
+      'windows monitor script should enumerate Win32_Volume for multi-volume coverage'
+    )
+    assert(
+      !windowsScript.includes('Win32_LogicalDisk'),
       'windows command should no longer rely on Win32_LogicalDisk only'
     )
     assert(
-      decodedScript.includes('Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine') &&
-        decodedScript.includes('Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory'),
+      windowsScript.includes('Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine') &&
+        windowsScript.includes('Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory'),
       'windows command should query WMI GPU performance counter classes for generic GPU telemetry'
     )
     assert(
-      decodedScript.includes(
+      windowsScript.includes(
         'nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,utilization.memory,temperature.gpu'
       ),
       'windows command should use nvidia-smi when available for NVIDIA GPU telemetry'
     )
     assert(
-      decodedScript.includes('UTF8Encoding') &&
-        decodedScript.includes('OpenStandardOutput().Write($bytes,0,$bytes.Length)'),
+      windowsScript.includes('UTF8Encoding') &&
+        windowsScript.includes('OpenStandardOutput().Write($bytes,0,$bytes.Length)'),
       'windows command should write utf-8 json bytes explicitly'
+    )
+  })
+
+  await runCase('remote windows monitoring sends the raw powershell script through stdin', async () => {
+    const terminal = {
+      id: 'ssh-win',
+      type: 'ssh',
+      title: 'win',
+      runtimeState: 'ready',
+      remoteOs: 'windows',
+      capabilities: {
+        supportsMonitor: true,
+      },
+    }
+    let capturedCommand = ''
+    let capturedOptions: { stdin?: string } | undefined
+    const output = JSON.stringify({
+      s: {
+        h: 'remote-win',
+        o: 'Windows',
+        r: '10.0',
+        a: 'x64',
+        sh: 'powershell.exe',
+      },
+      c: {
+        u: 10,
+        c: [5, 15],
+        l: 2,
+      },
+      m: {
+        t: 100,
+        u: 40,
+        a: 60,
+        f: 60,
+        p: 40,
+      },
+      d: [],
+      g: [],
+      n: [],
+      p: [],
+      k: [],
+      u: 60,
+    })
+    const service = new ResourceMonitorService({
+      getTerminalById: (terminalId: string) =>
+        terminalId === terminal.id ? terminal : undefined,
+      getMonitorIdentity: () => 'ssh://shared-host:22',
+      execOnTerminal: async (
+        _terminalId: string,
+        command: string,
+        _timeoutMs: number,
+        options?: { stdin?: string }
+      ) => {
+        capturedCommand = command
+        capturedOptions = options
+        return { stdout: output, stderr: '' }
+      },
+    } as any)
+
+    await (service as any).collectWindowsSnapshot('ssh-win')
+    const stdinPayload = capturedOptions?.stdin || ''
+
+    assertEqual(
+      capturedCommand,
+      'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      'remote windows snapshots should launch PowerShell in stdin script mode'
+    )
+    assert(
+      stdinPayload.includes('Win32_OperatingSystem') &&
+        stdinPayload.includes('ConvertTo-Json -Depth 6 -Compress'),
+      'remote windows snapshots should send the full monitor script via stdin'
+    )
+    assert(
+      !stdinPayload.includes('FromBase64String') &&
+        !stdinPayload.includes('iex '),
+      'remote windows snapshots should avoid encoded bootstrap payloads'
+    )
+  })
+
+  await runCase('windows snapshot parsing falls back to the final json line when stdout contains prompt noise', async () => {
+    const terminal = {
+      id: 'ssh-win-noisy',
+      type: 'ssh',
+      title: 'win',
+      runtimeState: 'ready',
+      remoteOs: 'windows',
+      capabilities: {
+        supportsMonitor: true,
+      },
+    }
+    const noisyOutput = [
+      'PS C:\\Users\\Admin>',
+      '{"s":{"h":"remote-win","o":"Windows","r":"10.0","a":"x64","sh":"powershell.exe"},"c":{"u":10,"c":[5,15],"l":2},"m":{"t":100,"u":40,"a":60,"f":60,"p":40},"d":[],"g":[],"n":[],"p":[],"k":[],"u":60}',
+    ].join('\r\n')
+    const service = new ResourceMonitorService({
+      getTerminalById: (terminalId: string) =>
+        terminalId === terminal.id ? terminal : undefined,
+      getMonitorIdentity: () => 'ssh://shared-host:22',
+      execOnTerminal: async () => ({ stdout: noisyOutput, stderr: '' }),
+    } as any)
+
+    const snapshot = await (service as any).collectWindowsSnapshot('ssh-win-noisy')
+
+    assertEqual(
+      snapshot.system?.hostname,
+      'remote-win',
+      'windows parser should recover the final json line after prompt noise'
+    )
+    assertEqual(
+      snapshot.cpu?.logicalCoreCount,
+      2,
+      'windows parser should still decode cpu data after recovering the json payload'
+    )
+  })
+
+  await runCase('local windows monitoring executes the raw powershell script without nesting powershell -Command', async () => {
+    const terminal = {
+      id: 'local-win',
+      type: 'local',
+      title: 'win',
+      runtimeState: 'ready',
+      capabilities: {
+        supportsMonitor: true,
+      },
+      systemInfo: {
+        platform: 'win32',
+        os: 'Windows',
+        release: '10.0',
+        arch: 'x64',
+        hostname: 'local-win',
+        isRemote: false,
+        shell: 'powershell.exe',
+      },
+    }
+    const execCalls: string[] = []
+    const output = JSON.stringify({
+      s: {
+        h: 'local-win',
+        o: 'Windows',
+        r: '10.0',
+        a: 'x64',
+        sh: 'powershell.exe',
+      },
+      c: {
+        u: 10,
+        c: [5, 15],
+        l: 2,
+      },
+      m: {
+        t: 100,
+        u: 40,
+        a: 60,
+        f: 60,
+        p: 40,
+      },
+      d: [],
+      n: [],
+      p: [],
+      k: [],
+      u: 60,
+    })
+    const service = new ResourceMonitorService({
+      getTerminalById: (terminalId: string) =>
+        terminalId === terminal.id ? terminal : undefined,
+      getMonitorIdentity: () => 'local://default',
+      execOnTerminal: async (_terminalId: string, command: string) => {
+        execCalls.push(command)
+        return { stdout: output, stderr: '' }
+      },
+    } as any)
+
+    await (service as any).collectWindowsSnapshot('local-win')
+
+    assertEqual(execCalls.length, 1, 'local windows snapshots should execute one monitor command')
+    assert(
+      !execCalls[0].startsWith('powershell -nop -noni -c "'),
+      'local windows snapshots should pass a raw powershell script to the local backend'
+    )
+    assert(
+      execCalls[0].includes('Win32_OperatingSystem') &&
+        execCalls[0].includes('ConvertTo-Json -Depth 6 -Compress'),
+      'local windows snapshots should still execute the full windows monitor script'
     )
   })
 

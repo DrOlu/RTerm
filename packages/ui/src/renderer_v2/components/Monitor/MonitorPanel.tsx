@@ -427,6 +427,12 @@ const MonitorTabView: React.FC<{
   const visibleSockets = socketEntries.slice(0, presentation.socketRows)
   const visibleDisks = diskEntries.slice(0, presentation.diskRows)
   const visibleGpus = gpuEntries.slice(0, presentation.gpuRows)
+  const compactGpuRows = visibleGpus.map((gpu: GpuEntry, index: number) => ({
+    id: `compact-gpu-${index}`,
+    label: gpu.name || `GPU ${index + 1}`,
+    detail: formatGpuMemoryFootprint(gpu),
+    value: formatGpuCompactValue(gpu),
+  }))
   const visibleCorePercents = snapshot.cpu?.corePercents?.slice(0, presentation.coreRows) || []
   const compactSocketRows = visibleSockets.slice(
     0,
@@ -809,7 +815,7 @@ const MonitorTabView: React.FC<{
                     <span>STORAGE</span>
                   </div>
                   <span className="monitor-compact-card-value">
-                    {visibleDisks.length + visibleGpus.length} items
+                    {diskEntries.length} total
                   </span>
                 </div>
                 <div className="monitor-card-body">
@@ -831,29 +837,27 @@ const MonitorTabView: React.FC<{
                   ) : (
                     <div className="monitor-card-empty">No disk data.</div>
                   )}
-
-                  {visibleGpus.length > 0 && (
-                    <div className="monitor-subsection">
-                      <div className="monitor-subsection-header">
-                        <Gauge size={13} />
-                        <span>GPU</span>
-                      </div>
-                      <CompactList
-                        rows={visibleGpus.map((gpu: GpuEntry, index: number) => ({
-                          id: `compact-gpu-${index}`,
-                          label: gpu.name || `GPU ${index + 1}`,
-                          detail: formatGpuMemoryFootprint(gpu),
-                          value: formatGpuCompactValue(gpu),
-                        }))}
-                      />
-                      <OverflowHint
-                        hiddenCount={Math.max(0, gpuEntries.length - visibleGpus.length)}
-                        label="gpu"
-                      />
-                    </div>
-                  )}
                 </div>
               </section>
+
+              {visibleGpus.length > 0 && (
+                <section className="monitor-card">
+                  <div className="monitor-card-header">
+                    <div className="monitor-card-title">
+                      <Gauge size={14} />
+                      <span>GPU</span>
+                    </div>
+                    <span className="monitor-compact-card-value">{gpuEntries.length} total</span>
+                  </div>
+                  <div className="monitor-card-body">
+                    <CompactList rows={compactGpuRows} />
+                    <OverflowHint
+                      hiddenCount={Math.max(0, gpuEntries.length - visibleGpus.length)}
+                      label="gpu"
+                    />
+                  </div>
+                </section>
+              )}
             </div>
           </>
         )}
@@ -1422,29 +1426,28 @@ const MonitorTabView: React.FC<{
             ) : (
               <div className="monitor-card-empty">No disk data.</div>
             )}
+          </div>
+        </section>
 
-            {visibleGpus.length > 0 && (
-              <div className="monitor-subsection">
-                <div className="monitor-subsection-header">
-                  <Gauge size={13} />
-                  <span>GPU</span>
-                </div>
-                {useCompactCards ? (
-                  <>
-                    <CompactList
-                      rows={visibleGpus.map((gpu: GpuEntry, index: number) => ({
-                        id: `gpu-${index}`,
-                        label: gpu.name || `GPU ${index + 1}`,
-                        detail: formatGpuMemoryFootprint(gpu),
-                        value: formatGpuCompactValue(gpu),
-                      }))}
-                    />
-                    <OverflowHint
-                      hiddenCount={Math.max(0, (snapshot.gpus?.length || 0) - visibleGpus.length)}
-                      label="gpu"
-                    />
-                  </>
-                ) : (
+        {visibleGpus.length > 0 && (
+          <section className="monitor-card">
+            <div className="monitor-card-header">
+              <div className="monitor-card-title">
+                <Gauge size={14} />
+                <span>GPU</span>
+              </div>
+            </div>
+
+            <div className="monitor-card-body">
+              {useCompactCards ? (
+                <>
+                  <CompactList rows={compactGpuRows} />
+                  <OverflowHint
+                    hiddenCount={Math.max(0, (snapshot.gpus?.length || 0) - visibleGpus.length)}
+                    label="gpu"
+                  />
+                </>
+              ) : (
                 <div className="monitor-disk-list">
                   {visibleGpus.map((gpu: GpuEntry, index: number) => {
                     const memoryUsagePercent = resolveGpuMemoryUsagePercent(gpu)
@@ -1491,11 +1494,10 @@ const MonitorTabView: React.FC<{
                     )
                   })}
                 </div>
-                )}
-              </div>
-            )}
-          </div>
-        </section>
+              )}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   )

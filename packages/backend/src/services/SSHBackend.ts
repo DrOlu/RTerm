@@ -8,6 +8,7 @@ import {
   isSshConnectionConfig,
   type TerminalBackend,
   type TerminalConfig,
+  type TerminalExecOptions,
   type SSHConnectionConfig,
   type FileSystemEntry,
   type FileStatInfo,
@@ -77,12 +78,13 @@ export class SSHBackend implements TerminalBackend {
   async execOnSession(
     ptyId: string,
     command: string,
-    timeoutMs = 6000
+    timeoutMs = 6000,
+    options?: TerminalExecOptions
   ): Promise<{ stdout: string; stderr: string } | null> {
     const instance = this.sessions.get(ptyId)
     if (!instance) return null
     try {
-      return await this.execCollect(instance.client, command, timeoutMs)
+      return await this.execCollect(instance.client, command, timeoutMs, options)
     } catch {
       return null
     }
@@ -131,7 +133,8 @@ export class SSHBackend implements TerminalBackend {
   private async execCollect(
     client: ssh2.Client,
     command: string,
-    timeoutMs = 6000
+    timeoutMs = 6000,
+    options?: TerminalExecOptions
   ): Promise<{ stdout: string; stderr: string }> {
     return await new Promise((resolve, reject) => {
       let stdout = ''
@@ -163,6 +166,15 @@ export class SSHBackend implements TerminalBackend {
           clearTimeout(timer)
           resolve({ stdout, stderr })
         })
+        if (options?.stdin !== undefined) {
+          try {
+            stream.end(options.stdin)
+          } catch (error) {
+            clearTimeout(timer)
+            reject(error)
+            return
+          }
+        }
       })
     })
   }

@@ -1,4 +1,5 @@
 import { SSHBackend } from './SSHBackend'
+import { EventEmitter } from 'node:events'
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
   if (actual !== expected) {
@@ -130,6 +131,55 @@ const run = async (): Promise<void> => {
     assertCondition(second !== undefined, 'subsequent calls should retry and return real system info')
     assertEqual(second.hostname, 'TUOTUO-SERVER', 'retried collection should parse hostname')
     assertEqual(session.systemInfo?.hostname, 'TUOTUO-SERVER', 'successful retry should populate the cache')
+  })
+
+  await runCase('execOnSession writes stdin payloads to the SSH exec channel', async () => {
+    class FakeStream extends EventEmitter {
+      readonly stderr = new EventEmitter()
+      endPayload: string | undefined
+
+      end(input?: string): this {
+        this.endPayload = input
+        this.emit('data', Buffer.from('monitor-json'))
+        this.emit('close')
+        return this
+      }
+    }
+
+    const backend = new SSHBackend()
+    const stream = new FakeStream()
+    let observedCommand = ''
+    const session = createSession()
+    session.client = {
+      exec: (command: string, callback: (err: Error | null, stream: FakeStream) => void) => {
+        observedCommand = command
+        callback(null, stream)
+      },
+    }
+    ;(backend as any).sessions.set('pty-c', session)
+
+    const result = await backend.execOnSession(
+      'pty-c',
+      'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      1000,
+      { stdin: 'Write-Output 123\n' }
+    )
+
+    assertEqual(
+      observedCommand,
+      'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      'ssh exec should preserve the requested command verbatim'
+    )
+    assertEqual(
+      stream.endPayload,
+      'Write-Output 123\n',
+      'ssh exec should stream stdin payloads to the remote process'
+    )
+    assertEqual(
+      result?.stdout,
+      'monitor-json',
+      'ssh exec should still collect stdout when stdin is used'
+    )
   })
 }
 

@@ -629,8 +629,16 @@ export interface TerminalSessionBackend {
   execOnSession?(
     ptyId: string,
     command: string,
-    timeoutMs?: number
+    timeoutMs?: number,
+    options?: TerminalExecOptions
   ): Promise<{ stdout: string; stderr: string } | null>
+}
+
+export interface TerminalExecOptions {
+  /**
+   * Optional standard input payload to write to the spawned side-band command.
+   */
+  stdin?: string
 }
 
 export interface TerminalFileSystemBackend {
