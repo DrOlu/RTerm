@@ -292,6 +292,7 @@ export class AppStore {
       fileSystemTabs: computed,
       monitorTabs: computed,
       panelTabDisplayMode: computed,
+      chatDisplayMode: computed,
       commandDraftProfileId: computed,
       openSettings: action,
       closeSettings: action,
@@ -313,6 +314,7 @@ export class AppStore {
       setLanguage: action,
       setTerminalSettings: action,
       setPanelTabDisplayMode: action,
+      setChatDisplayMode: action,
       setCommandDraftProfileId: action,
       saveModel: action,
       deleteModel: action,
@@ -1004,6 +1006,10 @@ export class AppStore {
     )
   }
 
+  get chatDisplayMode(): 'classic' | 'seamless' {
+    return this.settings?.chat?.displayMode ?? 'classic'
+  }
+
   get commandDraftProfileId(): string {
     const profiles = this.settings?.models?.profiles ?? []
     const storedId = String(this.settings?.commandDraft?.profileId || '').trim()
@@ -1359,6 +1365,18 @@ export class AppStore {
       }
     })
     await window.gyshell.uiSettings.set({ panelTabs: nextPanelTabs })
+  }
+
+  async setChatDisplayMode(displayMode: 'classic' | 'seamless'): Promise<void> {
+    const nextChat = { displayMode }
+    runInAction(() => {
+      if (!this.settings) return
+      this.settings = {
+        ...this.settings,
+        chat: nextChat,
+      }
+    })
+    await window.gyshell.uiSettings.set({ chat: nextChat })
   }
 
   async setCommandDraftProfileId(profileId: string): Promise<void> {

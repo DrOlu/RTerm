@@ -144,9 +144,15 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
     const lastMessage = lastMessageId
       ? session?.messagesById.get(lastMessageId) || null
       : null
+    const chatDisplayMode = store.chatDisplayMode
+    const lastMessageStreaming = lastMessage?.streaming === true
     const renderItems = React.useMemo(
-      () => buildChatRenderItems(session, isThinking),
-      [isThinking, renderListVersion, session, sessionId],
+      () => buildChatRenderItems(session, isThinking, chatDisplayMode),
+      // messageCount and lastMessageStreaming ensure recomputation when the
+      // session content changes even if renderListVersion is not yet bumped
+      // (e.g. during initial auto-restore before hydration completes).
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [chatDisplayMode, isThinking, messageCount, lastMessageStreaming, renderListVersion, session, sessionId],
     )
     const previousRenderItemsById =
       previousRenderItemsSnapshotRef.current.sessionId === sessionId
@@ -244,6 +250,17 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       setMeasurementEpoch((current) => current + 1)
       setHeightVersion((current) => current + 1)
     }, [sessionId])
+
+    // When display mode changes (e.g. settings load after initial render),
+    // item structure changes (classic individual items → seamless groups).
+    // Stale measured heights from the old mode cause wrong virtual scroll
+    // offsets, so invalidate all measurements to force a fresh layout.
+    React.useLayoutEffect(() => {
+      rowHeightsRef.current = new Map()
+      pendingScrollAdjustmentRef.current = 0
+      setMeasurementEpoch((current) => current + 1)
+      setHeightVersion((current) => current + 1)
+    }, [chatDisplayMode])
 
     React.useEffect(() => {
       setBannerUiStateByKey((current) =>
@@ -371,7 +388,10 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       () =>
         renderItems.reduce<Array<{ item: ChatRenderItem; index: number }>>(
           (result, item, index) => {
-            if (session?.messagesById.get(item.id)?.streaming === true) {
+            const isStreaming =
+              item.seamlessGroupStreaming === true ||
+              session?.messagesById.get(item.id)?.streaming === true
+            if (isStreaming) {
               result.push({ item, index })
             }
             return result
@@ -521,6 +541,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                     mergeWithPreviousAssistant={item.mergeWithPreviousAssistant}
                     showAssistantGroupCopy={item.showAssistantGroupCopy}
                     assistantGroupMessageIds={item.assistantGroupMessageIds}
+                    seamlessGroupMessageIds={item.seamlessGroupMessageIds}
                     bannerUiState={bannerUiStateByKey[bannerUiStateKey]}
                     onBannerUiStateChange={(patch) =>
                       handleBannerUiStateChange(item.id, patch)
@@ -562,6 +583,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                     mergeWithPreviousAssistant={item.mergeWithPreviousAssistant}
                     showAssistantGroupCopy={item.showAssistantGroupCopy}
                     assistantGroupMessageIds={item.assistantGroupMessageIds}
+                    seamlessGroupMessageIds={item.seamlessGroupMessageIds}
                     bannerUiState={bannerUiStateByKey[bannerUiStateKey]}
                     onBannerUiStateChange={(patch) =>
                       handleBannerUiStateChange(item.id, patch)

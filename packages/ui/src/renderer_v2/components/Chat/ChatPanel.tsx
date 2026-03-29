@@ -29,8 +29,10 @@ import { CompactPanelTabSelect } from "../Layout/CompactPanelTabSelect";
 import { resolvePanelTabBarMode } from "../Layout/panelHeaderPresentation";
 import type { QueueItem } from "../../stores/ChatQueueStore";
 import { RichInput, type RichInputHandle } from "./RichInput";
+import { SeamlessOverlayCard } from "./ChatBanner";
 import { resolveFloatingMenuPlacement } from "../../lib/menuPlacement";
 import { isLinux, isWindows } from "../../platform/platform";
+import { resolveSeamlessOverlayMessages } from "./chatRenderModel";
 import {
   CHAT_PANEL_SESSION_TITLE_CHAR_LIMIT,
   formatChatPanelSessionTitle,
@@ -148,6 +150,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       null,
     );
     const [showExportMenu, setShowExportMenu] = useState(false);
+    const [overlayExpandedById, setOverlayExpandedById] = useState<Record<string, boolean>>({});
+    const [overlayShowDetailsById, setOverlayShowDetailsById] = useState<Record<string, boolean>>({});
     const [exportMenuStyle, setExportMenuStyle] = useState<
       React.CSSProperties | undefined
     >(undefined);
@@ -794,6 +798,33 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           onAskDecision={handleAskDecision}
           onRollback={(message) => setRollbackTarget(message)}
         />
+
+        {store.chatDisplayMode === 'seamless' && (() => {
+          if (!activeSession) return null
+          const overlayMessages = resolveSeamlessOverlayMessages(activeSession)
+          if (overlayMessages.length === 0) return null
+          return (
+            <div className="seamless-overlay">
+              {overlayMessages.map((msg) => (
+                <SeamlessOverlayCard
+                  key={msg.id}
+                  msg={msg}
+                  onAskDecision={handleAskDecision}
+                  onRemove={() => store.chat.removeMessage(msg.id, activeSession.id)}
+                  askLabels={askLabels}
+                  expanded={overlayExpandedById[msg.id]}
+                  onExpandedChange={(v) =>
+                    setOverlayExpandedById((prev) => ({ ...prev, [msg.id]: v }))
+                  }
+                  showDetails={overlayShowDetailsById[msg.id]}
+                  onShowDetailsChange={(v) =>
+                    setOverlayShowDetailsById((prev) => ({ ...prev, [msg.id]: v }))
+                  }
+                />
+              ))}
+            </div>
+          )
+        })()}
 
         <div className="chat-input-area">
           {isQueueMode && activeSessionId && queueItems.length > 0 && (

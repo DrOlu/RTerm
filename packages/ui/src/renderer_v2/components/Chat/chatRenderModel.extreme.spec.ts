@@ -1,5 +1,8 @@
 import { observable } from 'mobx'
-import { buildChatRenderItems } from './chatRenderModel'
+import {
+  buildChatRenderItems,
+  resolveSeamlessOverlayMessages,
+} from './chatRenderModel'
 import type { ChatMessage, ChatSession } from '../../stores/ChatStore'
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
@@ -194,6 +197,75 @@ runCase(
       items.map((item) => item.id),
       ['live'],
       'only the live streaming assistant row should remain visible',
+    )
+  },
+)
+
+runCase(
+  'seamless overlay only includes the trailing overlay block',
+  () => {
+    const session = createSession([
+      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+      createMessage({
+        id: 'err-old',
+        role: 'assistant',
+        type: 'error',
+        content: 'old failure',
+      }),
+      createMessage({
+        id: 'a1',
+        role: 'assistant',
+        type: 'text',
+        content: 'recovered',
+      }),
+      createMessage({
+        id: 'ask-current',
+        role: 'assistant',
+        type: 'ask',
+        content: 'Need approval',
+      }),
+      createMessage({
+        id: 'alert-current',
+        role: 'assistant',
+        type: 'alert',
+        content: 'Current warning',
+        metadata: { subToolLevel: 'warning' },
+      }),
+    ])
+
+    const overlayMessages = resolveSeamlessOverlayMessages(session)
+    assertDeepEqual(
+      overlayMessages.map((message) => message.id),
+      ['ask-current', 'alert-current'],
+      'historical overlay rows should stop pinning once newer visible chat content exists',
+    )
+  },
+)
+
+runCase(
+  'seamless overlay ignores hidden tail rows when keeping the current issue',
+  () => {
+    const session = createSession([
+      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+      createMessage({
+        id: 'err-current',
+        role: 'assistant',
+        type: 'error',
+        content: 'latest failure',
+      }),
+      createMessage({
+        id: 'tokens',
+        role: 'system',
+        type: 'tokens_count',
+        content: '',
+      }),
+    ])
+
+    const overlayMessages = resolveSeamlessOverlayMessages(session)
+    assertDeepEqual(
+      overlayMessages.map((message) => message.id),
+      ['err-current'],
+      'hidden tail rows should not suppress the active overlay issue',
     )
   },
 )

@@ -57,6 +57,7 @@ export const en = {
     recursionLimit: 'Agent Recursion Limit',
     recursionLimitInf: 'Infinite',
     debugMode: 'Debug Mode',
+    chatDisplayMode: 'Chat Display Mode',
     wsGatewayAccess: 'WebSocket Gateway Exposure',
     wsGatewayPort: 'WebSocket Gateway Port',
     experimentalFeatures: 'Experimental Features',
@@ -74,6 +75,10 @@ export const en = {
       auto: 'Auto',
       expanded: 'Expanded',
       select: 'Select'
+    },
+    chatDisplayModes: {
+      classic: 'Classic',
+      seamless: 'Seamless',
     },
     baseModels: 'Base Models',
     profiles: 'Profiles',
@@ -198,6 +203,7 @@ export const en = {
       cursorBlink: 'Whether the terminal cursor should blink.',
       recursionLimit: 'The maximum number of steps the Agent can take in a single task. Increase this if you encounter "Recursion limit reached" errors. Setting to maximum enables infinite steps.',
       debugMode: 'Enable debug-oriented persistence and diagnostics. Currently this keeps additional_kwargs.__raw_response in backend exported messages; outgoing model inputs still strip raw payloads.',
+      chatDisplayMode: 'Control how agent tool activity is displayed in the chat panel.\n- Classic: full expandable banners for each tool call, file edit, and command.\n- Seamless Agent: consecutive tool calls are grouped into a single compact banner; approval requests and alerts float above the input area.',
       wsGatewayAccess:
         'Control websocket RPC exposure.\n- Localhost only: bind to 127.0.0.1 and only accept local connections.\n- Internet: bind to 0.0.0.0 so LAN/public interfaces can connect (subject to OS firewall).\n- Disabled: do not start websocket listener.',
       wsGatewayPort:

@@ -26,6 +26,9 @@ export const DEFAULT_UI_SETTINGS: UiSettings = {
   },
   commandDraft: {
     profileId: '',
+  },
+  chat: {
+    displayMode: 'classic',
   }
 }
 
@@ -38,6 +41,7 @@ function pickUiSnapshot(raw: unknown): Partial<UiSettings> {
     terminal: raw.terminal,
     panelTabs: raw.panelTabs,
     commandDraft: raw.commandDraft,
+    chat: raw.chat,
   } as Partial<UiSettings>
 }
 
@@ -60,6 +64,9 @@ function normalizeUiSettings(settings: UiSettings): UiSettings {
   }
   if (typeof next.commandDraft.profileId !== 'string') {
     next.commandDraft.profileId = ''
+  }
+  if (next.chat?.displayMode !== 'classic' && next.chat?.displayMode !== 'seamless') {
+    next.chat = { displayMode: 'classic' }
   }
   next.uiSchemaVersion = UI_SETTINGS_SCHEMA_VERSION
   return next

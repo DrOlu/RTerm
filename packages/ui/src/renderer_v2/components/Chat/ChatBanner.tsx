@@ -12,7 +12,8 @@ import {
   ShieldAlert,
   AlertTriangle,
   XCircle,
-  FastForward
+  FastForward,
+  Check,
 } from 'lucide-react'
 import type { ChatMessage } from '../../stores/ChatStore'
 import './chatBanner.scss'
@@ -592,4 +593,181 @@ export const AlertBanner = observer(({
       )}
     </>
   )
+})
+
+// ─── Seamless mode components ────────────────────────────────────────────────
+
+const MAX_STEP_TEXT_LEN = 64
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text
+  return text.slice(0, max - 1) + '…'
+}
+
+function getStepDescription(msg: ChatMessage): { text: string; info?: string } {
+  switch (msg.type) {
+    case 'command': {
+      const content = truncate(msg.content || '', MAX_STEP_TEXT_LEN)
+      return { text: `$ ${content}` }
+    }
+    case 'tool_call': {
+      const toolName = msg.metadata?.toolName || 'tool'
+      const content = truncate(msg.content || '', MAX_STEP_TEXT_LEN - toolName.length - 2)
+      return { text: content ? `${toolName}: ${content}` : toolName }
+    }
+    case 'file_edit': {
+      const action = msg.metadata?.action || 'edited'
+      const filePath = truncate(msg.metadata?.filePath || msg.content || '', MAX_STEP_TEXT_LEN - 8)
+      const actionLabel = action === 'created' ? 'create' : action === 'error' ? 'error' : 'edit'
+      const diff = msg.metadata?.diff || ''
+      let info: string | undefined
+      if (diff) {
+        let added = 0
+        let removed = 0
+        diff.split('\n').forEach((line) => {
+          if (line.startsWith('+') && !line.startsWith('+++')) added++
+          else if (line.startsWith('-') && !line.startsWith('---')) removed++
+        })
+        if (added || removed) info = `+${added}/-${removed}`
+      }
+      return { text: `${actionLabel} ${filePath}`, info }
+    }
+    case 'sub_tool': {
+      const title = truncate(msg.metadata?.subToolTitle || msg.content || 'sub_tool', MAX_STEP_TEXT_LEN)
+      return { text: title }
+    }
+    default:
+      return { text: truncate(msg.content || '', MAX_STEP_TEXT_LEN) }
+  }
+}
+
+export const SeamlessToolGroupBanner = observer(({
+  messages,
+  expanded: expandedProp,
+  onExpandedChange,
+}: {
+  messages: ChatMessage[]
+  expanded?: boolean
+  onExpandedChange?: (nextValue: boolean) => void
+}) => {
+  const [expanded, setExpanded] = useControllableBoolean(expandedProp, false, onExpandedChange)
+
+  const isStreaming = messages.some((m) => !!m.streaming)
+  const stepCount = messages.length
+
+  // Single finished step: render inline without group chrome
+  if (stepCount === 1 && !isStreaming) {
+    const { text, info } = getStepDescription(messages[0])
+    return (
+      <div className="seamless-tool-group is-done is-single">
+        <div className="stg-header">
+          <div className="stg-status-icon"><Check size={12} /></div>
+          <span className="stg-title">{text}</span>
+          {info && <span className="stg-step-info">{info}</span>}
+        </div>
+      </div>
+    )
+  }
+
+  const lastMsg = messages[messages.length - 1]
+  const lastStep = lastMsg ? getStepDescription(lastMsg) : null
+
+  const headerText = isStreaming
+    ? (lastStep ? truncate(lastStep.text, 48) : 'Working...')
+    : `Done · ${stepCount} steps`
+
+  const shouldSweep = isStreaming
+
+  return (
+    <div
+      className={`seamless-tool-group${isStreaming ? ' is-streaming' : ' is-done'}${expanded ? ' is-expanded' : ''}`}
+    >
+      <div className="stg-header" onClick={() => setExpanded(!expanded)}>
+        <div className="stg-status-icon">
+          {isStreaming
+            ? <Loader2 size={12} className="spin" />
+            : <Check size={12} />}
+        </div>
+        <div className={`stg-title${shouldSweep ? ' stg-sweep' : ''}`}>
+          <span data-sweep-text={shouldSweep ? headerText : undefined}>
+            {headerText}
+          </span>
+        </div>
+        <div className="stg-meta">
+          {isStreaming && stepCount > 1 ? (
+            <span className="stg-count">{stepCount} steps</span>
+          ) : null}
+        </div>
+        <div className="stg-chevron">
+          {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </div>
+      </div>
+      {expanded && (
+        <div className="stg-steps">
+          {messages.map((msg, idx) => {
+            const { text, info } = getStepDescription(msg)
+            const isDone = !msg.streaming
+            const isLast = idx === messages.length - 1
+            return (
+              <div
+                key={msg.id}
+                className={`stg-step${isDone ? ' is-done' : ' is-active'}${isLast && isStreaming ? ' is-current' : ''}`}
+              >
+                <span className="stg-step-connector">{isLast ? '└' : '├'}</span>
+                <span className="stg-step-text">{text}</span>
+                {info && <span className="stg-step-info">{info}</span>}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+})
+
+export const SeamlessOverlayCard = observer(({
+  msg,
+  onAskDecision,
+  onRemove,
+  askLabels,
+  expanded: expandedProp,
+  onExpandedChange,
+  showDetails: showDetailsProp,
+  onShowDetailsChange,
+}: {
+  msg: ChatMessage
+  onAskDecision?: (messageId: string, decision: 'allow' | 'deny') => void
+  onRemove?: () => void
+  askLabels?: { allow: string; deny: string; allowed: string; denied: string }
+  expanded?: boolean
+  onExpandedChange?: (v: boolean) => void
+  showDetails?: boolean
+  onShowDetailsChange?: (v: boolean) => void
+}) => {
+  if (msg.type === 'ask' && onAskDecision && askLabels) {
+    return (
+      <div className="seamless-overlay-card seamless-overlay-ask">
+        <AskBanner
+          msg={msg}
+          expanded={expandedProp}
+          onExpandedChange={onExpandedChange}
+          onDecision={onAskDecision}
+          labels={askLabels}
+        />
+      </div>
+    )
+  }
+  if (msg.type === 'alert' || msg.type === 'error') {
+    return (
+      <div className="seamless-overlay-card seamless-overlay-alert">
+        <AlertBanner
+          msg={msg}
+          onRemove={onRemove}
+          showDetails={showDetailsProp}
+          onShowDetailsChange={onShowDetailsChange}
+        />
+      </div>
+    )
+  }
+  return null
 })

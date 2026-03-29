@@ -21,6 +21,12 @@ export interface CommandDraftUiSettings {
   profileId: string
 }
 
+export type ChatDisplayMode = 'classic' | 'seamless'
+
+export interface ChatUiSettings {
+  displayMode: ChatDisplayMode
+}
+
 export interface UiSettings {
   uiSchemaVersion: 1
   language: AppLanguage
@@ -28,4 +34,5 @@ export interface UiSettings {
   terminal: TerminalUiSettings
   panelTabs: PanelTabsUiSettings
   commandDraft: CommandDraftUiSettings
+  chat: ChatUiSettings
 }

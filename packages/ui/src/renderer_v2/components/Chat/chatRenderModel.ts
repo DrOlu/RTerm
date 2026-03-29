@@ -9,6 +9,10 @@ export interface ChatRenderItem {
   mergeWithPreviousAssistant: boolean
   showAssistantGroupCopy: boolean
   assistantGroupMessageIds: string[]
+  // Seamless mode: when set, this item represents a group of tool-call messages
+  seamlessGroupMessageIds?: string[]
+  // Seamless mode: true if any message in the group is currently streaming
+  seamlessGroupStreaming?: boolean
 }
 
 type RowDisplayKind = ChatVisibleRowKind | 'hidden'
@@ -31,11 +35,59 @@ const SPECIAL_ASSISTANT_TYPES: ReadonlySet<ChatMessage['type']> = new Set([
   'error',
 ])
 
+// Message types that are grouped into a single seamless tool-activity banner
+const SEAMLESS_TOOL_TYPES: ReadonlySet<ChatMessage['type']> = new Set([
+  'command',
+  'tool_call',
+  'file_edit',
+  'sub_tool',
+])
+
 const isCompletedWhitespaceAssistantText = (message: ChatMessage): boolean =>
   message.role === 'assistant' &&
   message.type === 'text' &&
   message.streaming !== true &&
   !/\S/.test(String(message.content || ''))
+
+const isSeamlessOverlayMessage = (
+  message: ChatMessage,
+  lastMessageId: string | null,
+): boolean => {
+  if (message.type === 'ask' || message.type === 'error') return true
+  if (message.type === 'alert') {
+    if (message.metadata?.subToolLevel === 'info') {
+      return message.id === lastMessageId
+    }
+    return true
+  }
+  return false
+}
+
+const isHiddenTailMessage = (message: ChatMessage): boolean =>
+  message.type === 'tokens_count' || isCompletedWhitespaceAssistantText(message)
+
+export const resolveSeamlessOverlayMessages = (
+  session: ChatSession | null,
+): ChatMessage[] => {
+  if (!session) return []
+
+  const lastMessageId =
+    session.messageIds.length > 0
+      ? session.messageIds[session.messageIds.length - 1]
+      : null
+  const overlayMessages: ChatMessage[] = []
+
+  for (let index = session.messageIds.length - 1; index >= 0; index -= 1) {
+    const messageId = session.messageIds[index]
+    const message = session.messagesById.get(messageId)
+    if (!message) continue
+    if (isHiddenTailMessage(message)) continue
+    if (!isSeamlessOverlayMessage(message, lastMessageId)) break
+    overlayMessages.unshift(message)
+  }
+
+  return overlayMessages
+}
 
 const getRowDisplayKind = (
   session: ChatSession,
@@ -97,6 +149,7 @@ const estimateRowHeight = (
 export const buildChatRenderItems = (
   session: ChatSession | null,
   isThinking: boolean,
+  displayMode: 'classic' | 'seamless' = 'classic',
 ): ChatRenderItem[] => {
   if (!session) return []
 
@@ -109,6 +162,15 @@ export const buildChatRenderItems = (
   session.messageIds.forEach((messageId) => {
     const msg = session.messagesById.get(messageId)
     if (!msg) return
+
+    // In seamless mode, overlay types (ask/alert/error) are shown in the
+    // floating overlay above the input area, not inline in the message list.
+    if (
+      displayMode === 'seamless' &&
+      isSeamlessOverlayMessage(msg, lastMessageId)
+    ) {
+      return
+    }
 
     const kind = getRowDisplayKind(session, messageId, lastMessageId)
     if (kind === 'hidden') return
@@ -137,11 +199,48 @@ export const buildChatRenderItems = (
       continue
     }
 
+    // In seamless mode, group consecutive tool-call messages into one render item
+    if (displayMode === 'seamless' && SEAMLESS_TOOL_TYPES.has(row.msg.type)) {
+      const groupFirstId = row.id
+      const seamlessGroupMessageIds: string[] = [row.id]
+      let isGroupStreaming = !!row.msg.streaming
+
+      while (
+        visibleIndex + 1 < visibleRows.length &&
+        visibleRows[visibleIndex + 1].kind === 'assistant' &&
+        SEAMLESS_TOOL_TYPES.has(visibleRows[visibleIndex + 1].msg.type)
+      ) {
+        visibleIndex += 1
+        const nextRow = visibleRows[visibleIndex]
+        seamlessGroupMessageIds.push(nextRow.id)
+        if (nextRow.msg.streaming) isGroupStreaming = true
+      }
+
+      // Merge if this is not the first assistant item in the turn.
+      const prevIsAssistant = items.length > 0 && items[items.length - 1].kind === 'assistant'
+
+      items.push({
+        id: groupFirstId,
+        kind: 'assistant',
+        estimatedHeight: 48 + seamlessGroupMessageIds.length * 22,
+        mergeWithPreviousAssistant: prevIsAssistant,
+        showAssistantGroupCopy: false,
+        assistantGroupMessageIds: [],
+        seamlessGroupMessageIds,
+        seamlessGroupStreaming: isGroupStreaming,
+      })
+
+      visibleIndex += 1
+      continue
+    }
+
     const runStart = visibleIndex
     const assistantGroupMessageIds: string[] = [row.id]
     while (
       visibleIndex + 1 < visibleRows.length &&
-      visibleRows[visibleIndex + 1].kind === 'assistant'
+      visibleRows[visibleIndex + 1].kind === 'assistant' &&
+      // In seamless mode, don't extend a run into tool types (they're grouped separately)
+      !(displayMode === 'seamless' && SEAMLESS_TOOL_TYPES.has(visibleRows[visibleIndex + 1].msg.type))
     ) {
       visibleIndex += 1
       assistantGroupMessageIds.push(visibleRows[visibleIndex].id)
@@ -157,13 +256,37 @@ export const buildChatRenderItems = (
       (nextVisibleKind === 'user' ||
         (!nextVisibleRow && !isThinking))
 
+    // In seamless mode, the ASSISTANT label is shown on the first item in each
+    // AI turn (whether tool group or text). Check if any prior assistant item
+    // in this turn already received the label.
+    // In classic mode, only text messages render the label so this is always false.
+    const turnAlreadyHasLabel = displayMode === 'seamless' && (() => {
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (items[i].kind === 'user') return false
+        if (items[i].kind === 'assistant') return true
+      }
+      return false
+    })()
+    let firstTextLabelShown = !!turnAlreadyHasLabel
     for (let index = runStart; index <= runEnd; index += 1) {
       const assistantRow = visibleRows[index]
+      const isTextType = !SPECIAL_ASSISTANT_TYPES.has(assistantRow.msg.type)
+
+      // Show the ASSISTANT label on the first text message in this turn
+      let shouldMerge: boolean
+      if (isTextType && !firstTextLabelShown) {
+        shouldMerge = false
+        firstTextLabelShown = true
+      } else {
+        shouldMerge = index > runStart ||
+          (index === runStart && !!turnAlreadyHasLabel)
+      }
+
       items.push({
         id: assistantRow.id,
         kind: assistantRow.kind,
         estimatedHeight: estimateRowHeight(assistantRow.msg, assistantRow.kind),
-        mergeWithPreviousAssistant: index > runStart,
+        mergeWithPreviousAssistant: shouldMerge,
         showAssistantGroupCopy: canShowGroupCopy && index === runEnd,
         assistantGroupMessageIds:
           canShowGroupCopy && index === runEnd

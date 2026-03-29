@@ -132,6 +132,9 @@ interface UiSettings {
   commandDraft: {
     profileId: string
   }
+  chat: {
+    displayMode: 'classic' | 'seamless'
+  }
 }
 
 type TerminalRecoveryReason = 'resume' | 'unlock-screen' | 'display-metrics-changed'

@@ -873,6 +873,29 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                     <span className="switch-slider" />
                   </label>
                 </div>
+                <div className="settings-row">
+                  <div className="settings-row-label-with-info">
+                    <label>{t.settings.chatDisplayMode}</label>
+                    <InfoTooltip content={t.settings.tooltips.chatDisplayMode} />
+                  </div>
+                  <Select
+                    className="settings-native-select"
+                    value={store.chatDisplayMode}
+                    onChange={(value) =>
+                      store.setChatDisplayMode(value as 'classic' | 'seamless')
+                    }
+                    options={[
+                      {
+                        value: 'classic',
+                        label: t.settings.chatDisplayModes.classic,
+                      },
+                      {
+                        value: 'seamless',
+                        label: t.settings.chatDisplayModes.seamless,
+                      },
+                    ]}
+                  />
+                </div>
               </div>
 
                 <div

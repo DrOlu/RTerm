@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm'
 import type { AppStore } from '../../stores/AppStore'
 import type { ChatMessage } from '../../stores/ChatStore'
 import { renderMentionContent } from '../../lib/MentionParser'
-import { CommandBanner, ToolCallBanner, FileEditBanner, SubToolBanner, ReasoningBanner, CompactionBanner, AskBanner, AlertBanner } from './ChatBanner'
+import { CommandBanner, ToolCallBanner, FileEditBanner, SubToolBanner, ReasoningBanner, CompactionBanner, AskBanner, AlertBanner, SeamlessToolGroupBanner } from './ChatBanner'
 import type { ChatBannerUiState } from './chatBannerUiState'
 
 interface MessageRowProps {
@@ -20,6 +20,8 @@ interface MessageRowProps {
   mergeWithPreviousAssistant?: boolean
   showAssistantGroupCopy?: boolean
   assistantGroupMessageIds?: string[]
+  // Seamless mode: when set, render a grouped tool-activity banner
+  seamlessGroupMessageIds?: string[]
   bannerUiState?: ChatBannerUiState
   onBannerUiStateChange?: (patch: Partial<ChatBannerUiState>) => void
 }
@@ -40,17 +42,18 @@ const isCompletedWhitespaceAssistantText = (message: ChatMessage): boolean =>
   message.streaming !== true &&
   !/\S/.test(String(message.content || ''))
 
-export const MessageRow: React.FC<MessageRowProps> = observer(({ 
+export const MessageRow: React.FC<MessageRowProps> = observer(({
   store,
-  sessionId, 
-  messageId, 
-  onAskDecision, 
+  sessionId,
+  messageId,
+  onAskDecision,
   onRollback,
   askLabels,
   isThinking,
   mergeWithPreviousAssistant = false,
   showAssistantGroupCopy = false,
   assistantGroupMessageIds = [],
+  seamlessGroupMessageIds,
   bannerUiState,
   onBannerUiStateChange,
 }) => {
@@ -117,7 +120,29 @@ export const MessageRow: React.FC<MessageRowProps> = observer(({
     [markCopied]
   )
 
-  if (!session || !msg) return null
+  if (!session) return null
+
+  // Seamless mode: render a grouped tool-activity banner for multiple messages
+  if (seamlessGroupMessageIds && seamlessGroupMessageIds.length > 0) {
+    const groupMessages = seamlessGroupMessageIds
+      .map((id) => session.messagesById.get(id))
+      .filter((m): m is ChatMessage => !!m)
+    if (groupMessages.length === 0) return null
+    return (
+      <div
+        className={`message-row-container role-assistant${mergeWithPreviousAssistant ? ' is-group-continuation' : ''}`}
+      >
+        <div className="message-role-label assistant">ASSISTANT</div>
+        <SeamlessToolGroupBanner
+          messages={groupMessages}
+          expanded={bannerUiState?.expanded}
+          onExpandedChange={(expanded) => onBannerUiStateChange?.({ expanded })}
+        />
+      </div>
+    )
+  }
+
+  if (!msg) return null
   const isUser = msg.role === 'user'
 
   // Logic: If this is an 'alert' (retry hint), only show it if it's the absolute last message in the session
