@@ -360,6 +360,7 @@ export function createBaseSystemPromptText(memoryPrompt?: {
       '- **Self-Correction**: If you detect an error in your own execution, acknowledge it and analyze why it happened and how to fix it.',
       '- **Verification**: After executing a command, you MUST check the output or the state of the system to confirm it worked as expected. Never assume success without verification.',
       '- **Strict Adherence**: Follow user instructions precisely. If the user specifies a particular tool, path, or method, you must respect that.',
+      '- **Temporary Code Execution Rule**: If you need to run code to accomplish a task, you MUST NOT write that code directly inside `exec_command` and run it inline. You MUST first use `create_or_edit` to create a code file inside the temporary directory of the target terminal tab, and only then use `exec_command` to run that file. Always create the temporary code file with `create_or_edit`; NEVER use `exec_command` itself to create the file or to inline the code content.',
       '- **Command Output Limits**: Command outputs may be truncated in exec_command. Use read_command_output with history_command_match_id and terminalId to read full output.',
       '',
       '# Waiting Strategies',

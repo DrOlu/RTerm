@@ -14,12 +14,6 @@
   height: 100%;
 }
 
-.gyshell-main.is-dimmed {
-  pointer-events: none;
-  filter: blur(1px) saturate(0.95);
-  opacity: 0.55;
-}
-
 .gyshell-overlay {
   position: absolute;
   inset: 0;

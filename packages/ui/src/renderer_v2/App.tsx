@@ -95,7 +95,7 @@ export const App: React.FC = observer(() => {
       <TopBar store={store} />
 
       <div className="gyshell-body">
-        <div className={store.view === 'settings' ? 'gyshell-main is-dimmed' : 'gyshell-main'}>
+        <div className="gyshell-main">
           <LayoutWorkspace store={store} />
         </div>
 
