@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#key-capabilities)
 
 English README | [中文 README](./README.zh-CN.md)  
-Latest release notes: [`changelogs/v1.2.0.md`](./changelogs/v1.2.0.md)
+Latest release notes: [`changelogs/v1.3.0.md`](./changelogs/v1.3.0.md)
 
 If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/GyShell/discussions).
 
@@ -64,26 +64,22 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - **For multi-device flow**: desktop + TUI + mobile-web with shared gateway semantics.
 - **For multimodal workflows**: text and image inputs can be combined in one execution turn.
 
-## v1.2.0 Key Highlights
+## v1.3.0 Key Highlights
 
-- **Detachable multi-window workspace**
-  - detach chat, terminal, file, editor, and monitor panels into sub-windows
-  - move tabs and full panels across windows with drag and drop
-  - detached windows now preserve transferred state more reliably
-- **Adaptive panel tab display modes**
-  - choose `Auto`, `Expanded`, or `Select` from desktop settings
-  - auto mode collapses chat, terminal, filesystem, and monitor tabs into a compact selector on narrow headers
-- **Built-in mobile-web server**
-  - start the mobile-web companion directly from desktop settings
-  - copy ready-to-open LAN links with the gateway URL prefilled
-  - new gateway exposure modes: `LAN only` and `Custom IP ranges`
-- **Resource monitor panel**
-  - first-class workspace panel for CPU, memory, disk, network, process, socket, and GPU visibility
-  - available for both local terminals and SSH-backed terminals
-- **Linux desktop support**
-  - packaged Linux desktop builds for `x64` and `arm64`
-  - AppImage, deb, pacman, and rpm outputs
-  - Linux-specific window chrome and bundled CLI runtime polish
+- **Dedicated Compaction Model**
+  - assign a separate model for long-context history summarization inside each profile
+  - keep live chat, action, and deep-thinking models focused on the current task
+- **Seamless Agent chat mode**
+  - group consecutive commands, tool calls, file edits, and sub-tools into one compact activity banner
+  - float approvals and alerts above the input area to reduce transcript clutter
+- **File browser sorting and filtering**
+  - sort by name, modified time, size, or type directly in the file panel
+  - show or hide dotfiles without leaving the current directory
+  - refresh the built-in editor without reopening the file
+- **Smarter remote monitor**
+  - share monitor collection across tabs that point at the same machine
+  - fail over cleanly when the original source tab exits
+  - surface clearer GPU telemetry in a denser CLI-style monitor layout
 
 ---
 
@@ -93,7 +89,9 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 
 - Thinking-oriented execution for complex tasks.
 - Context-aware responses from terminal state and selected resources.
-- Long-session context quality with dynamic compaction summaries.
+- Per-profile model routing for `Global`, `Thinking`, `Action`, and `Compaction` roles.
+- Long-session context quality with dedicated compaction models and dynamic compaction summaries.
+- Classic or Seamless chat activity display, depending on how much inline tool detail you want.
 - Persistent global memory injection via `memory.md`.
 - Multimodal user input pipeline (text + images) for compatible models.
 - OpenAI-compatible model endpoint support.
@@ -106,9 +104,9 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - Agent can coordinate **multiple SSH/local terminal tabs** in parallel during one task.
 - Control-character operations for interactive terminal apps.
 - Terminal tab restoration after backend restart, plus lossless output catch-up for renderer remount/reconnect within the same backend runtime.
-- **Integrated file browser panel**: browse, create, rename, delete, and preview files across local and SSH sessions.
+- **Integrated file browser panel**: browse, create, rename, delete, preview, sort, and filter files across local and SSH sessions.
 - **Cross-session file transfer** (copy/move) with real-time progress, cancellation, and adaptive SFTP tuning.
-- **Built-in text editor panel** for editing files directly in the workspace.
+- **Built-in text editor panel** for editing, refreshing, and saving files directly in the workspace.
 
 ### Workspace + Monitoring
 
@@ -116,6 +114,8 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - Choose `Auto`, `Expanded`, or `Select` panel tab display modes based on how much header space your workspace has.
 - Open a resource monitor panel for local and SSH terminals from the workspace rail.
 - Monitor panel surfaces CPU, memory, disk, network, process, socket, and GPU telemetry when available.
+- Monitor collection is shared across tabs that point at the same local or SSH target, with failover if the original source tab exits.
+- Compact monitor layouts now give GPU telemetry its own card with clearer VRAM usage details.
 
 ### Skills + MCP + Tools
 
@@ -275,7 +275,7 @@ See:
 
 ## Read More
 
-- Release notes: `changelogs/v1.2.0.md`
+- Release notes: `changelogs/v1.3.0.md`
 - Build matrix and packaging: `docs/build-commands.md`
 - Monorepo boundaries and runtime flow: `docs/monorepo-architecture.md`
 
