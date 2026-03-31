@@ -1,4 +1,5 @@
 .panel-terminal {
+  --panel-find-offset-top: calc(var(--panel-tab-header-height) + 8px);
   background: var(--panel-bg-2);
   position: relative;
   display: flex;

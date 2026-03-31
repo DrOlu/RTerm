@@ -1,10 +1,18 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { GripVertical, Laptop, MoreVertical, Plus, Server, X } from "lucide-react";
+import {
+  GripVertical,
+  Laptop,
+  MoreVertical,
+  Plus,
+  Server,
+  X,
+} from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { AppStore, TerminalTabModel } from "../../stores/AppStore";
 import "./terminal.scss";
-import { XTermView } from "./XTermView";
+import { PanelFindBar } from "../Common/PanelFindBar";
+import { XTermView, type XTermSearchHandle } from "./XTermView";
 import { resolveFloatingMenuPlacement } from "../../lib/menuPlacement";
 import {
   getTerminalConnectionIconKind,
@@ -17,8 +25,9 @@ import { resolveTerminalTabIcon } from "./terminalTabIcons";
 import {
   formatCommandDraftShortcut,
   getDefaultCommandDraftShortcut,
-  resolveCommandDraftShortcut
+  resolveCommandDraftShortcut,
 } from "../../lib/commandDraftShortcut";
+import { isFindShortcutEvent } from "../../lib/textSearch";
 
 interface TerminalPanelProps {
   store: AppStore;
@@ -41,12 +50,21 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
     onLayoutHeaderContextMenu,
   }) => {
     const [openMenu, setOpenMenu] = React.useState<"add" | "more" | null>(null);
-    const [commandDraftOpenRequest, setCommandDraftOpenRequest] = React.useState<{
-      id: number;
-      placement: "center" | "pointer";
-      terminalId: string;
-    } | null>(null);
+    const [commandDraftOpenRequest, setCommandDraftOpenRequest] =
+      React.useState<{
+        id: number;
+        placement: "center" | "pointer";
+        terminalId: string;
+      } | null>(null);
+    const [findOpen, setFindOpen] = React.useState(false);
+    const [searchQuery, setSearchQuery] = React.useState("");
+    const [searchResultCount, setSearchResultCount] = React.useState(0);
+    const [searchResultIndex, setSearchResultIndex] = React.useState(-1);
     const rootRef = React.useRef<HTMLDivElement | null>(null);
+    const searchInputRef = React.useRef<HTMLInputElement | null>(null);
+    const terminalViewRefs = React.useRef<
+      Record<string, XTermSearchHandle | null>
+    >({});
     const addMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const addMenuRef = React.useRef<HTMLDivElement | null>(null);
     const moreMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
@@ -67,6 +85,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
     );
     const activeTab =
       tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null;
+    const activeSearchHandle = activeTab
+      ? terminalViewRefs.current[activeTab.id] || null
+      : null;
     const activeIconKind = activeTab
       ? getTerminalConnectionIconKind(activeTab.config.type)
       : "generic";
@@ -78,7 +99,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
         )
       : "inactive";
     const resolvedCommandDraftShortcut = resolveCommandDraftShortcut(
-      store.settings?.terminal?.commandDraftShortcut ?? getDefaultCommandDraftShortcut(),
+      store.settings?.terminal?.commandDraftShortcut ??
+        getDefaultCommandDraftShortcut(),
     );
     const commandDraftShortcutLabel = formatCommandDraftShortcut(
       resolvedCommandDraftShortcut,
@@ -92,11 +114,18 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
       if (isLinux()) return "is-platform-linux";
       return "";
     }, []);
+    const normalizedSearchQuery = React.useMemo(
+      () => searchQuery.trim(),
+      [searchQuery],
+    );
 
     const recomputeMenuPosition = React.useCallback(() => {
       const trigger =
-        openMenu === "more" ? moreMenuButtonRef.current : addMenuButtonRef.current;
-      const menu = openMenu === "more" ? moreMenuRef.current : addMenuRef.current;
+        openMenu === "more"
+          ? moreMenuButtonRef.current
+          : addMenuButtonRef.current;
+      const menu =
+        openMenu === "more" ? moreMenuRef.current : addMenuRef.current;
       if (!trigger || !menu) return;
 
       const rect = trigger.getBoundingClientRect();
@@ -132,10 +161,16 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
       const onMouseDown = (event: MouseEvent) => {
         const target = event.target as Node | null;
         if (!target) return;
-        if (addMenuRef.current?.contains(target) || moreMenuRef.current?.contains(target)) {
+        if (
+          addMenuRef.current?.contains(target) ||
+          moreMenuRef.current?.contains(target)
+        ) {
           return;
         }
-        if (addMenuButtonRef.current?.contains(target) || moreMenuButtonRef.current?.contains(target)) {
+        if (
+          addMenuButtonRef.current?.contains(target) ||
+          moreMenuButtonRef.current?.contains(target)
+        ) {
           return;
         }
         setOpenMenu(null);
@@ -166,10 +201,75 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
       recomputeMenuPosition();
     }, [openMenu, recomputeMenuPosition]);
 
+    const focusSearchInput = React.useCallback(() => {
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+    }, []);
+
+    const openFind = React.useCallback(() => {
+      setFindOpen(true);
+      focusSearchInput();
+    }, [focusSearchInput]);
+
+    const clearAllTerminalSearches = React.useCallback(() => {
+      Object.values(terminalViewRefs.current).forEach((handle) => {
+        handle?.clearSearch();
+      });
+    }, []);
+
+    const closeFind = React.useCallback(() => {
+      setFindOpen(false);
+      setSearchQuery("");
+      setSearchResultCount(0);
+      setSearchResultIndex(-1);
+      clearAllTerminalSearches();
+    }, [clearAllTerminalSearches]);
+
+    const moveSearchResult = React.useCallback(
+      (direction: "next" | "previous") => {
+        if (!activeSearchHandle || !normalizedSearchQuery) {
+          return;
+        }
+        if (direction === "previous") {
+          activeSearchHandle.findPrevious(normalizedSearchQuery);
+          return;
+        }
+        activeSearchHandle.findNext(normalizedSearchQuery);
+      },
+      [activeSearchHandle, normalizedSearchQuery],
+    );
+
+    const handlePanelKeyDownCapture = React.useCallback(
+      (event: React.KeyboardEvent<HTMLElement>) => {
+        if (!isFindShortcutEvent(event)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        openFind();
+      },
+      [openFind],
+    );
+
+    React.useEffect(() => {
+      if (!findOpen) {
+        return;
+      }
+      if (!activeSearchHandle) {
+        setSearchResultCount(0);
+        setSearchResultIndex(-1);
+        return;
+      }
+      activeSearchHandle.setSearchQuery(normalizedSearchQuery);
+    }, [activeSearchHandle, findOpen, normalizedSearchQuery]);
+
     return (
       <div
         className={`panel panel-terminal${isLayoutDragSource ? " is-dragging-source" : ""}`}
         ref={rootRef}
+        onKeyDownCapture={handlePanelKeyDownCapture}
       >
         <div
           className="terminal-tabs-container is-draggable"
@@ -325,7 +425,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
               ref={addMenuButtonRef}
               className="tab-add-btn"
               title={t.terminal.newTab}
-              onClick={() => setOpenMenu((current) => (current === "add" ? null : "add"))}
+              onClick={() =>
+                setOpenMenu((current) => (current === "add" ? null : "add"))
+              }
             >
               <Plus size={14} strokeWidth={2} />
             </button>
@@ -336,7 +438,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
               aria-label={t.common.showMore}
               aria-haspopup="menu"
               aria-expanded={openMenu === "more"}
-              onClick={() => setOpenMenu((current) => (current === "more" ? null : "more"))}
+              onClick={() =>
+                setOpenMenu((current) => (current === "more" ? null : "more"))
+              }
             >
               <MoreVertical size={14} strokeWidth={2} />
             </button>
@@ -436,6 +540,29 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
             : null}
         </div>
 
+        {findOpen ? (
+          <PanelFindBar
+            inputRef={searchInputRef}
+            value={searchQuery}
+            placeholder={t.terminal.searchPlaceholder}
+            resultLabel={
+              normalizedSearchQuery
+                ? searchResultCount > 0
+                  ? t.common.findResults(
+                      Math.max(0, searchResultIndex + 1),
+                      searchResultCount,
+                    )
+                  : t.common.findNoResults
+                : ""
+            }
+            onChange={setSearchQuery}
+            onPrevious={() => moveSearchResult("previous")}
+            onNext={() => moveSearchResult("next")}
+            onClose={closeFind}
+            disableNavigation={searchResultCount <= 0}
+          />
+        ) : null}
+
         <div className="panel-body">
           {tabs.length ? (
             <div className="terminal-stack">
@@ -449,6 +576,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                     }
                   >
                     <XTermView
+                      ref={(handle) => {
+                        terminalViewRefs.current[tab.id] = handle;
+                      }}
                       config={tab.config}
                       theme={store.xtermTheme}
                       terminalSettings={store.settings?.terminal}
@@ -463,17 +593,20 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                       }}
                       commandDraftShortcut={resolvedCommandDraftShortcut}
                       commandDraftProfileId={store.commandDraftProfileId}
-                      commandDraftProfileOptions={
-                        (store.settings?.models.profiles || []).map((profile) => ({
-                          id: profile.id,
-                          name: profile.name,
-                        }))
-                      }
+                      commandDraftProfileOptions={(
+                        store.settings?.models.profiles || []
+                      ).map((profile) => ({
+                        id: profile.id,
+                        name: profile.name,
+                      }))}
                       onCommandDraftProfileChange={(profileId) => {
-                        void store.setCommandDraftProfileId(profileId)
+                        void store.setCommandDraftProfileId(profileId);
                       }}
                       commandDraftOpenRequest={commandDraftOpenRequest}
-                      onCommandDraftOpenRequestHandled={(requestId, terminalId) => {
+                      onCommandDraftOpenRequestHandled={(
+                        requestId,
+                        terminalId,
+                      ) => {
                         setCommandDraftOpenRequest((current) => {
                           if (
                             !current ||
@@ -497,6 +630,13 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                       onSelectionChange={(text) =>
                         store.setTerminalSelection(tab.id, text)
                       }
+                      onSearchResultsChange={(payload) => {
+                        if (tab.id !== activeTab?.id) {
+                          return;
+                        }
+                        setSearchResultCount(payload.resultCount);
+                        setSearchResultIndex(payload.resultIndex);
+                      }}
                     />
                   </div>
                 );

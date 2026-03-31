@@ -1,0 +1,77 @@
+.panel-find-bar {
+  position: absolute;
+  top: var(--panel-find-offset-top, 8px);
+  right: 8px;
+  z-index: 16;
+  width: min(336px, calc(100% - 16px));
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--panel-bg) 96%, black 4%);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
+}
+
+.panel-find-input {
+  min-width: 0;
+  flex: 1;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--app-bg) 88%, transparent);
+  color: var(--fg);
+  outline: none;
+  padding: 0 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.panel-find-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  background: color-mix(in srgb, var(--app-bg) 84%, transparent);
+}
+
+.panel-find-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.panel-find-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.panel-find-btn {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 0;
+  line-height: 0;
+  flex: 0 0 auto;
+}
+
+.panel-find-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
+
+.panel-find-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

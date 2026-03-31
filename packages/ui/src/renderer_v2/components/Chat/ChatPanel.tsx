@@ -18,6 +18,7 @@ import {
 import { observer } from "mobx-react-lite";
 import type { AppStore } from "../../stores/AppStore";
 import type { ChatMessage } from "../../stores/ChatStore";
+import { PanelFindBar } from "../Common/PanelFindBar";
 import { ChatHistoryPanel } from "./ChatHistoryPanel";
 import { ChatMessageList } from "./ChatMessageList";
 import { ConfirmDialog } from "../Common/ConfirmDialog";
@@ -38,6 +39,11 @@ import {
   formatChatPanelSessionTitle,
 } from "../../lib/sessionTitleDisplay";
 import type { ComposerDraft, InputImageAttachment } from "../../lib/userInput";
+import {
+  cycleSearchIndex,
+  findTextMatches,
+  isFindShortcutEvent,
+} from "../../lib/textSearch";
 import "./chat.scss";
 
 import { createPortal } from "react-dom";
@@ -107,6 +113,26 @@ const TokenTooltip: React.FC<{
   );
 };
 
+const CHAT_PANEL_FOCUS_BYPASS_SELECTOR = [
+  "input",
+  "textarea",
+  "select",
+  "button",
+  "a[href]",
+  "[contenteditable]",
+  "[data-panel-find-input='true']",
+  "[data-layout-panel-draggable='true']",
+  "[data-layout-tab-draggable='true']",
+  "[draggable='true']",
+  "[role='button']",
+  "[role='link']",
+  "[role='menuitem']",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+const shouldFocusChatPanelRoot = (target: HTMLElement | null): boolean =>
+  !target?.closest(CHAT_PANEL_FOCUS_BYPASS_SELECTOR);
+
 interface ChatPanelProps {
   store: AppStore;
   panelId: string;
@@ -150,13 +176,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       null,
     );
     const [showExportMenu, setShowExportMenu] = useState(false);
-    const [overlayExpandedById, setOverlayExpandedById] = useState<Record<string, boolean>>({});
-    const [overlayShowDetailsById, setOverlayShowDetailsById] = useState<Record<string, boolean>>({});
+    const [overlayExpandedById, setOverlayExpandedById] = useState<
+      Record<string, boolean>
+    >({});
+    const [overlayShowDetailsById, setOverlayShowDetailsById] = useState<
+      Record<string, boolean>
+    >({});
+    const [findOpen, setFindOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResultIndex, setSearchResultIndex] = useState(-1);
     const [exportMenuStyle, setExportMenuStyle] = useState<
       React.CSSProperties | undefined
     >(undefined);
     const exportMenuButtonRef = useRef<HTMLButtonElement>(null);
     const exportMenuRef = useRef<HTMLDivElement>(null);
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
     const t = store.i18n.t;
     const contextMenuId = React.useMemo(
       () => `chat-panel-${panelId}`,
@@ -174,6 +208,30 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
     const activeSession = store.chat.getSessionById(activeSessionId);
     const activeHeaderSession =
       activeSession || store.chat.getSessionById(sessionIds[0] || "");
+    const normalizedSearchQuery = searchQuery.trim();
+    const searchResultMessageIds = React.useMemo(() => {
+      if (!activeSession || !normalizedSearchQuery) {
+        return [];
+      }
+      return activeSession.messageIds.filter((messageId) => {
+        const message = activeSession.messagesById.get(messageId);
+        if (!message || message.type !== "text") {
+          return false;
+        }
+        return (
+          findTextMatches(String(message.content || ""), normalizedSearchQuery)
+            .length > 0
+        );
+      });
+    }, [activeSession, normalizedSearchQuery]);
+    const activeSearchMessageId =
+      searchResultIndex >= 0
+        ? searchResultMessageIds[searchResultIndex] || null
+        : null;
+    const searchResultMessageIdSet = React.useMemo(
+      () => new Set(searchResultMessageIds),
+      [searchResultMessageIds],
+    );
     const isOverlayOpen = store.view !== "main";
     const isThinking = activeSession?.isThinking || false;
     const isQueueMode = activeSessionId
@@ -583,12 +641,102 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       };
     }, [showExportMenu, computeExportMenuPosition]);
 
+    useEffect(() => {
+      if (!normalizedSearchQuery) {
+        setSearchResultIndex(-1);
+        return;
+      }
+      setSearchResultIndex(0);
+    }, [activeSessionId, normalizedSearchQuery]);
+
+    useEffect(() => {
+      setSearchResultIndex((current) => {
+        if (!normalizedSearchQuery || searchResultMessageIds.length <= 0) {
+          return -1;
+        }
+        if (current < 0 || current >= searchResultMessageIds.length) {
+          return 0;
+        }
+        return current;
+      });
+    }, [normalizedSearchQuery, searchResultMessageIds.length]);
+
+    const focusSearchInput = useCallback(() => {
+      requestAnimationFrame(() => {
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      });
+    }, []);
+
+    const openFind = useCallback(() => {
+      setFindOpen(true);
+      focusSearchInput();
+    }, [focusSearchInput]);
+
+    const closeFind = useCallback(() => {
+      setFindOpen(false);
+      setSearchQuery("");
+      setSearchResultIndex(-1);
+    }, []);
+
+    const moveSearchResult = useCallback(
+      (direction: "next" | "previous") => {
+        if (!normalizedSearchQuery || searchResultMessageIds.length <= 0) {
+          return;
+        }
+        setSearchResultIndex((current) =>
+          cycleSearchIndex(current, searchResultMessageIds.length, direction),
+        );
+      },
+      [normalizedSearchQuery, searchResultMessageIds.length],
+    );
+
+    const handlePanelKeyDownCapture = useCallback(
+      (event: React.KeyboardEvent<HTMLElement>) => {
+        if (!isFindShortcutEvent(event)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        openFind();
+      },
+      [openFind],
+    );
+
+    const handlePanelMouseDownCapture = useCallback(
+      (event: React.MouseEvent<HTMLElement>) => {
+        if (store.layout.tree.focusedPanelId !== panelId) {
+          store.layout.setFocusedPanel(panelId);
+        }
+
+        const target = event.target as HTMLElement | null;
+        if (!shouldFocusChatPanelRoot(target)) {
+          return;
+        }
+
+        requestAnimationFrame(() => {
+          panelRef.current?.focus({ preventScroll: true });
+        });
+      },
+      [panelId, store.layout],
+    );
+
+    const handlePanelFocusCapture = useCallback(() => {
+      if (store.layout.tree.focusedPanelId !== panelId) {
+        store.layout.setFocusedPanel(panelId);
+      }
+    }, [panelId, store.layout]);
+
     return (
       <div
         className={`panel panel-chat${isLayoutDragSource ? " is-dragging-source" : ""}`}
         ref={panelRef}
-        >
-            <div
+        tabIndex={-1}
+        onKeyDownCapture={handlePanelKeyDownCapture}
+        onMouseDownCapture={handlePanelMouseDownCapture}
+        onFocusCapture={handlePanelFocusCapture}
+      >
+        <div
           className="panel-header-minimal is-draggable"
           draggable
           data-layout-panel-draggable="true"
@@ -789,6 +937,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           onConfirm={handleQueueEditConfirm}
         />
 
+        {findOpen ? (
+          <PanelFindBar
+            inputRef={searchInputRef}
+            value={searchQuery}
+            placeholder={t.chat.searchPlaceholder}
+            resultLabel={
+              normalizedSearchQuery
+                ? searchResultMessageIds.length > 0
+                  ? t.common.findResults(
+                      Math.max(0, searchResultIndex + 1),
+                      searchResultMessageIds.length,
+                    )
+                  : t.common.findNoResults
+                : ""
+            }
+            onChange={setSearchQuery}
+            onPrevious={() => moveSearchResult("previous")}
+            onNext={() => moveSearchResult("next")}
+            onClose={closeFind}
+            disableNavigation={searchResultMessageIds.length <= 0}
+          />
+        ) : null}
+
         <ChatMessageList
           store={store}
           sessionId={activeSessionId}
@@ -797,34 +968,47 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           askLabels={askLabels}
           onAskDecision={handleAskDecision}
           onRollback={(message) => setRollbackTarget(message)}
+          searchTargetMessageId={activeSearchMessageId}
+          searchTargetVersion={searchResultIndex}
+          searchMatchedMessageIds={searchResultMessageIdSet}
         />
 
-        {store.chatDisplayMode === 'seamless' && (() => {
-          if (!activeSession) return null
-          const overlayMessages = resolveSeamlessOverlayMessages(activeSession)
-          if (overlayMessages.length === 0) return null
-          return (
-            <div className="seamless-overlay">
-              {overlayMessages.map((msg) => (
-                <SeamlessOverlayCard
-                  key={msg.id}
-                  msg={msg}
-                  onAskDecision={handleAskDecision}
-                  onRemove={() => store.chat.removeMessage(msg.id, activeSession.id)}
-                  askLabels={askLabels}
-                  expanded={overlayExpandedById[msg.id]}
-                  onExpandedChange={(v) =>
-                    setOverlayExpandedById((prev) => ({ ...prev, [msg.id]: v }))
-                  }
-                  showDetails={overlayShowDetailsById[msg.id]}
-                  onShowDetailsChange={(v) =>
-                    setOverlayShowDetailsById((prev) => ({ ...prev, [msg.id]: v }))
-                  }
-                />
-              ))}
-            </div>
-          )
-        })()}
+        {store.chatDisplayMode === "seamless" &&
+          (() => {
+            if (!activeSession) return null;
+            const overlayMessages =
+              resolveSeamlessOverlayMessages(activeSession);
+            if (overlayMessages.length === 0) return null;
+            return (
+              <div className="seamless-overlay">
+                {overlayMessages.map((msg) => (
+                  <SeamlessOverlayCard
+                    key={msg.id}
+                    msg={msg}
+                    onAskDecision={handleAskDecision}
+                    onRemove={() =>
+                      store.chat.removeMessage(msg.id, activeSession.id)
+                    }
+                    askLabels={askLabels}
+                    expanded={overlayExpandedById[msg.id]}
+                    onExpandedChange={(v) =>
+                      setOverlayExpandedById((prev) => ({
+                        ...prev,
+                        [msg.id]: v,
+                      }))
+                    }
+                    showDetails={overlayShowDetailsById[msg.id]}
+                    onShowDetailsChange={(v) =>
+                      setOverlayShowDetailsById((prev) => ({
+                        ...prev,
+                        [msg.id]: v,
+                      }))
+                    }
+                  />
+                ))}
+              </div>
+            );
+          })()}
 
         <div className="chat-input-area">
           {isQueueMode && activeSessionId && queueItems.length > 0 && (

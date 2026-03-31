@@ -1,4 +1,5 @@
 .panel-file-editor {
+  --panel-find-offset-top: 58px;
   background: var(--panel-bg);
   position: relative;
   display: flex;
@@ -121,4 +122,3 @@
   font-size: 11px;
   line-height: 1.45;
 }
-

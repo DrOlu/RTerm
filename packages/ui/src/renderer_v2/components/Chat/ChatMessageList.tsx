@@ -1,16 +1,16 @@
-import React from 'react'
-import { observer } from 'mobx-react-lite'
-import type { AppStore } from '../../stores/AppStore'
-import type { ChatMessage } from '../../stores/ChatStore'
-import { MessageRow } from './MessageRow'
-import { buildChatRenderItems, type ChatRenderItem } from './chatRenderModel'
+import React from "react";
+import { observer } from "mobx-react-lite";
+import type { AppStore } from "../../stores/AppStore";
+import type { ChatMessage } from "../../stores/ChatStore";
+import { MessageRow } from "./MessageRow";
+import { buildChatRenderItems, type ChatRenderItem } from "./chatRenderModel";
 import {
   type ChatBannerUiState,
   type ChatBannerUiStateMap,
   getChatBannerUiStateKey,
   mergeChatBannerUiState,
   pruneChatBannerUiStateForSession,
-} from './chatBannerUiState'
+} from "./chatBannerUiState";
 import {
   type ChatOffscreenMeasurementRetentionState,
   buildChatVirtualLayout,
@@ -20,33 +20,36 @@ import {
   resolveChatScrollAnchorAdjustment,
   resolveChatVirtualRange,
   shouldInvalidateChatMeasuredHeights,
-} from './chatVirtualList'
+} from "./chatVirtualList";
 
 interface ChatMessageListProps {
-  store: AppStore
-  sessionId: string | null
-  isThinking: boolean
-  placeholder: string
+  store: AppStore;
+  sessionId: string | null;
+  isThinking: boolean;
+  placeholder: string;
   askLabels: {
-    allow: string
-    deny: string
-    allowed: string
-    denied: string
-  }
-  onAskDecision: (messageId: string, decision: 'allow' | 'deny') => void
-  onRollback: (message: ChatMessage) => void
+    allow: string;
+    deny: string;
+    allowed: string;
+    denied: string;
+  };
+  onAskDecision: (messageId: string, decision: "allow" | "deny") => void;
+  onRollback: (message: ChatMessage) => void;
+  searchTargetMessageId?: string | null;
+  searchTargetVersion?: number;
+  searchMatchedMessageIds?: ReadonlySet<string>;
 }
 
 interface ObservedChatRowProps {
-  itemId: string
-  onHeightChange: (itemId: string, height: number) => void
-  measurementEpoch: number
-  className?: string
-  style?: React.CSSProperties
-  children: React.ReactNode
+  itemId: string;
+  onHeightChange: (itemId: string, height: number) => void;
+  measurementEpoch: number;
+  className?: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
 }
 
-const BOTTOM_AUTO_SCROLL_THRESHOLD_PX = 50
+const BOTTOM_AUTO_SCROLL_THRESHOLD_PX = 50;
 
 const ObservedChatRow: React.FC<ObservedChatRowProps> = ({
   itemId,
@@ -56,40 +59,36 @@ const ObservedChatRow: React.FC<ObservedChatRowProps> = ({
   style,
   children,
 }) => {
-  const rowRef = React.useRef<HTMLDivElement | null>(null)
+  const rowRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useLayoutEffect(() => {
-    const element = rowRef.current
-    if (!element) return
+    const element = rowRef.current;
+    if (!element) return;
 
     const reportHeight = (nextHeight: number) => {
-      onHeightChange(itemId, nextHeight)
-    }
+      onHeightChange(itemId, nextHeight);
+    };
 
-    reportHeight(element.getBoundingClientRect().height)
-    if (typeof ResizeObserver === 'undefined') {
-      return
+    reportHeight(element.getBoundingClientRect().height);
+    if (typeof ResizeObserver === "undefined") {
+      return;
     }
 
     const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (!entry) return
-      reportHeight(entry.contentRect.height)
-    })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [itemId, measurementEpoch, onHeightChange])
+      const entry = entries[0];
+      if (!entry) return;
+      reportHeight(entry.contentRect.height);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [itemId, measurementEpoch, onHeightChange]);
 
   return (
-    <div
-      ref={rowRef}
-      className={className}
-      style={style}
-    >
+    <div ref={rowRef} className={className} style={style}>
       {children}
     </div>
-  )
-}
+  );
+};
 
 export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
   ({
@@ -100,167 +99,175 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
     askLabels,
     onAskDecision,
     onRollback,
+    searchTargetMessageId = null,
+    searchTargetVersion = -1,
+    searchMatchedMessageIds,
   }) => {
-    const scrollRef = React.useRef<HTMLDivElement | null>(null)
-    const viewportWidthRef = React.useRef<number | null>(null)
-    const rowHeightsRef = React.useRef<Map<string, number>>(new Map())
-    const scrollFrameRef = React.useRef<number | null>(null)
-    const pendingScrollAdjustmentRef = React.useRef(0)
-    const renderItemIndexByIdRef = React.useRef<Map<string, number>>(new Map())
+    const scrollRef = React.useRef<HTMLDivElement | null>(null);
+    const viewportWidthRef = React.useRef<number | null>(null);
+    const rowHeightsRef = React.useRef<Map<string, number>>(new Map());
+    const scrollFrameRef = React.useRef<number | null>(null);
+    const pendingScrollAdjustmentRef = React.useRef(0);
+    const renderItemIndexByIdRef = React.useRef<Map<string, number>>(new Map());
     const previousRenderItemsSnapshotRef = React.useRef<{
-      sessionId: string | null
-      itemsById: Map<string, ChatRenderItem>
+      sessionId: string | null;
+      itemsById: Map<string, ChatRenderItem>;
     }>({
       sessionId: null,
       itemsById: new Map(),
-    })
+    });
     const virtualLayoutRef = React.useRef<{
-      offsets: number[]
-      heights: number[]
-      totalHeight: number
+      offsets: number[];
+      heights: number[];
+      totalHeight: number;
     }>({
       offsets: [],
       heights: [],
       totalHeight: 0,
-    })
-    const shouldAutoScrollRef = React.useRef(true)
-    const [heightVersion, setHeightVersion] = React.useState(0)
-    const [measurementEpoch, setMeasurementEpoch] = React.useState(0)
-    const [scrollTop, setScrollTop] = React.useState(0)
-    const [viewportHeight, setViewportHeight] = React.useState(0)
-    const [, setShouldAutoScroll] = React.useState(true)
+    });
+    const shouldAutoScrollRef = React.useRef(true);
+    const [heightVersion, setHeightVersion] = React.useState(0);
+    const [measurementEpoch, setMeasurementEpoch] = React.useState(0);
+    const [scrollTop, setScrollTop] = React.useState(0);
+    const [viewportHeight, setViewportHeight] = React.useState(0);
+    const [, setShouldAutoScroll] = React.useState(true);
     const [bannerUiStateByKey, setBannerUiStateByKey] =
-      React.useState<ChatBannerUiStateMap>({})
+      React.useState<ChatBannerUiStateMap>({});
     const [
       retainedOffscreenMeasurementState,
       setRetainedOffscreenMeasurementState,
-    ] = React.useState<ChatOffscreenMeasurementRetentionState>({})
+    ] = React.useState<ChatOffscreenMeasurementRetentionState>({});
 
-    const session = store.chat.getSessionById(sessionId)
-    const renderListVersion = session?.renderListVersion || 0
-    const messageCount = session?.messageIds.length || 0
+    const session = store.chat.getSessionById(sessionId);
+    const renderListVersion = session?.renderListVersion || 0;
+    const messageCount = session?.messageIds.length || 0;
     const lastMessageId =
-      messageCount > 0 ? session?.messageIds[messageCount - 1] || null : null
+      messageCount > 0 ? session?.messageIds[messageCount - 1] || null : null;
     const lastMessage = lastMessageId
       ? session?.messagesById.get(lastMessageId) || null
-      : null
-    const chatDisplayMode = store.chatDisplayMode
-    const lastMessageStreaming = lastMessage?.streaming === true
+      : null;
+    const chatDisplayMode = store.chatDisplayMode;
+    const lastMessageStreaming = lastMessage?.streaming === true;
     const renderItems = React.useMemo(
       () => buildChatRenderItems(session, isThinking, chatDisplayMode),
       // messageCount and lastMessageStreaming ensure recomputation when the
       // session content changes even if renderListVersion is not yet bumped
       // (e.g. during initial auto-restore before hydration completes).
       // eslint-disable-next-line react-hooks/exhaustive-deps
-      [chatDisplayMode, isThinking, messageCount, lastMessageStreaming, renderListVersion, session, sessionId],
-    )
+      [
+        chatDisplayMode,
+        isThinking,
+        messageCount,
+        lastMessageStreaming,
+        renderListVersion,
+        session,
+        sessionId,
+      ],
+    );
     const previousRenderItemsById =
       previousRenderItemsSnapshotRef.current.sessionId === sessionId
         ? previousRenderItemsSnapshotRef.current.itemsById
-        : new Map<string, ChatRenderItem>()
+        : new Map<string, ChatRenderItem>();
     const renderItemIndexById = React.useMemo(() => {
-      const next = new Map<string, number>()
+      const next = new Map<string, number>();
       renderItems.forEach((item, index) => {
-        next.set(item.id, index)
-      })
-      return next
-    }, [renderItems])
+        next.set(item.id, index);
+      });
+      return next;
+    }, [renderItems]);
 
     const handleBannerUiStateChange = React.useCallback(
-      (
-        messageId: string,
-        patch: Partial<ChatBannerUiState>,
-      ) => {
+      (messageId: string, patch: Partial<ChatBannerUiState>) => {
         setBannerUiStateByKey((current) =>
           mergeChatBannerUiState(
             current,
             getChatBannerUiStateKey(sessionId, messageId),
             patch,
           ),
-        )
+        );
       },
       [sessionId],
-    )
+    );
 
     const syncScrollMetrics = React.useCallback(() => {
-      const element = scrollRef.current
-      if (!element) return
+      const element = scrollRef.current;
+      if (!element) return;
 
-      const nextScrollTop = element.scrollTop
-      const nextViewportHeight = element.clientHeight
+      const nextScrollTop = element.scrollTop;
+      const nextViewportHeight = element.clientHeight;
       const isAtBottom =
         element.scrollHeight - nextScrollTop - nextViewportHeight <
-        BOTTOM_AUTO_SCROLL_THRESHOLD_PX
+        BOTTOM_AUTO_SCROLL_THRESHOLD_PX;
 
-      shouldAutoScrollRef.current = isAtBottom
-      setScrollTop(nextScrollTop)
-      setViewportHeight(nextViewportHeight)
-      setShouldAutoScroll(isAtBottom)
-    }, [])
+      shouldAutoScrollRef.current = isAtBottom;
+      setScrollTop(nextScrollTop);
+      setViewportHeight(nextViewportHeight);
+      setShouldAutoScroll(isAtBottom);
+    }, []);
 
     const scheduleScrollMetricSync = React.useCallback(() => {
-      if (scrollFrameRef.current !== null) return
+      if (scrollFrameRef.current !== null) return;
       scrollFrameRef.current = window.requestAnimationFrame(() => {
-        scrollFrameRef.current = null
-        syncScrollMetrics()
-      })
-    }, [syncScrollMetrics])
+        scrollFrameRef.current = null;
+        syncScrollMetrics();
+      });
+    }, [syncScrollMetrics]);
 
     const handleRowHeightChange = React.useCallback(
       (itemId: string, height: number) => {
-        const nextHeight = Math.ceil(height)
-        const itemIndex = renderItemIndexByIdRef.current.get(itemId)
+        const nextHeight = Math.ceil(height);
+        const itemIndex = renderItemIndexByIdRef.current.get(itemId);
         const currentHeight =
           rowHeightsRef.current.get(itemId) ??
-          (typeof itemIndex === 'number'
+          (typeof itemIndex === "number"
             ? virtualLayoutRef.current.heights[itemIndex]
-            : undefined)
+            : undefined);
         if (currentHeight === nextHeight || nextHeight <= 24) {
-          return
+          return;
         }
 
-        if (typeof itemIndex === 'number') {
-          const element = scrollRef.current
+        if (typeof itemIndex === "number") {
+          const element = scrollRef.current;
           const scrollAdjustment = resolveChatScrollAnchorAdjustment({
             layout: virtualLayoutRef.current,
             itemIndex,
             nextHeight,
             scrollTop: element?.scrollTop ?? 0,
             autoScrollEnabled: shouldAutoScrollRef.current,
-          })
+          });
           if (scrollAdjustment !== 0) {
-            pendingScrollAdjustmentRef.current += scrollAdjustment
+            pendingScrollAdjustmentRef.current += scrollAdjustment;
           }
         }
 
-        rowHeightsRef.current.set(itemId, nextHeight)
-        setHeightVersion((current) => current + 1)
+        rowHeightsRef.current.set(itemId, nextHeight);
+        setHeightVersion((current) => current + 1);
       },
       [],
-    )
+    );
 
     React.useLayoutEffect(() => {
-      shouldAutoScrollRef.current = true
-      setShouldAutoScroll(true)
-      setScrollTop(0)
-      setViewportHeight(0)
-      pendingScrollAdjustmentRef.current = 0
-      rowHeightsRef.current = new Map()
-      setRetainedOffscreenMeasurementState({})
-      setMeasurementEpoch((current) => current + 1)
-      setHeightVersion((current) => current + 1)
-    }, [sessionId])
+      shouldAutoScrollRef.current = true;
+      setShouldAutoScroll(true);
+      setScrollTop(0);
+      setViewportHeight(0);
+      pendingScrollAdjustmentRef.current = 0;
+      rowHeightsRef.current = new Map();
+      setRetainedOffscreenMeasurementState({});
+      setMeasurementEpoch((current) => current + 1);
+      setHeightVersion((current) => current + 1);
+    }, [sessionId]);
 
     // When display mode changes (e.g. settings load after initial render),
     // item structure changes (classic individual items → seamless groups).
     // Stale measured heights from the old mode cause wrong virtual scroll
     // offsets, so invalidate all measurements to force a fresh layout.
     React.useLayoutEffect(() => {
-      rowHeightsRef.current = new Map()
-      pendingScrollAdjustmentRef.current = 0
-      setMeasurementEpoch((current) => current + 1)
-      setHeightVersion((current) => current + 1)
-    }, [chatDisplayMode])
+      rowHeightsRef.current = new Map();
+      pendingScrollAdjustmentRef.current = 0;
+      setMeasurementEpoch((current) => current + 1);
+      setHeightVersion((current) => current + 1);
+    }, [chatDisplayMode]);
 
     React.useEffect(() => {
       setBannerUiStateByKey((current) =>
@@ -269,59 +276,59 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
           sessionId,
           session?.messageIds || [],
         ),
-      )
-    }, [renderListVersion, sessionId, session])
+      );
+    }, [renderListVersion, sessionId, session]);
 
     React.useLayoutEffect(() => {
-      const element = scrollRef.current
-      if (!element) return
+      const element = scrollRef.current;
+      if (!element) return;
 
-      viewportWidthRef.current = Math.round(element.clientWidth)
-      scheduleScrollMetricSync()
+      viewportWidthRef.current = Math.round(element.clientWidth);
+      scheduleScrollMetricSync();
       const onScroll = () => {
-        scheduleScrollMetricSync()
-      }
+        scheduleScrollMetricSync();
+      };
 
-      element.addEventListener('scroll', onScroll, { passive: true })
+      element.addEventListener("scroll", onScroll, { passive: true });
       const resizeObserver =
-        typeof ResizeObserver !== 'undefined'
+        typeof ResizeObserver !== "undefined"
           ? new ResizeObserver((entries) => {
-              const nextWidth = entries[0]?.contentRect.width ?? element.clientWidth
+              const nextWidth =
+                entries[0]?.contentRect.width ?? element.clientWidth;
               if (
                 shouldInvalidateChatMeasuredHeights(
                   viewportWidthRef.current,
                   nextWidth,
                 )
               ) {
-                rowHeightsRef.current = new Map()
-                pendingScrollAdjustmentRef.current = 0
-                setMeasurementEpoch((current) => current + 1)
-                setHeightVersion((current) => current + 1)
+                rowHeightsRef.current = new Map();
+                pendingScrollAdjustmentRef.current = 0;
+                setMeasurementEpoch((current) => current + 1);
+                setHeightVersion((current) => current + 1);
               }
-              viewportWidthRef.current = Math.round(nextWidth)
-              scheduleScrollMetricSync()
+              viewportWidthRef.current = Math.round(nextWidth);
+              scheduleScrollMetricSync();
             })
-          : null
-      resizeObserver?.observe(element)
+          : null;
+      resizeObserver?.observe(element);
 
       return () => {
-        element.removeEventListener('scroll', onScroll)
-        resizeObserver?.disconnect()
+        element.removeEventListener("scroll", onScroll);
+        resizeObserver?.disconnect();
         if (scrollFrameRef.current !== null) {
-          window.cancelAnimationFrame(scrollFrameRef.current)
-          scrollFrameRef.current = null
+          window.cancelAnimationFrame(scrollFrameRef.current);
+          scrollFrameRef.current = null;
         }
-      }
-    }, [scheduleScrollMetricSync])
+      };
+    }, [scheduleScrollMetricSync]);
 
     const virtualLayout = React.useMemo(
-      () =>
-        buildChatVirtualLayout(renderItems, rowHeightsRef.current),
+      () => buildChatVirtualLayout(renderItems, rowHeightsRef.current),
       [renderItems, heightVersion],
-    )
-    renderItemIndexByIdRef.current = renderItemIndexById
-    virtualLayoutRef.current = virtualLayout
-    const effectiveViewportHeight = viewportHeight > 0 ? viewportHeight : 800
+    );
+    renderItemIndexByIdRef.current = renderItemIndexById;
+    virtualLayoutRef.current = virtualLayout;
+    const effectiveViewportHeight = viewportHeight > 0 ? viewportHeight : 800;
 
     const virtualRange = React.useMemo(
       () =>
@@ -331,83 +338,112 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
           effectiveViewportHeight,
         ),
       [effectiveViewportHeight, scrollTop, virtualLayout],
-    )
+    );
 
     React.useLayoutEffect(() => {
-      const pendingScrollAdjustment = pendingScrollAdjustmentRef.current
+      const pendingScrollAdjustment = pendingScrollAdjustmentRef.current;
       if (pendingScrollAdjustment === 0) {
-        return
+        return;
       }
 
-      const element = scrollRef.current
-      pendingScrollAdjustmentRef.current = 0
+      const element = scrollRef.current;
+      pendingScrollAdjustmentRef.current = 0;
       if (!element) {
-        return
+        return;
       }
 
-      element.scrollTop = Math.max(0, element.scrollTop + pendingScrollAdjustment)
-      scheduleScrollMetricSync()
-    }, [heightVersion, scheduleScrollMetricSync, sessionId])
+      element.scrollTop = Math.max(
+        0,
+        element.scrollTop + pendingScrollAdjustment,
+      );
+      scheduleScrollMetricSync();
+    }, [heightVersion, scheduleScrollMetricSync, sessionId]);
 
     React.useLayoutEffect(() => {
-      const element = scrollRef.current
-      if (!element) return
+      const element = scrollRef.current;
+      if (!element) return;
 
-      const isNewUserMessage = lastMessage?.role === 'user'
+      const isNewUserMessage = lastMessage?.role === "user";
       if (isNewUserMessage && !shouldAutoScrollRef.current) {
-        shouldAutoScrollRef.current = true
-        setShouldAutoScroll(true)
+        shouldAutoScrollRef.current = true;
+        setShouldAutoScroll(true);
       }
 
       if (!isNewUserMessage && !shouldAutoScrollRef.current) {
-        return
+        return;
       }
 
       element.scrollTop = Math.max(
         0,
         virtualLayout.totalHeight - element.clientHeight,
-      )
-      scheduleScrollMetricSync()
+      );
+      scheduleScrollMetricSync();
     }, [
       lastMessage?.role,
       messageCount,
       scheduleScrollMetricSync,
       sessionId,
       virtualLayout.totalHeight,
-    ])
+    ]);
+
+    React.useLayoutEffect(() => {
+      if (!searchTargetMessageId) {
+        return;
+      }
+      const element = scrollRef.current;
+      if (!element) {
+        return;
+      }
+      const targetIndex = renderItemIndexById.get(searchTargetMessageId);
+      if (typeof targetIndex !== "number") {
+        return;
+      }
+      const targetTop = virtualLayout.offsets[targetIndex] || 0;
+      const targetHeight = virtualLayout.heights[targetIndex] || 120;
+      const nextScrollTop = Math.max(
+        0,
+        targetTop - Math.max(0, (element.clientHeight - targetHeight) / 2),
+      );
+      element.scrollTop = nextScrollTop;
+      scheduleScrollMetricSync();
+    }, [
+      renderItemIndexById,
+      scheduleScrollMetricSync,
+      searchTargetMessageId,
+      searchTargetVersion,
+      virtualLayout.heights,
+      virtualLayout.offsets,
+    ]);
 
     const visibleItems = renderItems.slice(
       virtualRange.startIndex,
       virtualRange.endIndex,
-    )
+    );
     const tailRetentionItemId =
       isThinking && renderItems.length > 0
         ? renderItems[renderItems.length - 1]?.id || null
-        : null
+        : null;
     const streamingRenderItems = React.useMemo(
       () =>
         renderItems.reduce<Array<{ item: ChatRenderItem; index: number }>>(
           (result, item, index) => {
             const isStreaming =
               item.seamlessGroupStreaming === true ||
-              session?.messagesById.get(item.id)?.streaming === true
+              session?.messagesById.get(item.id)?.streaming === true;
             if (isStreaming) {
-              result.push({ item, index })
+              result.push({ item, index });
             }
-            return result
+            return result;
           },
           [],
         ),
       [renderItems, session],
-    )
+    );
     const offscreenStreamingItems = React.useMemo(
       () =>
-        resolveChatOffscreenStreamingItems(
-          streamingRenderItems,
-          virtualRange,
-        ),
+        resolveChatOffscreenStreamingItems(streamingRenderItems, virtualRange),
       [streamingRenderItems, virtualRange.endIndex, virtualRange.startIndex],
-    )
+    );
     const offscreenLayoutChangedItems = React.useMemo(
       () =>
         resolveChatOffscreenLayoutChangedItems(
@@ -421,27 +457,27 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
         virtualRange.endIndex,
         virtualRange.startIndex,
       ],
-    )
+    );
     const retainedOffscreenItems = React.useMemo(
       () =>
         Object.keys(retainedOffscreenMeasurementState).reduce<ChatRenderItem[]>(
           (result, itemId) => {
-            const itemIndex = renderItemIndexById.get(itemId)
+            const itemIndex = renderItemIndexById.get(itemId);
             const isVisible =
-              typeof itemIndex === 'number' &&
+              typeof itemIndex === "number" &&
               itemIndex >= virtualRange.startIndex &&
-              itemIndex < virtualRange.endIndex
-            if (typeof itemIndex !== 'number' || isVisible) {
-              return result
+              itemIndex < virtualRange.endIndex;
+            if (typeof itemIndex !== "number" || isVisible) {
+              return result;
             }
 
-            const item = renderItems[itemIndex]
+            const item = renderItems[itemIndex];
             if (!item) {
-              return result
+              return result;
             }
 
-            result.push(item)
-            return result
+            result.push(item);
+            return result;
           },
           [],
         ),
@@ -452,35 +488,35 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
         virtualRange.endIndex,
         virtualRange.startIndex,
       ],
-    )
+    );
     const offscreenMeasuredItems = React.useMemo(() => {
-      const byId = new Map<string, ChatRenderItem>()
+      const byId = new Map<string, ChatRenderItem>();
       offscreenStreamingItems.forEach((item) => {
-        byId.set(item.id, item)
-      })
+        byId.set(item.id, item);
+      });
       offscreenLayoutChangedItems.forEach((item) => {
         if (!byId.has(item.id)) {
-          byId.set(item.id, item)
+          byId.set(item.id, item);
         }
-      })
+      });
       retainedOffscreenItems.forEach((item) => {
         if (!byId.has(item.id)) {
-          byId.set(item.id, item)
+          byId.set(item.id, item);
         }
-      })
-      return Array.from(byId.values())
+      });
+      return Array.from(byId.values());
     }, [
       offscreenLayoutChangedItems,
       offscreenStreamingItems,
       retainedOffscreenItems,
-    ])
+    ]);
 
     React.useLayoutEffect(() => {
       previousRenderItemsSnapshotRef.current = {
         sessionId,
         itemsById: new Map(renderItems.map((item) => [item.id, item])),
-      }
-    }, [renderItems, sessionId])
+      };
+    }, [renderItems, sessionId]);
 
     React.useLayoutEffect(() => {
       setRetainedOffscreenMeasurementState((currentState) =>
@@ -492,14 +528,14 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
           tailRetentionItemId,
           thinking: isThinking,
         }),
-      )
+      );
     }, [
       isThinking,
       offscreenStreamingItems,
       renderItemIndexById,
       tailRetentionItemId,
       virtualRange,
-    ])
+    ]);
 
     return (
       <div className="panel-body" ref={scrollRef}>
@@ -513,9 +549,9 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
             style={{ height: virtualLayout.totalHeight }}
           >
             {visibleItems.map((item, index) => {
-              const itemIndex = virtualRange.startIndex + index
+              const itemIndex = virtualRange.startIndex + index;
               const bannerUiStateKey =
-                getChatBannerUiStateKey(sessionId, item.id) || ''
+                getChatBannerUiStateKey(sessionId, item.id) || "";
               return (
                 <ObservedChatRow
                   key={item.id}
@@ -524,7 +560,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                   measurementEpoch={measurementEpoch}
                   className="message-list-row-shell"
                   style={{
-                    position: 'absolute',
+                    position: "absolute",
                     top: virtualLayout.offsets[itemIndex] || 0,
                     left: 0,
                     right: 0,
@@ -532,7 +568,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                 >
                   <MessageRow
                     store={store}
-                    sessionId={sessionId || ''}
+                    sessionId={sessionId || ""}
                     messageId={item.id}
                     onAskDecision={onAskDecision}
                     onRollback={onRollback}
@@ -546,9 +582,13 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                     onBannerUiStateChange={(patch) =>
                       handleBannerUiStateChange(item.id, patch)
                     }
+                    isSearchMatch={
+                      searchMatchedMessageIds?.has(item.id) === true
+                    }
+                    isActiveSearchMatch={searchTargetMessageId === item.id}
                   />
                 </ObservedChatRow>
-              )
+              );
             })}
           </div>
         )}
@@ -557,14 +597,14 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
             aria-hidden="true"
             style={{
               height: 0,
-              overflow: 'hidden',
-              pointerEvents: 'none',
-              visibility: 'hidden',
+              overflow: "hidden",
+              pointerEvents: "none",
+              visibility: "hidden",
             }}
           >
             {offscreenMeasuredItems.map((item) => {
               const bannerUiStateKey =
-                getChatBannerUiStateKey(sessionId, item.id) || ''
+                getChatBannerUiStateKey(sessionId, item.id) || "";
               return (
                 <ObservedChatRow
                   key={`${item.id}:measurement`}
@@ -574,7 +614,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                 >
                   <MessageRow
                     store={store}
-                    sessionId={sessionId || ''}
+                    sessionId={sessionId || ""}
                     messageId={item.id}
                     onAskDecision={onAskDecision}
                     onRollback={onRollback}
@@ -590,11 +630,11 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                     }
                   />
                 </ObservedChatRow>
-              )
+              );
             })}
           </div>
         )}
       </div>
-    )
+    );
   },
-)
+);

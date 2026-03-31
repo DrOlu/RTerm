@@ -1,7 +1,16 @@
 .panel-filesystem {
+  --panel-find-offset-top: 88px;
   --filesystem-font-size: 14px;
-  --filesystem-font-size-sm: clamp(10px, calc(var(--filesystem-font-size) - 1px), 28px);
-  --filesystem-font-size-xs: clamp(9px, calc(var(--filesystem-font-size) - 2px), 27px);
+  --filesystem-font-size-sm: clamp(
+    10px,
+    calc(var(--filesystem-font-size) - 1px),
+    28px
+  );
+  --filesystem-font-size-xs: clamp(
+    9px,
+    calc(var(--filesystem-font-size) - 2px),
+    27px
+  );
   background: var(--panel-bg);
   position: relative;
   display: flex;
@@ -312,7 +321,7 @@
   font-size: var(--filesystem-font-size);
 }
 
-.filesystem-row[draggable='true'] {
+.filesystem-row[draggable="true"] {
   user-select: none;
 }
 
@@ -336,6 +345,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.filesystem-row-highlight {
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  color: inherit;
+  padding: 0;
 }
 
 .filesystem-row-meta {
