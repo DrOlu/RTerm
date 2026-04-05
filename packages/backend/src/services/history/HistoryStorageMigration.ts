@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { setImmediate as setImmediateAsync } from "node:timers/promises";
-import Database from "better-sqlite3";
 import type { UIChatSession } from "../../types/ui-chat";
 import type { StoredChatSessionRecord } from "./historyTypes";
 import {
@@ -9,10 +8,9 @@ import {
   LEGACY_UI_HISTORY_FILE_NAME,
   resolveHistoryStoragePaths,
 } from "./historyStoragePaths";
-import { HistorySqliteStore } from "./HistorySqliteStore";
 import { buildUiSessionSummary, sanitizeUiSession } from "./uiHistoryHelpers";
 
-type DatabaseHandle = Database.Database;
+type DatabaseHandle = InstanceType<typeof import("better-sqlite3")>;
 
 interface LegacyChatHistoryFile {
   sessions?: StoredChatSessionRecord[];
@@ -105,7 +103,13 @@ export class HistoryStorageMigration {
       percent: 0,
     });
 
-    if (HistorySqliteStore.hasInitializedStore(paths.sqliteDbPath)) {
+    // Fast path: check for legacy JSON files using fs only (no SQLite needed).
+    // This ensures fresh installs never load the native SQLite module during migration,
+    // which prevents startup crashes when the native binary is unavailable.
+    const legacyChatExists = fs.existsSync(paths.legacyChatHistoryPath);
+    const legacyUiExists = fs.existsSync(paths.legacyUiHistoryPath);
+
+    if (!legacyChatExists && !legacyUiExists) {
       this.emitReady("History storage is ready.");
       return {
         migrated: false,
@@ -116,16 +120,8 @@ export class HistoryStorageMigration {
       };
     }
 
-    const legacyChatExists = fs.existsSync(paths.legacyChatHistoryPath);
-    const legacyUiExists = fs.existsSync(paths.legacyUiHistoryPath);
-    if (!legacyChatExists && !legacyUiExists) {
-      const store = new HistorySqliteStore({ filePath: paths.sqliteDbPath });
-      try {
-        store.setMeta("history_schema_version", "1");
-        store.setMeta("storage_format", "sqlite");
-      } finally {
-        store.close();
-      }
+    // SQLite DB already exists — legacy files are leftover backups or stale copies.
+    if (fs.existsSync(paths.sqliteDbPath)) {
       this.emitReady("History storage is ready.");
       return {
         migrated: false,
@@ -190,7 +186,11 @@ export class HistoryStorageMigration {
         fs.unlinkSync(tempDbPath);
       }
 
-      const db = new Database(tempDbPath);
+      // Lazy-load SQLite only when migration is actually needed.
+      const { loadBetterSqlite3 } = await import("./betterSqlite3Runtime");
+      const { HistorySqliteStore } = await import("./HistorySqliteStore");
+      const BetterSqlite3 = loadBetterSqlite3();
+      const db: DatabaseHandle = new BetterSqlite3(tempDbPath);
       try {
         HistorySqliteStore.initializeDatabase(db);
         await this.importChatSessions(db, chatSessions, advance);

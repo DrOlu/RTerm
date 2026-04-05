@@ -6,6 +6,8 @@ import { pipeline } from 'node:stream/promises'
 import { SocksClient } from 'socks'
 import {
   isSshConnectionConfig,
+  type TerminalCommandTrackingToken,
+  type TerminalCommandTrackingUpdate,
   type TerminalBackend,
   type TerminalConfig,
   type TerminalExecOptions,
@@ -19,6 +21,19 @@ import {
   type SftpTransferDirection,
   type SftpTransferProfile
 } from './ssh/SftpAdaptiveTransferTuner'
+import {
+  buildWindowsPowerShellEncodedCommand,
+  WINDOWS_POWERSHELL_COMMAND_OUTPUT_FILE_PREFIX,
+  escapePowerShellSingleQuotedString,
+  parseWindowsBuildNumber,
+  parseWindowsPromptMarkerLine,
+  shouldUseWindowsPowerShellSidecar,
+  WINDOWS_POWERSHELL_COMMAND_REQUEST_FILE_PREFIX,
+  WINDOWS_POWERSHELL_REMOTE_SIDECAR_DIR_NAME,
+  WINDOWS_POWERSHELL_SIDECAR_RETENTION_MS,
+  type WindowsCommandTrackingMode,
+  type WindowsPromptMarkerState,
+} from './windowsPowerShellTracking'
 
 const GYSHELL_READY_MARKER = '__GYSHELL_READY__'
 
@@ -41,6 +56,12 @@ interface SSHInstance {
   systemInfoPromise?: Promise<any>
   systemInfoRetryTimer?: ReturnType<typeof setTimeout>
   systemInfoRetryCount?: number
+  commandTrackingMode?: WindowsCommandTrackingMode
+  windowsBuildNumber?: number
+  windowsPromptMarkerPath?: string
+  windowsCommandRequestPath?: string
+  windowsCommandOutputPath?: string
+  windowsPromptMarkerState?: WindowsPromptMarkerState
   forwardServers: net.Server[]
   remoteForwards: Array<{ host: string; port: number }>
   remoteForwardHandlerInstalled: boolean
@@ -54,7 +75,18 @@ interface SftpChunkWriteSession {
   cleanupTimer?: ReturnType<typeof setTimeout>
 }
 
+interface WindowsBootstrapInfo {
+  Version?: string
+  CSName?: string
+  Arch?: string
+  TempPath?: string
+  PSVersionMajor?: number
+}
+
 export class SSHBackend implements TerminalBackend {
+  private static readonly SHELL_INIT_RETRY_INTERVAL_MS = 8000
+  private static readonly WINDOWS_SHELL_INIT_RETRY_INTERVAL_MS = 20000
+  private static readonly WINDOWS_PROMPT_MARKER_TAIL_BYTES = 8192
   private sessions: Map<string, SSHInstance> = new Map()
   private readonly chunkWriteSessions = new Map<string, SftpChunkWriteSession>()
   private readonly transferTuner = new SftpAdaptiveTransferTuner({
@@ -88,6 +120,100 @@ export class SSHBackend implements TerminalBackend {
     } catch {
       return null
     }
+  }
+
+  async prepareCommandTracking(
+    ptyId: string
+  ): Promise<TerminalCommandTrackingToken | undefined> {
+    const instance = this.sessions.get(ptyId)
+    if (!instance || instance.commandTrackingMode !== 'windows-powershell-sidecar') {
+      return undefined
+    }
+    const cachedSnapshot = instance.windowsPromptMarkerState || null
+    let snapshot: WindowsPromptMarkerState | null = null
+    try {
+      snapshot = await this.refreshWindowsPromptMarkerState(instance, {
+        allowCachedFallback: false
+      })
+    } catch {
+      snapshot = null
+    }
+    if (!snapshot && !cachedSnapshot) {
+      const resetOk = await this.resetWindowsPromptMarker(instance)
+      return {
+        mode: 'windows-powershell-sidecar',
+        baselineSequence: 0,
+        awaitingInitialFreshMarker: !resetOk,
+        dispatchMode: instance.windowsCommandRequestPath ? 'prompt-file' : undefined,
+        displayMode: instance.windowsCommandRequestPath ? 'synthetic-transcript' : undefined,
+        commandRequestPath: instance.windowsCommandRequestPath,
+        commandOutputPath: instance.windowsCommandOutputPath,
+      }
+    }
+    const resolvedSnapshot = snapshot || cachedSnapshot
+    if (!resolvedSnapshot) {
+      return undefined
+    }
+    return {
+      mode: 'windows-powershell-sidecar',
+      baselineSequence: resolvedSnapshot.sequence,
+      awaitingInitialFreshMarker: !snapshot && !!cachedSnapshot,
+      dispatchMode: instance.windowsCommandRequestPath ? 'prompt-file' : undefined,
+      displayMode: instance.windowsCommandRequestPath ? 'synthetic-transcript' : undefined,
+      commandRequestPath: instance.windowsCommandRequestPath,
+      commandOutputPath: instance.windowsCommandOutputPath,
+    }
+  }
+
+  async pollCommandTracking(
+    ptyId: string,
+    token: TerminalCommandTrackingToken
+  ): Promise<TerminalCommandTrackingUpdate | undefined> {
+    if (token.mode !== 'windows-powershell-sidecar') {
+      return undefined
+    }
+    const instance = this.sessions.get(ptyId)
+    if (!instance || instance.commandTrackingMode !== 'windows-powershell-sidecar') {
+      return undefined
+    }
+    const snapshot = token.awaitingInitialFreshMarker
+      ? await this.refreshWindowsPromptMarkerStateViaExec(instance, {
+          allowCachedFallback: false
+        })
+      : await this.refreshWindowsPromptMarkerState(instance)
+    if (!snapshot || snapshot.sequence <= token.baselineSequence) {
+      return undefined
+    }
+    const preferExecOutputRead = Boolean(token.awaitingInitialFreshMarker)
+    if (token.awaitingInitialFreshMarker) {
+      const dispatchedAtMs = token.dispatchedAtMs || 0
+      if (snapshot.modifiedAtMs !== undefined && snapshot.modifiedAtMs <= dispatchedAtMs) {
+        token.baselineSequence = snapshot.sequence
+        return undefined
+      }
+      token.awaitingInitialFreshMarker = false
+    }
+    const output = await this.readWindowsCommandOutputBestEffort(
+      instance,
+      token.commandOutputPath || instance.windowsCommandOutputPath,
+      { preferExec: preferExecOutputRead }
+    )
+    return {
+      mode: 'windows-powershell-sidecar',
+      sequence: snapshot.sequence,
+      exitCode: snapshot.exitCode,
+      cwd: snapshot.cwd,
+      homeDir: snapshot.homeDir,
+      output
+    }
+  }
+
+  async refreshSessionState(ptyId: string): Promise<void> {
+    const instance = this.sessions.get(ptyId)
+    if (!instance || instance.commandTrackingMode !== 'windows-powershell-sidecar') {
+      return
+    }
+    await this.refreshWindowsPromptMarkerState(instance)
   }
 
   private stripReadyMarker(chunk: string): string {
@@ -179,20 +305,435 @@ export class SSHBackend implements TerminalBackend {
     })
   }
 
-  private buildWindowsPowerShellEncodedCommand(): string {
-    const psInit = `
-function Global:prompt {
-  $ec = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } else { if ($?) { 0 } else { 1 } }
-  $cwd_b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($PWD.Path))
-  $home_b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($HOME))
-  Write-Host -NoNewline "$([char]27)]1337;gyshell_precmd;ec=$ec;cwd_b64=$cwd_b64;home_b64=$home_b64$([char]7)"
-  return "PS $($PWD.Path)> "
-}
-Clear-Host
-Write-Output "__GYSHELL_READY__"
-`
-    // PowerShell -EncodedCommand requires UTF-16LE.
-    return Buffer.from(psInit, 'utf16le').toString('base64')
+  private buildWindowsBootstrapInfoCommand(): string {
+    const script = [
+      "$utf8=[System.Text.UTF8Encoding]::new($false)",
+      '[Console]::OutputEncoding=$utf8',
+      '$OutputEncoding=$utf8',
+      "$json=([pscustomobject]@{Version=[Environment]::OSVersion.Version.ToString();CSName=$env:COMPUTERNAME;Arch=$(if([Environment]::Is64BitOperatingSystem){'x64'}else{'x86'});TempPath=[IO.Path]::GetTempPath();PSVersionMajor=$PSVersionTable.PSVersion.Major}|ConvertTo-Json -Compress)",
+      '$bytes=$utf8.GetBytes($json)',
+      '[Console]::OpenStandardOutput().Write($bytes,0,$bytes.Length)',
+    ].join(';')
+    const encoded = Buffer.from(script, 'utf16le').toString('base64')
+    return `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded}`
+  }
+
+  private shouldUseWindowsPowerShellSidecar(instance: SSHInstance): boolean {
+    return shouldUseWindowsPowerShellSidecar({
+      buildNumber: instance.windowsBuildNumber,
+      shell: String(instance.systemInfo?.shell || 'powershell.exe'),
+      trackingChannelAvailable: !instance.sftpInitError
+    })
+  }
+
+  private buildWindowsPromptMarkerPath(tempPath: string, ptyId: string): string {
+    return `${this.buildWindowsPromptMarkerDirectory(tempPath)}/gyshell-prompt-${ptyId}.log`
+  }
+
+  private buildWindowsCommandRequestPath(tempPath: string, ptyId: string): string {
+    return `${this.buildWindowsPromptMarkerDirectory(tempPath)}/${WINDOWS_POWERSHELL_COMMAND_REQUEST_FILE_PREFIX}${ptyId}.b64`
+  }
+
+  private buildWindowsCommandOutputPath(tempPath: string, ptyId: string): string {
+    return `${this.buildWindowsPromptMarkerDirectory(tempPath)}/${WINDOWS_POWERSHELL_COMMAND_OUTPUT_FILE_PREFIX}${ptyId}.txt`
+  }
+
+  private buildWindowsPromptMarkerDirectory(tempPath: string): string {
+    const normalizedTemp = this.normalizeRemotePath(tempPath).replace(/\/+$/, '')
+    return `${normalizedTemp}/${WINDOWS_POWERSHELL_REMOTE_SIDECAR_DIR_NAME}`
+  }
+
+  private buildWindowsPowerShellEncodedCommand(options?: {
+    commandTrackingMode?: SSHInstance['commandTrackingMode']
+    promptMarkerPath?: string
+    commandRequestPath?: string
+    commandOutputPath?: string
+  }): string {
+    return buildWindowsPowerShellEncodedCommand({
+      readyMarker: GYSHELL_READY_MARKER,
+      commandTrackingMode: options?.commandTrackingMode || 'shell-integration',
+      promptMarkerPath: options?.promptMarkerPath,
+      commandRequestPath: options?.commandRequestPath,
+      commandOutputPath: options?.commandOutputPath,
+    })
+  }
+
+  private getShellInitRetryIntervalMs(remoteOs: SSHInstance['remoteOs']): number {
+    return remoteOs === 'windows'
+      ? SSHBackend.WINDOWS_SHELL_INIT_RETRY_INTERVAL_MS
+      : SSHBackend.SHELL_INIT_RETRY_INTERVAL_MS
+  }
+
+  private async bootstrapWindowsSession(instance: SSHInstance): Promise<void> {
+    try {
+      const info = await this.execCollect(
+        instance.client,
+        this.buildWindowsBootstrapInfoCommand(),
+        10000
+      )
+      const parsed = JSON.parse(info.stdout || '{}') as WindowsBootstrapInfo
+      const release = String(parsed.Version || '').trim()
+      const tempPath = String(parsed.TempPath || '').trim()
+      const nextSystemInfo = {
+        os: 'Windows',
+        platform: 'win32',
+        release,
+        arch: String(parsed.Arch || '').trim(),
+        hostname: String(parsed.CSName || '').trim(),
+        isRemote: true,
+        shell: 'powershell.exe'
+      }
+      instance.systemInfo = nextSystemInfo
+      instance.windowsBuildNumber = parseWindowsBuildNumber(release)
+      instance.commandTrackingMode = this.shouldUseWindowsPowerShellSidecar(instance)
+        ? 'windows-powershell-sidecar'
+        : 'shell-integration'
+      if (instance.commandTrackingMode === 'windows-powershell-sidecar') {
+        const fallbackTempPath = tempPath || 'C:/Windows/Temp'
+        await this.cleanupStaleWindowsPromptMarkers(instance, fallbackTempPath)
+        instance.windowsPromptMarkerPath = this.buildWindowsPromptMarkerPath(
+          fallbackTempPath,
+          instance.sshConfig?.id || 'ssh'
+        )
+        instance.windowsCommandRequestPath = this.buildWindowsCommandRequestPath(
+          fallbackTempPath,
+          instance.sshConfig?.id || 'ssh'
+        )
+        instance.windowsCommandOutputPath = this.buildWindowsCommandOutputPath(
+          fallbackTempPath,
+          instance.sshConfig?.id || 'ssh'
+        )
+      } else {
+        instance.windowsPromptMarkerPath = undefined
+        instance.windowsCommandRequestPath = undefined
+        instance.windowsCommandOutputPath = undefined
+      }
+      instance.windowsPromptMarkerState = undefined
+    } catch {
+      instance.commandTrackingMode = 'shell-integration'
+      instance.windowsPromptMarkerPath = undefined
+      instance.windowsCommandRequestPath = undefined
+      instance.windowsCommandOutputPath = undefined
+    }
+  }
+
+  private async cleanupStaleWindowsPromptMarkers(
+    instance: SSHInstance,
+    tempPath: string
+  ): Promise<void> {
+    const markerDir = this.buildWindowsPromptMarkerDirectory(tempPath).replace(/\//g, '\\')
+    const cutoffDays = Math.floor(WINDOWS_POWERSHELL_SIDECAR_RETENTION_MS / (24 * 60 * 60 * 1000))
+    const script = [
+      `$__gyshell_marker_dir='${escapePowerShellSingleQuotedString(markerDir)}'`,
+      `if(Test-Path -LiteralPath $__gyshell_marker_dir){Get-ChildItem -LiteralPath $__gyshell_marker_dir -File -ErrorAction SilentlyContinue|Where-Object{($_.Name -like 'gyshell-prompt-*.log' -or $_.Name -like '${WINDOWS_POWERSHELL_COMMAND_REQUEST_FILE_PREFIX}*.b64' -or $_.Name -like '${WINDOWS_POWERSHELL_COMMAND_OUTPUT_FILE_PREFIX}*.txt') -and $_.LastWriteTimeUtc -lt (Get-Date).ToUniversalTime().AddDays(-${cutoffDays})}|Remove-Item -Force -ErrorAction SilentlyContinue}`
+    ].join(';')
+    const encoded = Buffer.from(script, 'utf16le').toString('base64')
+    try {
+      await this.execCollect(
+        instance.client,
+        `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+        6000
+      )
+    } catch {
+      // ignore best-effort stale temp cleanup failures
+    }
+  }
+
+  private async resetWindowsPromptMarker(instance: SSHInstance): Promise<boolean> {
+    if (!instance.windowsPromptMarkerPath) {
+      return false
+    }
+    const markerPath = this.normalizeRemotePath(instance.windowsPromptMarkerPath).replace(/\//g, '\\')
+    const script = [
+      '$__gyshell_utf8=[Text.UTF8Encoding]::new($false)',
+      '$OutputEncoding=$__gyshell_utf8',
+      `$__gyshell_marker_path='${escapePowerShellSingleQuotedString(markerPath)}'`,
+      '[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($__gyshell_marker_path))|Out-Null',
+      "[IO.File]::WriteAllText($__gyshell_marker_path,'',$__gyshell_utf8)"
+    ].join(';')
+    const encoded = Buffer.from(script, 'utf16le').toString('base64')
+    try {
+      await this.execCollect(
+        instance.client,
+        `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+        6000
+      )
+      instance.windowsPromptMarkerState = undefined
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private async readWindowsPromptMarkerState(instance: SSHInstance): Promise<WindowsPromptMarkerState | null> {
+    if (!instance.windowsPromptMarkerPath) {
+      return null
+    }
+    const sftp = await this.initializeSftp(instance)
+    const normalizedPath = this.normalizeRemotePath(instance.windowsPromptMarkerPath)
+    let stats: ssh2.Stats
+    try {
+      stats = await this.sftpStat(sftp, normalizedPath)
+    } catch (error: any) {
+      if (error?.code === 2 || error?.code === 'ENOENT') {
+        return null
+      }
+      throw error
+    }
+
+    const totalSize = Math.max(0, Number(stats.size) || 0)
+    if (totalSize <= 0) {
+      return null
+    }
+
+    const readSize = Math.min(totalSize, SSHBackend.WINDOWS_PROMPT_MARKER_TAIL_BYTES)
+    const startOffset = Math.max(0, totalSize - readSize)
+    const handle = await this.sftpOpen(sftp, normalizedPath, 'r')
+    try {
+      const buffer = Buffer.allocUnsafe(readSize)
+      const bytesRead = await this.sftpReadDirect(sftp, handle, buffer, 0, readSize, startOffset)
+      if (bytesRead <= 0) {
+        return null
+      }
+      const text = buffer.subarray(0, bytesRead).toString('utf8')
+      const lines = text.split(/\r?\n/)
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const parsed = parseWindowsPromptMarkerLine(lines[index] || '')
+        if (parsed) {
+          return {
+            sequence: parsed.sequence,
+            exitCode: parsed.exitCode,
+            cwd: parsed.cwd ? this.normalizeDecodedRemotePath(parsed.cwd) || undefined : undefined,
+            homeDir: parsed.homeDir ? this.normalizeDecodedRemotePath(parsed.homeDir) || undefined : undefined,
+            modifiedAtMs:
+              Number.isFinite(Number((stats as any).mtime)) ? Number((stats as any).mtime) * 1000 : undefined
+          }
+        }
+      }
+      return null
+    } finally {
+      await this.sftpClose(sftp, handle).catch(() => {})
+    }
+  }
+
+  private async refreshWindowsPromptMarkerState(
+    instance: SSHInstance,
+    options?: { allowCachedFallback?: boolean }
+  ): Promise<WindowsPromptMarkerState | null> {
+    let next: WindowsPromptMarkerState | null = null
+    try {
+      next = await this.readWindowsPromptMarkerState(instance)
+    } catch (error) {
+      next = await this.readWindowsPromptMarkerStateViaExec(instance).catch(() => {
+        throw error
+      })
+    }
+    return this.applyWindowsPromptMarkerState(instance, next, options)
+  }
+
+  private async refreshWindowsPromptMarkerStateViaExec(
+    instance: SSHInstance,
+    options?: { allowCachedFallback?: boolean }
+  ): Promise<WindowsPromptMarkerState | null> {
+    const next = await this.readWindowsPromptMarkerStateViaExec(instance)
+    return this.applyWindowsPromptMarkerState(instance, next, options)
+  }
+
+  private applyWindowsPromptMarkerState(
+    instance: SSHInstance,
+    next: WindowsPromptMarkerState | null,
+    options?: { allowCachedFallback?: boolean }
+  ): WindowsPromptMarkerState | null {
+    if (!next) {
+      if (options?.allowCachedFallback === false) {
+        return null
+      }
+      return instance.windowsPromptMarkerState || null
+    }
+    instance.windowsPromptMarkerState = next
+    if (next.cwd) {
+      instance.cwd = next.cwd
+    }
+    if (next.homeDir) {
+      instance.homeDir = next.homeDir
+    }
+    return next
+  }
+
+  private async readWindowsPromptMarkerStateViaExec(
+    instance: SSHInstance
+  ): Promise<WindowsPromptMarkerState | null> {
+    if (!instance.windowsPromptMarkerPath) {
+      return null
+    }
+    const markerPath = this.normalizeRemotePath(instance.windowsPromptMarkerPath).replace(/\//g, '\\')
+    const script = [
+      '$__gyshell_utf8=[Text.UTF8Encoding]::new($false)',
+      '[Console]::OutputEncoding=$__gyshell_utf8',
+      '$OutputEncoding=$__gyshell_utf8',
+      `$__gyshell_marker_path='${escapePowerShellSingleQuotedString(markerPath)}'`,
+      'if(Test-Path -LiteralPath $__gyshell_marker_path){$__gyshell_item=Get-Item -LiteralPath $__gyshell_marker_path -ErrorAction SilentlyContinue;$__gyshell_line=Get-Content -LiteralPath $__gyshell_marker_path -Tail 1 -ErrorAction SilentlyContinue;if($null -ne $__gyshell_line){$__gyshell_json=([pscustomobject]@{line=[string]$__gyshell_line;modifiedAtMs=[int64]([DateTimeOffset]$__gyshell_item.LastWriteTimeUtc).ToUnixTimeMilliseconds()}|ConvertTo-Json -Compress);$__gyshell_bytes=$__gyshell_utf8.GetBytes($__gyshell_json);[Console]::OpenStandardOutput().Write($__gyshell_bytes,0,$__gyshell_bytes.Length)}}'
+    ].join(';')
+    const encoded = Buffer.from(script, 'utf16le').toString('base64')
+    const result = await this.execCollect(
+      instance.client,
+      `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+      6000
+    )
+    const text = String(result.stdout || '').trim()
+    if (!text) {
+      return null
+    }
+    try {
+      const parsedJson = JSON.parse(text) as { line?: string; modifiedAtMs?: number }
+      const parsed = parseWindowsPromptMarkerLine(String(parsedJson.line || ''))
+      if (!parsed) {
+        return null
+      }
+      return {
+        sequence: parsed.sequence,
+        exitCode: parsed.exitCode,
+        cwd: parsed.cwd ? this.normalizeDecodedRemotePath(parsed.cwd) || undefined : undefined,
+        homeDir: parsed.homeDir ? this.normalizeDecodedRemotePath(parsed.homeDir) || undefined : undefined,
+        modifiedAtMs:
+          Number.isFinite(Number(parsedJson.modifiedAtMs)) ? Number(parsedJson.modifiedAtMs) : undefined
+      }
+    } catch {
+      const lines = text.split(/\r?\n/)
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const parsed = parseWindowsPromptMarkerLine(lines[index] || '')
+        if (parsed) {
+          return {
+            sequence: parsed.sequence,
+            exitCode: parsed.exitCode,
+            cwd: parsed.cwd ? this.normalizeDecodedRemotePath(parsed.cwd) || undefined : undefined,
+            homeDir: parsed.homeDir ? this.normalizeDecodedRemotePath(parsed.homeDir) || undefined : undefined
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  private async readWindowsCommandOutput(
+    instance: SSHInstance,
+    outputPath: string
+  ): Promise<string | undefined> {
+    const sftp = await this.initializeSftp(instance)
+    const normalizedPath = this.normalizeRemotePath(outputPath)
+    try {
+      const data = await new Promise<Buffer>((resolve, reject) => {
+        sftp.readFile(normalizedPath, (err, buf) => {
+          if (err || !buf) {
+            reject(err || new Error('Failed to read Windows sidecar output file'))
+            return
+          }
+          resolve(buf as Buffer)
+        })
+      })
+      return data.toString('utf8').replace(/^\ufeff/, '')
+    } catch (error: any) {
+      if (error?.code === 2 || error?.code === 'ENOENT') {
+        return undefined
+      }
+      throw error
+    }
+  }
+
+  private async readWindowsCommandOutputViaExec(
+    instance: SSHInstance,
+    outputPath: string
+  ): Promise<string | undefined> {
+    const normalizedPath = this.normalizeRemotePath(outputPath).replace(/\//g, '\\')
+    const script = [
+      '$__gyshell_utf8=[Text.UTF8Encoding]::new($false)',
+      '[Console]::OutputEncoding=$__gyshell_utf8',
+      '$OutputEncoding=$__gyshell_utf8',
+      `$__gyshell_output_path='${escapePowerShellSingleQuotedString(normalizedPath)}'`,
+      'if(Test-Path -LiteralPath $__gyshell_output_path){$__gyshell_text=[IO.File]::ReadAllText($__gyshell_output_path,$__gyshell_utf8);$__gyshell_bytes=$__gyshell_utf8.GetBytes($__gyshell_text);[Console]::OpenStandardOutput().Write($__gyshell_bytes,0,$__gyshell_bytes.Length)}'
+    ].join(';')
+    const encoded = Buffer.from(script, 'utf16le').toString('base64')
+    const result = await this.execCollect(
+      instance.client,
+      `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${encoded}`,
+      6000
+    )
+    const stdout = String(result.stdout || '')
+    return stdout ? stdout.replace(/^\ufeff/, '') : undefined
+  }
+
+  private async readWindowsCommandOutputBestEffort(
+    instance: SSHInstance,
+    outputPath: string | undefined,
+    options?: { preferExec?: boolean }
+  ): Promise<string | undefined> {
+    if (!outputPath) {
+      return undefined
+    }
+    if (options?.preferExec) {
+      try {
+        return await this.readWindowsCommandOutputViaExec(instance, outputPath)
+      } catch {
+        return undefined
+      }
+    }
+    try {
+      return await this.readWindowsCommandOutput(instance, outputPath)
+    } catch {
+      try {
+        return await this.readWindowsCommandOutputViaExec(instance, outputPath)
+      } catch {
+        return undefined
+      }
+    }
+  }
+
+  private async cleanupWindowsPromptMarker(instance: SSHInstance): Promise<void> {
+    const markerPath = instance.windowsPromptMarkerPath
+    const requestPath = instance.windowsCommandRequestPath
+    const outputPath = instance.windowsCommandOutputPath
+    if (!markerPath) {
+      instance.windowsCommandRequestPath = undefined
+      instance.windowsCommandOutputPath = undefined
+      return
+    }
+    const sftp = instance.sftp
+    if (!sftp) {
+      instance.windowsPromptMarkerPath = undefined
+      instance.windowsCommandRequestPath = undefined
+      instance.windowsCommandOutputPath = undefined
+      instance.windowsPromptMarkerState = undefined
+      return
+    }
+    try {
+      await this.sftpUnlink(sftp, this.normalizeRemotePath(markerPath))
+      if (requestPath) {
+        try {
+          await this.sftpUnlink(sftp, this.normalizeRemotePath(requestPath))
+        } catch {}
+      }
+      if (outputPath) {
+        try {
+          await this.sftpUnlink(sftp, this.normalizeRemotePath(outputPath))
+        } catch {}
+      }
+      const markerDir = this.normalizeRemotePath(dirname(markerPath))
+      try {
+        await this.sftpRmdir(sftp, markerDir)
+      } catch {}
+      try {
+        await this.sftpRmdir(sftp, this.normalizeRemotePath(dirname(markerDir)))
+      } catch {}
+    } catch (error: any) {
+      if (!(error?.code === 2 || error?.code === 'ENOENT')) {
+        // ignore best-effort cleanup failures
+      }
+    } finally {
+      instance.windowsPromptMarkerPath = undefined
+      instance.windowsCommandRequestPath = undefined
+      instance.windowsCommandOutputPath = undefined
+      instance.windowsPromptMarkerState = undefined
+    }
   }
 
   private async connectViaSocks5Proxy(opts: {
@@ -615,6 +1156,14 @@ Write-Output "__GYSHELL_READY__"
           emit(`\x1b[33m⚠ SFTP unavailable: ${message}. File panel features may be limited.\x1b[0m\r\n`)
         }
 
+        if (instance.remoteOs === 'windows') {
+          try {
+            await this.bootstrapWindowsSession(instance)
+          } catch {
+            instance.commandTrackingMode = 'shell-integration'
+          }
+        }
+
         emit('\x1b[36m▹ Opening interactive shell...\x1b[0m\r\n')
         console.log(`[SSH] Opening interactive shell...`)
         client.shell(
@@ -651,12 +1200,19 @@ Write-Output "__GYSHELL_READY__"
             if (!instance.stream || isReadySent || !instance.isInitializing) return
             
             console.log(`[SSH] Injection attempt ${retryCount + 1}...`)
-            instance.stream.write('\x03\n\n')
+            if (instance.remoteOs !== 'windows' || retryCount > 0) {
+              instance.stream.write('\x03\n\n')
+            }
 
             setTimeout(() => {
               if (!instance.stream || isReadySent || !instance.isInitializing) return
               if (instance.remoteOs === 'windows') {
-                const b64 = this.buildWindowsPowerShellEncodedCommand()
+                const b64 = this.buildWindowsPowerShellEncodedCommand({
+                  commandTrackingMode: instance.commandTrackingMode,
+                  promptMarkerPath: instance.windowsPromptMarkerPath,
+                  commandRequestPath: instance.windowsCommandRequestPath,
+                  commandOutputPath: instance.windowsCommandOutputPath
+                })
                 instance.stream.write(`powershell.exe -NoLogo -NoProfile -NoExit -EncodedCommand ${b64}\r`)
               } else {
                 const script = this.getUnixInjectionScript()
@@ -689,7 +1245,7 @@ Write-Output "__GYSHELL_READY__"
             } else {
               clearInterval(watchdogInterval)
             }
-          }, 8000)
+          }, this.getShellInitRetryIntervalMs(instance.remoteOs))
 
           stream.on('data', (data: Buffer) => {
             const chunk = data.toString()
@@ -721,8 +1277,9 @@ Write-Output "__GYSHELL_READY__"
             }
           })
 
-          stream.on('close', (code: number) => {
+          stream.on('close', async (code: number) => {
             this.clearSystemInfoRetry(instance)
+            await this.cleanupWindowsPromptMarker(instance).catch(() => {})
             for (const s of instance.forwardServers) { try { s.close() } catch {} }
             for (const rf of instance.remoteForwards) { try { instance.client.unforwardIn(rf.host, rf.port) } catch {} }
             try { instance.sftp?.end?.() } catch {}
@@ -810,6 +1367,7 @@ Write-Output "__GYSHELL_READY__"
     const instance = this.sessions.get(ptyId)
     if (instance) {
       this.clearSystemInfoRetry(instance)
+      void this.cleanupWindowsPromptMarker(instance)
       this.closeChunkSessionsForPty(ptyId)
       for (const s of instance.forwardServers) { try { s.close() } catch {} }
       for (const rf of instance.remoteForwards) { try { instance.client.unforwardIn(rf.host, rf.port) } catch {} }

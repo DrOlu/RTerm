@@ -37,7 +37,11 @@ interface StreamProbeOptions {
 export class ModelCapabilityService {
   async probe(model: ModelDefinition): Promise<ModelCapabilityProfile> {
     const testedAt = Date.now()
-    if (!model.model || !model.apiKey) {
+    // Normalize apiKey - trim whitespace and check for empty/invalid values
+    // This fixes issues on Windows Server 2016 where pasting may introduce whitespace or empty strings
+    const normalizedApiKey = typeof model.apiKey === 'string' ? model.apiKey.trim() : ''
+    
+    if (!model.model) {
       return {
         imageInputs: false,
         textOutputs: false,
@@ -45,22 +49,40 @@ export class ModelCapabilityService {
         supportsObjectToolChoice: false,
         testedAt,
         ok: false,
-        error: 'Missing model or apiKey'
+        error: 'Missing model name'
       }
     }
+    
+    if (!normalizedApiKey) {
+      return {
+        imageInputs: false,
+        textOutputs: false,
+        supportsStructuredOutput: false,
+        supportsObjectToolChoice: false,
+        testedAt,
+        ok: false,
+        error: 'Missing or empty apiKey - please check your API key is correctly entered'
+      }
+    }
+    
+    // Create a normalized model with trimmed apiKey for all subsequent operations
+    const normalizedModel: ModelDefinition = {
+      ...model,
+      apiKey: normalizedApiKey
+    }
 
-    const structuredMode = this.resolveStructuredOutputMode(model)
+    const structuredMode = this.resolveStructuredOutputMode(normalizedModel)
     const [textCheck, imageCheck, structuredOutputCheck, objectToolChoiceCheck] = await Promise.all([
-      this.checkTextOutputs(model),
-      this.checkImageInputs(model),
+      this.checkTextOutputs(normalizedModel),
+      this.checkImageInputs(normalizedModel),
       structuredMode === 'auto'
-        ? this.checkStructuredOutput(model)
+        ? this.checkStructuredOutput(normalizedModel)
         : Promise.resolve<ProbeStepResult>({ ok: structuredMode === 'on' }),
-      this.checkObjectToolChoice(model)
+      this.checkObjectToolChoice(normalizedModel)
     ])
     const activeCheck = textCheck.ok
       ? { ok: true as const }
-      : await this.checkActiveByModelsEndpoint(model)
+      : await this.checkActiveByModelsEndpoint(normalizedModel)
 
     const errors: string[] = []
     if (!imageCheck.ok && imageCheck.error) errors.push(`image: ${imageCheck.error}`)

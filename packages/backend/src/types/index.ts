@@ -269,15 +269,42 @@ export interface CommandResult {
   history_command_match_id: string
 }
 
+export type TerminalCommandTrackingMode = 'windows-powershell-sidecar'
+
+export interface TerminalCommandTrackingToken {
+  mode: TerminalCommandTrackingMode
+  baselineSequence: number
+  awaitingInitialFreshMarker?: boolean
+  dispatchedAtMs?: number
+  dispatchMode?: 'prompt-file'
+  displayMode?: 'synthetic-transcript'
+  commandRequestPath?: string
+  commandOutputPath?: string
+}
+
+export interface TerminalCommandTrackingUpdate {
+  mode: TerminalCommandTrackingMode
+  sequence: number
+  exitCode?: number
+  cwd?: string
+  homeDir?: string
+  output?: string
+}
+
 export interface CommandTask {
   id: string
   command: string
+  wireCommand?: string
+  completionTracking?: TerminalCommandTrackingToken
+  displayMode?: 'synthetic-transcript'
   type: 'wait' | 'nowait'
   status: 'running' | 'finished' | 'aborted' | 'timeout'
   startOffset: number
   endOffset?: number
   exitCode?: number
   output?: string
+  lastOutputAtMs?: number
+  capturedOutput?: string
   startTime: number
   endTime?: number
   startAbsLine?: number
@@ -632,6 +659,29 @@ export interface TerminalSessionBackend {
     timeoutMs?: number,
     options?: TerminalExecOptions
   ): Promise<{ stdout: string; stderr: string } | null>
+
+  /**
+   * Capture backend-specific command tracking state before dispatching a command.
+   * Backends return undefined when the normal shell integration path remains sufficient.
+   */
+  prepareCommandTracking?(
+    ptyId: string
+  ): Promise<TerminalCommandTrackingToken | undefined>
+
+  /**
+   * Poll backend-specific command tracking state after a command has been dispatched.
+   * Returns undefined until the tracked command is known to have finished.
+   */
+  pollCommandTracking?(
+    ptyId: string,
+    token: TerminalCommandTrackingToken
+  ): Promise<TerminalCommandTrackingUpdate | undefined>
+
+  /**
+   * Best-effort runtime state refresh used by path resolution on shells whose cwd/home
+   * tracking depends on an out-of-band sidecar channel.
+   */
+  refreshSessionState?(ptyId: string): Promise<void>
 }
 
 export interface TerminalExecOptions {

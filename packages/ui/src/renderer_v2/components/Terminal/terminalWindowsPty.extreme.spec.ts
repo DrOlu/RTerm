@@ -23,6 +23,14 @@ runCase('parses the Windows build number from a dotted release string', () => {
   assertEqual(parseWindowsBuildNumber('10.0.26100'), 26100, 'should parse the trailing build segment')
 })
 
+runCase('parses the Windows build number from a four-part release string', () => {
+  assertEqual(
+    parseWindowsBuildNumber('10.0.26100.3476'),
+    26100,
+    'should parse the build segment instead of the revision segment'
+  )
+})
+
 runCase('ignores invalid Windows release values', () => {
   assertEqual(parseWindowsBuildNumber(''), undefined, 'empty release should not yield a build number')
   assertEqual(parseWindowsBuildNumber('preview-build'), undefined, 'non-numeric release should not yield a build number')
@@ -36,10 +44,18 @@ runCase('derives a conservative conpty hint for Windows terminals', () => {
   )
 })
 
+runCase('uses winpty for pre-ConPTY Windows builds', () => {
+  assertDeepEqual(
+    resolveTerminalWindowsPty('windows', { release: '10.0.14393' }),
+    { backend: 'winpty', buildNumber: 14393 },
+    'pre-ConPTY Windows builds should receive a winpty hint'
+  )
+})
+
 runCase('falls back to a conservative build number before system info arrives', () => {
   assertDeepEqual(
     resolveTerminalWindowsPty('windows'),
-    { backend: 'conpty', buildNumber: 0 },
+    { backend: 'winpty', buildNumber: 0 },
     'windows terminals should use a fallback build number when needed'
   )
 })

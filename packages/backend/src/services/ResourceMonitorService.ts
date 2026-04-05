@@ -1,4 +1,5 @@
 import os from 'os'
+import { gzipSync } from 'zlib'
 import type { TerminalService } from './TerminalService'
 import type {
   ResourceSnapshot,
@@ -17,6 +18,8 @@ const DEFAULT_POLL_INTERVAL_MS = 2000
 const MIN_POLL_INTERVAL_MS = 500
 const MAX_POLL_INTERVAL_MS = 30000
 const SNAPSHOT_COMMAND_TIMEOUT_MS = 10000
+const WINDOWS_SNAPSHOT_COMMAND_TIMEOUT_MS = 20000
+const WINDOWS_SNAPSHOT_FALLBACK_TIMEOUT_MS = 25000
 const SECTION_MARKER = '__GYSHELL_MONITOR_SECTION__::'
 const MAX_TOP_PROCESSES = 16
 const MAX_SOCKET_ROWS = 24
@@ -659,11 +662,10 @@ export class ResourceMonitorService {
   ): Promise<CollectedSnapshot> {
     const terminal = this.terminalService.getTerminalById(terminalId)
     const monitorScript = this.buildWindowsMonitorScript()
-    const result = await this.terminalService.execOnTerminal(
+    const result = await this.executeWindowsMonitorCommand(
       terminalId,
-      terminal?.type === 'local' ? monitorScript : this.buildWindowsMonitorCommand(),
-      SNAPSHOT_COMMAND_TIMEOUT_MS,
-      terminal?.type === 'local' ? undefined : { stdin: `${monitorScript}\n` }
+      terminal,
+      monitorScript
     )
     if (!result) {
       return { error: 'Failed to execute Windows monitor command' }
@@ -731,6 +733,46 @@ export class ResourceMonitorService {
         socketEntries.length > 0 ? this.aggregateSocketEntries(socketEntries) : undefined,
       uptimeSeconds: this.asNumber(parsedUptime),
     }
+  }
+
+  private async executeWindowsMonitorCommand(
+    terminalId: string,
+    _terminal: TerminalTab | undefined,
+    monitorScript: string
+  ): Promise<{ stdout: string; stderr: string } | null> {
+    const attempts: Array<{
+      command: string
+      timeoutMs: number
+      options?: { stdin?: string }
+    }> = [
+      {
+        command: this.buildWindowsMonitorCommand(),
+        timeoutMs: WINDOWS_SNAPSHOT_COMMAND_TIMEOUT_MS,
+        options: { stdin: `${monitorScript}\r\n` }
+      },
+      {
+        command: this.buildWindowsMonitorBootstrapCommand(monitorScript),
+        timeoutMs: WINDOWS_SNAPSHOT_FALLBACK_TIMEOUT_MS
+      }
+    ]
+
+    let lastResult: { stdout: string; stderr: string } | null = null
+    for (const attempt of attempts) {
+      const result = await this.terminalService.execOnTerminal(
+        terminalId,
+        attempt.command,
+        attempt.timeoutMs,
+        attempt.options
+      )
+      if (result?.stdout?.trim()) {
+        return result
+      }
+      if (result) {
+        lastResult = result
+      }
+    }
+
+    return lastResult
   }
 
   private buildLinuxMonitorCommand(): string {
@@ -826,6 +868,19 @@ export class ResourceMonitorService {
 
   private buildWindowsMonitorCommand(): string {
     return 'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -'
+  }
+
+  private buildWindowsMonitorBootstrapCommand(script: string): string {
+    const compressed = gzipSync(Buffer.from(script, 'utf8')).toString('base64')
+    const bootstrap = [
+      `$compressed='${compressed}'`,
+      'iex ([IO.StreamReader]::new(',
+      '[IO.Compression.GzipStream]::new(',
+      '[IO.MemoryStream]::new([Convert]::FromBase64String($compressed)),',
+      '[IO.Compression.CompressionMode]::Decompress),',
+      '[Text.Encoding]::UTF8)).ReadToEnd()'
+    ].join('; ')
+    return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "${bootstrap}"`
   }
 
   private parseWindowsMonitorPayload(raw: string): any {

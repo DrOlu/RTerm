@@ -54,6 +54,9 @@ class FakeTerminalBackend implements TerminalBackend {
   private readonly spawnFailures = new Set<string>()
   private readonly remoteOsByPtyId = new Map<string, 'unix' | 'windows' | undefined>()
   private readonly systemInfoByPtyId = new Map<string, TerminalSystemInfo | undefined>()
+  private readonly homeDirByPtyId = new Map<string, string>()
+  private readonly refreshCallbacksByPtyId = new Map<string, () => Promise<void> | void>()
+  private readonly listDirectoryCalls: Array<{ ptyId: string; dirPath: string }> = []
 
   private getPtyIdForTerminalId(terminalId: string): string {
     return `pty-${terminalId}`
@@ -91,6 +94,28 @@ class FakeTerminalBackend implements TerminalBackend {
 
   setSystemInfoForTerminalId(terminalId: string, systemInfo: TerminalSystemInfo | undefined): void {
     this.systemInfoByPtyId.set(this.getPtyIdForTerminalId(terminalId), systemInfo)
+  }
+
+  setCwdForTerminalId(terminalId: string, cwd: string): void {
+    const session = this.sessions.get(this.getPtyIdForTerminalId(terminalId))
+    if (session) {
+      session.cwd = cwd
+    }
+  }
+
+  setHomeDirForTerminalId(terminalId: string, homeDir: string): void {
+    this.homeDirByPtyId.set(this.getPtyIdForTerminalId(terminalId), homeDir)
+  }
+
+  setRefreshSessionStateForTerminalId(
+    terminalId: string,
+    callback: () => Promise<void> | void
+  ): void {
+    this.refreshCallbacksByPtyId.set(this.getPtyIdForTerminalId(terminalId), callback)
+  }
+
+  getLastListDirectoryCall(): { ptyId: string; dirPath: string } | undefined {
+    return this.listDirectoryCalls[this.listDirectoryCalls.length - 1]
   }
 
   failSpawnForTerminalId(terminalId: string): void {
@@ -138,6 +163,8 @@ class FakeTerminalBackend implements TerminalBackend {
     this.sessions.delete(ptyId)
     this.remoteOsByPtyId.delete(ptyId)
     this.systemInfoByPtyId.delete(ptyId)
+    this.homeDirByPtyId.delete(ptyId)
+    this.refreshCallbacksByPtyId.delete(ptyId)
   }
 
   onData(ptyId: string, callback: (data: string) => void): void {
@@ -191,7 +218,8 @@ class FakeTerminalBackend implements TerminalBackend {
 
   async writeFileBytes(_ptyId: string, _filePath: string, _content: Buffer): Promise<void> {}
 
-  async listDirectory(_ptyId: string, _dirPath: string): Promise<FileSystemEntry[]> {
+  async listDirectory(ptyId: string, dirPath: string): Promise<FileSystemEntry[]> {
+    this.listDirectoryCalls.push({ ptyId, dirPath })
     return []
   }
 
@@ -203,12 +231,12 @@ class FakeTerminalBackend implements TerminalBackend {
 
   async renamePath(_ptyId: string, _sourcePath: string, _targetPath: string): Promise<void> {}
 
-  getCwd(_ptyId: string): string | undefined {
-    return '/tmp'
+  getCwd(ptyId: string): string | undefined {
+    return this.sessions.get(ptyId)?.cwd || '/tmp'
   }
 
-  async getHomeDir(_ptyId: string): Promise<string | undefined> {
-    return '/tmp'
+  async getHomeDir(ptyId: string): Promise<string | undefined> {
+    return this.homeDirByPtyId.get(ptyId) || '/tmp'
   }
 
   getRemoteOs(_ptyId: string): 'unix' | 'windows' | undefined {
@@ -217,6 +245,14 @@ class FakeTerminalBackend implements TerminalBackend {
 
   async getSystemInfo(_ptyId: string): Promise<TerminalSystemInfo | undefined> {
     return this.systemInfoByPtyId.get(_ptyId)
+  }
+
+  async refreshSessionState(ptyId: string): Promise<void> {
+    const callback = this.refreshCallbacksByPtyId.get(ptyId)
+    if (!callback) {
+      return
+    }
+    await callback()
   }
 
   async statFile(_ptyId: string, _filePath: string): Promise<FileStatInfo> {
@@ -766,6 +802,66 @@ const run = async (): Promise<void> => {
       assertCondition(
         service2.getDisplayTerminals().some((terminal) => terminal.id === 'serial-restore-a'),
         'restored terminal-only tab should exist in display inventory after restart'
+      )
+    })
+
+    await runCase('sidecar-backed windows file operations refresh cwd and home before resolving paths', async () => {
+      const backend = new FakeTerminalBackend()
+      backend.setRemoteOsForTerminalId('ssh-win-sidecar-fs', 'windows')
+      backend.setSystemInfoForTerminalId('ssh-win-sidecar-fs', {
+        os: 'Windows',
+        platform: 'win32',
+        release: '10.0.14393.0',
+        arch: 'x64',
+        hostname: 'ws2016',
+        isRemote: true,
+        shell: 'powershell.exe'
+      })
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'ssh-win-sidecar-fs',
+        title: 'Windows Sidecar FS',
+        host: '192.168.64.11',
+        port: 22,
+        username: 'Administrator',
+        authMethod: 'password',
+        password: 'secret',
+        cols: 120,
+        rows: 32
+      })
+
+      backend.setCwdForTerminalId('ssh-win-sidecar-fs', 'C:\\Users\\Administrator')
+      backend.setHomeDirForTerminalId('ssh-win-sidecar-fs', 'C:\\Users\\Administrator')
+      backend.setRefreshSessionStateForTerminalId('ssh-win-sidecar-fs', () => {
+        backend.setCwdForTerminalId('ssh-win-sidecar-fs', 'C:\\Windows')
+        backend.setHomeDirForTerminalId('ssh-win-sidecar-fs', 'C:\\Users\\Administrator')
+      })
+
+      const listed = await service.listDirectory('ssh-win-sidecar-fs')
+      const resolvedRelative = await service.resolvePathForFileSystem('ssh-win-sidecar-fs', 'System32')
+      const resolvedHome = await service.resolvePathForFileSystem('ssh-win-sidecar-fs', '~\\Desktop')
+
+      assertEqual(
+        listed.path,
+        'C:\\Windows',
+        'default directory listing should use the refreshed sidecar cwd after manual prompt changes'
+      )
+      assertEqual(
+        backend.getLastListDirectoryCall()?.dirPath,
+        'C:\\Windows',
+        'filesystem backend should receive the refreshed cwd for implicit listings'
+      )
+      assertEqual(
+        resolvedRelative,
+        'C:\\Windows\\System32',
+        'relative path resolution should use the refreshed sidecar cwd'
+      )
+      assertEqual(
+        resolvedHome,
+        'C:\\Users\\Administrator\\Desktop',
+        'home expansion should use the refreshed sidecar home directory'
       )
     })
   } finally {

@@ -9,7 +9,7 @@ const npxBinary = process.platform === "win32" ? "npx.cmd" : "npx";
 const checkArgs = [
   "-e",
   [
-    "const Database = require('better-sqlite3');",
+    "const Database = require('better-sqlite3-electron');",
     "const db = new Database(':memory:');",
     "db.exec('SELECT 1');",
     "db.close();",
@@ -52,7 +52,7 @@ const rebuild = run(npxBinary, [
   "electron-rebuild",
   "-f",
   "-w",
-  "better-sqlite3",
+  "better-sqlite3-electron",
 ]);
 if (rebuild.status !== 0) {
   const rebuildOutput = formatOutput(rebuild);

@@ -604,6 +604,90 @@ const run = async (): Promise<void> => {
     )
   })
 
+  await runCase('remote windows monitoring falls back to a compressed bootstrap when stdin execution returns no result', async () => {
+    const terminal = {
+      id: 'ssh-win-fallback',
+      type: 'ssh',
+      title: 'win',
+      runtimeState: 'ready',
+      remoteOs: 'windows',
+      capabilities: {
+        supportsMonitor: true,
+      },
+    }
+    const attempts: Array<{ command: string; timeoutMs: number; stdin?: string }> = []
+    const output = JSON.stringify({
+      s: {
+        h: 'remote-win',
+        o: 'Windows',
+        r: '10.0',
+        a: 'x64',
+        sh: 'powershell.exe',
+      },
+      c: {
+        u: 12,
+        c: [10, 14],
+        l: 2,
+      },
+      m: {
+        t: 100,
+        u: 45,
+        a: 55,
+        f: 55,
+        p: 45,
+      },
+      d: [],
+      g: [],
+      n: [],
+      p: [],
+      k: [],
+      u: 120,
+    })
+    const service = new ResourceMonitorService({
+      getTerminalById: (terminalId: string) =>
+        terminalId === terminal.id ? terminal : undefined,
+      getMonitorIdentity: () => 'ssh://shared-host:22',
+      execOnTerminal: async (
+        _terminalId: string,
+        command: string,
+        timeoutMs: number,
+        options?: { stdin?: string }
+      ) => {
+        attempts.push({ command, timeoutMs, stdin: options?.stdin })
+        if (attempts.length === 1) {
+          return null
+        }
+        return { stdout: output, stderr: '' }
+      },
+    } as any)
+
+    const snapshot = await (service as any).collectWindowsSnapshot('ssh-win-fallback')
+
+    assertEqual(attempts.length, 2, 'remote windows monitor should retry with a fallback launcher')
+    assertEqual(
+      attempts[0]?.command,
+      'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      'the first attempt should still use the stdin launcher'
+    )
+    assert(
+      attempts[0]?.stdin?.includes('Win32_OperatingSystem') &&
+        attempts[0]?.stdin?.endsWith('\r\n'),
+      'the stdin launcher should send the raw monitor script with Windows line endings'
+    )
+    assert(
+      attempts[1]?.command.startsWith(
+        'powershell.exe -NoLogo -NoProfile -NonInteractive -Command "'
+      ) &&
+        attempts[1]?.command.includes('FromBase64String('),
+      'the fallback should switch to a compressed bootstrap command'
+    )
+    assertEqual(
+      snapshot.system?.hostname,
+      'remote-win',
+      'the fallback launcher should still produce a valid windows snapshot'
+    )
+  })
+
   await runCase('windows snapshot parsing falls back to the final json line when stdout contains prompt noise', async () => {
     const terminal = {
       id: 'ssh-win-noisy',
@@ -640,7 +724,7 @@ const run = async (): Promise<void> => {
     )
   })
 
-  await runCase('local windows monitoring executes the raw powershell script without nesting powershell -Command', async () => {
+  await runCase('local windows monitoring sends the monitor script via stdin like ssh', async () => {
     const terminal = {
       id: 'local-win',
       type: 'local',
@@ -659,7 +743,8 @@ const run = async (): Promise<void> => {
         shell: 'powershell.exe',
       },
     }
-    const execCalls: string[] = []
+    let capturedCommand = ''
+    let capturedOptions: { stdin?: string } | undefined
     const output = JSON.stringify({
       s: {
         h: 'local-win',
@@ -690,23 +775,125 @@ const run = async (): Promise<void> => {
       getTerminalById: (terminalId: string) =>
         terminalId === terminal.id ? terminal : undefined,
       getMonitorIdentity: () => 'local://default',
-      execOnTerminal: async (_terminalId: string, command: string) => {
-        execCalls.push(command)
+      execOnTerminal: async (
+        _terminalId: string,
+        command: string,
+        _timeoutMs: number,
+        options?: { stdin?: string }
+      ) => {
+        capturedCommand = command
+        capturedOptions = options
         return { stdout: output, stderr: '' }
       },
     } as any)
 
     await (service as any).collectWindowsSnapshot('local-win')
+    const stdinPayload = capturedOptions?.stdin || ''
 
-    assertEqual(execCalls.length, 1, 'local windows snapshots should execute one monitor command')
-    assert(
-      !execCalls[0].startsWith('powershell -nop -noni -c "'),
-      'local windows snapshots should pass a raw powershell script to the local backend'
+    assertEqual(
+      capturedCommand,
+      'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      'local windows snapshots should launch PowerShell in stdin script mode'
     )
     assert(
-      execCalls[0].includes('Win32_OperatingSystem') &&
-        execCalls[0].includes('ConvertTo-Json -Depth 6 -Compress'),
-      'local windows snapshots should still execute the full windows monitor script'
+      stdinPayload.includes('Win32_OperatingSystem') &&
+        stdinPayload.includes('ConvertTo-Json -Depth 6 -Compress'),
+      'local windows snapshots should send the full monitor script via stdin'
+    )
+    assert(
+      stdinPayload.endsWith('\r\n'),
+      'local windows stdin payload should end with Windows line endings'
+    )
+  })
+
+  await runCase('local windows monitoring falls back to compressed bootstrap when stdin fails', async () => {
+    const terminal = {
+      id: 'local-win-fallback',
+      type: 'local',
+      title: 'win',
+      runtimeState: 'ready',
+      capabilities: {
+        supportsMonitor: true,
+      },
+      systemInfo: {
+        platform: 'win32',
+        os: 'Windows',
+        release: '10.0.14393',
+        arch: 'x64',
+        hostname: 'local-win-2016',
+        isRemote: false,
+        shell: 'powershell.exe',
+      },
+    }
+    const attempts: Array<{ command: string; timeoutMs: number; stdin?: string }> = []
+    const output = JSON.stringify({
+      s: {
+        h: 'local-win-2016',
+        o: 'Windows',
+        r: '10.0.14393',
+        a: 'x64',
+        sh: 'powershell.exe',
+      },
+      c: {
+        u: 8,
+        c: [6, 10],
+        l: 2,
+      },
+      m: {
+        t: 100,
+        u: 50,
+        a: 50,
+        f: 50,
+        p: 50,
+      },
+      d: [],
+      g: [],
+      n: [],
+      p: [],
+      k: [],
+      u: 300,
+    })
+    const service = new ResourceMonitorService({
+      getTerminalById: (terminalId: string) =>
+        terminalId === terminal.id ? terminal : undefined,
+      getMonitorIdentity: () => 'local://default',
+      execOnTerminal: async (
+        _terminalId: string,
+        command: string,
+        timeoutMs: number,
+        options?: { stdin?: string }
+      ) => {
+        attempts.push({ command, timeoutMs, stdin: options?.stdin })
+        if (attempts.length === 1) {
+          return null
+        }
+        return { stdout: output, stderr: '' }
+      },
+    } as any)
+
+    const snapshot = await (service as any).collectWindowsSnapshot('local-win-fallback')
+
+    assertEqual(attempts.length, 2, 'local windows monitor should retry with a fallback launcher')
+    assertEqual(
+      attempts[0]?.command,
+      'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      'the first local attempt should use the stdin launcher'
+    )
+    assert(
+      attempts[0]?.stdin?.includes('Win32_OperatingSystem'),
+      'the first local attempt should send the monitor script via stdin'
+    )
+    assert(
+      attempts[1]?.command.startsWith(
+        'powershell.exe -NoLogo -NoProfile -NonInteractive -Command "'
+      ) &&
+        attempts[1]?.command.includes('FromBase64String('),
+      'the local fallback should switch to a compressed bootstrap command'
+    )
+    assertEqual(
+      snapshot.system?.hostname,
+      'local-win-2016',
+      'the local fallback should still produce a valid windows snapshot'
     )
   })
 

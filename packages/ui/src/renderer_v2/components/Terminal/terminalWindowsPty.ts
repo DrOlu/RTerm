@@ -7,24 +7,18 @@ export interface TerminalSystemInfoLike {
 }
 
 const UNKNOWN_WINDOWS_BUILD = 0
+const CONPTY_MIN_WINDOWS_BUILD = 18309
 
 export const parseWindowsBuildNumber = (release?: string): number | undefined => {
   if (typeof release !== 'string') return undefined
   const normalized = release.trim()
   if (!normalized) return undefined
 
-  const segments = normalized.split('.')
-  for (let index = segments.length - 1; index >= 0; index -= 1) {
-    const rawSegment = segments[index]?.trim()
-    if (!rawSegment) continue
-    if (!/^\d+$/.test(rawSegment)) continue
-    const parsed = Number.parseInt(rawSegment, 10)
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      return parsed
-    }
-  }
+  const match = normalized.match(/^\d+\.\d+\.(\d+)/)
+  if (!match) return undefined
 
-  return undefined
+  const parsed = Number.parseInt(match[1], 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }
 
 export const resolveTerminalWindowsPty = (
@@ -35,10 +29,12 @@ export const resolveTerminalWindowsPty = (
     return undefined
   }
 
+  const buildNumber = parseWindowsBuildNumber(systemInfo?.release) ?? UNKNOWN_WINDOWS_BUILD
+
   return {
-    backend: 'conpty',
+    backend: buildNumber >= CONPTY_MIN_WINDOWS_BUILD ? 'conpty' : 'winpty',
     // Prefer a safe compatibility posture until the exact Windows build arrives.
-    buildNumber: parseWindowsBuildNumber(systemInfo?.release) ?? UNKNOWN_WINDOWS_BUILD
+    buildNumber
   }
 }
 
