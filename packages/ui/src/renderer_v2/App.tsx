@@ -6,6 +6,7 @@ import { SettingsView } from "./components/Settings/SettingsView";
 import { ConnectionsView } from "./components/Connections/ConnectionsView";
 import { ConfirmDialog } from "./components/Common/ConfirmDialog";
 import { LayoutWorkspace } from "./components/Layout/LayoutWorkspace";
+import { shouldShowHistoryMigrationOverlay } from "./lib/historyMigrationOverlay";
 import "./styles/app.scss";
 
 const store = new AppStore();
@@ -58,11 +59,8 @@ export const App: React.FC = observer(() => {
   const t = store.i18n.t;
   const versionInfo = store.versionInfo;
   const historyMigrationState = store.historyMigrationState;
-  const showHistoryMigrationOverlay = Boolean(
-    historyMigrationState &&
-    (historyMigrationState.blocking ||
-      historyMigrationState.status === "error"),
-  );
+  const showHistoryMigrationOverlay =
+    shouldShowHistoryMigrationOverlay(historyMigrationState);
   const migrationPercent = Math.max(
     0,
     Math.min(100, historyMigrationState?.percent ?? 0),

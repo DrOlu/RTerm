@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#key-capabilities)
 
 English README | [中文 README](./README.zh-CN.md)  
-Latest release notes: [`changelogs/v1.3.0.md`](./changelogs/v1.3.0.md)
+Latest release notes: [`changelogs/v1.4.0.md`](./changelogs/v1.4.0.md)
 
 If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/GyShell/discussions).
 
@@ -25,6 +25,9 @@ Usage guides:
 
 > [!WARNING]
 > **Active Development**: GyShell evolves quickly. If a version introduces history compatibility breaks, it will be called out explicitly in release notes.
+
+> [!NOTE]
+> **v1.4.0 upgrade note**: the first launch after upgrading may briefly block while GyShell migrates legacy JSON history into SQLite and writes timestamped backup files.
 
 <p align="center">
   <img src="./demo_imgs/demo.png" width="100%">
@@ -64,28 +67,19 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - **For multi-device flow**: desktop + TUI + mobile-web with shared gateway semantics.
 - **For multimodal workflows**: text and image inputs can be combined in one execution turn.
 
-## v1.3.0 Key Highlights
+## v1.4.0 Key Highlights
 
-- **Dedicated Compaction Model**
-  - assign a separate model for long-context history summarization inside each profile
-  - keep live chat, action, and deep-thinking models focused on the current task
-- **Terminal command draft**
-  - open a draft box inside the current terminal tab with a configurable shortcut
-  - generate a paste-ready shell command from recent terminal context instead of starting from scratch
-- **Seamless Agent chat mode**
-  - group consecutive commands, tool calls, file edits, and sub-tools into one compact activity banner
-  - float approvals and alerts above the input area to reduce transcript clutter
-- **Unified panel search**
-  - use `Ctrl/Cmd+F` in terminal, current chat, file browser, and file editor
-  - jump between matches with one consistent find bar
-- **File browser sorting and filtering**
-  - sort by name, modified time, size, or type directly in the file panel
-  - show or hide dotfiles without leaving the current directory
-  - refresh the built-in editor without reopening the file
-- **Smarter remote monitor**
-  - share monitor collection across tabs that point at the same machine
-  - fail over cleanly when the original source tab exits
-  - surface clearer GPU telemetry in a denser CLI-style monitor layout
+- **SQLite-backed conversation history**
+  - upgrade-time migration moves legacy JSON history into a single SQLite store and preserves timestamped backups
+  - history-heavy workflows should feel steadier when browsing, renaming, or deleting old sessions
+- **Windows PowerShell reliability upgrade**
+  - older Windows local and SSH PowerShell sessions track command completion more reliably
+  - rendered output is cleaner, and packaged Windows desktop builds ship with safer PTY runtime handling
+- **Per-source monitor control**
+  - pause or resume monitoring for each local machine or SSH target independently
+  - the choice persists across restarts
+- **Terminal search fix**
+  - terminal `Ctrl/Cmd+F` stays attached to the active tab after switches and layout remounts
 
 ---
 
@@ -97,6 +91,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - Context-aware responses from terminal state and selected resources.
 - Per-profile model routing for `Global`, `Thinking`, `Action`, and `Compaction` roles.
 - Long-session context quality with dedicated compaction models and dynamic compaction summaries.
+- SQLite-backed conversation history with automatic one-time migration from legacy JSON storage.
 - AI-assisted terminal command drafting from recent tab context, with paste-before-run control.
 - Classic or Seamless chat activity display, depending on how much inline tool detail you want.
 - Persistent global memory injection via `memory.md`.
@@ -106,6 +101,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 ### Terminal + SSH + File Management
 
 - Shell support: Zsh, Bash, PowerShell.
+- Older Windows PowerShell environments now use more reliable sidecar-based command completion tracking for local and SSH sessions.
 - SSH support: password/key auth, proxy chaining, bastion workflows.
 - Port forwarding: local, remote, and dynamic SOCKS.
 - Agent can coordinate **multiple SSH/local terminal tabs** in parallel during one task.
@@ -125,6 +121,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - Open a resource monitor panel for local and SSH terminals from the workspace rail.
 - Monitor panel surfaces CPU, memory, disk, network, process, socket, and GPU telemetry when available.
 - Monitor collection is shared across tabs that point at the same local or SSH target, with failover if the original source tab exits.
+- Monitor polling can be paused or resumed per local/SSH source, with the preference kept across restarts.
 - Compact monitor layouts now give GPU telemetry its own card with clearer VRAM usage details.
 
 ### Skills + MCP + Tools
@@ -285,7 +282,7 @@ See:
 
 ## Read More
 
-- Release notes: `changelogs/v1.3.0.md`
+- Release notes: `changelogs/v1.4.0.md`
 - Build matrix and packaging: `docs/build-commands.md`
 - Monorepo boundaries and runtime flow: `docs/monorepo-architecture.md`
 

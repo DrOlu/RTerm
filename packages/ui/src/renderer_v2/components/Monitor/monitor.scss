@@ -105,6 +105,15 @@
   max-width: 100%;
 }
 
+.monitor-tabs-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding-right: 4px;
+  flex: 0 0 auto;
+}
+
 // ── Panel body ───────────────────────────────────────
 
 .monitor-panel-body {
@@ -1346,56 +1355,88 @@
 // ── Polling toggle ──────────────────────────────────
 
 .monitor-polling-toggle {
-  position: relative;
-  display: inline-block;
-  flex-shrink: 0;
-  margin-left: auto;
-  margin-right: 8px;
-  align-self: center;
-  width: 36px;
+  --monitor-toggle-thumb-offset: 12px;
+  width: 34px;
   height: 18px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--fg-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   cursor: pointer;
+  line-height: 0;
+  opacity: 0.82;
+  transition: all 0.12s ease;
+}
 
-  input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
+.monitor-polling-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border-color: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+}
 
-  .switch-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: color-mix(in srgb, var(--fg) 10%, transparent);
-    border-radius: 2px;
-    border: 1px solid var(--border);
-    transition: all 0.2s;
+.monitor-polling-toggle:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
 
-    &::before {
-      position: absolute;
-      content: '';
-      height: 14px;
-      width: 14px;
-      left: 2px;
-      top: 1px;
-      background: var(--fg-muted);
-      border-radius: 1px;
-      transition: all 0.2s;
-    }
-  }
+.monitor-polling-toggle.is-enabled {
+  --monitor-toggle-thumb-offset: 0px;
+  color: var(--accent);
+}
 
-  input:checked + .switch-slider {
-    background: color-mix(in srgb, var(--accent) 20%, transparent);
-    border-color: var(--accent);
+.monitor-polling-toggle-track {
+  position: relative;
+  width: 24px;
+  height: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--panel-bg-2) 92%, black 8%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 7%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--fg) 5%, transparent);
+  transition: all 0.12s ease;
+}
 
-    &::before {
-      transform: translateX(16px);
-      background: var(--accent);
-    }
-  }
+.monitor-polling-toggle-track::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 50%;
+  border-left: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
+  transform: translateX(-0.5px);
+}
+
+.monitor-polling-toggle-thumb {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  width: 9px;
+  height: 6px;
+  border-radius: 1px;
+  background: currentColor;
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 32%, transparent);
+  transform: translateX(var(--monitor-toggle-thumb-offset));
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.monitor-polling-toggle.is-enabled .monitor-polling-toggle-track {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--panel-bg-2) 84%, var(--accent) 16%);
+}
+
+.monitor-polling-toggle:hover .monitor-polling-toggle-track {
+  border-color: color-mix(in srgb, var(--fg) 18%, var(--border));
+}
+
+.monitor-polling-toggle.is-enabled:hover .monitor-polling-toggle-track {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
 }
 
 // ── Paused state ────────────────────────────────────

@@ -150,13 +150,11 @@ export class FileSkillStore {
   }
 
   async ensureSkillsDir(): Promise<void> {
-    const roots = await this.resolveRoots()
-    for (const dir of roots) {
-      try {
-        await fs.mkdir(dir, { recursive: true })
-      } catch {
-        // ignore permission-denied locations
-      }
+    const primary = await this.resolvePrimaryRoot()
+    try {
+      await fs.mkdir(primary, { recursive: true })
+    } catch {
+      // ignore permission-denied locations
     }
   }
 

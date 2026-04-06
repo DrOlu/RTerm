@@ -1508,18 +1508,21 @@ const MonitorToggle: React.FC<{
   enabled: boolean
   onToggle: () => void
 }> = ({ enabled, onToggle }) => (
-  <label
-    className="switch monitor-polling-toggle"
+  <button
+    type="button"
+    className={enabled ? 'monitor-polling-toggle is-enabled' : 'monitor-polling-toggle'}
     title={enabled ? 'Pause monitoring' : 'Resume monitoring'}
-    onClick={(e) => e.stopPropagation()}
+    aria-label={enabled ? 'Pause monitoring' : 'Resume monitoring'}
+    aria-pressed={enabled}
+    onClick={(event) => {
+      event.stopPropagation()
+      onToggle()
+    }}
   >
-    <input
-      type="checkbox"
-      checked={enabled}
-      onChange={onToggle}
-    />
-    <span className="switch-slider" />
-  </label>
+    <span className="monitor-polling-toggle-track" aria-hidden="true">
+      <span className="monitor-polling-toggle-thumb" />
+    </span>
+  </button>
 )
 
 export const MonitorPanel: React.FC<MonitorPanelProps> = observer(({
@@ -1582,6 +1585,9 @@ export const MonitorPanel: React.FC<MonitorPanelProps> = observer(({
   }, [])
 
   const activeTab = activeTerminalId ? tabs.find((tab) => tab.id === activeTerminalId) : null
+  const monitorToggleControl = (
+    <MonitorToggle enabled={monitorEnabled} onToggle={handleToggleMonitor} />
+  )
 
   if (tabs.length === 0) {
     return (
@@ -1620,80 +1626,85 @@ export const MonitorPanel: React.FC<MonitorPanelProps> = observer(({
           <GripVertical size={12} strokeWidth={2.4} />
         </div>
         {tabBarMode === 'select' ? (
-          <CompactPanelTabSelect
-            className="monitor-tabs-select"
-            panelId={panelId}
-            panelKind="monitor"
-            value={activeTerminalId}
-            options={tabs.map((tab) => ({
-              value: tab.id,
-              label: tab.title,
-              leading: (
-                <span className="monitor-tab-icon">
-                  <Activity size={14} strokeWidth={2} />
-                </span>
-              ),
-              trailing: (
-                <span
-                  className={`tab-runtime-state tab-runtime-state-${(tab.runtimeState || 'initializing') === 'ready' ? 'ready' : 'inactive'}`}
-                  title={tab.runtimeState || 'initializing'}
-                />
-              )
-            }))}
-            onChange={onSelectTab}
-            leading={
-              <span className="monitor-tab-icon">
-                <Activity size={14} strokeWidth={2} />
-              </span>
-            }
-            trailing={
-              activeTab ? (
-                <span
-                  className={`tab-runtime-state tab-runtime-state-${(activeTab.runtimeState || 'initializing') === 'ready' ? 'ready' : 'inactive'}`}
-                  title={activeTab.runtimeState || 'initializing'}
-                />
-              ) : null
-            }
-          />
-        ) : (
-          <div
-            className="monitor-tabs-bar"
-            data-layout-tab-bar="true"
-            data-layout-tab-panel-id={panelId}
-            data-layout-tab-kind="monitor"
-          >
-            {tabs.map((tab, index) => {
-              const isActive = tab.id === activeTerminalId
-              const runtimeState = tab.runtimeState || 'initializing'
-              const runtimeIndicatorState = runtimeState === 'ready' ? 'ready' : 'inactive'
-              return (
-                <div
-                  key={tab.id}
-                  className={isActive ? 'monitor-tab is-active' : 'monitor-tab'}
-                  onClick={() => onSelectTab(tab.id)}
-                  role="button"
-                  tabIndex={0}
-                  draggable
-                  data-layout-tab-draggable="true"
-                  data-layout-tab-id={tab.id}
-                  data-layout-tab-kind="monitor"
-                  data-layout-tab-panel-id={panelId}
-                  data-layout-tab-index={index}
-                >
+          <>
+            <CompactPanelTabSelect
+              className="monitor-tabs-select"
+              panelId={panelId}
+              panelKind="monitor"
+              value={activeTerminalId}
+              options={tabs.map((tab) => ({
+                value: tab.id,
+                label: tab.title,
+                leading: (
                   <span className="monitor-tab-icon">
                     <Activity size={14} strokeWidth={2} />
                   </span>
-                  <span className="monitor-tab-title">{tab.title}</span>
+                ),
+                trailing: (
                   <span
-                    className={`tab-runtime-state tab-runtime-state-${runtimeIndicatorState}`}
-                    title={runtimeState}
+                    className={`tab-runtime-state tab-runtime-state-${(tab.runtimeState || 'initializing') === 'ready' ? 'ready' : 'inactive'}`}
+                    title={tab.runtimeState || 'initializing'}
                   />
-                </div>
-              )
-            })}
-          </div>
+                )
+              }))}
+              onChange={onSelectTab}
+              leading={
+                <span className="monitor-tab-icon">
+                  <Activity size={14} strokeWidth={2} />
+                </span>
+              }
+              trailing={
+                activeTab ? (
+                  <span
+                    className={`tab-runtime-state tab-runtime-state-${(activeTab.runtimeState || 'initializing') === 'ready' ? 'ready' : 'inactive'}`}
+                    title={activeTab.runtimeState || 'initializing'}
+                  />
+                ) : null
+              }
+            />
+            <div className="monitor-tabs-actions">{monitorToggleControl}</div>
+          </>
+        ) : (
+          <>
+            <div
+              className="monitor-tabs-bar"
+              data-layout-tab-bar="true"
+              data-layout-tab-panel-id={panelId}
+              data-layout-tab-kind="monitor"
+            >
+              {tabs.map((tab, index) => {
+                const isActive = tab.id === activeTerminalId
+                const runtimeState = tab.runtimeState || 'initializing'
+                const runtimeIndicatorState = runtimeState === 'ready' ? 'ready' : 'inactive'
+                return (
+                  <div
+                    key={tab.id}
+                    className={isActive ? 'monitor-tab is-active' : 'monitor-tab'}
+                    onClick={() => onSelectTab(tab.id)}
+                    role="button"
+                    tabIndex={0}
+                    draggable
+                    data-layout-tab-draggable="true"
+                    data-layout-tab-id={tab.id}
+                    data-layout-tab-kind="monitor"
+                    data-layout-tab-panel-id={panelId}
+                    data-layout-tab-index={index}
+                  >
+                    <span className="monitor-tab-icon">
+                      <Activity size={14} strokeWidth={2} />
+                    </span>
+                    <span className="monitor-tab-title">{tab.title}</span>
+                    <span
+                      className={`tab-runtime-state tab-runtime-state-${runtimeIndicatorState}`}
+                      title={runtimeState}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+            <div className="monitor-tabs-actions">{monitorToggleControl}</div>
+          </>
         )}
-        <MonitorToggle enabled={monitorEnabled} onToggle={handleToggleMonitor} />
       </div>
       <div className="panel-body monitor-panel-body" ref={panelBodyRef}>
         {activeTab && (
