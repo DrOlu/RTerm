@@ -97,8 +97,12 @@ const run = async (): Promise<void> => {
     )
     assertEqual(tracking.tmpPath, undefined, 'modern windows builds should not create a temp sidecar directory')
     assertCondition(
-      decoded.includes('Write-Host "__GYSHELL_TASK_FINISH__::ec=$ec"'),
-      'modern windows builds should keep the existing shell integration markers'
+      decoded.includes('Write-Host -NoNewline "$([char]27)]1337;gyshell_precmd;ec=$ec;cwd_b64=$cwd_b64;home_b64=$home_b64$([char]7)"'),
+      'modern windows builds should keep the zero-width OSC shell integration marker'
+    )
+    assertCondition(
+      !decoded.includes('__GYSHELL_TASK_FINISH__::ec=$ec'),
+      'modern windows builds should avoid visible finish markers that shift the prompt geometry'
     )
   })
 

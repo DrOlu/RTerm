@@ -85,7 +85,7 @@ export const buildWindowsPowerShellEncodedCommand = (options: {
         ]
           .filter(Boolean)
           .join(';')
-      : 'function Global:prompt{$ec=if($LASTEXITCODE -ne $null){$LASTEXITCODE}else{if($?){0}else{1}};$cwd_b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($PWD.Path));$home_b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($HOME));Write-Host "__GYSHELL_TASK_FINISH__::ec=$ec";Write-Host -NoNewline "$([char]27)]1337;gyshell_precmd;ec=$ec;cwd_b64=$cwd_b64;home_b64=$home_b64$([char]7)";"PS $($PWD.Path)> "};Clear-Host;Write-Output "__GYSHELL_READY__"'
+      : 'function Global:prompt{$ec=if($LASTEXITCODE -ne $null){$LASTEXITCODE}else{if($?){0}else{1}};$cwd_b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($PWD.Path));$home_b64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($HOME));Write-Host -NoNewline "$([char]27)]1337;gyshell_precmd;ec=$ec;cwd_b64=$cwd_b64;home_b64=$home_b64$([char]7)";"PS $($PWD.Path)> "};Clear-Host;Write-Output "__GYSHELL_READY__"'
 
   return Buffer.from(psInit, 'utf16le').toString('base64')
 }

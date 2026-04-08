@@ -8,6 +8,8 @@ import type {
 import { TerminalService } from './TerminalService'
 
 const WINDOWS_OSC_PRECMD = '\x1b]1337;gyshell_precmd;ec=0;cwd_b64=L3RtcA==\x07'
+const WINDOWS_OSC_PRECMD_WITH_PROMPT =
+  '\x1b]1337;gyshell_precmd;ec=0;cwd_b64=QzpcVXNlcnNcQWRtaW5pc3RyYXRvcg==;home_b64=QzpcVXNlcnNcQWRtaW5pc3RyYXRvcg==\x07'
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
   if (actual !== expected) {
@@ -901,7 +903,7 @@ const run = async (): Promise<void> => {
 
     backend.emitData(
       'win-ssh-modern-echo-noise',
-      'cmd /c "echcmd /c "echocmd /c "echo WIN_OK"\r\nWIN_OK\r\n__GYSHELL_TASK_FINISH__::ec=0\r\n'
+      `cmd /c "echcmd /c "echocmd /c "echo WIN_OK"\r\nWIN_OK\r\n${WINDOWS_OSC_PRECMD_WITH_PROMPT}PS C:\\Users\\Administrator> `
     )
 
     const result = await waitPromise
@@ -953,7 +955,7 @@ const run = async (): Promise<void> => {
 
     backend.emitData(
       'win-ssh-modern-prompt-output',
-      "Write-Output 'PS C:\\repo>'\r\nPS C:\\repo>\r\nPS C:\\Users\\Administrator>\r\n__GYSHELL_TASK_FINISH__::ec=0\r\n"
+      `Write-Output 'PS C:\\repo>'\r\nPS C:\\repo>\r\n${WINDOWS_OSC_PRECMD_WITH_PROMPT}PS C:\\Users\\Administrator> `
     )
 
     const result = await waitPromise

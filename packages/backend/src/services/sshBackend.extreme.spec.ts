@@ -45,8 +45,8 @@ const run = async (): Promise<void> => {
       'windows init script should emit the precmd marker directly via Write-Host'
     )
     assertCondition(
-      decoded.includes('Write-Host "__GYSHELL_TASK_FINISH__::ec=$ec"'),
-      'windows init script should also emit a plain-text finish marker for downlevel winpty sessions'
+      !decoded.includes('__GYSHELL_TASK_FINISH__::ec=$ec'),
+      'windows init script should avoid visible finish markers that skew the rendered cursor position'
     )
     assertCondition(
       decoded.includes(';"PS $($PWD.Path)> "};'),
