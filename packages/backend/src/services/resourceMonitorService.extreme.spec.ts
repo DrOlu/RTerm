@@ -604,7 +604,7 @@ const run = async (): Promise<void> => {
     )
   })
 
-  await runCase('remote windows monitoring falls back to a compressed bootstrap when stdin execution returns no result', async () => {
+  await runCase('remote windows monitoring retries with raw stdin when the first attempt returns no result', async () => {
     const terminal = {
       id: 'ssh-win-fallback',
       type: 'ssh',
@@ -663,7 +663,7 @@ const run = async (): Promise<void> => {
 
     const snapshot = await (service as any).collectWindowsSnapshot('ssh-win-fallback')
 
-    assertEqual(attempts.length, 2, 'remote windows monitor should retry with a fallback launcher')
+    assertEqual(attempts.length, 2, 'remote windows monitor should retry once when stdin returns no result')
     assertEqual(
       attempts[0]?.command,
       'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
@@ -675,16 +675,19 @@ const run = async (): Promise<void> => {
       'the stdin launcher should send the raw monitor script with Windows line endings'
     )
     assert(
-      attempts[1]?.command.startsWith(
-        'powershell.exe -NoLogo -NoProfile -NonInteractive -Command "'
-      ) &&
-        attempts[1]?.command.includes('FromBase64String('),
-      'the fallback should switch to a compressed bootstrap command'
+      attempts[1]?.command === 'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      'the retry should stay on the raw stdin launcher'
+    )
+    assert(
+      attempts[1]?.stdin?.includes('Win32_OperatingSystem') &&
+        !String(attempts[1]?.stdin || '').includes('FromBase64String') &&
+        !String(attempts[1]?.stdin || '').includes('iex '),
+      'the retry should keep sending the unobfuscated monitor script through stdin'
     )
     assertEqual(
       snapshot.system?.hostname,
       'remote-win',
-      'the fallback launcher should still produce a valid windows snapshot'
+      'the raw stdin retry should still produce a valid windows snapshot'
     )
   })
 
@@ -806,7 +809,7 @@ const run = async (): Promise<void> => {
     )
   })
 
-  await runCase('local windows monitoring falls back to compressed bootstrap when stdin fails', async () => {
+  await runCase('local windows monitoring retries with raw stdin when the first attempt fails', async () => {
     const terminal = {
       id: 'local-win-fallback',
       type: 'local',
@@ -873,7 +876,7 @@ const run = async (): Promise<void> => {
 
     const snapshot = await (service as any).collectWindowsSnapshot('local-win-fallback')
 
-    assertEqual(attempts.length, 2, 'local windows monitor should retry with a fallback launcher')
+    assertEqual(attempts.length, 2, 'local windows monitor should retry once when stdin returns no result')
     assertEqual(
       attempts[0]?.command,
       'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
@@ -884,16 +887,19 @@ const run = async (): Promise<void> => {
       'the first local attempt should send the monitor script via stdin'
     )
     assert(
-      attempts[1]?.command.startsWith(
-        'powershell.exe -NoLogo -NoProfile -NonInteractive -Command "'
-      ) &&
-        attempts[1]?.command.includes('FromBase64String('),
-      'the local fallback should switch to a compressed bootstrap command'
+      attempts[1]?.command === 'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -',
+      'the local retry should stay on the raw stdin launcher'
+    )
+    assert(
+      attempts[1]?.stdin?.includes('Win32_OperatingSystem') &&
+        !String(attempts[1]?.stdin || '').includes('FromBase64String') &&
+        !String(attempts[1]?.stdin || '').includes('iex '),
+      'the local retry should keep sending the unobfuscated monitor script through stdin'
     )
     assertEqual(
       snapshot.system?.hostname,
       'local-win-2016',
-      'the local fallback should still produce a valid windows snapshot'
+      'the local raw stdin retry should still produce a valid windows snapshot'
     )
   })
 

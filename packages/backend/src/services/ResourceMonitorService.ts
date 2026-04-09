@@ -1,5 +1,4 @@
 import os from 'os'
-import { gzipSync } from 'zlib'
 import type { TerminalService } from './TerminalService'
 import type {
   ResourceSnapshot,
@@ -19,7 +18,7 @@ const MIN_POLL_INTERVAL_MS = 500
 const MAX_POLL_INTERVAL_MS = 30000
 const SNAPSHOT_COMMAND_TIMEOUT_MS = 10000
 const WINDOWS_SNAPSHOT_COMMAND_TIMEOUT_MS = 20000
-const WINDOWS_SNAPSHOT_FALLBACK_TIMEOUT_MS = 25000
+const WINDOWS_SNAPSHOT_RETRY_TIMEOUT_MS = 25000
 const SECTION_MARKER = '__GYSHELL_MONITOR_SECTION__::'
 const MAX_TOP_PROCESSES = 16
 const MAX_SOCKET_ROWS = 24
@@ -751,8 +750,9 @@ export class ResourceMonitorService {
         options: { stdin: `${monitorScript}\r\n` }
       },
       {
-        command: this.buildWindowsMonitorBootstrapCommand(monitorScript),
-        timeoutMs: WINDOWS_SNAPSHOT_FALLBACK_TIMEOUT_MS
+        command: this.buildWindowsMonitorCommand(),
+        timeoutMs: WINDOWS_SNAPSHOT_RETRY_TIMEOUT_MS,
+        options: { stdin: `${monitorScript}\r\n` }
       }
     ]
 
@@ -868,19 +868,6 @@ export class ResourceMonitorService {
 
   private buildWindowsMonitorCommand(): string {
     return 'powershell.exe -NoLogo -NoProfile -NonInteractive -Command -'
-  }
-
-  private buildWindowsMonitorBootstrapCommand(script: string): string {
-    const compressed = gzipSync(Buffer.from(script, 'utf8')).toString('base64')
-    const bootstrap = [
-      `$compressed='${compressed}'`,
-      'iex ([IO.StreamReader]::new(',
-      '[IO.Compression.GzipStream]::new(',
-      '[IO.MemoryStream]::new([Convert]::FromBase64String($compressed)),',
-      '[IO.Compression.CompressionMode]::Decompress),',
-      '[Text.Encoding]::UTF8)).ReadToEnd()'
-    ].join('; ')
-    return `powershell.exe -NoLogo -NoProfile -NonInteractive -Command "${bootstrap}"`
   }
 
   private parseWindowsMonitorPayload(raw: string): any {
