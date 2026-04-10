@@ -187,10 +187,11 @@ export class HistoryStorageMigration {
       }
 
       // Lazy-load SQLite only when migration is actually needed.
-      const { loadBetterSqlite3 } = await import("./betterSqlite3Runtime");
+      const { openBetterSqlite3Database } = await import(
+        "./betterSqlite3Runtime"
+      );
       const { HistorySqliteStore } = await import("./HistorySqliteStore");
-      const BetterSqlite3 = loadBetterSqlite3();
-      const db: DatabaseHandle = new BetterSqlite3(tempDbPath);
+      const db: DatabaseHandle = openBetterSqlite3Database(tempDbPath);
       try {
         HistorySqliteStore.initializeDatabase(db);
         await this.importChatSessions(db, chatSessions, advance);

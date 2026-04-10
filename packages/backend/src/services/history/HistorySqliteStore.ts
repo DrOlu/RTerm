@@ -7,19 +7,10 @@ import type {
   StoredChatSessionRecord,
   UISessionSummaryRecord,
 } from "./historyTypes";
-import { loadBetterSqlite3 } from "./betterSqlite3Runtime";
+import { openBetterSqlite3Database } from "./betterSqlite3Runtime";
 import { resolveHistoryStoragePaths } from "./historyStoragePaths";
 
 type DatabaseHandle = InstanceType<typeof import("better-sqlite3")>;
-type BetterSqlite3Constructor = ReturnType<typeof loadBetterSqlite3>;
-
-let _cachedBetterSqlite3: BetterSqlite3Constructor | null = null;
-function getBetterSqlite3(): BetterSqlite3Constructor {
-  if (!_cachedBetterSqlite3) {
-    _cachedBetterSqlite3 = loadBetterSqlite3();
-  }
-  return _cachedBetterSqlite3;
-}
 
 interface HistorySqliteStoreOptions {
   filePath?: string;
@@ -67,7 +58,7 @@ export class HistorySqliteStore {
     this.filePath =
       options?.filePath || resolveHistoryStoragePaths().sqliteDbPath;
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    this.db = new (getBetterSqlite3())(this.filePath);
+    this.db = openBetterSqlite3Database(this.filePath);
     HistorySqliteStore.initializeDatabase(this.db);
   }
 
@@ -146,7 +137,7 @@ export class HistorySqliteStore {
     if (!fs.existsSync(filePath)) {
       return false;
     }
-    const db = new (getBetterSqlite3())(filePath, { readonly: true });
+    const db = openBetterSqlite3Database(filePath, { readonly: true });
     try {
       const row = db
         .prepare(

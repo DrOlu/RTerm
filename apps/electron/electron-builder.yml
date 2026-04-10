@@ -22,6 +22,10 @@ extraResources:
     to: cli
     filter:
       - '**/*'
+  - from: node_modules/better-sqlite3-electron/build/Release
+    to: native-modules/better-sqlite3
+    filter:
+      - better_sqlite3.node
   - from: apps/electron/mobile-web-runtime
     to: mobile-web
     filter:

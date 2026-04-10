@@ -11,9 +11,13 @@
 
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  formatNativeBinaryIdentity,
+  inspectNativeBinary,
+  matchesNativeBinaryTarget,
+} from "./native-binary-utils.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -43,37 +47,6 @@ function isHostMatch(targetPlatform, targetArch) {
   return targetPlatform === process.platform && targetArch === process.arch;
 }
 
-function detectBinaryPlatform(filePath) {
-  if (!fs.existsSync(filePath)) {
-    return "missing";
-  }
-  const header = Buffer.alloc(4);
-  const fd = fs.openSync(filePath, "r");
-  try {
-    fs.readSync(fd, header, 0, 4, 0);
-  } finally {
-    fs.closeSync(fd);
-  }
-  // PE (Windows): starts with "MZ"
-  if (header[0] === 0x4d && header[1] === 0x5a) {
-    return "win32";
-  }
-  // Mach-O (macOS): magic 0xFEEDFACE / 0xFEEDFACF / fat binary 0xCAFEBABE
-  if (
-    (header[0] === 0xfe && header[1] === 0xed) ||
-    (header[0] === 0xcf && header[1] === 0xfa) ||
-    (header[0] === 0xce && header[1] === 0xfa) ||
-    (header[0] === 0xca && header[1] === 0xfe)
-  ) {
-    return "darwin";
-  }
-  // ELF (Linux): starts with 0x7F "ELF"
-  if (header[0] === 0x7f && header[1] === 0x45 && header[2] === 0x4c && header[3] === 0x46) {
-    return "linux";
-  }
-  return "unknown";
-}
-
 const { platform: targetPlatform, arch: targetArch } = parseArgs();
 if (!targetPlatform || !targetArch) {
   console.log(
@@ -82,61 +55,87 @@ if (!targetPlatform || !targetArch) {
   process.exit(0);
 }
 
-if (isHostMatch(targetPlatform, targetArch)) {
-  console.log(
-    `[ensure-better-sqlite3-target-prebuilt] Target ${targetPlatform}-${targetArch} matches host, skipping.`
-  );
-  process.exit(0);
-}
-
-// Check if the current binary already matches the target platform.
-const currentPlatform = detectBinaryPlatform(nodeFilePath);
-if (currentPlatform === targetPlatform) {
-  console.log(
-    `[ensure-better-sqlite3-target-prebuilt] Binary already targets ${targetPlatform}, skipping.`
-  );
-  process.exit(0);
-}
+const currentIdentity = inspectNativeBinary(nodeFilePath);
 
 console.log(
-  `[ensure-better-sqlite3-target-prebuilt] Current binary is ${currentPlatform}, downloading prebuild for ${targetPlatform}-${targetArch} (Electron ${electronVersion})...`
+  `[ensure-better-sqlite3-target-prebuilt] Current binary is ${formatNativeBinaryIdentity(currentIdentity)}, preparing ${targetPlatform}-${targetArch} (Electron ${electronVersion})...`
 );
 
 const npxBin = process.platform === "win32" ? "npx.cmd" : "npx";
-const result = spawnSync(
-  npxBin,
-  [
-    "prebuild-install",
-    "--platform", targetPlatform,
-    "--arch", targetArch,
-    "--runtime", "electron",
-    "--target", electronVersion,
-    "--tag-prefix", "v",
-  ],
-  {
+const ensureHostScriptPath = path.join(
+  scriptDir,
+  "ensure-better-sqlite3-electron.mjs",
+);
+
+const run = (command, args) =>
+  spawnSync(command, args, {
     cwd: modulePath,
     env: { ...process.env },
     encoding: "utf8",
     stdio: "inherit",
-  }
-);
+  });
 
-if (result.status !== 0) {
-  console.error(
-    `[ensure-better-sqlite3-target-prebuilt] Failed to download prebuild for ${targetPlatform}-${targetArch}.`
-  );
-  process.exit(result.status ?? 1);
+if (isHostMatch(targetPlatform, targetArch)) {
+  const prebuildResult = run(npxBin, [
+    "prebuild-install",
+    "--platform",
+    targetPlatform,
+    "--arch",
+    targetArch,
+    "--runtime",
+    "electron",
+    "--target",
+    electronVersion,
+    "--tag-prefix",
+    "v",
+  ]);
+
+  if (prebuildResult.status !== 0) {
+    console.warn(
+      `[ensure-better-sqlite3-target-prebuilt] Prebuild download failed for host target ${targetPlatform}-${targetArch}; falling back to electron rebuild verification.`,
+    );
+  }
+
+  const hostVerifyResult = spawnSync(process.execPath, [ensureHostScriptPath], {
+    cwd: repoRoot,
+    env: { ...process.env },
+    encoding: "utf8",
+    stdio: "inherit",
+  });
+  if (hostVerifyResult.status !== 0) {
+    process.exit(hostVerifyResult.status ?? 1);
+  }
+} else {
+  const crossTargetResult = run(npxBin, [
+    "prebuild-install",
+    "--platform",
+    targetPlatform,
+    "--arch",
+    targetArch,
+    "--runtime",
+    "electron",
+    "--target",
+    electronVersion,
+    "--tag-prefix",
+    "v",
+  ]);
+
+  if (crossTargetResult.status !== 0) {
+    console.error(
+      `[ensure-better-sqlite3-target-prebuilt] Failed to download prebuild for ${targetPlatform}-${targetArch}.`
+    );
+    process.exit(crossTargetResult.status ?? 1);
+  }
 }
 
-// Verify the downloaded binary matches the target platform.
-const verifiedPlatform = detectBinaryPlatform(nodeFilePath);
-if (verifiedPlatform !== targetPlatform) {
+const verifiedIdentity = inspectNativeBinary(nodeFilePath);
+if (!matchesNativeBinaryTarget(verifiedIdentity, targetPlatform, targetArch)) {
   console.error(
-    `[ensure-better-sqlite3-target-prebuilt] Downloaded binary is ${verifiedPlatform}, expected ${targetPlatform}. Prebuild may be corrupt.`
+    `[ensure-better-sqlite3-target-prebuilt] Downloaded binary is ${formatNativeBinaryIdentity(verifiedIdentity)}, expected ${targetPlatform}-${targetArch}.`
   );
   process.exit(1);
 }
 
 console.log(
-  `[ensure-better-sqlite3-target-prebuilt] Successfully installed ${targetPlatform}-${targetArch} prebuild.`
+  `[ensure-better-sqlite3-target-prebuilt] Ready: ${formatNativeBinaryIdentity(verifiedIdentity)}.`
 );
