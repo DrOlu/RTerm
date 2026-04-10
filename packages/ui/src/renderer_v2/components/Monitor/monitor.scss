@@ -404,9 +404,18 @@
   box-shadow: none;
 }
 
+.monitor-card.is-detail-source .monitor-card-header {
+  border-bottom-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.monitor-card.is-detail-source .monitor-card-title {
+  color: color-mix(in srgb, var(--accent) 88%, white 8%);
+}
+
 .monitor-card-header {
   min-height: 24px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -415,6 +424,7 @@
 }
 
 .monitor-card-title {
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -452,6 +462,7 @@
 
 .monitor-segmented {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0;
   padding: 0;
@@ -832,8 +843,7 @@
 
 .monitor-compact-label,
 .monitor-compact-detail,
-.monitor-compact-value,
-.monitor-compact-overflow {
+.monitor-compact-value {
   font-family: var(--font-mono);
 }
 
@@ -849,8 +859,7 @@
   white-space: nowrap;
 }
 
-.monitor-compact-detail,
-.monitor-compact-overflow {
+.monitor-compact-detail {
   color: var(--fg-muted);
   font-size: var(--monitor-font-size-sm);
 }
@@ -872,9 +881,150 @@
 .monitor-compact-value.tone-warn { color: var(--monitor-warn); }
 .monitor-compact-value.tone-danger { color: var(--monitor-danger); }
 
-.monitor-compact-overflow {
+.monitor-overflow-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 10px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.monitor-overflow-meta,
+.monitor-overflow-toggle {
+  font-family: var(--font-mono);
+  font-size: var(--monitor-font-size-sm);
   text-transform: uppercase;
   letter-spacing: 0.48px;
+}
+
+.monitor-overflow-meta {
+  color: var(--fg-faint);
+}
+
+.monitor-overflow-toggle {
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.monitor-overflow-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.monitor-overflow-toggle.is-active-detail {
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.monitor-overflow-toggle.is-active-detail:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.monitor-overflow-toggle:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.monitor-detail-wrap {
+  min-width: 0;
+}
+
+.monitor-detail-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 2px 3px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px dashed var(--monitor-line);
+  background: color-mix(in srgb, var(--panel-bg-2) 92%, var(--accent) 5%);
+}
+
+.monitor-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.monitor-detail-title,
+.monitor-detail-meta,
+.monitor-detail-close {
+  font-family: var(--font-mono);
+}
+
+.monitor-detail-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  font-size: var(--monitor-font-size-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.monitor-detail-meta {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 10px;
+  color: var(--fg-muted);
+  font-size: var(--monitor-font-size-sm);
+}
+
+.monitor-detail-close {
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--monitor-font-size-sm);
+  font-weight: 700;
+  letter-spacing: 0.48px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.monitor-detail-close:hover {
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.monitor-detail-close:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.monitor-detail-body {
+  min-width: 0;
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-gutter: stable;
+}
+
+.monitor-detail-body .monitor-table,
+.monitor-detail-body .monitor-disk-list,
+.monitor-detail-body .monitor-compact-list,
+.monitor-detail-body .monitor-core-grid {
+  min-width: 0;
 }
 
 // ── Compact strip head (ultra compact) ───────────────
@@ -1165,6 +1315,19 @@
 .monitor-content-ultra .monitor-compact-row {
   min-height: 16px;
   padding: 1px 3px;
+}
+
+.monitor-content-ultra .monitor-overflow-bar {
+  padding-top: 3px;
+}
+
+.monitor-content-ultra .monitor-detail-dock {
+  padding: 3px 4px;
+  gap: 3px;
+}
+
+.monitor-content-ultra .monitor-detail-head {
+  padding-bottom: 3px;
 }
 
 // ── Layout: dense ────────────────────────────────────

@@ -17,6 +17,18 @@ export interface MonitorPresentationConfig {
   memoryTagCount: number
 }
 
+export interface MonitorVisibleCollection {
+  visibleCount: number
+  totalCount: number
+  hiddenCount: number
+  hasOverflow: boolean
+  expanded: boolean
+}
+
+export interface MonitorVisibleRows<T> extends MonitorVisibleCollection {
+  rows: T[]
+}
+
 const DEFAULT_CONFIG: Record<MonitorPresentationMode, Omit<MonitorPresentationConfig, 'mode'>> = {
   standard: {
     historyBarCount: 24,
@@ -98,5 +110,28 @@ export const getMonitorPresentationConfig = (
   return {
     mode,
     ...DEFAULT_CONFIG[mode],
+  }
+}
+
+export const resolveMonitorVisibleRows = <T>(
+  rows: readonly T[] | null | undefined,
+  collapsedCount: number,
+  expanded: boolean
+): MonitorVisibleRows<T> => {
+  const allRows = Array.isArray(rows) ? [...rows] : []
+  const normalizedCollapsedCount = Number.isFinite(collapsedCount)
+    ? Math.max(1, Math.floor(collapsedCount))
+    : allRows.length || 1
+  const hasOverflow = allRows.length > normalizedCollapsedCount
+  const visibleRows =
+    expanded || !hasOverflow ? allRows : allRows.slice(0, normalizedCollapsedCount)
+
+  return {
+    rows: visibleRows,
+    visibleCount: visibleRows.length,
+    totalCount: allRows.length,
+    hiddenCount: Math.max(0, allRows.length - visibleRows.length),
+    hasOverflow,
+    expanded,
   }
 }

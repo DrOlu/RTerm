@@ -1,5 +1,6 @@
 import {
   getMonitorPresentationConfig,
+  resolveMonitorVisibleRows,
   resolveMonitorPresentationMode,
 } from './monitorPresentation'
 
@@ -78,4 +79,26 @@ runCase('compact modes tighten visible row budgets for ultra-thin layouts', () =
   if (compactVertical.diskRows > 3 || compactHorizontal.diskRows > 3) {
     throw new Error('compact modes should cap disk rows for ultra-thin layouts')
   }
+})
+
+runCase('resolveMonitorVisibleRows keeps collapsed sections within the row budget while reporting overflow', () => {
+  const rows = resolveMonitorVisibleRows([1, 2, 3, 4], 2, false)
+  assertEqual(rows.visibleCount, 2, 'collapsed rows should respect the presentation row budget')
+  assertEqual(rows.totalCount, 4, 'collapsed rows should preserve the full total count')
+  assertEqual(rows.hiddenCount, 2, 'collapsed rows should report the hidden count')
+  assertEqual(rows.hasOverflow, true, 'collapsed rows should report when overflow exists')
+})
+
+runCase('resolveMonitorVisibleRows returns the full dataset when the section is expanded', () => {
+  const rows = resolveMonitorVisibleRows([1, 2, 3, 4], 2, true)
+  assertEqual(rows.visibleCount, 4, 'expanded rows should reveal the full dataset')
+  assertEqual(rows.hiddenCount, 0, 'expanded rows should not report hidden items')
+  assertEqual(rows.expanded, true, 'expanded rows should preserve the expanded flag')
+})
+
+runCase('resolveMonitorVisibleRows avoids false overflow when the dataset already fits', () => {
+  const rows = resolveMonitorVisibleRows([1, 2], 4, false)
+  assertEqual(rows.visibleCount, 2, 'fitting rows should keep the full dataset visible')
+  assertEqual(rows.hiddenCount, 0, 'fitting rows should not report hidden items')
+  assertEqual(rows.hasOverflow, false, 'fitting rows should not report overflow')
 })

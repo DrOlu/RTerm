@@ -13,7 +13,11 @@ import {
 import { observer } from 'mobx-react-lite'
 import type { AppStore, TerminalTabModel } from '../../stores/AppStore'
 import type { MonitorSnapshot } from '../../lib/ipcTypes'
-import { getMonitorPresentationConfig } from './monitorPresentation'
+import {
+  getMonitorPresentationConfig,
+  resolveMonitorVisibleRows,
+  type MonitorVisibleCollection,
+} from './monitorPresentation'
 import { resolvePrimaryDisk } from './monitorData'
 import { CompactPanelTabSelect } from '../Layout/CompactPanelTabSelect'
 import { resolvePanelTabBarMode } from '../Layout/panelHeaderPresentation'
@@ -38,6 +42,14 @@ type GpuEntry = NonNullable<ResourceSnapshot['gpus']>[number]
 type CpuViewMode = 'cores' | 'processes'
 type NetworkViewMode = 'throughput' | 'sockets'
 type MeterTone = 'default' | 'warn' | 'danger' | 'rx' | 'tx'
+type MonitorDetailSectionId =
+  | 'cpu-cores'
+  | 'cpu-processes'
+  | 'memory-processes'
+  | 'network-interfaces'
+  | 'network-sockets'
+  | 'storage-disks'
+  | 'gpu-devices'
 const HISTORY_BAR_COUNT = 24
 
 const formatBytes = (bytes: number | undefined): string => {
@@ -261,10 +273,408 @@ const CompactList: React.FC<{
   </div>
 )
 
-const OverflowHint: React.FC<{ hiddenCount: number; label: string }> = ({ hiddenCount, label }) =>
-  hiddenCount > 0 ? (
-    <div className="monitor-compact-overflow">+{hiddenCount} more {label}</div>
-  ) : null
+const SectionOverflowControl: React.FC<{
+  visibility: MonitorVisibleCollection
+  itemLabel: string
+  active: boolean
+  onToggle: () => void
+}> = ({ visibility, itemLabel, active, onToggle }) => {
+  if (!visibility.hasOverflow) {
+    return null
+  }
+
+  const buttonLabel = active ? 'CLOSE DETAIL' : 'OPEN DETAIL'
+  const ariaLabel = active
+    ? `Close ${itemLabel} detail`
+    : `Open ${itemLabel} detail`
+
+  return (
+    <div className="monitor-overflow-bar">
+      <span className="monitor-overflow-meta">
+        VISIBLE {visibility.visibleCount} / {visibility.totalCount}
+      </span>
+      <button
+        type="button"
+        className={
+          active
+            ? 'monitor-overflow-toggle is-active-detail'
+            : 'monitor-overflow-toggle'
+        }
+        aria-label={ariaLabel}
+        onClick={onToggle}
+      >
+        {buttonLabel}
+      </button>
+    </div>
+  )
+}
+
+const MonitorDetailDock: React.FC<{
+  sectionId: MonitorDetailSectionId
+  availableWidth: number
+  maxBodyHeight: number
+  onClose: () => void
+  cpuCorePercents: number[]
+  cpuProcesses: ProcessEntry[]
+  memoryProcesses: ProcessEntry[]
+  networkEntries: NetworkEntry[]
+  totals: { rx: number; tx: number }
+  socketEntries: SocketEntry[]
+  diskEntries: DiskEntry[]
+  gpuEntries: GpuEntry[]
+}> = ({
+  sectionId,
+  availableWidth,
+  maxBodyHeight,
+  onClose,
+  cpuCorePercents,
+  cpuProcesses,
+  memoryProcesses,
+  networkEntries,
+  totals,
+  socketEntries,
+  diskEntries,
+  gpuEntries,
+}) => {
+  const useCompactTables = availableWidth < 860
+  let title = ''
+  let subtitle = ''
+  let rowCount = 0
+  let icon: React.ReactNode = <Activity size={14} />
+  let content: React.ReactNode = null
+
+  if (sectionId === 'cpu-cores') {
+    title = 'CPU CORES'
+    subtitle = 'Per-core usage map'
+    rowCount = cpuCorePercents.length
+    icon = <Cpu size={14} />
+    content =
+      cpuCorePercents.length > 0 ? (
+        <div className="monitor-core-grid">
+          {cpuCorePercents.map((percent: number, index: number) => (
+            <div key={`detail-cpu-core-${index}`} className="monitor-core-row">
+              <span className="monitor-core-name">
+                CPU{String(index).padStart(2, '0')}
+              </span>
+              <div className="monitor-core-track">
+                <div
+                  className="monitor-core-fill"
+                  style={{ width: `${clampPercent(percent)}%` }}
+                />
+              </div>
+              <span className="monitor-core-value">{formatPercent(percent)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="monitor-card-empty">Per-core data is unavailable for this target.</div>
+      )
+  } else if (sectionId === 'cpu-processes') {
+    title = 'CPU TOP'
+    subtitle = 'Sorted by CPU pressure'
+    rowCount = cpuProcesses.length
+    icon = <Cpu size={14} />
+    content =
+      cpuProcesses.length > 0 ? (
+        useCompactTables ? (
+          <CompactList
+            rows={cpuProcesses.map((process: ProcessEntry) => ({
+              id: `detail-cpu-proc-${process.pid}`,
+              label: process.name,
+              detail: `PID ${process.pid}${process.user ? ` · ${process.user}` : ''}`,
+              value: `${formatPercent(process.cpuPercent)} · ${formatBytes(process.memoryBytes)}`,
+            }))}
+          />
+        ) : (
+          <div className="monitor-table">
+            <div className="monitor-table-head monitor-table-row monitor-table-row-process">
+              <span>PID</span>
+              <span>CPU</span>
+              <span>RSS</span>
+              <span>COMMAND</span>
+            </div>
+            {cpuProcesses.map((process: ProcessEntry) => (
+              <div
+                key={`detail-cpu-proc-${process.pid}`}
+                className="monitor-table-row monitor-table-row-process"
+              >
+                <span>{process.pid}</span>
+                <span>{formatPercent(process.cpuPercent)}</span>
+                <span>{formatBytes(process.memoryBytes)}</span>
+                <span title={process.command || process.name}>
+                  {process.command || process.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        <div className="monitor-card-empty">No process data.</div>
+      )
+  } else if (sectionId === 'memory-processes') {
+    title = 'MEMORY TOP'
+    subtitle = 'Sorted by resident memory'
+    rowCount = memoryProcesses.length
+    icon = <MemoryStick size={14} />
+    content =
+      memoryProcesses.length > 0 ? (
+        useCompactTables ? (
+          <CompactList
+            rows={memoryProcesses.map((process: ProcessEntry) => ({
+              id: `detail-mem-proc-${process.pid}`,
+              label: process.name,
+              detail: `PID ${process.pid}${process.user ? ` · ${process.user}` : ''}`,
+              value: `${formatBytes(process.memoryBytes)} · ${formatPercent(process.cpuPercent)}`,
+            }))}
+          />
+        ) : (
+          <div className="monitor-table">
+            <div className="monitor-table-head monitor-table-row monitor-table-row-memory">
+              <span>PID</span>
+              <span>USER</span>
+              <span>RSS</span>
+              <span>COMMAND</span>
+            </div>
+            {memoryProcesses.map((process: ProcessEntry) => (
+              <div
+                key={`detail-mem-proc-${process.pid}`}
+                className="monitor-table-row monitor-table-row-memory"
+              >
+                <span>{process.pid}</span>
+                <span>{process.user || '--'}</span>
+                <span>{formatBytes(process.memoryBytes)}</span>
+                <span title={process.command || process.name}>
+                  {process.command || process.name}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        <div className="monitor-card-empty">No process memory data.</div>
+      )
+  } else if (sectionId === 'network-interfaces') {
+    title = 'NETWORK IFACES'
+    subtitle = 'Traffic split by interface'
+    rowCount = networkEntries.length
+    icon = <Network size={14} />
+    content =
+      networkEntries.length > 0 ? (
+        useCompactTables ? (
+          <CompactList
+            rows={networkEntries.map((entry: NetworkEntry) => {
+              const ifaceTotal = entry.rxBytesPerSec + entry.txBytesPerSec
+              const ifacePercent =
+                totals.rx + totals.tx > 0
+                  ? (ifaceTotal / (totals.rx + totals.tx)) * 100
+                  : 0
+              return {
+                id: `detail-net-iface-${entry.interface}`,
+                label: entry.interface,
+                detail: `${ifacePercent.toFixed(1)}% share`,
+                value: `↓ ${formatBytesPerSec(entry.rxBytesPerSec)} · ↑ ${formatBytesPerSec(entry.txBytesPerSec)}`,
+              }
+            })}
+          />
+        ) : (
+          <div className="monitor-table">
+            <div className="monitor-table-head monitor-table-row monitor-table-row-network">
+              <span>IFACE</span>
+              <span>RX</span>
+              <span>TX</span>
+            </div>
+            {networkEntries.map((entry: NetworkEntry) => {
+              const ifaceTotal = entry.rxBytesPerSec + entry.txBytesPerSec
+              const ifacePercent =
+                totals.rx + totals.tx > 0
+                  ? (ifaceTotal / (totals.rx + totals.tx)) * 100
+                  : 0
+              return (
+                <div
+                  key={`detail-net-iface-${entry.interface}`}
+                  className="monitor-network-row"
+                >
+                  <div className="monitor-network-row-head">
+                    <span className="monitor-network-name">{entry.interface}</span>
+                    <span className="monitor-network-share">
+                      {ifacePercent.toFixed(1)}% share
+                    </span>
+                  </div>
+                  <div className="monitor-network-row-meta">
+                    <span className="is-rx">↓ {formatBytesPerSec(entry.rxBytesPerSec)}</span>
+                    <span className="is-tx">↑ {formatBytesPerSec(entry.txBytesPerSec)}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )
+      ) : (
+        <div className="monitor-card-empty">No interface throughput data.</div>
+      )
+  } else if (sectionId === 'network-sockets') {
+    title = 'SOCKET HOTSPOTS'
+    subtitle = 'Connection fan-out by process'
+    rowCount = socketEntries.length
+    icon = <Network size={14} />
+    content =
+      socketEntries.length > 0 ? (
+        useCompactTables ? (
+          <CompactList
+            rows={socketEntries.map((entry: SocketEntry) => ({
+              id: `detail-socket-${entry.protocol}-${entry.pid || 'na'}-${entry.localAddress}-${entry.localPort || 'na'}`,
+              label: entry.processName || `${entry.localAddress}:${entry.localPort ?? '--'}`,
+              detail: `${entry.protocol.toUpperCase()} ${entry.localAddress}:${entry.localPort ?? '--'}${entry.state ? ` · ${entry.state}` : ''}`,
+              value: `${entry.remoteHostCount} hosts · ${entry.connectionCount} conn`,
+              tone: entry.isListening ? 'rx' : 'default',
+            }))}
+          />
+        ) : (
+          <div className="monitor-table">
+            <div className="monitor-table-head monitor-table-row monitor-table-row-socket">
+              <span>PROTO</span>
+              <span>PROC</span>
+              <span>BIND</span>
+              <span>PORT</span>
+              <span>HOSTS</span>
+              <span>CONN</span>
+              <span>STATE</span>
+            </div>
+            {socketEntries.map((entry: SocketEntry) => (
+              <div
+                key={`detail-socket-${entry.protocol}-${entry.pid || 'na'}-${entry.localAddress}-${entry.localPort || 'na'}`}
+                className="monitor-table-row monitor-table-row-socket"
+              >
+                <span>{entry.protocol.toUpperCase()}</span>
+                <span title={entry.processName || '--'}>{entry.processName || '--'}</span>
+                <span title={entry.localAddress}>{entry.localAddress}</span>
+                <span>{entry.localPort ?? '--'}</span>
+                <span>{entry.remoteHostCount}</span>
+                <span>{entry.connectionCount}</span>
+                <span className={entry.isListening ? 'is-listening' : ''}>
+                  {entry.state || '--'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        <div className="monitor-card-empty">No socket data.</div>
+      )
+  } else if (sectionId === 'storage-disks') {
+    title = 'STORAGE'
+    subtitle = 'Sorted by usage pressure'
+    rowCount = diskEntries.length
+    icon = <HardDrive size={14} />
+    content =
+      diskEntries.length > 0 ? (
+        <div className="monitor-disk-list">
+          {diskEntries.map((disk: DiskEntry) => (
+            <div
+              key={`detail-disk-${disk.filesystem}-${disk.mountPoint}`}
+              className="monitor-disk-row"
+            >
+              <div className="monitor-disk-row-head">
+                <span className="monitor-disk-name">{disk.mountPoint}</span>
+                <span className="monitor-disk-meta">
+                  {formatBytes(disk.usedBytes)} / {formatBytes(disk.totalBytes)}
+                </span>
+              </div>
+              <div className="monitor-core-track">
+                <div
+                  className="monitor-core-fill"
+                  style={{ width: `${clampPercent(disk.usagePercent)}%` }}
+                />
+              </div>
+              <div className="monitor-disk-row-foot">
+                <span>{disk.filesystem}</span>
+                <span>{formatPercent(disk.usagePercent)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="monitor-card-empty">No disk data.</div>
+      )
+  } else {
+    title = 'GPU'
+    subtitle = 'Accelerator load and memory'
+    rowCount = gpuEntries.length
+    icon = <Gauge size={14} />
+    content =
+      gpuEntries.length > 0 ? (
+        <div className="monitor-disk-list">
+          {gpuEntries.map((gpu: GpuEntry, index: number) => {
+            const memoryUsagePercent = resolveGpuMemoryUsagePercent(gpu)
+            return (
+              <div key={`detail-gpu-${index}`} className="monitor-disk-row">
+                <div className="monitor-disk-row-head">
+                  <span className="monitor-disk-name">
+                    {gpu.name || `GPU ${index + 1}`}
+                  </span>
+                  <span className="monitor-disk-meta">
+                    {formatPercent(gpu.utilizationPercent)}
+                  </span>
+                </div>
+                <div className="monitor-meter-grid">
+                  <InlineMeter
+                    label="GPU"
+                    value={formatPercent(gpu.utilizationPercent)}
+                    percent={gpu.utilizationPercent || 0}
+                    tone="warn"
+                  />
+                  <InlineMeter
+                    label="VRAM"
+                    value={formatGpuMemoryFootprint(gpu)}
+                    percent={memoryUsagePercent || 0}
+                    tone={resolveGpuMemoryTone(memoryUsagePercent)}
+                  />
+                  {typeof gpu.memoryUtilizationPercent === 'number' &&
+                    Number.isFinite(gpu.memoryUtilizationPercent) && (
+                      <InlineMeter
+                        label="MEM"
+                        value={formatPercent(gpu.memoryUtilizationPercent)}
+                        percent={gpu.memoryUtilizationPercent}
+                        tone="rx"
+                      />
+                    )}
+                </div>
+                <div className="monitor-disk-row-foot">
+                  <span>{formatGpuMemoryFootprint(gpu)}</span>
+                  <span>
+                    {gpu.temperatureC !== undefined ? `${gpu.temperatureC}°C` : '--'}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="monitor-card-empty">No GPU data.</div>
+      )
+  }
+
+  return (
+    <section className="monitor-detail-dock" data-monitor-detail-section={sectionId}>
+      <div className="monitor-detail-head">
+        <div className="monitor-detail-title">
+          {icon}
+          <span>{title}</span>
+        </div>
+        <div className="monitor-detail-meta">
+          <span>{subtitle}</span>
+          <span>{rowCount} rows</span>
+          <button type="button" className="monitor-detail-close" onClick={onClose}>
+            CLOSE DETAIL
+          </button>
+        </div>
+      </div>
+      <div className="monitor-detail-body" style={{ maxHeight: `${maxBodyHeight}px` }}>
+        {content}
+      </div>
+    </section>
+  )
+}
 
 const CompactBarMetric: React.FC<{
   label: string
@@ -337,6 +747,11 @@ const MonitorTabView: React.FC<{
 }> = observer(({ store, terminalId, terminalTitle, runtimeState, availableWidth, availableHeight }) => {
   const [cpuMode, setCpuMode] = React.useState<CpuViewMode>('cores')
   const [networkMode, setNetworkMode] = React.useState<NetworkViewMode>('throughput')
+  const [detailSectionId, setDetailSectionId] = React.useState<MonitorDetailSectionId | null>(null)
+  const detailDockRef = React.useRef<HTMLDivElement | null>(null)
+  const toggleDetailSection = (sectionId: MonitorDetailSectionId) => {
+    setDetailSectionId((current) => (current === sectionId ? null : sectionId))
+  }
   const monitorState = store.getMonitorTerminalState(terminalId)
   const snapshot = monitorState?.snapshot || null
   const lastError = monitorState?.lastError || null
@@ -347,6 +762,157 @@ const MonitorTabView: React.FC<{
 
   const isReady = runtimeState === 'ready' || runtimeState === undefined
   const presentation = getMonitorPresentationConfig(availableWidth, availableHeight)
+  const detailBodyMaxHeight = (() => {
+    const ratio =
+      presentation.mode === 'standard'
+        ? 0.38
+        : presentation.mode === 'dense'
+          ? 0.34
+          : 0.3
+    const minimum = presentation.mode === 'compact-horizontal' ? 88 : 120
+    const maximum =
+      presentation.mode === 'standard'
+        ? 340
+        : presentation.mode === 'dense'
+          ? 280
+          : 220
+    return Math.max(
+      minimum,
+      Math.min(maximum, Math.floor(Math.max(availableHeight, 0) * ratio))
+    )
+  })()
+  const cpuProcessesSorted = (snapshot?.processes || [])
+    .slice()
+    .sort((left: ProcessEntry, right: ProcessEntry) => (right.cpuPercent || 0) - (left.cpuPercent || 0))
+  const memoryProcessesSorted = (snapshot?.processes || [])
+    .slice()
+    .sort((left: ProcessEntry, right: ProcessEntry) => (right.memoryBytes || 0) - (left.memoryBytes || 0))
+  const networkEntries = (snapshot?.network || [])
+    .slice()
+    .sort(
+      (left: NetworkEntry, right: NetworkEntry) =>
+        right.rxBytesPerSec +
+        right.txBytesPerSec -
+        (left.rxBytesPerSec + left.txBytesPerSec)
+    )
+  const socketEntries = (snapshot?.networkConnections || [])
+    .slice()
+    .sort((left: SocketEntry, right: SocketEntry) => {
+      const leftScore = left.connectionCount * 1000 + left.remoteHostCount
+      const rightScore = right.connectionCount * 1000 + right.remoteHostCount
+      return rightScore - leftScore
+    })
+  const diskEntries = (snapshot?.disks || [])
+    .slice()
+    .sort((left: DiskEntry, right: DiskEntry) => right.usagePercent - left.usagePercent)
+  const gpuEntries = (snapshot?.gpus || [])
+    .slice()
+    .sort(
+      (left: GpuEntry, right: GpuEntry) =>
+        (right.utilizationPercent || 0) - (left.utilizationPercent || 0)
+    )
+  const cpuCoreRows = resolveMonitorVisibleRows<number>(
+    snapshot?.cpu?.corePercents || [],
+    presentation.coreRows,
+    false
+  )
+  const cpuProcessRows = resolveMonitorVisibleRows(
+    cpuProcessesSorted,
+    presentation.cpuProcessRows,
+    false
+  )
+  const memoryProcessRows = resolveMonitorVisibleRows(
+    memoryProcessesSorted,
+    presentation.memoryProcessRows,
+    false
+  )
+  const interfaceRows = resolveMonitorVisibleRows(
+    networkEntries,
+    presentation.interfaceRows,
+    false
+  )
+  const socketRows = resolveMonitorVisibleRows(
+    socketEntries,
+    presentation.socketRows,
+    false
+  )
+  const ultraSocketRows = resolveMonitorVisibleRows(
+    socketEntries,
+    presentation.mode === 'compact-horizontal' ? 2 : 1,
+    false
+  )
+  const diskRows = resolveMonitorVisibleRows(
+    diskEntries,
+    presentation.diskRows,
+    false
+  )
+  const gpuRows = resolveMonitorVisibleRows(
+    gpuEntries,
+    presentation.gpuRows,
+    false
+  )
+
+  React.useEffect(() => {
+    if (!detailSectionId) {
+      return
+    }
+
+    const detailStillAvailable =
+      (detailSectionId === 'cpu-cores' && cpuCoreRows.hasOverflow) ||
+      (detailSectionId === 'cpu-processes' && cpuProcessRows.hasOverflow) ||
+      (detailSectionId === 'memory-processes' && memoryProcessRows.hasOverflow) ||
+      (detailSectionId === 'network-interfaces' && interfaceRows.hasOverflow) ||
+      (detailSectionId === 'network-sockets' && socketRows.hasOverflow) ||
+      (detailSectionId === 'storage-disks' && diskRows.hasOverflow) ||
+      (detailSectionId === 'gpu-devices' && gpuRows.hasOverflow)
+
+    if (!detailStillAvailable) {
+      setDetailSectionId(null)
+    }
+  }, [
+    detailSectionId,
+    cpuCoreRows.hasOverflow,
+    cpuProcessRows.hasOverflow,
+    memoryProcessRows.hasOverflow,
+    interfaceRows.hasOverflow,
+    socketRows.hasOverflow,
+    diskRows.hasOverflow,
+    gpuRows.hasOverflow,
+  ])
+
+  React.useEffect(() => {
+    if (!detailSectionId) {
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDetailSectionId(null)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [detailSectionId])
+
+  React.useEffect(() => {
+    if (!detailSectionId) {
+      return
+    }
+    const detailDock = detailDockRef.current
+    if (!detailDock) {
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      detailDock.scrollIntoView({
+        block: 'nearest',
+        behavior: 'smooth',
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [detailSectionId])
 
   if (!isReady) {
     const waitingMessage =
@@ -384,38 +950,6 @@ const MonitorTabView: React.FC<{
   const isUltraCompact =
     presentation.mode === 'compact-horizontal' || presentation.mode === 'compact-vertical'
   const isUltraHorizontal = presentation.mode === 'compact-horizontal'
-  const topCpuProcesses = (snapshot.processes || [])
-    .slice()
-    .sort((left: ProcessEntry, right: ProcessEntry) => (right.cpuPercent || 0) - (left.cpuPercent || 0))
-    .slice(0, presentation.cpuProcessRows)
-  const topMemoryProcesses = (snapshot.processes || [])
-    .slice()
-    .sort((left: ProcessEntry, right: ProcessEntry) => (right.memoryBytes || 0) - (left.memoryBytes || 0))
-    .slice(0, presentation.memoryProcessRows)
-  const networkEntries = (snapshot.network || [])
-    .slice()
-    .sort(
-      (left: NetworkEntry, right: NetworkEntry) =>
-        right.rxBytesPerSec +
-        right.txBytesPerSec -
-        (left.rxBytesPerSec + left.txBytesPerSec)
-    )
-  const socketEntries = (snapshot.networkConnections || [])
-    .slice()
-    .sort((left: SocketEntry, right: SocketEntry) => {
-      const leftScore = left.connectionCount * 1000 + left.remoteHostCount
-      const rightScore = right.connectionCount * 1000 + right.remoteHostCount
-      return rightScore - leftScore
-    })
-  const diskEntries = (snapshot.disks || [])
-    .slice()
-    .sort((left: DiskEntry, right: DiskEntry) => right.usagePercent - left.usagePercent)
-  const gpuEntries = (snapshot.gpus || [])
-    .slice()
-    .sort(
-      (left: GpuEntry, right: GpuEntry) =>
-        (right.utilizationPercent || 0) - (left.utilizationPercent || 0)
-    )
   const platformLabel = formatPlatform(snapshot.system?.platform || 'unknown')
   const connectionLabel = (snapshot.system?.connectionType || 'local').toUpperCase()
   const hostLabel =
@@ -424,21 +958,20 @@ const MonitorTabView: React.FC<{
       : terminalTitle
   const compactHostLabel = snapshot.system?.hostname || terminalTitle
   const primaryDisk = resolvePrimaryDisk(snapshot)
-  const visibleInterfaces = networkEntries.slice(0, presentation.interfaceRows)
-  const visibleSockets = socketEntries.slice(0, presentation.socketRows)
-  const visibleDisks = diskEntries.slice(0, presentation.diskRows)
-  const visibleGpus = gpuEntries.slice(0, presentation.gpuRows)
+  const topCpuProcesses = cpuProcessRows.rows
+  const topMemoryProcesses = memoryProcessRows.rows
+  const visibleInterfaces = interfaceRows.rows
+  const visibleSockets = socketRows.rows
+  const visibleDisks = diskRows.rows
+  const visibleGpus = gpuRows.rows
   const compactGpuRows = visibleGpus.map((gpu: GpuEntry, index: number) => ({
     id: `compact-gpu-${index}`,
     label: gpu.name || `GPU ${index + 1}`,
     detail: formatGpuMemoryFootprint(gpu),
     value: formatGpuCompactValue(gpu),
   }))
-  const visibleCorePercents = snapshot.cpu?.corePercents?.slice(0, presentation.coreRows) || []
-  const compactSocketRows = visibleSockets.slice(
-    0,
-    presentation.mode === 'compact-horizontal' ? 2 : 1
-  )
+  const visibleCorePercents = cpuCoreRows.rows
+  const compactSocketRows = ultraSocketRows.rows
   const listeningSocketCount = socketEntries.filter((entry: SocketEntry) => entry.isListening).length
   const swapUsagePercent =
     snapshot.memory?.swap && snapshot.memory.swap.totalBytes > 0
@@ -452,7 +985,7 @@ const MonitorTabView: React.FC<{
           (snapshot.loadAverage[0] / Math.max(snapshot.cpu?.logicalCoreCount || 1, 1)) * 100
         )
       : undefined
-  const leadProcess = topCpuProcesses[0] || topMemoryProcesses[0]
+  const leadProcess = cpuProcessesSorted[0] || memoryProcessesSorted[0]
   const leadInterface = networkEntries[0]
   const leadGpu = gpuEntries[0]
   const memoryTags = [
@@ -611,6 +1144,191 @@ const MonitorTabView: React.FC<{
     })
   }
 
+  const cpuCardActive =
+    detailSectionId === 'cpu-cores' || detailSectionId === 'cpu-processes'
+  const memoryCardActive = detailSectionId === 'memory-processes'
+  const networkCardActive =
+    detailSectionId === 'network-interfaces' || detailSectionId === 'network-sockets'
+  const storageCardActive = detailSectionId === 'storage-disks'
+  const gpuCardActive = detailSectionId === 'gpu-devices'
+  const detailDock = detailSectionId ? (
+    <div ref={detailDockRef} className="monitor-detail-wrap">
+      <MonitorDetailDock
+        sectionId={detailSectionId}
+        availableWidth={availableWidth}
+        maxBodyHeight={detailBodyMaxHeight}
+        onClose={() => setDetailSectionId(null)}
+        cpuCorePercents={snapshot.cpu?.corePercents || []}
+        cpuProcesses={cpuProcessesSorted}
+        memoryProcesses={memoryProcessesSorted}
+        networkEntries={networkEntries}
+        totals={totals}
+        socketEntries={socketEntries}
+        diskEntries={diskEntries}
+        gpuEntries={gpuEntries}
+      />
+    </div>
+  ) : null
+
+  const compactDetailGrid = (
+    <div className="monitor-compact-grid">
+      <section className={cpuCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
+        <div className="monitor-card-header">
+          <div className="monitor-card-title">
+            <Cpu size={14} />
+            <span>TOP PROC</span>
+          </div>
+          <span className="monitor-compact-card-value">{snapshot.processes?.length || 0} total</span>
+        </div>
+        <div className="monitor-card-body">
+          {topCpuProcesses.length > 0 ? (
+            <>
+              <CompactList
+                rows={topCpuProcesses.map((process: ProcessEntry) => ({
+                  id: `compact-proc-${process.pid}`,
+                  label: process.name,
+                  detail: `PID ${process.pid}${process.user ? ` · ${process.user}` : ''}`,
+                  value: `${formatPercent(process.cpuPercent)} · ${formatBytes(process.memoryBytes)}`,
+                }))}
+              />
+              <SectionOverflowControl
+                visibility={cpuProcessRows}
+                itemLabel="processes"
+                active={detailSectionId === 'cpu-processes'}
+                onToggle={() => toggleDetailSection('cpu-processes')}
+              />
+            </>
+          ) : (
+            <div className="monitor-card-empty">No process data.</div>
+          )}
+        </div>
+      </section>
+
+      <section className={networkCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
+        <div className="monitor-card-header">
+          <div className="monitor-card-title">
+            <Network size={14} />
+            <span>NET</span>
+          </div>
+          <span className="monitor-compact-card-value">
+            ↓ {formatBytesPerSec(totals.rx)} · ↑ {formatBytesPerSec(totals.tx)}
+          </span>
+        </div>
+        <div className="monitor-card-body">
+          {visibleInterfaces.length > 0 ? (
+            <>
+              <CompactList
+                rows={visibleInterfaces.map((entry: NetworkEntry) => ({
+                  id: `compact-iface-${entry.interface}`,
+                  label: entry.interface,
+                  detail: `${(
+                    totals.rx + totals.tx > 0
+                      ? ((entry.rxBytesPerSec + entry.txBytesPerSec) / (totals.rx + totals.tx)) * 100
+                      : 0
+                  ).toFixed(1)}% share`,
+                  value: `↓ ${formatBytesPerSec(entry.rxBytesPerSec)} · ↑ ${formatBytesPerSec(entry.txBytesPerSec)}`,
+                }))}
+              />
+              <SectionOverflowControl
+                visibility={interfaceRows}
+                itemLabel="interfaces"
+                active={detailSectionId === 'network-interfaces'}
+                onToggle={() => toggleDetailSection('network-interfaces')}
+              />
+            </>
+          ) : (
+            <div className="monitor-card-empty">No interface data.</div>
+          )}
+
+          <div className="monitor-compact-meta-strip">
+            <span>{networkEntries.length} iface</span>
+            <span>{socketEntries.length} sockets</span>
+            <span>{listeningSocketCount} listen</span>
+          </div>
+
+          {compactSocketRows.length > 0 && (
+            <div className="monitor-subsection">
+              <div className="monitor-subsection-header">
+                <Activity size={13} />
+                <span>ACTIVE SOCKETS</span>
+              </div>
+              <CompactList
+                rows={compactSocketRows.map((entry: SocketEntry) => ({
+                  id: `compact-socket-${entry.protocol}-${entry.pid || 'na'}-${entry.localAddress}-${entry.localPort || 'na'}`,
+                  label: entry.processName || `${entry.localAddress}:${entry.localPort ?? '--'}`,
+                  detail: `${entry.protocol.toUpperCase()} ${entry.localAddress}:${entry.localPort ?? '--'}${entry.state ? ` · ${entry.state}` : ''}`,
+                  value: `${entry.remoteHostCount} hosts · ${entry.connectionCount} conn`,
+                  tone: entry.isListening ? 'rx' : 'default',
+                }))}
+              />
+              <SectionOverflowControl
+                visibility={ultraSocketRows}
+                itemLabel="sockets"
+                active={detailSectionId === 'network-sockets'}
+                onToggle={() => toggleDetailSection('network-sockets')}
+              />
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className={storageCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
+        <div className="monitor-card-header">
+          <div className="monitor-card-title">
+            <HardDrive size={14} />
+            <span>STORAGE</span>
+          </div>
+          <span className="monitor-compact-card-value">
+            {diskEntries.length} total
+          </span>
+        </div>
+        <div className="monitor-card-body">
+          {visibleDisks.length > 0 ? (
+            <>
+              <CompactList
+                rows={visibleDisks.map((disk: DiskEntry) => ({
+                  id: `compact-disk-${disk.filesystem}-${disk.mountPoint}`,
+                  label: disk.mountPoint,
+                  detail: disk.filesystem,
+                  value: `${formatPercent(disk.usagePercent)} · ${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`,
+                }))}
+              />
+              <SectionOverflowControl
+                visibility={diskRows}
+                itemLabel="disks"
+                active={detailSectionId === 'storage-disks'}
+                onToggle={() => toggleDetailSection('storage-disks')}
+              />
+            </>
+          ) : (
+            <div className="monitor-card-empty">No disk data.</div>
+          )}
+        </div>
+      </section>
+
+      {gpuRows.totalCount > 0 && (
+        <section className={gpuCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
+          <div className="monitor-card-header">
+            <div className="monitor-card-title">
+              <Gauge size={14} />
+              <span>GPU</span>
+            </div>
+            <span className="monitor-compact-card-value">{gpuEntries.length} total</span>
+          </div>
+          <div className="monitor-card-body">
+            <CompactList rows={compactGpuRows} />
+            <SectionOverflowControl
+              visibility={gpuRows}
+              itemLabel="gpus"
+              active={detailSectionId === 'gpu-devices'}
+              onToggle={() => toggleDetailSection('gpu-devices')}
+            />
+          </div>
+        </section>
+      )}
+    </div>
+  )
+
   if (isUltraCompact) {
     return (
       <div
@@ -663,6 +1381,8 @@ const MonitorTabView: React.FC<{
                 />
               ))}
             </div>
+            {detailDock}
+            {compactDetailGrid}
           </>
         ) : (
           <>
@@ -717,149 +1437,8 @@ const MonitorTabView: React.FC<{
                 />
               )}
             </div>
-
-            <div className="monitor-compact-grid">
-              <section className="monitor-card">
-                <div className="monitor-card-header">
-                  <div className="monitor-card-title">
-                    <Cpu size={14} />
-                    <span>TOP PROC</span>
-                  </div>
-                  <span className="monitor-compact-card-value">{snapshot.processes?.length || 0} total</span>
-                </div>
-                <div className="monitor-card-body">
-                  {topCpuProcesses.length > 0 ? (
-                    <>
-                      <CompactList
-                        rows={topCpuProcesses.map((process: ProcessEntry) => ({
-                          id: `compact-proc-${process.pid}`,
-                          label: process.name,
-                          detail: `PID ${process.pid}${process.user ? ` · ${process.user}` : ''}`,
-                          value: `${formatPercent(process.cpuPercent)} · ${formatBytes(process.memoryBytes)}`,
-                        }))}
-                      />
-                      <OverflowHint
-                        hiddenCount={Math.max(0, (snapshot.processes?.length || 0) - topCpuProcesses.length)}
-                        label="proc"
-                      />
-                    </>
-                  ) : (
-                    <div className="monitor-card-empty">No process data.</div>
-                  )}
-                </div>
-              </section>
-
-              <section className="monitor-card">
-                <div className="monitor-card-header">
-                  <div className="monitor-card-title">
-                    <Network size={14} />
-                    <span>NET</span>
-                  </div>
-                  <span className="monitor-compact-card-value">
-                    ↓ {formatBytesPerSec(totals.rx)} · ↑ {formatBytesPerSec(totals.tx)}
-                  </span>
-                </div>
-                <div className="monitor-card-body">
-                  {visibleInterfaces.length > 0 ? (
-                    <>
-                      <CompactList
-                        rows={visibleInterfaces.map((entry: NetworkEntry) => ({
-                          id: `compact-iface-${entry.interface}`,
-                          label: entry.interface,
-                          detail: `${(
-                            totals.rx + totals.tx > 0
-                              ? ((entry.rxBytesPerSec + entry.txBytesPerSec) / (totals.rx + totals.tx)) * 100
-                              : 0
-                          ).toFixed(1)}% share`,
-                          value: `↓ ${formatBytesPerSec(entry.rxBytesPerSec)} · ↑ ${formatBytesPerSec(entry.txBytesPerSec)}`,
-                        }))}
-                      />
-                      <OverflowHint
-                        hiddenCount={Math.max(0, networkEntries.length - visibleInterfaces.length)}
-                        label="iface"
-                      />
-                    </>
-                  ) : (
-                    <div className="monitor-card-empty">No interface data.</div>
-                  )}
-
-                  <div className="monitor-compact-meta-strip">
-                    <span>{networkEntries.length} iface</span>
-                    <span>{socketEntries.length} sockets</span>
-                    <span>{listeningSocketCount} listen</span>
-                  </div>
-
-                  {compactSocketRows.length > 0 && (
-                    <div className="monitor-subsection">
-                      <div className="monitor-subsection-header">
-                        <Activity size={13} />
-                        <span>ACTIVE SOCKETS</span>
-                      </div>
-                      <CompactList
-                        rows={compactSocketRows.map((entry: SocketEntry) => ({
-                          id: `compact-socket-${entry.protocol}-${entry.pid || 'na'}-${entry.localAddress}-${entry.localPort || 'na'}`,
-                          label: entry.processName || `${entry.localAddress}:${entry.localPort ?? '--'}`,
-                          detail: `${entry.protocol.toUpperCase()} ${entry.localAddress}:${entry.localPort ?? '--'}${entry.state ? ` · ${entry.state}` : ''}`,
-                          value: `${entry.remoteHostCount} hosts · ${entry.connectionCount} conn`,
-                          tone: entry.isListening ? 'rx' : 'default',
-                        }))}
-                      />
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              <section className="monitor-card">
-                <div className="monitor-card-header">
-                  <div className="monitor-card-title">
-                    <HardDrive size={14} />
-                    <span>STORAGE</span>
-                  </div>
-                  <span className="monitor-compact-card-value">
-                    {diskEntries.length} total
-                  </span>
-                </div>
-                <div className="monitor-card-body">
-                  {visibleDisks.length > 0 ? (
-                    <>
-                      <CompactList
-                        rows={visibleDisks.map((disk: DiskEntry) => ({
-                          id: `compact-disk-${disk.filesystem}-${disk.mountPoint}`,
-                          label: disk.mountPoint,
-                          detail: disk.filesystem,
-                          value: `${formatPercent(disk.usagePercent)} · ${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`,
-                        }))}
-                      />
-                      <OverflowHint
-                        hiddenCount={Math.max(0, diskEntries.length - visibleDisks.length)}
-                        label="disk"
-                      />
-                    </>
-                  ) : (
-                    <div className="monitor-card-empty">No disk data.</div>
-                  )}
-                </div>
-              </section>
-
-              {visibleGpus.length > 0 && (
-                <section className="monitor-card">
-                  <div className="monitor-card-header">
-                    <div className="monitor-card-title">
-                      <Gauge size={14} />
-                      <span>GPU</span>
-                    </div>
-                    <span className="monitor-compact-card-value">{gpuEntries.length} total</span>
-                  </div>
-                  <div className="monitor-card-body">
-                    <CompactList rows={compactGpuRows} />
-                    <OverflowHint
-                      hiddenCount={Math.max(0, gpuEntries.length - visibleGpus.length)}
-                      label="gpu"
-                    />
-                  </div>
-                </section>
-              )}
-            </div>
+            {detailDock}
+            {compactDetailGrid}
           </>
         )}
       </div>
@@ -983,9 +1562,11 @@ const MonitorTabView: React.FC<{
         </div>
       </div>
 
+      {detailDock}
+
       <div className="monitor-grid">
         {snapshot.cpu ? (
-          <section className="monitor-card">
+          <section className={cpuCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
             <div className="monitor-card-header">
               <div className="monitor-card-title">
                 <Cpu size={14} />
@@ -1034,22 +1615,30 @@ const MonitorTabView: React.FC<{
 
               {cpuMode === 'cores' ? (
                 visibleCorePercents.length > 0 ? (
-                  <div className="monitor-core-grid">
-                    {visibleCorePercents.map((percent: number, index: number) => (
-                      <div key={`cpu-core-${index}`} className="monitor-core-row">
-                        <span className="monitor-core-name">
-                          CPU{String(index).padStart(2, '0')}
-                        </span>
-                        <div className="monitor-core-track">
-                          <div
-                            className="monitor-core-fill"
-                            style={{ width: `${clampPercent(percent)}%` }}
-                          />
+                  <>
+                    <div className="monitor-core-grid">
+                      {visibleCorePercents.map((percent: number, index: number) => (
+                        <div key={`cpu-core-${index}`} className="monitor-core-row">
+                          <span className="monitor-core-name">
+                            CPU{String(index).padStart(2, '0')}
+                          </span>
+                          <div className="monitor-core-track">
+                            <div
+                              className="monitor-core-fill"
+                              style={{ width: `${clampPercent(percent)}%` }}
+                            />
+                          </div>
+                          <span className="monitor-core-value">{formatPercent(percent)}</span>
                         </div>
-                        <span className="monitor-core-value">{formatPercent(percent)}</span>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                    <SectionOverflowControl
+                      visibility={cpuCoreRows}
+                      itemLabel="cpu cores"
+                      active={detailSectionId === 'cpu-cores'}
+                      onToggle={() => toggleDetailSection('cpu-cores')}
+                    />
+                  </>
                 ) : (
                   <div className="monitor-card-empty">Per-core data is unavailable for this target.</div>
                 )
@@ -1064,33 +1653,43 @@ const MonitorTabView: React.FC<{
                         value: `${formatPercent(process.cpuPercent)} · ${formatBytes(process.memoryBytes)}`,
                       }))}
                     />
-                    <OverflowHint
-                      hiddenCount={Math.max(0, (snapshot.processes?.length || 0) - topCpuProcesses.length)}
-                      label="proc"
+                    <SectionOverflowControl
+                      visibility={cpuProcessRows}
+                      itemLabel="processes"
+                      active={detailSectionId === 'cpu-processes'}
+                      onToggle={() => toggleDetailSection('cpu-processes')}
                     />
                   </>
                 ) : (
-                <div className="monitor-table">
-                  <div className="monitor-table-head monitor-table-row monitor-table-row-process">
-                    <span>PID</span>
-                    <span>CPU</span>
-                    <span>RSS</span>
-                    <span>COMMAND</span>
-                  </div>
-                  {topCpuProcesses.map((process: ProcessEntry) => (
-                    <div
-                      key={`cpu-proc-${process.pid}`}
-                      className="monitor-table-row monitor-table-row-process"
-                    >
-                      <span>{process.pid}</span>
-                      <span>{formatPercent(process.cpuPercent)}</span>
-                      <span>{formatBytes(process.memoryBytes)}</span>
-                      <span title={process.command || process.name}>
-                        {process.command || process.name}
-                      </span>
+                  <>
+                    <div className="monitor-table">
+                      <div className="monitor-table-head monitor-table-row monitor-table-row-process">
+                        <span>PID</span>
+                        <span>CPU</span>
+                        <span>RSS</span>
+                        <span>COMMAND</span>
+                      </div>
+                      {topCpuProcesses.map((process: ProcessEntry) => (
+                        <div
+                          key={`cpu-proc-${process.pid}`}
+                          className="monitor-table-row monitor-table-row-process"
+                        >
+                          <span>{process.pid}</span>
+                          <span>{formatPercent(process.cpuPercent)}</span>
+                          <span>{formatBytes(process.memoryBytes)}</span>
+                          <span title={process.command || process.name}>
+                            {process.command || process.name}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                    <SectionOverflowControl
+                      visibility={cpuProcessRows}
+                      itemLabel="processes"
+                      active={detailSectionId === 'cpu-processes'}
+                      onToggle={() => toggleDetailSection('cpu-processes')}
+                    />
+                  </>
                 )
               ) : (
                 <div className="monitor-card-empty">No process data.</div>
@@ -1102,7 +1701,7 @@ const MonitorTabView: React.FC<{
         )}
 
         {snapshot.memory ? (
-          <section className="monitor-card">
+          <section className={memoryCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
             <div className="monitor-card-header">
               <div className="monitor-card-title">
                 <MemoryStick size={14} />
@@ -1173,33 +1772,43 @@ const MonitorTabView: React.FC<{
                         value: `${formatBytes(process.memoryBytes)} · ${formatPercent(process.cpuPercent)}`,
                       }))}
                     />
-                    <OverflowHint
-                      hiddenCount={Math.max(0, (snapshot.processes?.length || 0) - topMemoryProcesses.length)}
-                      label="proc"
+                    <SectionOverflowControl
+                      visibility={memoryProcessRows}
+                      itemLabel="processes"
+                      active={detailSectionId === 'memory-processes'}
+                      onToggle={() => toggleDetailSection('memory-processes')}
                     />
                   </>
                 ) : (
-                <div className="monitor-table">
-                  <div className="monitor-table-head monitor-table-row monitor-table-row-memory">
-                    <span>PID</span>
-                    <span>USER</span>
-                    <span>RSS</span>
-                    <span>COMMAND</span>
-                  </div>
-                  {topMemoryProcesses.map((process: ProcessEntry) => (
-                    <div
-                      key={`mem-proc-${process.pid}`}
-                      className="monitor-table-row monitor-table-row-memory"
-                    >
-                      <span>{process.pid}</span>
-                      <span>{process.user || '--'}</span>
-                      <span>{formatBytes(process.memoryBytes)}</span>
-                      <span title={process.command || process.name}>
-                        {process.command || process.name}
-                      </span>
+                  <>
+                    <div className="monitor-table">
+                      <div className="monitor-table-head monitor-table-row monitor-table-row-memory">
+                        <span>PID</span>
+                        <span>USER</span>
+                        <span>RSS</span>
+                        <span>COMMAND</span>
+                      </div>
+                      {topMemoryProcesses.map((process: ProcessEntry) => (
+                        <div
+                          key={`mem-proc-${process.pid}`}
+                          className="monitor-table-row monitor-table-row-memory"
+                        >
+                          <span>{process.pid}</span>
+                          <span>{process.user || '--'}</span>
+                          <span>{formatBytes(process.memoryBytes)}</span>
+                          <span title={process.command || process.name}>
+                            {process.command || process.name}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                    <SectionOverflowControl
+                      visibility={memoryProcessRows}
+                      itemLabel="processes"
+                      active={detailSectionId === 'memory-processes'}
+                      onToggle={() => toggleDetailSection('memory-processes')}
+                    />
+                  </>
                 )
               ) : (
                 <div className="monitor-card-empty">No process memory data.</div>
@@ -1210,7 +1819,7 @@ const MonitorTabView: React.FC<{
           <EmptyCard title="Memory" body="No memory data." icon={<MemoryStick size={14} />} />
         )}
 
-        <section className="monitor-card">
+        <section className={networkCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
           <div className="monitor-card-header">
             <div className="monitor-card-title">
               <Network size={14} />
@@ -1270,51 +1879,61 @@ const MonitorTabView: React.FC<{
                             totals.rx + totals.tx > 0
                               ? (ifaceTotal / (totals.rx + totals.tx)) * 100
                               : 0
-                          return {
-                            id: `net-iface-${entry.interface}`,
-                            label: entry.interface,
-                            detail: `${ifacePercent.toFixed(1)}% share`,
-                            value: `↓ ${formatBytesPerSec(entry.rxBytesPerSec)} · ↑ ${formatBytesPerSec(entry.txBytesPerSec)}`,
-                          }
-                        })}
-                      />
-                      <OverflowHint
-                        hiddenCount={Math.max(0, (snapshot.network?.length || 0) - visibleInterfaces.length)}
-                        label="iface"
+                        return {
+                          id: `net-iface-${entry.interface}`,
+                          label: entry.interface,
+                          detail: `${ifacePercent.toFixed(1)}% share`,
+                          value: `↓ ${formatBytesPerSec(entry.rxBytesPerSec)} · ↑ ${formatBytesPerSec(entry.txBytesPerSec)}`,
+                        }
+                      })}
+                    />
+                      <SectionOverflowControl
+                        visibility={interfaceRows}
+                        itemLabel="interfaces"
+                        active={detailSectionId === 'network-interfaces'}
+                        onToggle={() => toggleDetailSection('network-interfaces')}
                       />
                     </>
                   ) : (
-                  <div className="monitor-table">
-                    <div className="monitor-table-head monitor-table-row monitor-table-row-network">
-                      <span>IFACE</span>
-                      <span>RX</span>
-                      <span>TX</span>
-                    </div>
-                    {visibleInterfaces.map((entry: NetworkEntry) => {
-                      const ifaceTotal = entry.rxBytesPerSec + entry.txBytesPerSec
-                      const ifacePercent =
-                        totals.rx + totals.tx > 0
-                          ? (ifaceTotal / (totals.rx + totals.tx)) * 100
-                          : 0
-                      return (
-                        <div
-                          key={`net-iface-${entry.interface}`}
-                          className="monitor-network-row"
-                        >
-                          <div className="monitor-network-row-head">
-                            <span className="monitor-network-name">{entry.interface}</span>
-                            <span className="monitor-network-share">
-                              {ifacePercent.toFixed(1)}% share
-                            </span>
-                          </div>
-                          <div className="monitor-network-row-meta">
-                            <span className="is-rx">↓ {formatBytesPerSec(entry.rxBytesPerSec)}</span>
-                            <span className="is-tx">↑ {formatBytesPerSec(entry.txBytesPerSec)}</span>
-                          </div>
+                    <>
+                      <div className="monitor-table">
+                        <div className="monitor-table-head monitor-table-row monitor-table-row-network">
+                          <span>IFACE</span>
+                          <span>RX</span>
+                          <span>TX</span>
                         </div>
-                      )
-                    })}
-                  </div>
+                        {visibleInterfaces.map((entry: NetworkEntry) => {
+                          const ifaceTotal = entry.rxBytesPerSec + entry.txBytesPerSec
+                          const ifacePercent =
+                            totals.rx + totals.tx > 0
+                              ? (ifaceTotal / (totals.rx + totals.tx)) * 100
+                              : 0
+                          return (
+                            <div
+                              key={`net-iface-${entry.interface}`}
+                              className="monitor-network-row"
+                            >
+                              <div className="monitor-network-row-head">
+                                <span className="monitor-network-name">{entry.interface}</span>
+                                <span className="monitor-network-share">
+                                  {ifacePercent.toFixed(1)}% share
+                                </span>
+                              </div>
+                              <div className="monitor-network-row-meta">
+                                <span className="is-rx">↓ {formatBytesPerSec(entry.rxBytesPerSec)}</span>
+                                <span className="is-tx">↑ {formatBytesPerSec(entry.txBytesPerSec)}</span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <SectionOverflowControl
+                        visibility={interfaceRows}
+                        itemLabel="interfaces"
+                        active={detailSectionId === 'network-interfaces'}
+                        onToggle={() => toggleDetailSection('network-interfaces')}
+                      />
+                    </>
                   )}
                 </>
               ) : (
@@ -1332,39 +1951,49 @@ const MonitorTabView: React.FC<{
                       tone: entry.isListening ? 'rx' : 'default',
                     }))}
                   />
-                  <OverflowHint
-                    hiddenCount={Math.max(0, (snapshot.networkConnections?.length || 0) - visibleSockets.length)}
-                    label="socket"
+                  <SectionOverflowControl
+                    visibility={socketRows}
+                    itemLabel="sockets"
+                    active={detailSectionId === 'network-sockets'}
+                    onToggle={() => toggleDetailSection('network-sockets')}
                   />
                 </>
               ) : (
-              <div className="monitor-table">
-                <div className="monitor-table-head monitor-table-row monitor-table-row-socket">
-                  <span>PROTO</span>
-                  <span>PROC</span>
-                  <span>BIND</span>
-                  <span>PORT</span>
-                  <span>HOSTS</span>
-                  <span>CONN</span>
-                  <span>STATE</span>
-                </div>
-                {visibleSockets.map((entry: SocketEntry) => (
-                  <div
-                    key={`socket-${entry.protocol}-${entry.pid || 'na'}-${entry.localAddress}-${entry.localPort || 'na'}`}
-                    className="monitor-table-row monitor-table-row-socket"
-                  >
-                    <span>{entry.protocol.toUpperCase()}</span>
-                    <span title={entry.processName || '--'}>{entry.processName || '--'}</span>
-                    <span title={entry.localAddress}>{entry.localAddress}</span>
-                    <span>{entry.localPort ?? '--'}</span>
-                    <span>{entry.remoteHostCount}</span>
-                    <span>{entry.connectionCount}</span>
-                    <span className={entry.isListening ? 'is-listening' : ''}>
-                      {entry.state || '--'}
-                    </span>
+                <>
+                  <div className="monitor-table">
+                    <div className="monitor-table-head monitor-table-row monitor-table-row-socket">
+                      <span>PROTO</span>
+                      <span>PROC</span>
+                      <span>BIND</span>
+                      <span>PORT</span>
+                      <span>HOSTS</span>
+                      <span>CONN</span>
+                      <span>STATE</span>
+                    </div>
+                    {visibleSockets.map((entry: SocketEntry) => (
+                      <div
+                        key={`socket-${entry.protocol}-${entry.pid || 'na'}-${entry.localAddress}-${entry.localPort || 'na'}`}
+                        className="monitor-table-row monitor-table-row-socket"
+                      >
+                        <span>{entry.protocol.toUpperCase()}</span>
+                        <span title={entry.processName || '--'}>{entry.processName || '--'}</span>
+                        <span title={entry.localAddress}>{entry.localAddress}</span>
+                        <span>{entry.localPort ?? '--'}</span>
+                        <span>{entry.remoteHostCount}</span>
+                        <span>{entry.connectionCount}</span>
+                        <span className={entry.isListening ? 'is-listening' : ''}>
+                          {entry.state || '--'}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                  <SectionOverflowControl
+                    visibility={socketRows}
+                    itemLabel="sockets"
+                    active={detailSectionId === 'network-sockets'}
+                    onToggle={() => toggleDetailSection('network-sockets')}
+                  />
+                </>
               )
             ) : (
               <div className="monitor-card-empty">No socket data.</div>
@@ -1372,7 +2001,7 @@ const MonitorTabView: React.FC<{
           </div>
         </section>
 
-        <section className="monitor-card">
+        <section className={storageCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
           <div className="monitor-card-header">
             <div className="monitor-card-title">
               <HardDrive size={14} />
@@ -1392,37 +2021,47 @@ const MonitorTabView: React.FC<{
                       value: `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)} · ${formatPercent(disk.usagePercent)}`,
                     }))}
                   />
-                  <OverflowHint
-                    hiddenCount={Math.max(0, (snapshot.disks?.length || 0) - visibleDisks.length)}
-                    label="disk"
+                  <SectionOverflowControl
+                    visibility={diskRows}
+                    itemLabel="disks"
+                    active={detailSectionId === 'storage-disks'}
+                    onToggle={() => toggleDetailSection('storage-disks')}
                   />
                 </>
               ) : (
-              <div className="monitor-disk-list">
-                {visibleDisks.map((disk: DiskEntry) => (
-                  <div
-                    key={`disk-${disk.filesystem}-${disk.mountPoint}`}
-                    className="monitor-disk-row"
-                  >
-                    <div className="monitor-disk-row-head">
-                      <span className="monitor-disk-name">{disk.mountPoint}</span>
-                      <span className="monitor-disk-meta">
-                        {formatBytes(disk.usedBytes)} / {formatBytes(disk.totalBytes)}
-                      </span>
-                    </div>
-                    <div className="monitor-core-track">
+                <>
+                  <div className="monitor-disk-list">
+                    {visibleDisks.map((disk: DiskEntry) => (
                       <div
-                        className="monitor-core-fill"
-                        style={{ width: `${clampPercent(disk.usagePercent)}%` }}
-                      />
-                    </div>
-                    <div className="monitor-disk-row-foot">
-                      <span>{disk.filesystem}</span>
-                      <span>{formatPercent(disk.usagePercent)}</span>
-                    </div>
+                        key={`disk-${disk.filesystem}-${disk.mountPoint}`}
+                        className="monitor-disk-row"
+                      >
+                        <div className="monitor-disk-row-head">
+                          <span className="monitor-disk-name">{disk.mountPoint}</span>
+                          <span className="monitor-disk-meta">
+                            {formatBytes(disk.usedBytes)} / {formatBytes(disk.totalBytes)}
+                          </span>
+                        </div>
+                        <div className="monitor-core-track">
+                          <div
+                            className="monitor-core-fill"
+                            style={{ width: `${clampPercent(disk.usagePercent)}%` }}
+                          />
+                        </div>
+                        <div className="monitor-disk-row-foot">
+                          <span>{disk.filesystem}</span>
+                          <span>{formatPercent(disk.usagePercent)}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                  <SectionOverflowControl
+                    visibility={diskRows}
+                    itemLabel="disks"
+                    active={detailSectionId === 'storage-disks'}
+                    onToggle={() => toggleDetailSection('storage-disks')}
+                  />
+                </>
               )
             ) : (
               <div className="monitor-card-empty">No disk data.</div>
@@ -1430,8 +2069,8 @@ const MonitorTabView: React.FC<{
           </div>
         </section>
 
-        {visibleGpus.length > 0 && (
-          <section className="monitor-card">
+        {gpuRows.totalCount > 0 && (
+          <section className={gpuCardActive ? 'monitor-card is-detail-source' : 'monitor-card'}>
             <div className="monitor-card-header">
               <div className="monitor-card-title">
                 <Gauge size={14} />
@@ -1443,58 +2082,68 @@ const MonitorTabView: React.FC<{
               {useCompactCards ? (
                 <>
                   <CompactList rows={compactGpuRows} />
-                  <OverflowHint
-                    hiddenCount={Math.max(0, (snapshot.gpus?.length || 0) - visibleGpus.length)}
-                    label="gpu"
+                  <SectionOverflowControl
+                    visibility={gpuRows}
+                    itemLabel="gpus"
+                    active={detailSectionId === 'gpu-devices'}
+                    onToggle={() => toggleDetailSection('gpu-devices')}
                   />
                 </>
               ) : (
-                <div className="monitor-disk-list">
-                  {visibleGpus.map((gpu: GpuEntry, index: number) => {
-                    const memoryUsagePercent = resolveGpuMemoryUsagePercent(gpu)
-                    return (
-                      <div key={`gpu-${index}`} className="monitor-disk-row">
-                        <div className="monitor-disk-row-head">
-                          <span className="monitor-disk-name">
-                            {gpu.name || `GPU ${index + 1}`}
-                          </span>
-                          <span className="monitor-disk-meta">
-                            {formatPercent(gpu.utilizationPercent)}
-                          </span>
+                <>
+                  <div className="monitor-disk-list">
+                    {visibleGpus.map((gpu: GpuEntry, index: number) => {
+                      const memoryUsagePercent = resolveGpuMemoryUsagePercent(gpu)
+                      return (
+                        <div key={`gpu-${index}`} className="monitor-disk-row">
+                          <div className="monitor-disk-row-head">
+                            <span className="monitor-disk-name">
+                              {gpu.name || `GPU ${index + 1}`}
+                            </span>
+                            <span className="monitor-disk-meta">
+                              {formatPercent(gpu.utilizationPercent)}
+                            </span>
+                          </div>
+                          <div className="monitor-meter-grid">
+                            <InlineMeter
+                              label="GPU"
+                              value={formatPercent(gpu.utilizationPercent)}
+                              percent={gpu.utilizationPercent || 0}
+                              tone="warn"
+                            />
+                            <InlineMeter
+                              label="VRAM"
+                              value={formatGpuMemoryFootprint(gpu)}
+                              percent={memoryUsagePercent || 0}
+                              tone={resolveGpuMemoryTone(memoryUsagePercent)}
+                            />
+                            {typeof gpu.memoryUtilizationPercent === 'number' &&
+                              Number.isFinite(gpu.memoryUtilizationPercent) && (
+                                <InlineMeter
+                                  label="MEM"
+                                  value={formatPercent(gpu.memoryUtilizationPercent)}
+                                  percent={gpu.memoryUtilizationPercent}
+                                  tone="rx"
+                                />
+                              )}
+                          </div>
+                          <div className="monitor-disk-row-foot">
+                            <span>{formatGpuMemoryFootprint(gpu)}</span>
+                            <span>
+                              {gpu.temperatureC !== undefined ? `${gpu.temperatureC}°C` : '--'}
+                            </span>
+                          </div>
                         </div>
-                        <div className="monitor-meter-grid">
-                          <InlineMeter
-                            label="GPU"
-                            value={formatPercent(gpu.utilizationPercent)}
-                            percent={gpu.utilizationPercent || 0}
-                            tone="warn"
-                          />
-                          <InlineMeter
-                            label="VRAM"
-                            value={formatGpuMemoryFootprint(gpu)}
-                            percent={memoryUsagePercent || 0}
-                            tone={resolveGpuMemoryTone(memoryUsagePercent)}
-                          />
-                          {typeof gpu.memoryUtilizationPercent === 'number' &&
-                            Number.isFinite(gpu.memoryUtilizationPercent) && (
-                              <InlineMeter
-                                label="MEM"
-                                value={formatPercent(gpu.memoryUtilizationPercent)}
-                                percent={gpu.memoryUtilizationPercent}
-                                tone="rx"
-                              />
-                            )}
-                        </div>
-                        <div className="monitor-disk-row-foot">
-                          <span>{formatGpuMemoryFootprint(gpu)}</span>
-                          <span>
-                            {gpu.temperatureC !== undefined ? `${gpu.temperatureC}°C` : '--'}
-                          </span>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                      )
+                    })}
+                  </div>
+                  <SectionOverflowControl
+                    visibility={gpuRows}
+                    itemLabel="gpus"
+                    active={detailSectionId === 'gpu-devices'}
+                    onToggle={() => toggleDetailSection('gpu-devices')}
+                  />
+                </>
               )}
             </div>
           </section>
