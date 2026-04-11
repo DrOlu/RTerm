@@ -55,6 +55,7 @@ import {
 import {
   buildDynamicRequestHistory,
   invokeWithRetryAndSanitizedInput,
+  sanitizeStoredMessagesForChatRuntime,
   stripRawResponseFromStoredMessages,
 } from "./AgentHelper/utils/model_messages";
 import { createStreamReasoningExtractor } from "./AgentHelper/utils/stream_reasoning_extractor";
@@ -1572,22 +1573,32 @@ export class AgentService_v2 {
 
       const messages: BaseMessage[] = [...state.messages];
       const lastMessage = messages[messages.length - 1];
+      const lastMessageIsAi = AIMessage.isInstance(lastMessage);
+      const guardMessages =
+        lastMessageIsAi || messages.length === 0 ? messages : messages.slice(0, -1);
 
-      if (!AIMessage.isInstance(lastMessage)) {
+      if (!lastMessageIsAi && lastMessage) {
+        console.warn(
+          `[AgentService_v2][task_guard] Last model response was not an AI message (type=${(lastMessage as any)?.type || "unknown"}). Dropping it before completion audit (sessionId=${sessionId}).`,
+        );
+      }
+
+      if (guardMessages.length === 0) {
         return {
-          messages,
+          messages: guardMessages,
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "end" as const,
         };
       }
 
-      const toolCalls: any[] = Array.isArray((lastMessage as any).tool_calls)
-        ? (lastMessage as any).tool_calls
+      const guardTail = guardMessages[guardMessages.length - 1];
+      const toolCalls: any[] = Array.isArray((guardTail as any)?.tool_calls)
+        ? (guardTail as any).tool_calls
         : [];
       if (toolCalls.length > 0) {
         return {
-          messages,
+          messages: guardMessages,
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "continue" as const,
@@ -1598,7 +1609,7 @@ export class AgentService_v2 {
       try {
         completionDecision = await this.getThinkingModelDecision(
           sessionId,
-          [...messages, createTaskCompletionDecisionUserPrompt()],
+          [...guardMessages, createTaskCompletionDecisionUserPrompt()],
           TASK_COMPLETION_DECISION_SCHEMA,
           config?.signal,
           "task_completion_guard",
@@ -1624,7 +1635,7 @@ export class AgentService_v2 {
           `[AgentService_v2][task_guard] Completion confirmed. reason=${this.normalizeLogReason(completionDecision.reason)}`,
         );
         return {
-          messages,
+          messages: guardMessages,
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "end" as const,
@@ -1639,7 +1650,7 @@ export class AgentService_v2 {
         continueInstruction = await this.getThinkingModelDecision(
           sessionId,
           [
-            ...messages,
+            ...guardMessages,
             createTaskCompletionDecisionUserPrompt(),
             new AIMessage({
               content: JSON.stringify(completionDecision),
@@ -1668,8 +1679,10 @@ export class AgentService_v2 {
         };
       }
 
-      const removedBackendMessageId = (lastMessage as any)?.additional_kwargs
-        ?._gyshellMessageId as string | undefined;
+      const removedBackendMessageId = lastMessageIsAi
+        ? ((lastMessage as any)?.additional_kwargs
+            ?._gyshellMessageId as string | undefined)
+        : undefined;
 
       if (removedBackendMessageId) {
         this.helpers.sendEvent(sessionId, {
@@ -1687,7 +1700,7 @@ export class AgentService_v2 {
       };
 
       return {
-        messages: [...messages, continueMessage],
+        messages: [...guardMessages, continueMessage],
         sessionId,
         pendingToolCalls: [],
         completionGuardDecision: "continue" as const,
@@ -2409,11 +2422,21 @@ export class AgentService_v2 {
       this.getEffectiveMaxTokensFromBinding(sessionBinding);
     const recursionLimit = this.settings?.recursionLimit ?? 200;
     const loadedSession = this.chatHistoryService.loadSession(sessionId);
-    let baseMessages = loadedSession
-      ? mapStoredMessagesToChatMessages(
-          Array.from(loadedSession.messages.values()),
-        )
-      : [];
+    let baseMessages: BaseMessage[] = [];
+    if (loadedSession) {
+      const storedMessages = Array.from(loadedSession.messages.values());
+      const sanitizedStoredMessages = sanitizeStoredMessagesForChatRuntime(
+        storedMessages as any[],
+      );
+      if (sanitizedStoredMessages.removedCount > 0) {
+        console.warn(
+          `[AgentService_v2] Dropped ${sanitizedStoredMessages.removedCount} invalid stored message(s) before restoring session history (sessionId=${sessionId}).`,
+        );
+      }
+      baseMessages = mapStoredMessagesToChatMessages(
+        sanitizedStoredMessages.messages as any[],
+      );
+    }
 
     const shouldResetCompressionArtifacts =
       !!loadedSession &&
@@ -2586,9 +2609,18 @@ export class AgentService_v2 {
     //   }
     // }
 
-    const storedMessages = mapChatMessagesToStoredMessages(persisted);
+    let storedMessages = mapChatMessagesToStoredMessages(persisted) as any[];
+    const sanitizedStoredMessages = sanitizeStoredMessagesForChatRuntime(
+      storedMessages,
+    );
+    if (sanitizedStoredMessages.removedCount > 0) {
+      console.warn(
+        `[AgentService_v2] Dropped ${sanitizedStoredMessages.removedCount} invalid stored message(s) before history persistence.`,
+      );
+    }
+    storedMessages = sanitizedStoredMessages.messages as any[];
     if (!this.shouldKeepDebugPayloadInPersistence()) {
-      stripRawResponseFromStoredMessages(storedMessages as any[]);
+      stripRawResponseFromStoredMessages(storedMessages);
     }
     const newMessagesMap = new Map<string, (typeof storedMessages)[0]>();
 
@@ -2666,8 +2698,16 @@ export class AgentService_v2 {
 
     const kept = entries.slice(0, idx);
     const keptStoredMessages = kept.map(([, msg]) => msg);
-    const keptMessages = mapStoredMessagesToChatMessages(
+    const sanitizedKeptStoredMessages = sanitizeStoredMessagesForChatRuntime(
       keptStoredMessages as any[],
+    );
+    if (sanitizedKeptStoredMessages.removedCount > 0) {
+      console.warn(
+        `[AgentService_v2] Dropped ${sanitizedKeptStoredMessages.removedCount} invalid stored message(s) while preparing rollback history (sessionId=${sessionId}).`,
+      );
+    }
+    const keptMessages = mapStoredMessagesToChatMessages(
+      sanitizedKeptStoredMessages.messages as any[],
     );
     const rollbackSanitized = sanitizeCompressionAfterRollback(keptMessages, {
       pruneToolWindow: 10,

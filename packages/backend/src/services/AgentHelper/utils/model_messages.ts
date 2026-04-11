@@ -18,6 +18,38 @@ export function stripRawResponseForModelInput(messages: BaseMessage[]): BaseMess
   return mutated ? mapStoredMessagesToChatMessages(stored) : messages
 }
 
+export function sanitizeStoredMessagesForChatRuntime(storedMessages: any[]): {
+  messages: any[]
+  removedCount: number
+} {
+  if (!Array.isArray(storedMessages) || storedMessages.length === 0) {
+    return {
+      messages: Array.isArray(storedMessages) ? storedMessages : [],
+      removedCount: 0
+    }
+  }
+
+  const kept: any[] = []
+  let removedCount = 0
+
+  for (const storedMessage of storedMessages) {
+    try {
+      const rebuilt = mapStoredMessagesToChatMessages([storedMessage] as any[])
+      if (!Array.isArray(rebuilt) || rebuilt.length === 0) {
+        removedCount += 1
+        continue
+      }
+      kept.push(storedMessage)
+    } catch {
+      removedCount += 1
+    }
+  }
+
+  return removedCount > 0
+    ? { messages: kept, removedCount }
+    : { messages: storedMessages, removedCount: 0 }
+}
+
 export function stripRawResponseFromStoredMessages(storedMessages: any[]): boolean {
   let mutated = false
   for (const msg of storedMessages) {
