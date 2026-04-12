@@ -8,7 +8,7 @@ import { ImageAttachmentService } from '../ImageAttachmentService';
 import { parseTerminalScopedFilePath } from './terminalScopedFilePath';
 
 /**
- * Helper to parse user input for special labels like skills, terminal tabs, and pastes.
+ * Helper to parse user input for special labels like skills, terminal tabs, and files.
  * It enriches the message content for the AI by fetching referenced data.
  */
 export class InputParseHelper {
@@ -25,17 +25,12 @@ export class InputParseHelper {
   private static TAB_REGEX = /\[MENTION_TAB:#(.+?)##(.+?)#\]/g;
 
   /**
-   * Regex to match user paste labels: [MENTION_USER_PASTE:#path##preview#]
-   */
-  private static PASTE_REGEX = /\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/g;
-
-  /**
    * Regex to match mentioned files: [MENTION_FILE:#path#] or [MENTION_FILE:#path##name#]
    */
   private static FILE_REGEX = /\[MENTION_FILE:#(.+?)(?:##.+?)?#\]/g;
 
   /**
-   * Parses the input, fetches skill contents and large pastes, and returns enriched 
+   * Parses the input, fetches skill and file contents, and returns enriched
    * content for AI and display content for the UI.
    */
   static async parseAndEnrich(
@@ -104,7 +99,7 @@ ${recentOutput}
     }
     this.TAB_REGEX.lastIndex = 0; // Reset regex state
 
-    // 3. Fetch Large Paste & Mentioned File Details
+    // 3. Fetch Mentioned File Details
     let fileDetails = '';
     if (includeContextDetails) {
       const referencedFiles: Array<{ terminalId: string | null; filePath: string }> = [];
@@ -121,11 +116,6 @@ ${recentOutput}
         });
       };
       const seenReferences = new Set<string>();
-
-      const pasteMatches = Array.from(normalized.text.matchAll(this.PASTE_REGEX));
-      pasteMatches.forEach((match) => {
-        pushUniqueReference(null, match[1]);
-      });
 
       const fileMatches = Array.from(normalized.text.matchAll(this.FILE_REGEX));
       fileMatches.forEach((match) => {
@@ -147,7 +137,6 @@ ${recentOutput}
         fileDetails += `${FILE_CONTENT_TAG}<${reference.filePath}>\n${fileContent}\n\n`;
       }
     }
-    this.PASTE_REGEX.lastIndex = 0; // Reset regex state
     this.FILE_REGEX.lastIndex = 0; // Reset regex state
 
     const preparedImages = await this.prepareImagesForInput(normalized.images, {

@@ -45,6 +45,14 @@ interface ClipboardDataLike {
   files?: ArrayLike<File> | null
 }
 
+export type RichInputClipboardPaste =
+  | { kind: 'imageFiles'; files: File[] }
+  | { kind: 'text'; text: string }
+
+interface RichInputClipboardDataLike extends ClipboardDataLike {
+  getData?: (format: string) => string
+}
+
 const toArray = <T>(input: ArrayLike<T> | null | undefined): T[] => {
   if (!input) return []
   return Array.from(input)
@@ -71,6 +79,18 @@ export const extractClipboardImageFiles = (clipboard: ClipboardDataLike | null |
   }
 
   return toArray(clipboard.files).filter((file) => !!file && isRecognizedImageFile(file))
+}
+
+export const resolveRichInputClipboardPaste = (
+  clipboard: RichInputClipboardDataLike | null | undefined
+): RichInputClipboardPaste => {
+  const imageFiles = extractClipboardImageFiles(clipboard)
+  if (imageFiles.length > 0) {
+    return { kind: 'imageFiles', files: imageFiles }
+  }
+
+  const text = typeof clipboard?.getData === 'function' ? clipboard.getData('text/plain') : ''
+  return { kind: 'text', text }
 }
 
 export const readFileAsDataUrl = (file: Blob): Promise<string> =>

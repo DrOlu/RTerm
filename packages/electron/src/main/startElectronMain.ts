@@ -32,7 +32,6 @@ import {
   WebSocketGatewayControlService,
   resolveWsGatewayPolicyFromEnv,
 } from "../../../backend/src/services/Gateway/WebSocketGatewayControlService";
-import { TempFileService } from "../../../backend/src/services/TempFileService";
 import { ImageAttachmentService } from "../../../backend/src/services/ImageAttachmentService";
 import { VersionService } from "../../../backend/src/services/VersionService";
 import { AccessTokenService } from "../../../backend/src/services/AccessToken/AccessTokenService";
@@ -69,7 +68,6 @@ let themeStore: ThemeConfigStore;
 let skillService: SkillService;
 let memoryService: MemoryService;
 let uiHistoryService: UIHistoryService;
-let tempFileService: TempFileService;
 let imageAttachmentService: ImageAttachmentService;
 let versionService: VersionService;
 let accessTokenService: AccessTokenService;
@@ -336,7 +334,6 @@ export async function startElectronMain(): Promise<void> {
         mcpToolService = new McpToolService();
         historyStore = new HistorySqliteStore();
         uiHistoryService = new UIHistoryService({ store: historyStore });
-        tempFileService = new TempFileService();
         imageAttachmentService = new ImageAttachmentService(userDataDir);
         versionService = new VersionService();
         accessTokenService = new AccessTokenService();
@@ -344,8 +341,6 @@ export async function startElectronMain(): Promise<void> {
           terminalService,
           settingsService,
         );
-
-        void tempFileService.cleanup();
 
         skillService = new SkillService(settingsService);
         void skillService.reload();
@@ -639,9 +634,6 @@ export async function startElectronMain(): Promise<void> {
                   uiHistoryService.getMessages(sessionId),
               },
               systemBridge: {
-                saveTempPaste: async (content: string) => {
-                  return await tempFileService.saveTempPaste(content);
-                },
                 saveImageAttachment: async (payload: {
                   dataBase64: string;
                   fileName?: string;
@@ -798,7 +790,6 @@ export async function startElectronMain(): Promise<void> {
           agentService,
           uiHistoryService,
           commandPolicyService,
-          tempFileService,
           imageAttachmentService,
           skillService,
           memoryService,
@@ -1033,9 +1024,6 @@ app.on("window-all-closed", async () => {
     } finally {
       mobileWebServerService = null;
     }
-  }
-  if (tempFileService) {
-    await tempFileService.cleanup();
   }
   app.quit();
 });

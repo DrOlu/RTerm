@@ -38,7 +38,6 @@ type WebSocketRpcMethod =
   | "filesystem:createFile"
   | "filesystem:deletePath"
   | "filesystem:renamePath"
-  | "system:saveTempPaste"
   | "system:saveImageAttachment"
   | "models:getProfiles"
   | "models:setActiveProfile"
@@ -256,7 +255,6 @@ export interface WebSocketGatewayAdapterOptions {
     probeModel?: (model: unknown) => unknown | Promise<unknown>;
   };
   systemBridge?: {
-    saveTempPaste?: (content: string) => Promise<string> | string;
     saveImageAttachment?: (payload: {
       dataBase64: string;
       fileName?: string;
@@ -1210,18 +1208,6 @@ export class WebSocketGatewayAdapter {
         const targetPath = this.readStringParam(params, "targetPath");
         await bridge.renamePath(terminalId, sourcePath, targetPath);
         return { ok: true };
-      }
-      case "system:saveTempPaste": {
-        const bridge = this.options.systemBridge;
-        if (!bridge?.saveTempPaste) {
-          throw new WebSocketRpcError(
-            "METHOD_NOT_FOUND",
-            "system:saveTempPaste is not available on this websocket gateway.",
-          );
-        }
-        const content = this.readStringParam(params, "content");
-        const filePath = await bridge.saveTempPaste(content);
-        return filePath;
       }
       case "system:saveImageAttachment": {
         const bridge = this.options.systemBridge;

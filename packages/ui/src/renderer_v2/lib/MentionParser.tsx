@@ -6,7 +6,7 @@ import { getFileMentionDisplayName } from './filesystemDragDrop';
  * 1) Chat message/queue mention rendering (`components/Chat/MessageRow.tsx`, `components/Chat/Queue/QueueCard.tsx`)
  * 2) Session-title text normalization (`lib/sessionTitleDisplay.ts`)
  */
-const MENTION_TOKEN_REGEX = /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|USER_PASTE):#.+?#(?:#.+?#)?\])/g;
+const MENTION_TOKEN_REGEX = /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE):#.+?#(?:#.+?#)?\])/g;
 
 const getFileDisplayName = (path: string): string => {
   return getFileMentionDisplayName(path) || path;
@@ -34,11 +34,6 @@ const mentionTokenToText = (token: string): string | null => {
     return explicitName || getFileDisplayName(imageMatch[1]);
   }
 
-  const pasteMatch = token.match(/^\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]$/);
-  if (pasteMatch) {
-    return pasteMatch[2];
-  }
-
   return null;
 };
 
@@ -63,8 +58,7 @@ export const renderMentionText = (content: string): string => {
     .replace(/\[MENTION_FILE:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, path: string) => getFileDisplayName(path))
     .replace(/\[MENTION_IMAGE:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g, (_m, path: string, name: string) =>
       String(name || '').trim() || getFileDisplayName(path)
-    )
-    .replace(/\[MENTION_USER_PASTE:#([^#\]\r\n]+)##([^#\]\r\n]+)(?:#\])?/g, (_m, _path: string, preview: string) => preview);
+    );
 
   return text;
 };
@@ -100,14 +94,6 @@ export const renderMentionContent = (content: string): (string | React.ReactElem
     if (part.startsWith('[MENTION_FILE:') || part.startsWith('[MENTION_IMAGE:')) {
       return (
         <span key={`mention-${i}`} className="mention-badge file">
-          {mentionText}
-        </span>
-      );
-    }
-
-    if (part.startsWith('[MENTION_USER_PASTE:')) {
-      return (
-        <span key={`mention-${i}`} className="mention-badge paste">
           {mentionText}
         </span>
       );

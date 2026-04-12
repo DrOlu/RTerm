@@ -16,7 +16,6 @@ import type {
   HistoryExportMode,
 } from "../../../backend/src/services/UIHistoryService";
 import type { CommandPolicyService } from "../../../backend/src/services/CommandPolicy/CommandPolicyService";
-import type { TempFileService } from "../../../backend/src/services/TempFileService";
 import type { ImageAttachmentService } from "../../../backend/src/services/ImageAttachmentService";
 import type { SkillService } from "../../../backend/src/services/SkillService";
 import type { MemoryService } from "../../../backend/src/services/MemoryService";
@@ -53,7 +52,6 @@ export class ElectronGatewayIpcAdapter {
     private agentService: AgentService_v2,
     private uiHistoryService: UIHistoryService,
     private commandPolicyService: CommandPolicyService,
-    private tempFileService: TempFileService,
     private imageAttachmentService: ImageAttachmentService,
     private skillService: SkillService,
     private memoryService: MemoryService,
@@ -270,11 +268,6 @@ export class ElectronGatewayIpcAdapter {
         return this.gateway.rollbackSessionToMessage(sessionId, messageId);
       },
     );
-
-    // System / temp
-    ipcMain.handle("system:saveTempPaste", async (_: any, content: string) => {
-      return await this.tempFileService.saveTempPaste(content);
-    });
 
     ipcMain.handle(
       "system:saveImageAttachment",

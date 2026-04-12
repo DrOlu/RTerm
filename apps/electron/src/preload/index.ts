@@ -401,7 +401,6 @@ export interface GyShellAPI {
   system: {
     platform: NodeJS.Platform;
     openExternal: (url: string) => Promise<void>;
-    saveTempPaste: (content: string) => Promise<string>;
     saveImageAttachment: (
       payload: SaveImageAttachmentPayload,
     ) => Promise<InputImageAttachment>;
@@ -725,8 +724,6 @@ const api: GyShellAPI = {
     platform: process.platform,
     openExternal: (url: string) =>
       ipcRenderer.invoke("system:openExternal", url),
-    saveTempPaste: (content: string) =>
-      ipcRenderer.invoke("system:saveTempPaste", content),
     saveImageAttachment: (payload: SaveImageAttachmentPayload) =>
       ipcRenderer.invoke("system:saveImageAttachment", payload),
   },

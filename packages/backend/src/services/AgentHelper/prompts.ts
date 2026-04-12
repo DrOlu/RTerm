@@ -68,7 +68,6 @@ export const USEFUL_SKILL_TAG = 'USEFUL_SKILL_DETAIL:\n'
 export const FILE_CONTENT_TAG = 'FILE_CONTENT:\n'
 export const TERMINAL_CONTENT_TAG = 'TERMINAL_CONTENT:\n'
 export const GLOBAL_MEMORY_TAG = 'GLOBAL_MEMORY_MD:\n'
-export const USER_PASTE_CONTENT_TAG = FILE_CONTENT_TAG
 
 function formatTodayLocalDate(now: Date = new Date()): string {
   const year = now.getFullYear()
@@ -403,10 +402,9 @@ export function createBaseSystemPromptText(memoryPrompt?: {
       `- **\`[MENTION_TAB:#name##id#]\`**: This label in the user input indicates that the user is specifically pointing you to a terminal tab named #name# with ID #id#. You should prioritize using this tab for the requested task.`,
       `- **\`[MENTION_FILE:#path#]\`**: This label in the user input indicates that the user has provided a file path #path#. If the file is small enough (under 4000 chars), its content is provided at the top of the message under the \`${FILE_CONTENT_TAG.trim()}\` tag. Otherwise, you should use this path when you need to read or modify this file.`,
       `- **\`[MENTION_IMAGE:#path##name#]\`**: This label in the user input indicates that the user attached an image file located at #path#. If your current model supports image inputs, the image may be injected directly as a multimodal input.`,
-      `- **\`[MENTION_USER_PASTE:#path##preview#]\`**: This label in the user input indicates that the user has pasted a large amount of text, which has been saved to a temporary file at #path#. If the content is small enough (under 4000 chars), it is provided at the top of the message under the \`${FILE_CONTENT_TAG.trim()}\` tag. If not, you may need to use \`read_file\` on this path to see the full content if it is critical to the task.`,
       `- **\`${USEFUL_SKILL_TAG.trim()}\`**: This tag provides the implementation details or documentation for a specific "Skill" referenced by the user. It also includes the absolute path of the skill file. Use this to understand how to correctly parameterize and call the \`skill\` tool or follow the provided procedure. If you need to modify an existing skill file, just use \`create_or_edit\` with that absolute path. If the skill includes a "Supporting Files" section, you can use the \`read_file\` tool to examine those files or use the terminal to run any provided scripts in the skill's directory.`,
       `- **\`${TERMINAL_CONTENT_TAG.trim()}\`**: This tag precedes the recent output (last 100 lines) of a terminal tab explicitly mentioned by the user via \`[MENTION_TAB:#name##id#]\`. Use this to understand the current state of that specific terminal.`,
-      `- **\`${FILE_CONTENT_TAG.trim()}\`**: This tag precedes the actual content of a file or large text pasted by the user. Use this as primary context for the user's request.`
+      `- **\`${FILE_CONTENT_TAG.trim()}\`**: This tag precedes the actual content of a mentioned file. Use this as primary context for the user's request.`
     ]
 
   if (memoryPrompt) {

@@ -161,7 +161,6 @@ function normalizeCompactText(input: string): string {
     .replace(/\[MENTION_TAB:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, name: string) => `@${name}`)
     .replace(/\[MENTION_SKILL:#([^#\]\r\n]+)(?:#\])?/g, (_m, name: string) => `@${name}`)
     .replace(/\[MENTION_FILE:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, path: string) => path.split(/[/\\]/).pop() || path)
-    .replace(/\[MENTION_USER_PASTE:#([^#\]\r\n]+)##([^#\]\r\n]+)(?:#\])?/g, (_m, _path: string, preview: string) => preview)
     .replace(/`{3,}[\s\S]*?`{3,}/g, ' [code block] ')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/[*_~#>[\\\]]+/g, ' ')

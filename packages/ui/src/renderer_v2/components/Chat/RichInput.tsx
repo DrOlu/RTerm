@@ -5,8 +5,8 @@ import { X } from 'lucide-react';
 import { AppStore } from '../../stores/AppStore';
 import {
   createImagePreviewDataUrl,
-  extractClipboardImageFiles,
   isRecognizedImageFile,
+  resolveRichInputClipboardPaste,
   type ComposerDraft,
   type ComposerImageAttachment,
   type InputImageAttachment
@@ -41,6 +41,13 @@ interface RichInputProps {
   disabled?: boolean;
 }
 
+type RichMentionItem = {
+  type: 'skill' | 'terminal' | 'file';
+  name: string;
+  id?: string;
+  preview?: string;
+};
+
 export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({ 
   store, 
   placeholder, 
@@ -50,7 +57,7 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
 }, ref) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestions, setSuggestions] = useState<{ type: 'skill' | 'terminal' | 'file' | 'paste'; name: string; id?: string; preview?: string }[]>([]);
+  const [suggestions, setSuggestions] = useState<RichMentionItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [suggestionPos, setSuggestionPos] = useState({ top: 0, left: 0 });
   const [imageAttachments, setImageAttachments] = useState<ComposerImageAttachment[]>([]);
@@ -226,11 +233,11 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
   }, [store.skills, store.terminalTabs]);
 
   const buildMentionHtml = (
-    item: { type: 'skill' | 'terminal' | 'file' | 'paste'; name: string; id?: string; preview?: string },
+    item: RichMentionItem,
     uid: string
   ): string => {
     const fileName = getFileMentionDisplayName(item.name) || item.name;
-    const displayText = item.type === 'file' ? (item.preview || fileName) : (item.type === 'paste' ? (item.preview || '') : `@${item.name}`);
+    const displayText = item.type === 'file' ? (item.preview || fileName) : `@${item.name}`;
     return `<span class="mention-tag" contenteditable="false" data-insert-id="${uid}" data-type="${item.type}" data-name="${item.name}" ${item.id ? `data-id="${item.id}"` : ''} ${item.preview ? `data-preview="${item.preview}"` : ''}>${displayText}</span>${cursorMarker}`;
   };
 
@@ -261,7 +268,7 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
     selection.addRange(range);
   };
 
-  const insertMention = (item: { type: 'skill' | 'terminal' | 'file' | 'paste'; name: string; id?: string; preview?: string }) => {
+  const insertMention = (item: RichMentionItem) => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
     const range = selection.getRangeAt(0);
@@ -291,7 +298,7 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
       replacementRange.setStart(textNode, info.index);
       replacementRange.setEnd(textNode, range.startOffset);
     } else {
-      // 3. Fallback for file drops or pastes (no '@' context)
+      // 3. Fallback for file drops and programmatic insertions (no '@' context)
       replacementRange.setStart(range.startContainer, range.startOffset);
       replacementRange.setEnd(range.startContainer, range.startOffset);
       if (editorRef.current && !editorRef.current.contains(range.commonAncestorContainer)) {
@@ -333,9 +340,6 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
             result += `[MENTION_TAB:#${name}##${id}#]`;
           } else if (type === 'file') {
             result += `[MENTION_FILE:#${name}#]`;
-          } else if (type === 'paste') {
-            const preview = el.dataset.preview || '';
-            result += `[MENTION_USER_PASTE:#${name}##${preview}#]`;
           }
         } else if (el.tagName === 'BR') {
           result += '\n';
@@ -361,7 +365,7 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
     setValue: (val: string) => {
       if (editorRef.current) {
         // Parser for [MENTION_XXX:#...#] labels to restore them as rich DOM nodes
-        const parts = val.split(/(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|USER_PASTE):#.+?#(?:#.+?#)?\])/g);
+        const parts = val.split(/(\[MENTION_(?:SKILL|TAB|FILE|IMAGE):#.+?#(?:#.+?#)?\])/g);
         editorRef.current.innerHTML = '';
         
         parts.forEach(part => {
@@ -410,18 +414,6 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
               span.textContent = imageName;
               editorRef.current?.appendChild(span);
             }
-          } else if (part.match(/\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/)) {
-            const pasteMatch = part.match(/\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/);
-            if (pasteMatch) {
-              const span = document.createElement('span');
-              span.className = 'mention-tag';
-              span.contentEditable = 'false';
-              span.dataset.type = 'paste';
-              span.dataset.name = pasteMatch[1];
-              span.dataset.preview = pasteMatch[2];
-              span.textContent = pasteMatch[2];
-              editorRef.current?.appendChild(span);
-            }
           } else if (part) {
             editorRef.current?.appendChild(document.createTextNode(part.replace(/\u00A0/g, ' ').replace(/\uFEFF/g, '')));
           }
@@ -435,7 +427,7 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
       const nextImages = Array.isArray(draft?.images) ? draft.images : [];
       if (editorRef.current) {
         // Reuse token parser to restore text mentions.
-        const parts = nextText.split(/(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|USER_PASTE):#.+?#(?:#.+?#)?\])/g);
+        const parts = nextText.split(/(\[MENTION_(?:SKILL|TAB|FILE|IMAGE):#.+?#(?:#.+?#)?\])/g);
         editorRef.current.innerHTML = '';
         parts.forEach(part => {
           const skillMatch = part.match(/\[MENTION_SKILL:#(.+?)#\]/);
@@ -479,18 +471,6 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
               span.dataset.name = imageMatch[1];
               const imageName = imageMatch[2] || getFileMentionDisplayName(imageMatch[1]) || imageMatch[1];
               span.textContent = imageName;
-              editorRef.current?.appendChild(span);
-            }
-          } else if (part.match(/\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/)) {
-            const pasteMatch = part.match(/\[MENTION_USER_PASTE:#(.+?)##(.+?)#\]/);
-            if (pasteMatch) {
-              const span = document.createElement('span');
-              span.className = 'mention-tag';
-              span.contentEditable = 'false';
-              span.dataset.type = 'paste';
-              span.dataset.name = pasteMatch[1];
-              span.dataset.preview = pasteMatch[2];
-              span.textContent = pasteMatch[2];
               editorRef.current?.appendChild(span);
             }
           } else if (part) {
@@ -666,35 +646,16 @@ export const RichInput = observer(forwardRef<RichInputHandle, RichInputProps>(({
     }
   };
 
-  const handlePaste = async (e: React.ClipboardEvent) => {
-    const imageFiles = extractClipboardImageFiles(e.clipboardData);
-    if (imageFiles.length > 0) {
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const paste = resolveRichInputClipboardPaste(e.clipboardData);
+    if (paste.kind === 'imageFiles') {
       e.preventDefault();
-      void attachLocalImages(imageFiles);
+      void attachLocalImages(paste.files);
       return;
     }
 
     e.preventDefault();
-    const text = e.clipboardData.getData('text/plain');
-    
-    if (text.length > 500) {
-      try {
-        console.log('[RichInput] Large paste detected, saving to temp file...');
-        const tempPath = await (window as any).gyshell.system.saveTempPaste(text);
-        console.log('[RichInput] Temp file saved at:', tempPath);
-        const preview = text.slice(0, 10).replace(/\n/g, ' ') + '...';
-        
-        // Use a small timeout to ensure the paste event finishes and editor is ready for DOM manipulation
-        setTimeout(() => {
-          insertMention({ type: 'paste', name: tempPath, preview });
-        }, 0);
-      } catch (err) {
-        console.error('[RichInput] Failed to save large paste:', err);
-        document.execCommand('insertText', false, text);
-      }
-    } else {
-      document.execCommand('insertText', false, text);
-    }
+    document.execCommand('insertText', false, paste.text);
   };
 
   const handleDrop = (e: React.DragEvent) => {

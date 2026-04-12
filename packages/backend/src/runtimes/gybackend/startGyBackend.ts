@@ -1,6 +1,5 @@
 import path from "node:path";
 import process from "node:process";
-import fs from "node:fs/promises";
 import { TerminalService } from "../../services/TerminalService";
 import { FileSystemService } from "../../services/FileSystemService";
 import { AgentService_v2 } from "../../services/AgentService_v2";
@@ -51,18 +50,6 @@ function resolveDataDir(): string {
     return path.resolve(custom);
   }
   return path.join(process.cwd(), ".gybackend-data");
-}
-
-async function saveTempPaste(
-  dataDir: string,
-  content: string,
-): Promise<string> {
-  const tmpDir = path.join(dataDir, "tmp_pastes");
-  await fs.mkdir(tmpDir, { recursive: true });
-  const fileName = `paste_${Date.now()}_${Math.random().toString(16).slice(2, 10)}.txt`;
-  const filePath = path.join(tmpDir, fileName);
-  await fs.writeFile(filePath, content, "utf8");
-  return filePath;
 }
 
 export async function startGyBackend(): Promise<void> {
@@ -406,9 +393,6 @@ export async function startGyBackend(): Promise<void> {
           getUiMessages: (sessionId) => uiHistoryService.getMessages(sessionId),
         },
         systemBridge: {
-          saveTempPaste: async (content: string) => {
-            return await saveTempPaste(dataDir, content);
-          },
           saveImageAttachment: async (payload: {
             dataBase64: string;
             fileName?: string;
