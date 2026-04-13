@@ -6,6 +6,7 @@ import type {
   TerminalSystemInfo
 } from '../types'
 import { TerminalService } from './TerminalService'
+import { waitCommandEnd } from './AgentHelper/tools/wait_tools'
 
 const WINDOWS_OSC_PRECMD = '\x1b]1337;gyshell_precmd;ec=0;cwd_b64=L3RtcA==\x07'
 const WINDOWS_OSC_PRECMD_WITH_PROMPT =
@@ -241,6 +242,21 @@ const createService = (backend: FakeCommandBackend): TerminalService => {
 const runCase = async (name: string, fn: () => Promise<void> | void): Promise<void> => {
   await fn()
   console.log(`PASS ${name}`)
+}
+
+const waitUntil = async (
+  predicate: () => boolean,
+  message: string,
+  timeoutMs = 2000
+): Promise<void> => {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    if (predicate()) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error(message)
 }
 
 const dumpViewport = (service: TerminalService, terminalId: string, rows: number): string => {
@@ -1043,6 +1059,246 @@ const run = async (): Promise<void> => {
 
     assertEqual(result.exitCode, 0, 'unix osc marker should still finish the task')
     assertEqual(result.stdoutDelta.trim(), 'test', 'unix output should remain visible')
+  })
+
+  await runCase('waitForTask suppresses nowait finish callback when manual wait consumes completion', async () => {
+    const backend = new FakeCommandBackend('unix', {
+      os: 'linux',
+      platform: 'linux',
+      release: '6.8.0',
+      arch: 'x64',
+      hostname: 'ubuntu',
+      isRemote: false,
+      shell: '/bin/bash'
+    })
+    const service = createService(backend)
+
+    await service.createTerminal({
+      type: 'local',
+      id: 'unix-nowait-suppressed',
+      title: 'Unix Nowait Suppressed',
+      cols: 120,
+      rows: 32
+    })
+
+    let callbackCount = 0
+    const taskId = await service.runCommandNoWait('unix-nowait-suppressed', 'printf suppressed', () => {
+      callbackCount += 1
+    })
+    const waitPromise = service.waitForTask('unix-nowait-suppressed', taskId, {
+      suppressFinishCallback: true
+    })
+
+    backend.emitData('unix-nowait-suppressed', `suppressed${WINDOWS_OSC_PRECMD}\n`)
+    const result = await waitPromise
+
+    assertEqual(result.exitCode, 0, 'manual wait should still receive the finished result')
+    assertEqual(result.stdoutDelta.trim(), 'suppressed', 'manual wait should receive command output')
+    assertEqual(callbackCount, 0, 'manual wait should suppress the nowait completion callback')
+  })
+
+  await runCase('waitForTask clears finish callback suppression when user skips manual wait', async () => {
+    const backend = new FakeCommandBackend('unix', {
+      os: 'linux',
+      platform: 'linux',
+      release: '6.8.0',
+      arch: 'x64',
+      hostname: 'ubuntu',
+      isRemote: false,
+      shell: '/bin/bash'
+    })
+    const service = createService(backend)
+
+    await service.createTerminal({
+      type: 'local',
+      id: 'unix-nowait-suppression-cleared',
+      title: 'Unix Nowait Suppression Cleared',
+      cols: 120,
+      rows: 32
+    })
+
+    let callbackCount = 0
+    let callbackTaskId = ''
+    const taskId = await service.runCommandNoWait('unix-nowait-suppression-cleared', 'printf cleared', (result) => {
+      callbackCount += 1
+      callbackTaskId = result.history_command_match_id
+    })
+    const skipped = await service.waitForTask('unix-nowait-suppression-cleared', taskId, {
+      suppressFinishCallback: true,
+      shouldSkip: () => true
+    })
+
+    assertEqual(skipped.exitCode, -3, 'manual wait should switch to async when skipped')
+    backend.emitData('unix-nowait-suppression-cleared', `cleared${WINDOWS_OSC_PRECMD}\n`)
+    await waitUntil(
+      () => callbackCount === 1,
+      'nowait completion callback should fire after skipped manual wait'
+    )
+    assertEqual(callbackTaskId, taskId, 'completion callback should preserve the command task id')
+  })
+
+  await runCase('wait_command_end abort does not mark a still-running nowait command completed', async () => {
+    const backend = new FakeCommandBackend('unix', {
+      os: 'linux',
+      platform: 'linux',
+      release: '6.8.0',
+      arch: 'x64',
+      hostname: 'ubuntu',
+      isRemote: false,
+      shell: '/bin/bash'
+    })
+    const service = createService(backend)
+
+    await service.createTerminal({
+      type: 'local',
+      id: 'unix-wait-tool-abort',
+      title: 'Unix Wait Tool Abort',
+      cols: 120,
+      rows: 32
+    })
+
+    let callbackCount = 0
+    let callbackTaskId = ''
+    const taskId = await service.runCommandNoWait('unix-wait-tool-abort', 'printf after-abort', (result) => {
+      callbackCount += 1
+      callbackTaskId = result.history_command_match_id
+    })
+    const controller = new AbortController()
+    const events: any[] = []
+    const completions: any[] = []
+    const waitPromise = waitCommandEnd(
+      { tabIdOrName: 'unix-wait-tool-abort' },
+      {
+        terminalService: service,
+        sessionId: 'session-wait-abort',
+        messageId: 'message-wait-abort',
+        sendEvent: (_sessionId: string, event: any) => {
+          events.push(event)
+        },
+        commandPolicyService: {} as any,
+        commandPolicyMode: 'smart',
+        signal: controller.signal,
+        completeBackgroundExecCommand: (command: any) => {
+          completions.push(command)
+        }
+      }
+    )
+
+    await waitUntil(
+      () => events.some((event) => event.type === 'sub_tool_started'),
+      'wait_command_end should start waiting before aborting'
+    )
+    controller.abort()
+
+    let abortError: unknown = null
+    try {
+      await waitPromise
+    } catch (error) {
+      abortError = error
+    }
+
+    assertEqual(
+      abortError instanceof Error && abortError.message === 'AbortError',
+      true,
+      'aborted wait_command_end should propagate AbortError'
+    )
+    assertEqual(
+      completions.length,
+      0,
+      'aborted wait_command_end should not mark the background command completed'
+    )
+    assertEqual(
+      service.getCommandTask('unix-wait-tool-abort', taskId)?.status,
+      'running',
+      'aborted wait_command_end should leave the nowait command running'
+    )
+
+    backend.emitData('unix-wait-tool-abort', `after-abort${WINDOWS_OSC_PRECMD}\n`)
+    await waitUntil(
+      () => callbackCount === 1,
+      'nowait completion callback should still fire after an aborted manual wait'
+    )
+    assertEqual(callbackTaskId, taskId, 'completion callback should preserve the command task id after abort')
+  })
+
+  await runCase('wait_command_end honors a just-finished suppressed wait before abort', async () => {
+    const backend = new FakeCommandBackend('unix', {
+      os: 'linux',
+      platform: 'linux',
+      release: '6.8.0',
+      arch: 'x64',
+      hostname: 'ubuntu',
+      isRemote: false,
+      shell: '/bin/bash'
+    })
+    const service = createService(backend)
+
+    await service.createTerminal({
+      type: 'local',
+      id: 'unix-wait-tool-finish-before-abort',
+      title: 'Unix Wait Tool Finish Before Abort',
+      cols: 120,
+      rows: 32
+    })
+
+    let callbackCount = 0
+    const taskId = await service.runCommandNoWait(
+      'unix-wait-tool-finish-before-abort',
+      'printf finish-before-abort',
+      () => {
+        callbackCount += 1
+      }
+    )
+    const controller = new AbortController()
+    const events: any[] = []
+    const completions: any[] = []
+    const waitPromise = waitCommandEnd(
+      { tabIdOrName: 'unix-wait-tool-finish-before-abort' },
+      {
+        terminalService: service,
+        sessionId: 'session-finish-before-abort',
+        messageId: 'message-finish-before-abort',
+        sendEvent: (_sessionId: string, event: any) => {
+          events.push(event)
+        },
+        commandPolicyService: {} as any,
+        commandPolicyMode: 'smart',
+        signal: controller.signal,
+        completeBackgroundExecCommand: (command: any) => {
+          completions.push(command)
+        }
+      }
+    )
+
+    await waitUntil(
+      () => events.some((event) => event.type === 'sub_tool_started'),
+      'wait_command_end should start waiting before the command finishes'
+    )
+    backend.emitData('unix-wait-tool-finish-before-abort', `finish-before-abort${WINDOWS_OSC_PRECMD}\n`)
+    controller.abort()
+
+    const result = await waitPromise
+
+    assertEqual(
+      result.includes('finish-before-abort'),
+      true,
+      'finished command output should win over a later abort signal'
+    )
+    assertEqual(
+      callbackCount,
+      0,
+      'manual wait should keep suppressing the nowait finish callback'
+    )
+    assertEqual(
+      completions.length,
+      1,
+      'finished command should still be marked completed when abort races after finish'
+    )
+    assertEqual(
+      completions[0]?.historyCommandMatchId,
+      taskId,
+      'completion should preserve the command task id when finish wins the race'
+    )
   })
 }
 

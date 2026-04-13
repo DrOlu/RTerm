@@ -305,6 +305,7 @@ export interface CommandTask {
   output?: string
   lastOutputAtMs?: number
   capturedOutput?: string
+  suppressFinishCallback?: boolean
   startTime: number
   endTime?: number
   startAbsLine?: number

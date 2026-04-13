@@ -13,9 +13,17 @@ import type {
 import type { SkillInfo, CreateSkillResult } from "./SkillService";
 import type { McpServerSummary } from "./McpToolService";
 import type { MemorySnapshot } from "../memory/FileMemoryStore";
-import type { StartTaskInput } from "./Gateway/types";
+import type { StartTaskInput, StartTaskMode } from "./Gateway/types";
 import type { StoredChatSession } from "./ChatHistoryService";
 import type { ChatSessionSummaryRecord } from "./history/historyTypes";
+import type {
+  RunBackgroundExecCommandCompleter,
+  RunBackgroundExecCommandRegistrar,
+  QueuedAgentInsertionAcknowledger,
+  QueuedAgentInsertionEnqueuer,
+  QueuedAgentInsertionProvider,
+  UnfinishedRunBackgroundExecCommandProvider,
+} from "./AgentHelper/queuedInsertions";
 
 export interface ISettingsRuntime {
   getSettings(): BackendSettings;
@@ -118,11 +126,29 @@ export interface IAgentRuntime {
   setFeedbackWaiter(
     waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>,
   ): void;
+  setQueuedInsertionProvider?(
+    provider: QueuedAgentInsertionProvider,
+  ): void;
+  setQueuedInsertionAcknowledger?(
+    acknowledger: QueuedAgentInsertionAcknowledger,
+  ): void;
+  setQueuedInsertionEnqueuer?(
+    enqueuer: QueuedAgentInsertionEnqueuer,
+  ): void;
+  setBackgroundExecCommandRegistrar?(
+    registrar: RunBackgroundExecCommandRegistrar,
+  ): void;
+  setBackgroundExecCommandCompleter?(
+    completer: RunBackgroundExecCommandCompleter,
+  ): void;
+  setUnfinishedBackgroundExecCommandProvider?(
+    provider: UnfinishedRunBackgroundExecCommandProvider,
+  ): void;
   run(
     context: any,
     input: StartTaskInput,
     signal: AbortSignal,
-    startMode?: "normal" | "inserted",
+    startMode?: StartTaskMode,
   ): Promise<void>;
   isAbortError(error: unknown): boolean;
   releaseSessionModelBinding(sessionId: string): void;

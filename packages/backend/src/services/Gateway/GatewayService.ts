@@ -20,6 +20,12 @@ import type {
   ISettingsRuntime,
 } from "../runtimeContracts";
 import { getRunExperimentalFlagsFromSettings } from "../AgentHelper/utils/experimental_flags";
+import {
+  type QueuedAgentInsertion,
+  type QueuedAgentInsertionInput,
+  type RunBackgroundExecCommand,
+  type RunBackgroundExecCommandInput,
+} from "../AgentHelper/queuedInsertions";
 import { TransportHub } from "./TransportHub";
 
 export class GatewayService extends EventEmitter implements IGatewayRuntime {
@@ -28,6 +34,13 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
   private feedbackBus: EventEmitter = new EventEmitter();
   private feedbackCache: Map<string, any> = new Map();
   private transportHub: TransportHub = new TransportHub();
+  private queuedInsertionsByAgentRun: Map<string, QueuedAgentInsertion[]> =
+    new Map();
+  private backgroundExecCommandsByAgentRun: Map<
+    string,
+    Map<string, RunBackgroundExecCommand>
+  > =
+    new Map();
 
   constructor(
     private terminalService: IGatewayTerminalRuntime,
@@ -51,6 +64,28 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     });
     this.agentService.setFeedbackWaiter((messageId, timeoutMs) =>
       this.waitForFeedback(messageId, timeoutMs),
+    );
+    this.agentService.setQueuedInsertionProvider?.((sessionId, agentRunId) =>
+      this.peekQueuedInsertions(sessionId, agentRunId),
+    );
+    this.agentService.setQueuedInsertionAcknowledger?.(
+      (sessionId, agentRunId, itemIds) =>
+        this.acknowledgeQueuedInsertions(sessionId, agentRunId, itemIds),
+    );
+    this.agentService.setQueuedInsertionEnqueuer?.((sessionId, insertion) =>
+      this.enqueueQueuedInsertion(sessionId, insertion),
+    );
+    this.agentService.setBackgroundExecCommandRegistrar?.(
+      (sessionId, command) =>
+        this.registerBackgroundExecCommand(sessionId, command),
+    );
+    this.agentService.setBackgroundExecCommandCompleter?.(
+      (sessionId, command) =>
+        this.completeBackgroundExecCommand(sessionId, command),
+    );
+    this.agentService.setUnfinishedBackgroundExecCommandProvider?.(
+      (sessionId, agentRunId) =>
+        this.consumeUnfinishedBackgroundExecCommands(sessionId, agentRunId),
     );
     this.commandPolicyService.setFeedbackWaiter((messageId, timeoutMs) =>
       this.waitForFeedback(messageId, timeoutMs),
@@ -113,11 +148,21 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     }
 
     this.ensureSessionProfileLock(context);
+    const preserveAgentRun =
+      context.status !== "idle" && options?.startMode === "inserted";
+    const inheritedAgentRunId = preserveAgentRun
+      ? this.getContextAgentRunId(context) || uuidv4()
+      : undefined;
+    if (inheritedAgentRunId) {
+      context.metadata.agentRunId = inheritedAgentRunId;
+      context.metadata.agentRunRestartInProgress = inheritedAgentRunId;
+    }
 
     if (context.status !== "idle") {
       await this.stopTask(sessionId, {
         waitForCompletion: true,
         preserveProfileLock: true,
+        preserveAgentRun,
       });
     } else {
       // Handle race: status already idle but previous run finalization not finished yet.
@@ -125,6 +170,7 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     }
 
     const runId = uuidv4();
+    const agentRunId = inheritedAgentRunId || uuidv4();
     const abortController = new AbortController();
     let resolveRunCompletion: () => void = () => {};
     const runCompletion = new Promise<void>((resolve) => {
@@ -136,6 +182,10 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     context.status = "running";
     context.metadata.runCompletion = runCompletion;
     context.metadata.runId = runId;
+    context.metadata.agentRunId = agentRunId;
+    if (context.metadata.agentRunRestartInProgress === agentRunId) {
+      delete context.metadata.agentRunRestartInProgress;
+    }
 
     try {
       // AgentService has been refactored as stateless run
@@ -170,8 +220,15 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
       }
       if (context.activeRunId === runId) {
         // Unified cleanup of run state
+        this.cleanupAgentRun(agentRunId);
         this.clearRunState(context);
         this.releaseSessionProfileLock(context);
+        if (context.metadata.agentRunId === agentRunId) {
+          delete context.metadata.agentRunId;
+        }
+        if (context.metadata.agentRunRestartInProgress === agentRunId) {
+          delete context.metadata.agentRunRestartInProgress;
+        }
         // 1. Send DONE action (for UI state like isThinking)
         this.broadcast({
           type: "agent:event",
@@ -188,15 +245,32 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
 
   async stopTask(
     sessionId: string,
-    options?: { waitForCompletion?: boolean; preserveProfileLock?: boolean },
+    options?: {
+      waitForCompletion?: boolean;
+      preserveProfileLock?: boolean;
+      preserveAgentRun?: boolean;
+    },
   ): Promise<void> {
     const context = this.sessions.get(sessionId);
     if (context && context.abortController) {
       const runCompletion = context.metadata.runCompletion as
         | Promise<void>
         | undefined;
+      const agentRunId = this.getContextAgentRunId(context);
       context.abortController.abort();
       this.clearRunState(context);
+      if (!options?.preserveAgentRun) {
+        this.cleanupAgentRun(agentRunId);
+        if (agentRunId && context.metadata.agentRunId === agentRunId) {
+          delete context.metadata.agentRunId;
+        }
+        if (
+          agentRunId &&
+          context.metadata.agentRunRestartInProgress === agentRunId
+        ) {
+          delete context.metadata.agentRunRestartInProgress;
+        }
+      }
       if (!options?.preserveProfileLock) {
         this.releaseSessionProfileLock(context);
       }
@@ -323,6 +397,7 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     await this.stopTask(sessionId);
     this.agentService.deleteChatSession(sessionId);
     this.sessions.delete(sessionId);
+    this.cleanupSessionAgentRuns(sessionId);
   }
 
   async deleteChatSessions(sessionIds: string[]): Promise<void> {
@@ -334,7 +409,10 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     }
     await Promise.all(ids.map((id) => this.stopTask(id)));
     this.agentService.deleteChatSessions(ids);
-    ids.forEach((id) => this.sessions.delete(id));
+    ids.forEach((id) => {
+      this.sessions.delete(id);
+      this.cleanupSessionAgentRuns(id);
+    });
   }
 
   renameSession(sessionId: string, newTitle: string): void {
@@ -365,6 +443,168 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
       | undefined;
     if (runCompletion) {
       await runCompletion.catch(() => undefined);
+    }
+  }
+
+  private enqueueQueuedInsertion(
+    sessionId: string,
+    insertion: QueuedAgentInsertionInput,
+  ): void {
+    const content = String(insertion.content || "").trim();
+    if (!content) return;
+    const agentRunId = insertion.originAgentRunId;
+    if (!agentRunId || !this.isAgentRunAcceptingEvents(sessionId, agentRunId)) {
+      return;
+    }
+
+    const current = this.queuedInsertionsByAgentRun.get(agentRunId) || [];
+    if (
+      insertion.dedupeKey &&
+      current.some((item) => item.dedupeKey === insertion.dedupeKey)
+    ) {
+      return;
+    }
+
+    current.push({
+      ...insertion,
+      content,
+      id: uuidv4(),
+      sessionId,
+      agentRunId,
+      createdAt: Date.now(),
+    });
+    this.queuedInsertionsByAgentRun.set(agentRunId, current);
+  }
+
+  private peekQueuedInsertions(
+    sessionId: string,
+    agentRunId: string,
+  ): QueuedAgentInsertion[] {
+    if (!this.isAgentRunAcceptingEvents(sessionId, agentRunId)) return [];
+    return [...(this.queuedInsertionsByAgentRun.get(agentRunId) || [])];
+  }
+
+  private acknowledgeQueuedInsertions(
+    sessionId: string,
+    agentRunId: string,
+    itemIds: string[],
+  ): void {
+    if (!this.isAgentRunAcceptingEvents(sessionId, agentRunId)) return;
+    const ids = new Set(itemIds.filter(Boolean));
+    if (ids.size === 0) return;
+    const items = this.queuedInsertionsByAgentRun.get(agentRunId) || [];
+    const remaining = items.filter((item) => !ids.has(item.id));
+    if (remaining.length > 0) {
+      this.queuedInsertionsByAgentRun.set(agentRunId, remaining);
+    } else {
+      this.queuedInsertionsByAgentRun.delete(agentRunId);
+    }
+  }
+
+  private registerBackgroundExecCommand(
+    sessionId: string,
+    command: RunBackgroundExecCommandInput,
+  ): void {
+    const agentRunId = command.originAgentRunId;
+    if (!agentRunId || !this.isAgentRunAcceptingEvents(sessionId, agentRunId)) {
+      return;
+    }
+    const current =
+      this.backgroundExecCommandsByAgentRun.get(agentRunId) ||
+      new Map<string, RunBackgroundExecCommand>();
+    const existing = current.get(command.historyCommandMatchId);
+    current.set(command.historyCommandMatchId, {
+      ...existing,
+      ...command,
+      id: command.historyCommandMatchId,
+      sessionId,
+      agentRunId,
+      createdAt: existing?.createdAt || Date.now(),
+      completedAt: existing?.completedAt,
+      exitCode: existing?.exitCode,
+      guardNotifiedAt: existing?.guardNotifiedAt,
+    });
+    this.backgroundExecCommandsByAgentRun.set(agentRunId, current);
+  }
+
+  private completeBackgroundExecCommand(
+    sessionId: string,
+    command: RunBackgroundExecCommandInput & { exitCode?: number },
+  ): void {
+    const agentRunId = command.originAgentRunId;
+    if (!agentRunId || !this.isAgentRunAcceptingEvents(sessionId, agentRunId)) {
+      return;
+    }
+    const current =
+      this.backgroundExecCommandsByAgentRun.get(agentRunId) ||
+      new Map<string, RunBackgroundExecCommand>();
+    const existing = current.get(command.historyCommandMatchId);
+    current.set(command.historyCommandMatchId, {
+      ...existing,
+      ...command,
+      id: command.historyCommandMatchId,
+      sessionId,
+      agentRunId,
+      createdAt: existing?.createdAt || Date.now(),
+      completedAt: Date.now(),
+      exitCode: command.exitCode,
+      guardNotifiedAt: existing?.guardNotifiedAt,
+    });
+    this.backgroundExecCommandsByAgentRun.set(agentRunId, current);
+  }
+
+  private consumeUnfinishedBackgroundExecCommands(
+    sessionId: string,
+    agentRunId: string,
+  ): RunBackgroundExecCommand[] {
+    if (!this.isAgentRunAcceptingEvents(sessionId, agentRunId)) return [];
+    const current = this.backgroundExecCommandsByAgentRun.get(agentRunId);
+    if (!current) return [];
+    const now = Date.now();
+    const unfinished = Array.from(current.values()).filter(
+      (command) => !command.completedAt && !command.guardNotifiedAt,
+    );
+    unfinished.forEach((command) => {
+      command.guardNotifiedAt = now;
+      current.set(command.historyCommandMatchId, command);
+    });
+    return unfinished;
+  }
+
+  private isAgentRunAcceptingEvents(
+    sessionId: string,
+    agentRunId: string,
+  ): boolean {
+    const context = this.sessions.get(sessionId);
+    if (!context) return false;
+    return (
+      context.metadata.agentRunId === agentRunId ||
+      context.metadata.agentRunRestartInProgress === agentRunId
+    );
+  }
+
+  private getContextAgentRunId(context: SessionContext): string | undefined {
+    return typeof context.metadata.agentRunId === "string"
+      ? context.metadata.agentRunId
+      : undefined;
+  }
+
+  private cleanupAgentRun(agentRunId: string | undefined): void {
+    if (!agentRunId) return;
+    this.queuedInsertionsByAgentRun.delete(agentRunId);
+    this.backgroundExecCommandsByAgentRun.delete(agentRunId);
+  }
+
+  private cleanupSessionAgentRuns(sessionId: string): void {
+    for (const [agentRunId, items] of this.queuedInsertionsByAgentRun) {
+      if (items.some((item) => item.sessionId === sessionId)) {
+        this.queuedInsertionsByAgentRun.delete(agentRunId);
+      }
+    }
+    for (const [agentRunId, commands] of this.backgroundExecCommandsByAgentRun) {
+      if (Array.from(commands.values()).some((item) => item.sessionId === sessionId)) {
+        this.backgroundExecCommandsByAgentRun.delete(agentRunId);
+      }
     }
   }
 

@@ -157,13 +157,29 @@ export async function waitCommandEnd(
     const result = await terminalService.waitForTask(bestMatch.id, taskId, {
       signal: context.signal,
       interruptOnAbort: false,
-      shouldSkip: () => userSkipped
+      shouldSkip: () => userSkipped,
+      suppressFinishCallback: true
     })
 
     const task = terminalService.getCommandTask(bestMatch.id, taskId)
     const commandName = task?.command || 'Unknown command'
     const historyCommandMatchId = result.history_command_match_id
     const truncatedOutput = truncateCommandOutput(result.stdoutDelta || '', historyCommandMatchId, bestMatch.id)
+    if (result.exitCode === -2) {
+      throw new Error('AbortError')
+    }
+    if (
+      !(result.exitCode === -3 || result.stdoutDelta === 'USER_SKIPPED_WAIT') &&
+      !(result.exitCode === -1 && result.stdoutDelta?.includes('timed out'))
+    ) {
+      context.completeBackgroundExecCommand?.({
+        terminalId: bestMatch.id,
+        terminalName: bestMatch.title || bestMatch.id,
+        historyCommandMatchId,
+        command: commandName,
+        exitCode: result.exitCode
+      })
+    }
 
     let finalResult = ''
     if (result.exitCode === -3 || result.stdoutDelta === 'USER_SKIPPED_WAIT') {

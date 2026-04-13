@@ -1580,6 +1580,7 @@ export class TerminalService {
       interruptOnAbort?: boolean; 
       onFinished?: (result: CommandResult) => void;
       shouldSkip?: () => boolean;
+      suppressFinishCallback?: boolean;
     }
   ): Promise<CommandResult> {
     const taskId = await this.executeCommandInternal(terminalId, command, 'wait', opts?.onFinished)
@@ -1593,35 +1594,28 @@ export class TerminalService {
       signal?: AbortSignal; 
       interruptOnAbort?: boolean;
       shouldSkip?: () => boolean;
+      suppressFinishCallback?: boolean;
     }
   ): Promise<CommandResult> {
     const startTime = Date.now()
     const timeoutMs = 120_000
+    let suppressionApplied = false
+    const initialTask = this.getTaskMap(terminalId)[taskId]
+    if (opts?.suppressFinishCallback && initialTask?.status === 'running') {
+      initialTask.suppressFinishCallback = true
+      suppressionApplied = true
+    }
+    const clearSuppressionIfStillRunning = (): void => {
+      if (!suppressionApplied) return
+      const task = this.getTaskMap(terminalId)[taskId]
+      if (task?.status === 'running') {
+        task.suppressFinishCallback = false
+      }
+    }
 
     while (true) {
-      if (opts?.signal?.aborted) {
-        if (opts.interruptOnAbort !== false) {
-          this.interrupt(terminalId)
-          this.markTaskAborted(terminalId, taskId)
-        }
-        return { stdoutDelta: 'Command aborted by user.', exitCode: -2, history_command_match_id: taskId }
-      }
-
-      // Check if user manually skipped the wait
-      if (opts?.shouldSkip?.()) {
-        return { 
-          stdoutDelta: 'USER_SKIPPED_WAIT', 
-          exitCode: -3, 
-          history_command_match_id: taskId 
-        }
-      }
-
       const task = this.getTaskMap(terminalId)[taskId]
-      if (!task) {
-        throw new Error(`Task ${taskId} not found.`)
-      }
-
-      if (task.status === 'finished') {
+      if (task?.status === 'finished') {
         return {
           stdoutDelta: task.output || '',
           exitCode: task.exitCode ?? -1,
@@ -1629,7 +1623,32 @@ export class TerminalService {
         }
       }
 
+      if (opts?.signal?.aborted) {
+        if (opts.interruptOnAbort !== false) {
+          this.interrupt(terminalId)
+          this.markTaskAborted(terminalId, taskId)
+        } else {
+          clearSuppressionIfStillRunning()
+        }
+        return { stdoutDelta: 'Command aborted by user.', exitCode: -2, history_command_match_id: taskId }
+      }
+
+      if (!task) {
+        throw new Error(`Task ${taskId} not found.`)
+      }
+
+      // Check if user manually skipped the wait after honoring a just-finished task.
+      if (opts?.shouldSkip?.()) {
+        clearSuppressionIfStillRunning()
+        return {
+          stdoutDelta: 'USER_SKIPPED_WAIT',
+          exitCode: -3,
+          history_command_match_id: taskId
+        }
+      }
+
       if (Date.now() - startTime > timeoutMs) {
+        clearSuppressionIfStillRunning()
         return {
           stdoutDelta: 'Command timed out (120s). The process is still running in the background.',
           exitCode: -1,
@@ -1815,6 +1834,8 @@ export class TerminalService {
     const callback = this.onTaskFinishedCallbacks.get(taskId)
     if (callback) {
       this.onTaskFinishedCallbacks.delete(taskId)
+    }
+    if (callback && !task.suppressFinishCallback) {
       callback({
         stdoutDelta: task.output,
         exitCode: options?.exitCode,

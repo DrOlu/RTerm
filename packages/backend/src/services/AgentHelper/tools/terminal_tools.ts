@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ToolExecutionContext } from '../types'
+import { buildExecCommandNowaitCompletedInsertion } from '../queuedInsertions'
 
 // --- Schemas ---
 
@@ -70,6 +71,33 @@ type RunCommandOptions = {
   getSkipWaitReason?: () => string | undefined
 }
 
+function enqueueNowaitCompletionNotification(params: {
+  context: ToolExecutionContext
+  terminalId: string
+  terminalName: string
+  command: string
+  historyCommandMatchId: string
+  exitCode?: number
+}): void {
+  params.context.completeBackgroundExecCommand?.({
+    terminalId: params.terminalId,
+    terminalName: params.terminalName,
+    historyCommandMatchId: params.historyCommandMatchId,
+    command: params.command,
+    exitCode: params.exitCode
+  })
+  if (!params.context.enqueueQueuedInsertion) return
+  params.context.enqueueQueuedInsertion(
+    buildExecCommandNowaitCompletedInsertion({
+      terminalId: params.terminalId,
+      terminalName: params.terminalName,
+      historyCommandMatchId: params.historyCommandMatchId,
+      command: params.command,
+      exitCode: params.exitCode
+    })
+  )
+}
+
 export async function runCommand(
   args: z.infer<typeof execCommandSchema>,
   context: ToolExecutionContext,
@@ -121,6 +149,7 @@ export async function runCommand(
   })
 
   try {
+    let shouldNotifyAsyncCompletion = false
     // Subscribe to skip wait feedback for this message
     let userSkipped = false
     if (context.waitForFeedback) {
@@ -134,13 +163,38 @@ export async function runCommand(
     const result = await terminalService.runCommandAndWait(bestMatch.id, command, {
       signal: context.signal,
       interruptOnAbort: false,
-      shouldSkip: () => userSkipped || options?.shouldSkipWait?.() === true
+      shouldSkip: () => {
+        const shouldSkip =
+          userSkipped || options?.shouldSkipWait?.() === true
+        if (shouldSkip) {
+          shouldNotifyAsyncCompletion = true
+        }
+        return shouldSkip
+      },
+      onFinished: (finished) => {
+        if (!shouldNotifyAsyncCompletion) return
+        enqueueNowaitCompletionNotification({
+          context,
+          terminalId: bestMatch.id,
+          terminalName: bestMatch.title || bestMatch.id,
+          command,
+          historyCommandMatchId: finished.history_command_match_id,
+          exitCode: finished.exitCode
+        })
+      }
     })
     const historyCommandMatchId = result.history_command_match_id
     const truncatedOutput = truncateCommandOutput(result.stdoutDelta || '', historyCommandMatchId, bestMatch.id)
     
     let finalResult = ''
     if (result.exitCode === -3 || result.stdoutDelta === 'USER_SKIPPED_WAIT') {
+      shouldNotifyAsyncCompletion = true
+      context.registerBackgroundExecCommand?.({
+        terminalId: bestMatch.id,
+        terminalName: bestMatch.title || bestMatch.id,
+        historyCommandMatchId,
+        command
+      })
       const autoSwitchReason = options?.getSkipWaitReason?.()?.trim()
       finalResult = autoSwitchReason
         ? `This command has been switched to nowait mode because ${autoSwitchReason}. The command is currently running in the background. Please DO NOT wait for it to finish unless specifically asked. You can use read_command_output to check its progress if needed. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
@@ -159,6 +213,13 @@ export async function runCommand(
       })
       return finalResult
     } else if (result.exitCode === -1 && result.stdoutDelta?.includes('timed out')) {
+      shouldNotifyAsyncCompletion = true
+      context.registerBackgroundExecCommand?.({
+        terminalId: bestMatch.id,
+        terminalName: bestMatch.title || bestMatch.id,
+        historyCommandMatchId,
+        command
+      })
       finalResult = `The command is still running, but the wait has timed out (120s). You can use read_command_output to check its current progress, or call wait_command_end again if you believe it needs more time to finish. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
     } else {
       finalResult = `The command has finished executing. The following is the output (history_command_match_id=${historyCommandMatchId}):
@@ -253,7 +314,26 @@ export async function runCommandNowait(args: z.infer<typeof execCommandSchema>, 
   })
 
   try {
-    const historyCommandMatchId = await terminalService.runCommandNoWait(bestMatch.id, command)
+    const historyCommandMatchId = await terminalService.runCommandNoWait(
+      bestMatch.id,
+      command,
+      (finished) => {
+        enqueueNowaitCompletionNotification({
+          context,
+          terminalId: bestMatch.id,
+          terminalName: bestMatch.title || bestMatch.id,
+          command,
+          historyCommandMatchId: finished.history_command_match_id,
+          exitCode: finished.exitCode
+        })
+      }
+    )
+    context.registerBackgroundExecCommand?.({
+      terminalId: bestMatch.id,
+      terminalName: bestMatch.title || bestMatch.id,
+      historyCommandMatchId,
+      command
+    })
     return `Command started in background. Use read_command_output to view output and status(finished or running), or use wait_command_end to wait for it to finish. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}.`
   } catch (error) {
     let errorMessage = error instanceof Error ? error.message : String(error)

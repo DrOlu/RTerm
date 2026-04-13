@@ -30,7 +30,7 @@ import type {
 import type { UIHistoryService } from "./UIHistoryService";
 import { v4 as uuidv4 } from "uuid";
 import type { z } from "zod";
-import type { StartTaskInput } from "./Gateway/types";
+import type { StartTaskInput, StartTaskMode } from "./Gateway/types";
 import type { StoredChatSession } from "./ChatHistoryService";
 import {
   buildToolsForModel,
@@ -96,9 +96,20 @@ import { runSkillTool } from "./AgentHelper/tools/skill_tools";
 import { TokenManager } from "./AgentHelper/TokenManager";
 import { InputParseHelper } from "./AgentHelper/InputParseHelper";
 import { ImageAttachmentService } from "./ImageAttachmentService";
+import {
+  buildUnfinishedExecCommandContinueInstruction,
+  type QueuedAgentInsertionAcknowledger,
+  type QueuedAgentInsertionEnqueuer,
+  type QueuedAgentInsertionProvider,
+  type RunBackgroundExecCommand,
+  type RunBackgroundExecCommandCompleter,
+  type RunBackgroundExecCommandRegistrar,
+  type UnfinishedRunBackgroundExecCommandProvider,
+} from "./AgentHelper/queuedInsertions";
 
 const Ann: any = Annotation;
 type StartupInputState = StartTaskInput | undefined;
+type StartupModeState = StartTaskMode;
 
 const StateAnnotation = Ann.Root({
   // Runtime/Persistence Context - single source of truth for the whole graph
@@ -134,7 +145,7 @@ const StateAnnotation = Ann.Root({
     default: (): StartupInputState => undefined,
   }),
   startup_mode: Ann({
-    reducer: (x: "normal" | "inserted", y?: "normal" | "inserted") => y ?? x,
+    reducer: (x: StartupModeState, y?: StartupModeState) => y ?? x,
     default: () => "normal",
   }),
   pendingToolCalls: Ann({
@@ -218,7 +229,19 @@ export class AgentService_v2 {
   private waitForFeedback:
     | ((messageId: string, timeoutMs?: number) => Promise<any | null>)
     | null = null;
+  private queuedInsertionProvider: QueuedAgentInsertionProvider | null = null;
+  private queuedInsertionAcknowledger: QueuedAgentInsertionAcknowledger | null =
+    null;
+  private queuedInsertionEnqueuer: QueuedAgentInsertionEnqueuer | null = null;
+  private backgroundExecCommandRegistrar: RunBackgroundExecCommandRegistrar | null =
+    null;
+  private backgroundExecCommandCompleter: RunBackgroundExecCommandCompleter | null =
+    null;
+  private unfinishedBackgroundExecCommandProvider:
+    | UnfinishedRunBackgroundExecCommandProvider
+    | null = null;
   private imageAttachmentService: ImageAttachmentService | null = null;
+  private activeAgentRunIdsBySession: Map<string, string> = new Map();
 
   constructor(
     terminalService: TerminalService,
@@ -257,6 +280,38 @@ export class AgentService_v2 {
     waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>,
   ): void {
     this.waitForFeedback = waiter;
+  }
+
+  setQueuedInsertionProvider(provider: QueuedAgentInsertionProvider): void {
+    this.queuedInsertionProvider = provider;
+  }
+
+  setQueuedInsertionAcknowledger(
+    acknowledger: QueuedAgentInsertionAcknowledger,
+  ): void {
+    this.queuedInsertionAcknowledger = acknowledger;
+  }
+
+  setQueuedInsertionEnqueuer(enqueuer: QueuedAgentInsertionEnqueuer): void {
+    this.queuedInsertionEnqueuer = enqueuer;
+  }
+
+  setBackgroundExecCommandRegistrar(
+    registrar: RunBackgroundExecCommandRegistrar,
+  ): void {
+    this.backgroundExecCommandRegistrar = registrar;
+  }
+
+  setBackgroundExecCommandCompleter(
+    completer: RunBackgroundExecCommandCompleter,
+  ): void {
+    this.backgroundExecCommandCompleter = completer;
+  }
+
+  setUnfinishedBackgroundExecCommandProvider(
+    provider: UnfinishedRunBackgroundExecCommandProvider,
+  ): void {
+    this.unfinishedBackgroundExecCommandProvider = provider;
   }
 
   isAbortError(error: unknown): boolean {
@@ -354,7 +409,10 @@ export class AgentService_v2 {
       "token_pruner_runtime",
     ]);
 
-    workflow.addEdge("final_output", END);
+    workflow.addConditionalEdges("final_output", this.routeFinalOutput, [
+      "token_pruner_runtime",
+      END,
+    ]);
 
     this.graph = workflow.compile({ checkpointer: this.checkpointer });
   }
@@ -532,6 +590,12 @@ export class AgentService_v2 {
 
   private createTokenManagerNode() {
     return RunnableLambda.from(async (state: any, config: any) => {
+      if (state.sessionId) {
+        this.ackQueuedInsertionMessagesInState(
+          state.sessionId,
+          state.messages as BaseMessage[],
+        );
+      }
       const messages: BaseMessage[] = Array.isArray(state.messages)
         ? state.messages
         : [];
@@ -585,7 +649,7 @@ export class AgentService_v2 {
       const sessionBinding = this.getSessionModelBinding(sessionId);
 
       const startupInput: StartTaskInput = state.startup_input ?? "";
-      const startupMode: "normal" | "inserted" =
+      const startupMode: StartupModeState =
         state.startup_mode === "inserted" ? "inserted" : "normal";
 
       const messages: BaseMessage[] = [...state.messages];
@@ -707,6 +771,10 @@ export class AgentService_v2 {
     return RunnableLambda.from(async (state: any, config: any) => {
       const sessionId = state.sessionId;
       if (!sessionId) throw new Error("No session ID in state");
+      this.ackQueuedInsertionMessagesInState(
+        sessionId,
+        state.messages as BaseMessage[],
+      );
       const sessionBinding = this.getSessionModelBinding(sessionId);
       const runtimeThinkingCorrectionEnabled =
         state.runtimeThinkingCorrectionEnabled !== false;
@@ -726,6 +794,15 @@ export class AgentService_v2 {
           input_kind: "self_correction",
         };
         fullHistoryMessages = [...fullHistoryMessages, selfCorrectionMessage];
+      }
+
+      const queuedInsertionMessages =
+        this.consumeQueuedInsertionMessages(sessionId);
+      if (queuedInsertionMessages.length > 0) {
+        fullHistoryMessages = [
+          ...fullHistoryMessages,
+          ...queuedInsertionMessages,
+        ];
       }
 
       const prevPassCount =
@@ -948,6 +1025,10 @@ export class AgentService_v2 {
     return RunnableLambda.from(async (state: any) => {
       const sessionId = state.sessionId;
       if (!sessionId) throw new Error("No session ID in state");
+      this.ackQueuedInsertionMessagesInState(
+        sessionId,
+        state.messages as BaseMessage[],
+      );
 
       const messages: BaseMessage[] = [...state.messages];
       const lastMessage = messages[messages.length - 1];
@@ -1566,6 +1647,40 @@ export class AgentService_v2 {
     });
   }
 
+  private consumeUnfinishedBackgroundExecCommandsForGuard(
+    sessionId: string,
+  ): RunBackgroundExecCommand[] {
+    const agentRunId = this.activeAgentRunIdsBySession.get(sessionId);
+    if (!agentRunId) return [];
+    return (
+      this.unfinishedBackgroundExecCommandProvider?.(sessionId, agentRunId) ||
+      []
+    );
+  }
+
+  private emitRemoveMessageIfPresent(
+    sessionId: string,
+    lastMessage: BaseMessage | undefined,
+  ): void {
+    if (!lastMessage || !AIMessage.isInstance(lastMessage)) return;
+    const removedBackendMessageId = (lastMessage as any)?.additional_kwargs
+      ?._gyshellMessageId as string | undefined;
+    if (!removedBackendMessageId) return;
+    this.helpers.sendEvent(sessionId, {
+      type: "remove_message",
+      messageId: removedBackendMessageId,
+    });
+  }
+
+  private appendTaskGuardSummaryReminder(instruction: string): string {
+    const reminder =
+      "- Once finished, please re-provide a full complete summary again, disregarding the previous summary.";
+    const trimmed = String(instruction || "").trim();
+    if (!trimmed) return reminder;
+    if (trimmed.includes(reminder)) return trimmed;
+    return `${trimmed}\n${reminder}`;
+  }
+
   private createTaskCompletionGuardNode() {
     return RunnableLambda.from(async (state: any, config: any) => {
       const sessionId = state.sessionId;
@@ -1605,6 +1720,40 @@ export class AgentService_v2 {
         };
       }
 
+      const unfinishedBackgroundCommands =
+        this.consumeUnfinishedBackgroundExecCommandsForGuard(sessionId);
+      if (unfinishedBackgroundCommands.length > 0) {
+        this.emitRemoveMessageIfPresent(sessionId, lastMessage);
+        const continueMessage = new HumanMessage(
+          `${CONTINUE_INSTRUCTION_TAG}${buildUnfinishedExecCommandContinueInstruction(unfinishedBackgroundCommands)}`,
+        );
+        (continueMessage as any).additional_kwargs = {
+          _gyshellMessageId: uuidv4(),
+          input_kind: "unfinished_background_exec_command_guard",
+        };
+        return {
+          messages: [...guardMessages, continueMessage],
+          sessionId,
+          pendingToolCalls: [],
+          completionGuardDecision: "continue" as const,
+        };
+      }
+
+      const lateQueuedInsertionResult =
+        this.appendQueuedInsertionMessagesForContinue(
+          sessionId,
+          guardMessages,
+          lastMessage,
+        );
+      if (lateQueuedInsertionResult.inserted) {
+        return {
+          messages: lateQueuedInsertionResult.messages,
+          sessionId,
+          pendingToolCalls: [],
+          completionGuardDecision: "continue" as const,
+        };
+      }
+
       let completionDecision: z.infer<typeof TASK_COMPLETION_DECISION_SCHEMA>;
       try {
         completionDecision = await this.getThinkingModelDecision(
@@ -1631,6 +1780,20 @@ export class AgentService_v2 {
       }
 
       if (completionDecision.is_fully_completed) {
+        const lateQueuedInsertionAfterAuditResult =
+          this.appendQueuedInsertionMessagesForContinue(
+            sessionId,
+            guardMessages,
+            lastMessage,
+          );
+        if (lateQueuedInsertionAfterAuditResult.inserted) {
+          return {
+            messages: lateQueuedInsertionAfterAuditResult.messages,
+            sessionId,
+            pendingToolCalls: [],
+            completionGuardDecision: "continue" as const,
+          };
+        }
         console.log(
           `[AgentService_v2][task_guard] Completion confirmed. reason=${this.normalizeLogReason(completionDecision.reason)}`,
         );
@@ -1679,20 +1842,10 @@ export class AgentService_v2 {
         };
       }
 
-      const removedBackendMessageId = lastMessageIsAi
-        ? ((lastMessage as any)?.additional_kwargs
-            ?._gyshellMessageId as string | undefined)
-        : undefined;
-
-      if (removedBackendMessageId) {
-        this.helpers.sendEvent(sessionId, {
-          type: "remove_message",
-          messageId: removedBackendMessageId,
-        });
-      }
+      this.emitRemoveMessageIfPresent(sessionId, lastMessage);
 
       const continueMessage = new HumanMessage(
-        `${CONTINUE_INSTRUCTION_TAG}${continueInstruction.continue_instruction}`,
+        `${CONTINUE_INSTRUCTION_TAG}${this.appendTaskGuardSummaryReminder(continueInstruction.continue_instruction)}`,
       );
       (continueMessage as any).additional_kwargs = {
         _gyshellMessageId: uuidv4(),
@@ -1713,6 +1866,29 @@ export class AgentService_v2 {
       const sessionId = state.sessionId;
       if (!sessionId) return state;
 
+      const messages: BaseMessage[] = Array.isArray(state.messages)
+        ? [...state.messages]
+        : [];
+      const lastMessage = messages[messages.length - 1];
+      const finalBoundaryMessages =
+        AIMessage.isInstance(lastMessage) || messages.length === 0
+          ? messages
+          : messages.slice(0, -1);
+      const queuedInsertionResult =
+        this.appendQueuedInsertionMessagesForContinue(
+          sessionId,
+          finalBoundaryMessages,
+          lastMessage,
+        );
+      if (queuedInsertionResult.inserted) {
+        return {
+          messages: queuedInsertionResult.messages,
+          sessionId,
+          pendingToolCalls: [],
+          completionGuardDecision: "continue" as const,
+        };
+      }
+
       // Persist UI history at task boundary (avoid sync disk writes during streaming).
       try {
         this.uiHistoryService.flush(sessionId);
@@ -1725,10 +1901,14 @@ export class AgentService_v2 {
 
       this.helpers.sendEvent(sessionId, {
         type: "debug_history",
-        history: JSON.parse(JSON.stringify(state.messages)),
+        history: JSON.parse(JSON.stringify(finalBoundaryMessages)),
       });
       this.helpers.sendEvent(sessionId, { type: "done" });
-      return state;
+      return {
+        ...state,
+        messages: finalBoundaryMessages,
+        completionGuardDecision: "end" as const,
+      };
     });
   }
 
@@ -1745,11 +1925,65 @@ export class AgentService_v2 {
     return toolMessage;
   }
 
+  private consumeQueuedInsertionMessages(sessionId: string): HumanMessage[] {
+    const agentRunId = this.activeAgentRunIdsBySession.get(sessionId);
+    if (!agentRunId) return [];
+    const items = this.queuedInsertionProvider?.(sessionId, agentRunId) || [];
+    return items.map((item) => {
+      const message = new HumanMessage(item.content);
+      (message as any).additional_kwargs = {
+        _gyshellMessageId: item.id || uuidv4(),
+        input_kind: "queued_insertion",
+        queued_insertion_kind: item.kind,
+        queued_insertion_created_at: item.createdAt,
+        _gyshellQueuedInsertion: true,
+      };
+      return message;
+    });
+  }
+
+  private ackQueuedInsertionMessagesInState(
+    sessionId: string,
+    messages: BaseMessage[] | undefined,
+  ): void {
+    const agentRunId = this.activeAgentRunIdsBySession.get(sessionId);
+    if (!agentRunId || !this.queuedInsertionAcknowledger) return;
+    const itemIds = (messages || [])
+      .map((message) => {
+        const kwargs = (message as any)?.additional_kwargs || {};
+        return kwargs._gyshellQueuedInsertion === true &&
+          typeof kwargs._gyshellMessageId === "string"
+          ? kwargs._gyshellMessageId
+          : "";
+      })
+      .filter(Boolean);
+    if (itemIds.length === 0) return;
+    this.queuedInsertionAcknowledger(sessionId, agentRunId, itemIds);
+  }
+
+  private appendQueuedInsertionMessagesForContinue(
+    sessionId: string,
+    messages: BaseMessage[],
+    removeMessageCandidate?: BaseMessage,
+  ): { inserted: boolean; messages: BaseMessage[] } {
+    const queuedInsertionMessages =
+      this.consumeQueuedInsertionMessages(sessionId);
+    if (queuedInsertionMessages.length === 0) {
+      return { inserted: false, messages };
+    }
+    this.emitRemoveMessageIfPresent(sessionId, removeMessageCandidate);
+    return {
+      inserted: true,
+      messages: [...messages, ...queuedInsertionMessages],
+    };
+  }
+
   private createExecutionContext(
     sessionId: string,
     messageId: string,
     config: any,
   ): ToolExecutionContext {
+    const agentRunId = this.activeAgentRunIdsBySession.get(sessionId);
     return {
       sessionId,
       messageId,
@@ -1758,6 +1992,28 @@ export class AgentService_v2 {
       waitForFeedback: this.waitForFeedback ?? undefined,
       commandPolicyService: this.commandPolicyService,
       commandPolicyMode: this.settings?.commandPolicyMode || "standard",
+      agentRunId,
+      enqueueQueuedInsertion: this.queuedInsertionEnqueuer
+        ? (insertion) =>
+            this.queuedInsertionEnqueuer?.(sessionId, {
+              ...insertion,
+              originAgentRunId: insertion.originAgentRunId || agentRunId,
+            })
+        : undefined,
+      registerBackgroundExecCommand: this.backgroundExecCommandRegistrar
+        ? (command) =>
+            this.backgroundExecCommandRegistrar?.(sessionId, {
+              ...command,
+              originAgentRunId: command.originAgentRunId || agentRunId,
+            })
+        : undefined,
+      completeBackgroundExecCommand: this.backgroundExecCommandCompleter
+        ? (command) =>
+            this.backgroundExecCommandCompleter?.(sessionId, {
+              ...command,
+              originAgentRunId: command.originAgentRunId || agentRunId,
+            })
+        : undefined,
       signal: config?.signal,
     };
   }
@@ -2017,6 +2273,12 @@ export class AgentService_v2 {
     return state.completionGuardDecision === "continue"
       ? "token_pruner_runtime"
       : "final_output";
+  };
+
+  private routeFinalOutput = (state: any): string => {
+    return state.completionGuardDecision === "continue"
+      ? "token_pruner_runtime"
+      : END;
   };
 
   private routeAfterToolCall = (state: any): string => {
@@ -2403,12 +2665,23 @@ export class AgentService_v2 {
     context: any,
     input: StartTaskInput,
     signal: AbortSignal,
-    startMode: "normal" | "inserted" = "normal",
+    startMode: StartTaskMode = "normal",
   ): Promise<void> {
     if (!this.graph) throw new Error("Graph not initialized");
 
     this.lastAbortedMessage = null;
     const { sessionId } = context;
+    const runId =
+      typeof context?.metadata?.runId === "string"
+        ? context.metadata.runId
+        : undefined;
+    const agentRunId =
+      typeof context?.metadata?.agentRunId === "string"
+        ? context.metadata.agentRunId
+        : runId;
+    if (agentRunId) {
+      this.activeAgentRunIdsBySession.set(sessionId, agentRunId);
+    }
     const lockedProfileId = String(context.lockedProfileId || "");
     if (!lockedProfileId) {
       throw new Error(`Missing locked profile for session ${sessionId}`);
@@ -2527,6 +2800,12 @@ export class AgentService_v2 {
       throw err; // Throw to Gateway for UI notification
     } finally {
       this.selfCorrectionRuntimeManager.clearSession(sessionId);
+      if (
+        agentRunId &&
+        this.activeAgentRunIdsBySession.get(sessionId) === agentRunId
+      ) {
+        this.activeAgentRunIdsBySession.delete(sessionId);
+      }
       await this.clearCheckpoint(sessionId);
     }
   }
