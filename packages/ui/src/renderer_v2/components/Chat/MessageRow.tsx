@@ -28,6 +28,7 @@ interface MessageRowProps {
   askLabels: { allow: string; deny: string; allowed: string; denied: string };
   isThinking: boolean;
   mergeWithPreviousAssistant?: boolean;
+  showAssistantRoleLabel?: boolean;
   showAssistantGroupCopy?: boolean;
   assistantGroupMessageIds?: string[];
   // Seamless mode: when set, render a grouped tool-activity banner
@@ -65,6 +66,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
     askLabels,
     isThinking,
     mergeWithPreviousAssistant = false,
+    showAssistantRoleLabel = false,
     showAssistantGroupCopy = false,
     assistantGroupMessageIds = [],
     seamlessGroupMessageIds,
@@ -150,7 +152,9 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
         <div
           className={`message-row-container role-assistant${mergeWithPreviousAssistant ? " is-group-continuation" : ""}${isSearchMatch ? " is-search-match" : ""}${isActiveSearchMatch ? " is-search-active" : ""}`}
         >
-          <div className="message-role-label assistant">ASSISTANT</div>
+          {showAssistantRoleLabel && (
+            <div className="message-role-label assistant">ASSISTANT</div>
+          )}
           <SeamlessToolGroupBanner
             messages={groupMessages}
             expanded={bannerUiState?.expanded}
@@ -196,6 +200,9 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
       <div
         className={`message-row-container role-assistant${mergeWithPreviousAssistant ? " is-group-continuation" : ""}${isSearchMatch ? " is-search-match" : ""}${isActiveSearchMatch ? " is-search-active" : ""}`}
       >
+        {showAssistantRoleLabel && (
+          <div className="message-role-label assistant">ASSISTANT</div>
+        )}
         {children}
         {shouldShowGroupCopy && (
           <div className="message-assistant-group-actions">
@@ -342,7 +349,6 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
 
     return renderAssistantRow(
       <>
-        <div className="message-role-label assistant">ASSISTANT</div>
         <div className={`message-text ${msg.role}`}>
           <div
             className={

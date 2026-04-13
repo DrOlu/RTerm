@@ -100,9 +100,19 @@ runCase(
       'assistant run head should not merge with previous row',
     )
     assertEqual(
+      items[1]?.showAssistantRoleLabel,
+      true,
+      'assistant run head should show the role label',
+    )
+    assertEqual(
       items[2]?.mergeWithPreviousAssistant,
       true,
       'assistant run continuation should merge with previous assistant row',
+    )
+    assertEqual(
+      items[2]?.showAssistantRoleLabel,
+      false,
+      'assistant run continuation should not repeat the role label',
     )
     assertEqual(
       items[1]?.showAssistantGroupCopy,
@@ -118,6 +128,111 @@ runCase(
       items[2]?.assistantGroupMessageIds,
       ['a1', 'a2'],
       'assistant run tail should expose the full assistant group',
+    )
+  },
+)
+
+runCase(
+  'classic assistant role label stays on the first tool row when tools precede text',
+  () => {
+    const session = createSession([
+      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+      createMessage({
+        id: 'tool1',
+        role: 'assistant',
+        type: 'tool_call',
+        content: '{"query":"example"}',
+        streaming: false,
+      }),
+      createMessage({
+        id: 'cmd1',
+        role: 'assistant',
+        type: 'command',
+        content: 'pwd',
+        streaming: false,
+      }),
+      createMessage({
+        id: 'a1',
+        role: 'assistant',
+        type: 'text',
+        content: 'answer after tools',
+        streaming: false,
+      }),
+      createMessage({ id: 'u2', role: 'user', type: 'text', content: 'next' }),
+    ])
+
+    const items = buildChatRenderItems(session, false, 'classic')
+    assertDeepEqual(
+      items.map((item) => item.id),
+      ['u1', 'tool1', 'cmd1', 'a1', 'u2'],
+      'classic tool-first assistant runs should preserve visible ordering',
+    )
+    assertDeepEqual(
+      items.map((item) => item.showAssistantRoleLabel),
+      [false, true, false, false, false],
+      'classic mode should render one assistant label at the top of the assistant turn',
+    )
+    assertDeepEqual(
+      items.map((item) => item.mergeWithPreviousAssistant),
+      [false, false, true, true, false],
+      'classic mode should merge all assistant rows after the top-labeled row',
+    )
+    assertDeepEqual(
+      items[3]?.assistantGroupMessageIds,
+      ['tool1', 'cmd1', 'a1'],
+      'classic copy grouping should keep all assistant rows in the connected run',
+    )
+  },
+)
+
+runCase(
+  'seamless assistant role label stays on the first grouped tool row when tools precede text',
+  () => {
+    const session = createSession([
+      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+      createMessage({
+        id: 'tool1',
+        role: 'assistant',
+        type: 'tool_call',
+        content: '{"query":"example"}',
+        streaming: false,
+      }),
+      createMessage({
+        id: 'cmd1',
+        role: 'assistant',
+        type: 'command',
+        content: 'pwd',
+        streaming: false,
+      }),
+      createMessage({
+        id: 'a1',
+        role: 'assistant',
+        type: 'text',
+        content: 'answer after tools',
+        streaming: false,
+      }),
+    ])
+
+    const items = buildChatRenderItems(session, false, 'seamless')
+    assertDeepEqual(
+      items.map((item) => item.id),
+      ['u1', 'tool1', 'a1'],
+      'seamless mode should group leading tool rows before the text row',
+    )
+    assertDeepEqual(
+      items[1]?.seamlessGroupMessageIds,
+      ['tool1', 'cmd1'],
+      'seamless grouped tool row should include consecutive tool activity',
+    )
+    assertDeepEqual(
+      items.map((item) => item.showAssistantRoleLabel),
+      [false, true, false],
+      'seamless mode should render one assistant label at the top of the assistant turn',
+    )
+    assertDeepEqual(
+      items.map((item) => item.mergeWithPreviousAssistant),
+      [false, false, true],
+      'seamless text after a leading tool group should merge under the top label',
     )
   },
 )

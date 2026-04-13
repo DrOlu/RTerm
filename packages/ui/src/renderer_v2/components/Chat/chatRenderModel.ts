@@ -7,6 +7,7 @@ export interface ChatRenderItem {
   kind: ChatVisibleRowKind
   estimatedHeight: number
   mergeWithPreviousAssistant: boolean
+  showAssistantRoleLabel: boolean
   showAssistantGroupCopy: boolean
   assistantGroupMessageIds: string[]
   // Seamless mode: when set, this item represents a group of tool-call messages
@@ -146,6 +147,16 @@ const estimateRowHeight = (
   }
 }
 
+const hasAssistantItemInCurrentTurn = (
+  items: readonly ChatRenderItem[],
+): boolean => {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index].kind === 'user') return false
+    if (items[index].kind === 'assistant') return true
+  }
+  return false
+}
+
 export const buildChatRenderItems = (
   session: ChatSession | null,
   isThinking: boolean,
@@ -192,6 +203,7 @@ export const buildChatRenderItems = (
         kind: row.kind,
         estimatedHeight: estimateRowHeight(row.msg, row.kind),
         mergeWithPreviousAssistant: false,
+        showAssistantRoleLabel: false,
         showAssistantGroupCopy: false,
         assistantGroupMessageIds: [],
       })
@@ -218,12 +230,14 @@ export const buildChatRenderItems = (
 
       // Merge if this is not the first assistant item in the turn.
       const prevIsAssistant = items.length > 0 && items[items.length - 1].kind === 'assistant'
+      const turnAlreadyHasLabel = hasAssistantItemInCurrentTurn(items)
 
       items.push({
         id: groupFirstId,
         kind: 'assistant',
         estimatedHeight: 48 + seamlessGroupMessageIds.length * 22,
         mergeWithPreviousAssistant: prevIsAssistant,
+        showAssistantRoleLabel: !turnAlreadyHasLabel,
         showAssistantGroupCopy: false,
         assistantGroupMessageIds: [],
         seamlessGroupMessageIds,
@@ -256,37 +270,19 @@ export const buildChatRenderItems = (
       (nextVisibleKind === 'user' ||
         (!nextVisibleRow && !isThinking))
 
-    // In seamless mode, the ASSISTANT label is shown on the first item in each
-    // AI turn (whether tool group or text). Check if any prior assistant item
-    // in this turn already received the label.
-    // In classic mode, only text messages render the label so this is always false.
-    const turnAlreadyHasLabel = displayMode === 'seamless' && (() => {
-      for (let i = items.length - 1; i >= 0; i--) {
-        if (items[i].kind === 'user') return false
-        if (items[i].kind === 'assistant') return true
-      }
-      return false
-    })()
-    let firstTextLabelShown = !!turnAlreadyHasLabel
+    let turnAlreadyHasLabel = hasAssistantItemInCurrentTurn(items)
     for (let index = runStart; index <= runEnd; index += 1) {
       const assistantRow = visibleRows[index]
-      const isTextType = !SPECIAL_ASSISTANT_TYPES.has(assistantRow.msg.type)
-
-      // Show the ASSISTANT label on the first text message in this turn
-      let shouldMerge: boolean
-      if (isTextType && !firstTextLabelShown) {
-        shouldMerge = false
-        firstTextLabelShown = true
-      } else {
-        shouldMerge = index > runStart ||
-          (index === runStart && !!turnAlreadyHasLabel)
-      }
+      const prevIsAssistant = items.length > 0 && items[items.length - 1].kind === 'assistant'
+      const showAssistantRoleLabel = !turnAlreadyHasLabel
+      if (showAssistantRoleLabel) turnAlreadyHasLabel = true
 
       items.push({
         id: assistantRow.id,
         kind: assistantRow.kind,
         estimatedHeight: estimateRowHeight(assistantRow.msg, assistantRow.kind),
-        mergeWithPreviousAssistant: shouldMerge,
+        mergeWithPreviousAssistant: prevIsAssistant,
+        showAssistantRoleLabel,
         showAssistantGroupCopy: canShowGroupCopy && index === runEnd,
         assistantGroupMessageIds:
           canShowGroupCopy && index === runEnd

@@ -31,6 +31,7 @@ const createItem = (
   kind: 'assistant',
   estimatedHeight,
   mergeWithPreviousAssistant: false,
+  showAssistantRoleLabel: false,
   showAssistantGroupCopy: false,
   assistantGroupMessageIds: [],
 })
@@ -199,6 +200,35 @@ runCase('offscreen layout invalidation selects tail rows whose copy footer chang
     invalidatedItems.map((item) => item.id).join(','),
     'row-2',
     'offscreen rows should be re-measured when copy controls appear after completion',
+  )
+})
+
+runCase('offscreen layout invalidation selects rows whose assistant label changes', () => {
+  const previousItems = [
+    createItem('row-1', 100),
+    createItem('row-2', 100),
+  ]
+  const nextItems: ChatRenderItem[] = [
+    previousItems[0],
+    {
+      ...previousItems[1],
+      showAssistantRoleLabel: true,
+    },
+  ]
+
+  const invalidatedItems = resolveChatOffscreenLayoutChangedItems(
+    nextItems,
+    new Map(previousItems.map((item) => [item.id, item])),
+    {
+      startIndex: 0,
+      endIndex: 1,
+    },
+  )
+
+  assertEqual(
+    invalidatedItems.map((item) => item.id).join(','),
+    'row-2',
+    'offscreen rows should be re-measured when assistant role labels appear',
   )
 })
 

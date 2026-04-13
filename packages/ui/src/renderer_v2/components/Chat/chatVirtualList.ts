@@ -197,6 +197,7 @@ const hasChatRenderItemLayoutChange = (
     previousItem.estimatedHeight !== nextItem.estimatedHeight ||
     previousItem.mergeWithPreviousAssistant !==
       nextItem.mergeWithPreviousAssistant ||
+    previousItem.showAssistantRoleLabel !== nextItem.showAssistantRoleLabel ||
     previousItem.showAssistantGroupCopy !== nextItem.showAssistantGroupCopy
   )
 }
