@@ -153,8 +153,6 @@ export const READ_COMMAND_OUTPUT_DESCRIPTION =
 export const READ_FILE_DESCRIPTION = 'Read a file from a specific terminal tab.'
 export const WAIT_TOOL_DESCRIPTION = 'Pause execution for a specified number of seconds (5-120). Use this for short, fixed-duration pauses when you need to wait for an external event that doesn\'t affect the terminal (e.g., waiting for a web server to start up).'
 export const WAIT_TERMINAL_IDLE_DESCRIPTION = 'Wait until the terminal output becomes stable (no changes for a few seconds) or a timeout (120s) is reached. Use this for commands that don\'t emit standard OSC exit markers but eventually stop printing text (e.g., some build tools or log watchers).'
-export const WAIT_COMMAND_END_DESCRIPTION = 'Wait for the currently running command in the terminal tab to finish based on shell integration markers. This is the most reliable way to wait for a command that was started with nowait. Use this when you need the command\'s exit code and final output to proceed.'
-
 export const BUILTIN_TOOL_INFO = [
   {
     name: 'exec_command',
@@ -187,10 +185,6 @@ export const BUILTIN_TOOL_INFO = [
   {
     name: 'wait_terminal_idle',
     description: WAIT_TERMINAL_IDLE_DESCRIPTION
-  },
-  {
-    name: 'wait_command_end',
-    description: WAIT_COMMAND_END_DESCRIPTION
   }
 ]
 
@@ -363,11 +357,11 @@ export function createBaseSystemPromptText(memoryPrompt?: {
       '- **Temporary Code Execution Rule**: If you need to run code to accomplish a task, you MUST NOT write that code directly inside `exec_command` and run it inline. You MUST first use `create_or_edit` to create a code file inside the !!!temporary directory!!!(must in temporary directory) of the target terminal tab, and only then use `exec_command` to run that file. Always create the temporary code file with `create_or_edit`; NEVER use `exec_command` itself to create the file or to inline the code content.',
       '- **Command Output Limits**: Command outputs may be truncated in exec_command. Use read_command_output with history_command_match_id and terminalId to read full output.',
       '',
-      '# Waiting Strategies',
-      'You have three tools for waiting, each with a specific use case:',
-      '1. **wait_command_end**: The **GOLD STANDARD** for waiting. Use this when you started a command with `nowait` and need to wait for it to finish. It relies on shell integration markers and is the most reliable way to get the exit code and final output.',
-      '2. **wait_terminal_idle**: Use this for commands that don\'t support shell integration markers or for "leaky" processes that keep printing logs but have reached a "ready" state. It waits for the output to stop changing for a few seconds.',
-      '3. **wait**: Use this ONLY for short, fixed-duration pauses (e.g., waiting 5s for a background service to initialize) where you don\'t need to monitor terminal output.',
+      '# Waiting & Monitoring Strategies',
+      'You have two tools for waiting, plus read_command_output for monitoring:',
+      '1. **wait_terminal_idle**: Use this for commands that don\'t support shell integration markers or for "leaky" processes that keep printing logs but have reached a "ready" state. It waits for the output to stop changing for a few seconds.',
+      '2. **wait**: Use this ONLY for short, fixed-duration pauses (e.g., waiting 5s for a background service to initialize) where you don\'t need to monitor terminal output.',
+      '- **read_command_output**: For commands started with `nowait` or switched to nowait mode, use `read_command_output` with the `history_command_match_id` and terminal id to check both the output and the current status (running or finished). This is the primary way to monitor background commands.',
       '',
       '# Environment Awareness & Pre-flight Checks',
       '- **No Assumptions**: You must NEVER assume the state of a terminal environment. Do not assume a command is installed, a path exists, or internet access is available.',

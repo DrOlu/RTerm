@@ -18,7 +18,7 @@ import {
   WAIT_TERMINAL_IDLE_DESCRIPTION
 } from './prompts'
 import type { ReadFileSupport } from './types'
-import { waitSchema, waitTerminalIdleSchema, waitCommandEndSchema, wait, waitTerminalIdle, waitCommandEnd } from './tools/wait_tools'
+import { waitSchema, waitTerminalIdleSchema, wait, waitTerminalIdle } from './tools/wait_tools'
 import { 
   skillToolSchema, 
   buildSkillToolDescription,
@@ -40,7 +40,7 @@ export {
 } from './tools/terminal_tools'
 
 export { readFileSchema } from './tools/read_tools'
-export { waitSchema, waitTerminalIdleSchema, waitCommandEndSchema } from './tools/wait_tools'
+export { waitSchema, waitTerminalIdleSchema } from './tools/wait_tools'
 export { skillToolSchema, createSkillSchema, buildSkillToolDescription } from './tools/skill_tools'
 
 export { BUILTIN_TOOL_INFO } from './prompts'
@@ -99,11 +99,6 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'wait_terminal_idle',
       description: WAIT_TERMINAL_IDLE_DESCRIPTION,
       schema: waitTerminalIdleSchema
-    },
-    {
-      name: 'wait_command_end',
-      description: 'Wait for the currently running command in the terminal tab to finish. Use this when you started a command with nowait but now need its output or exit code to proceed.',
-      schema: waitCommandEndSchema
     }
   ].map((tool) => convertToOpenAITool(tool))
 }
@@ -121,6 +116,5 @@ export const toolImplementations = {
   waitTerminalIdle,
   writeAndEdit,
   runReadFile,
-  runCreateSkillTool,
-  waitCommandEnd
+  runCreateSkillTool
 }

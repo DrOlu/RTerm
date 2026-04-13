@@ -220,7 +220,7 @@ export async function runCommand(
         historyCommandMatchId,
         command
       })
-      finalResult = `The command is still running, but the wait has timed out (120s). You can use read_command_output to check its current progress, or call wait_command_end again if you believe it needs more time to finish. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
+      finalResult = `The command has been running for over 120s and has been switched to nowait mode (running in the background). You can use read_command_output to check its progress. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
     } else {
       finalResult = `The command has finished executing. The following is the output (history_command_match_id=${historyCommandMatchId}):
 <terminal_content>
@@ -228,10 +228,10 @@ ${truncatedOutput}
 </terminal_content>`
     }
 
-    context.sendEvent(sessionId, { 
+    context.sendEvent(sessionId, {
       messageId,
-      type: 'command_finished', 
-      command, 
+      type: 'command_finished',
+      command,
       commandId: messageId,
       tabName: bestMatch.title || bestMatch.id,
       exitCode: result.exitCode,
@@ -243,7 +243,7 @@ ${truncatedOutput}
       throw error
     }
     let errorMessage = error instanceof Error ? error.message : String(error)
-    
+
     // If it's a "command running" error, append the last terminal output
     if (errorMessage.includes('There is a running exec_command')) {
       const recentOutput = terminalService.getRecentOutput(bestMatch.id) || '(No recent output available)'
@@ -251,7 +251,7 @@ ${truncatedOutput}
       errorMessage = `Error: ${errorMessage}\n\nThe current visible state of the terminal tab "${bestMatch.title || bestMatch.id}" is:
 <terminal_content>
 ${recentOutput}
-</terminal_content>\n\nIf you think you need to exit the current command, use write_stdin. If you want to wait for it to finish, use wait_command_end.${activeTaskId ? ` history_command_match_id=${activeTaskId}, terminalId=${bestMatch.id}` : ''}`
+</terminal_content>\n\nIf you think you need to exit the current command, use write_stdin. If you want to check its status, use read_command_output.${activeTaskId ? ` history_command_match_id=${activeTaskId}, terminalId=${bestMatch.id}` : ''}`
     }
 
     context.sendEvent(sessionId, { 
@@ -334,7 +334,7 @@ export async function runCommandNowait(args: z.infer<typeof execCommandSchema>, 
       historyCommandMatchId,
       command
     })
-    return `Command started in background. Use read_command_output to view output and status(finished or running), or use wait_command_end to wait for it to finish. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}.`
+    return `Command started in background. Use read_command_output to view output and check status (finished or running). history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}.`
   } catch (error) {
     let errorMessage = error instanceof Error ? error.message : String(error)
 
@@ -345,13 +345,13 @@ export async function runCommandNowait(args: z.infer<typeof execCommandSchema>, 
       errorMessage = `Error: ${errorMessage}\n\nThe current visible state of the terminal tab "${bestMatch.title || bestMatch.id}" is:
 <terminal_content>
 ${recentOutput}
-</terminal_content>\n\nIf you think you need to exit the current command, use write_stdin. If you want to wait for it to finish, use wait_command_end.${activeTaskId ? ` history_command_match_id=${activeTaskId}, terminalId=${bestMatch.id}` : ''}`
+</terminal_content>\n\nIf you think you need to exit the current command, use write_stdin. If you want to check its status, use read_command_output.${activeTaskId ? ` history_command_match_id=${activeTaskId}, terminalId=${bestMatch.id}` : ''}`
     }
 
-    context.sendEvent(sessionId, { 
+    context.sendEvent(sessionId, {
       messageId,
-      type: 'command_finished', 
-      command, 
+      type: 'command_finished',
+      command,
       commandId: messageId,
       tabName: bestMatch.title || bestMatch.id,
       exitCode: -1,
