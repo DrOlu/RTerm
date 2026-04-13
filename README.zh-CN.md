@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#核心能力)
 
 [English README](./README.md) | 中文 README  
-最新发布说明：[`changelogs/v1.4.0.md`](./changelogs/v1.4.0.md)
+最新发布说明：[`changelogs/v1.4.2.md`](./changelogs/v1.4.2.md)
 
 如果有任何建议或者问题，欢迎在 [GitHub Discussions](https://github.com/MrOrangeJJ/GyShell/discussions) 中提交。
 
@@ -20,7 +20,7 @@
 > **项目处于快速迭代阶段**：如果某个版本引入了历史数据兼容性变更，会在发布说明中明确标注。
 
 > [!NOTE]
-> **v1.4.0 升级提示**：升级后的首次启动可能会短暂阻塞，因为 GyShell 会把旧的 JSON 历史迁移到 SQLite，并写入带时间戳的备份文件。
+> **v1.4.0 升级提示**：从 1.4.0 以下版本升级后的首次启动可能会短暂阻塞，因为 GyShell 会把旧的 JSON 历史迁移到 SQLite，并写入带时间戳的备份文件。v1.4.2 无需额外迁移步骤。
 
 <p align="center">
   <img src="./demo_imgs/demo.png" width="100%">
@@ -60,19 +60,17 @@ GyShell 的定位是“运行在真实终端中的持续执行系统”：
 - **面向多设备协作**：桌面端 + TUI + Mobile Web 共用网关语义。
 - **面向多模态执行**：单轮里可组合文字与图片输入，直接推进真实任务。
 
-## v1.4.0 关键亮点
+## v1.4.2 关键亮点
 
-- **基于 SQLite 的会话历史**
-  - 升级时会把旧的 JSON 历史自动迁移到统一的 SQLite 存储，并保留带时间戳的备份
-  - 历史会话很多时，浏览、重命名、删除等操作会更稳
-- **Windows PowerShell 稳定性升级**
-  - 较旧的 Windows 本地和 SSH PowerShell 会话，对命令完成状态的判断更可靠
-  - 输出更干净，打包后的 Windows 桌面版也带上了更稳的 PTY 运行时处理
-- **按来源控制监控**
-  - 可以按本机或 SSH 目标分别暂停/恢复监控
-  - 设置会跨重启保留
-- **终端搜索修复**
-  - 终端里的 `Ctrl/Cmd+F` 在切标签和布局重挂载后仍会跟住当前活动标签页
+- **后台命令完成通知**
+  - nowait 命令和被跳过的命令完成后会自动通知 Agent，无需轮询即可形成异步闭环
+  - 如果 Agent 正在执行 `wait` 等待，后台命令完成时等待会提前结束，Agent 立刻响应
+- **剪贴板粘贴更简单**
+  - 大段粘贴内容在桌面端、TUI、Mobile Web 全部以纯文本直接插入——不再有临时文件，各端行为完全一致
+- **ASSISTANT 标签显示修复**
+  - 两种模式（Classic 和 Seamless）下，角色标签现在始终锚定在每轮 Assistant 回复的第一条消息上，即使该轮以工具调用或命令开头也不再消失
+- **会话稳定性**
+  - 含部分无效历史记录的会话现在可以正常加载和运行
 
 ---
 
@@ -85,7 +83,8 @@ GyShell 的定位是“运行在真实终端中的持续执行系统”：
 - 支持按 Profile 分配 `Global`、`Thinking`、`Action`、`Compaction` 四类模型角色。
 - 长会话智能压缩与独立压缩模型链路。
 - 会话与 UI 历史改为基于 SQLite 持久化，并支持从旧 JSON 存储自动做一次迁移。
-- 支持基于当前 tab 最近上下文生成命令草稿，并保留“先粘贴、再由你决定是否执行”的控制权。
+- 支持基于当前 tab 最近上下文生成命令草稿，并保留”先粘贴、再由你决定是否执行”的控制权。
+- 后台（nowait）命令完成后会自动通知 Agent，无需轮询即可形成异步闭环。
 - 对话面板支持 `传统模式` 与 `无感模式` 两种 Agent 活动呈现方式。
 - 支持通过 `memory.md` 注入全局持久记忆。
 - 支持多模态输入链路（文字 + 图片）。
@@ -275,7 +274,7 @@ GyShell 采用严格分层：
 
 ## 延伸阅读
 
-- 发布说明：`changelogs/v1.4.0.md`
+- 发布说明：`changelogs/v1.4.2.md`
 - 构建与打包命令矩阵：`docs/build-commands.md`
 - Monorepo 边界与运行链路：`docs/monorepo-architecture.md`
 
