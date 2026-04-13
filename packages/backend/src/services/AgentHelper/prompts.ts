@@ -151,7 +151,7 @@ export const READ_TERMINAL_TAB_DESCRIPTION = 'Read the recent visible output of 
 export const READ_COMMAND_OUTPUT_DESCRIPTION =
   'Read historical output of a specific command by history_command_match_id and terminal tab. Supports offset/limit for paging large outputs.'
 export const READ_FILE_DESCRIPTION = 'Read a file from a specific terminal tab.'
-export const WAIT_TOOL_DESCRIPTION = 'Pause execution for a specified number of seconds (5-60). Use this for short, fixed-duration pauses when you need to wait for an external event that doesn\'t affect the terminal (e.g., waiting for a web server to start up).'
+export const WAIT_TOOL_DESCRIPTION = 'Pause execution for a specified number of seconds (5-120). Use this for short, fixed-duration pauses when you need to wait for an external event that doesn\'t affect the terminal (e.g., waiting for a web server to start up).'
 export const WAIT_TERMINAL_IDLE_DESCRIPTION = 'Wait until the terminal output becomes stable (no changes for a few seconds) or a timeout (120s) is reached. Use this for commands that don\'t emit standard OSC exit markers but eventually stop printing text (e.g., some build tools or log watchers).'
 export const WAIT_COMMAND_END_DESCRIPTION = 'Wait for the currently running command in the terminal tab to finish based on shell integration markers. This is the most reliable way to wait for a command that was started with nowait. Use this when you need the command\'s exit code and final output to proceed.'
 

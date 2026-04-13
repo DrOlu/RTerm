@@ -3,7 +3,7 @@ import type { ToolExecutionContext } from '../types'
 import { truncateCommandOutput } from './terminal_tools'
 
 export const waitSchema = z.object({
-  seconds: z.number().min(5).max(60).describe('Number of seconds to wait (5-60)')
+  seconds: z.number().min(5).max(120).describe('Number of seconds to wait (5-120)')
 })
 
 export const waitTerminalIdleSchema = z.object({
