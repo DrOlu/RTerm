@@ -78,7 +78,7 @@ export function parseCliOptions(argv: string[]): CliOptions {
 
 export function printCliHelp(): void {
   const lines = [
-    'GyShell TUI',
+    'RTerm TUI',
     '',
     'Usage:',
     '  gyll [--url 127.0.0.1:17888] [--timeout 3000] [--sessionid <id>]',

@@ -252,14 +252,14 @@ export const en = {
       mcpConfig:
         'Open the MCP (Model Context Protocol) config. Use this to connect external tools like Google Search or File Indexers.\n\nNOTE: The app may not automatically find your system PATH. When configuring mcpServers, please use [ABSOLUTE PATHS] for the command field (e.g., npm, node, uv, python)!\nExample: Use "/usr/local/bin/node" instead of just "node".',
       skills:
-        'Skills are predefined instruction templates for complex tasks. AI loads them to perform better in specific domains.\n\nGyShell scans the following directories for skills:\n1. [GyShell Custom]: User-created skills (stored in GyShell data directory).\n2. [Claude/Goose Compatible]: ~/.claude/skills, ~/.agents/skills, and platform-specific config paths.\n\nNote: For skills outside the "GyShell Custom" folder, please manage (edit/delete) them manually in your file explorer.',
+        'Skills are predefined instruction templates for complex tasks. AI loads them to perform better in specific domains.\n\nRTerm scans the following directories for skills:\n1. [RTerm Custom]: User-created skills (stored in RTerm data directory).\n2. [Claude/Goose Compatible]: ~/.claude/skills, ~/.agents/skills, and platform-specific config paths.\n\nNote: For skills outside the "RTerm Custom" folder, please manage (edit/delete) them manually in your file explorer.',
       memory:
         "Memory is a single global markdown file (memory.md) shared across sessions. When enabled, the backend injects its full content into each session system prompt with the absolute file path and instructions for using create_or_edit/read_file on that exact file.",
       accessTokens:
         "Configure websocket gateway exposure and port, and manage access tokens for remote clients. Tokens are shown in plaintext only once when created, and only salted hashes are stored on disk.",
     },
     skillSections: {
-      custom: "GyShell Custom",
+      custom: "RTerm Custom",
       others: "External Skills",
     },
   },

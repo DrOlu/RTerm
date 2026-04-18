@@ -77,7 +77,7 @@ const SLASH_COMMANDS: SlashOption[] = [
   { command: 'profile', description: 'Select model profile' },
   { command: 'stop', description: 'Stop current run' },
   { command: 'help', description: 'Open help panel' },
-  { command: 'exit', description: 'Exit GyShell TUI' },
+  { command: 'exit', description: 'Exit RTerm TUI' },
 ]
 
 const RUN_SPINNER_FRAMES = ['|', '/', '-', '\\']
@@ -1119,7 +1119,7 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
     return truncateDisplayWidth(raw, max)
   })
   const headerLeftText = createMemo(() => {
-    const base = `GyShell | ${activeSessionMeta()?.title || 'Untitled'} (${activeSessionShortId()})`
+    const base = `RTerm | ${activeSessionMeta()?.title || 'Untitled'} (${activeSessionShortId()})`
     const rightWidth = displayWidth(headerRightText())
     const max = Math.max(14, dimensions().width - rightWidth - 5)
     return truncateDisplayWidth(base, max)

@@ -1,10 +1,14 @@
 {
-  "name": "GyShell Mobile",
-  "short_name": "GyShell",
+  "name": "RTerm Mobile",
+  "short_name": "RTerm",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui", "browser"],
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
   "background_color": "#ffffff",
   "theme_color": "#ffffff",
   "icons": [

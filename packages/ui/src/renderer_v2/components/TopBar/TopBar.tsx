@@ -18,7 +18,7 @@ export const TopBar: React.FC<{ store: AppStore }> = observer(({ store }) => {
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <div className="topbar-title">GyShell</div>
+        <div className="topbar-title">RTerm</div>
       </div>
       {showControls ? (
         <div className="topbar-right">

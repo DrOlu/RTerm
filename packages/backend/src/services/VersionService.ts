@@ -27,8 +27,8 @@ export interface VersionCheckResult {
   warning?: string
 }
 
-const VERSION_MANIFEST_URL = 'https://api.github.com/repos/MrOrangeJJ/GyShell/contents/version.json?ref=main'
-const FALLBACK_DOWNLOAD_URL = 'https://github.com/MrOrangeJJ/GyShell/releases/latest'
+const VERSION_MANIFEST_URL = 'https://api.github.com/repos/DrOlu/RTerm/contents/version.json?ref=main'
+const FALLBACK_DOWNLOAD_URL = 'https://hyperspace.ng/rterm/releases'
 
 export class VersionService {
   private readonly store: Store<VersionCache>
@@ -36,7 +36,7 @@ export class VersionService {
 
   constructor() {
     this.store = new Store<VersionCache>({
-      name: 'gyshell-version-cache',
+      name: 'rterm-version-cache',
       defaults: {}
     })
   }
@@ -142,7 +142,7 @@ export class VersionService {
           method: 'GET',
           headers: {
             Accept: 'application/json',
-            'User-Agent': `GyShell/${app.getVersion()}`,
+            'User-Agent': `RTerm/${app.getVersion()}`,
             ...(etag ? { 'If-None-Match': etag } : {})
           },
           timeout: 6000

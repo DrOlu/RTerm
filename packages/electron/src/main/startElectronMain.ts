@@ -939,8 +939,8 @@ export async function startElectronMain(): Promise<void> {
           historyMigrationCoordinator.markError(error, {
             title: "Application startup failed",
             message: historyMigrationCoordinator.getState().detectedLegacy
-              ? "Conversation history migration finished, but GyShell could not finish startup."
-              : "GyShell could not finish startup after preparing history storage.",
+              ? "Conversation history migration finished, but RTerm could not finish startup."
+              : "RTerm could not finish startup after preparing history storage.",
           });
         }
         console.error("[Main] Failed to finish Electron startup:", error);

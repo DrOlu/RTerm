@@ -368,9 +368,9 @@ export class TerminalService {
   }
 
   private async printBanner(terminalId: string): Promise<void> {
-    // ANSI Shadow font for "GyShell"
+    // Standard figlet font for "RTerm"
     // Using \x1b[36m for Cyan color
-    const banner = `\r\n\x1b[36m  ____         ____  _          _ _ \r\n / ___|_   _  / ___|| |__   ___| | |\r\n| |  _| | | | \\___ \\| '_ \\ / _ \\ | |\r\n| |_| | |_| |  ___) | | | |  __/ | |\r\n \\____|\\__, | |____/|_| |_|\\___|_|_|\r\n       |___/                        \x1b[0m\r\n`
+    const banner = `\r\n\x1b[36m ____ _____                   \r\n|  _ \\_   _|__ _ __ _ __ ___  \r\n| |_) || |/ _ \\ '__| '_ \` _ \\  \r\n|  _ < | |  __/ |  | | | | | |\r\n|_| \\_\\|_|\\___|_|  |_| |_| |_|\r\n                              \x1b[0m\r\n`
 
     // Small delay to ensure shell is ready
     setTimeout(() => {

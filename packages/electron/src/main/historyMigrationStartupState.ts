@@ -2,7 +2,7 @@ import type { HistoryMigrationState } from "../../../backend/src/services/histor
 
 const STARTUP_PREPARATION_TITLE = "Preparing application startup";
 const DEFAULT_STARTUP_FAILURE_TITLE = "Application startup failed";
-const DEFAULT_STARTUP_FAILURE_MESSAGE = "GyShell could not finish startup.";
+const DEFAULT_STARTUP_FAILURE_MESSAGE = "RTerm could not finish startup.";
 
 const normalizeProgressBounds = (
   state: HistoryMigrationState,

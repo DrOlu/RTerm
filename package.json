@@ -1,9 +1,9 @@
 {
-  "name": "gyshell",
+  "name": "rterm",
   "version": "1.4.2",
-  "description": "GyShell - AI-Native Terminal App",
+  "description": "RTerm - AI-Native Terminal App",
   "main": "./out/main/index.js",
-  "author": "TUOTUO <tuotuo@gyshell.com>",
+  "author": "Hyperspace Technologies <rterm@hyperspace.ng>",
   "private": true,
   "type": "module",
   "workspaces": [
