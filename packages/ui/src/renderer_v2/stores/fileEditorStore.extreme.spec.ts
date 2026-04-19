@@ -125,6 +125,98 @@ const run = async (): Promise<void> => {
     assertEqual(store.dirty, false, 'save should clear dirty state')
   })
 
+  await runCase('openFromFileSystem loads image previews through readFileBase64 as read-only documents', async () => {
+    let textReadCallCount = 0
+    let base64ReadCallCount = 0
+    let writeCallCount = 0
+    ;(globalThis as unknown as { window: unknown }).window = {
+      gyshell: {
+        filesystem: {
+          readTextFile: async () => {
+            textReadCallCount += 1
+            throw new Error('image previews should not use readTextFile')
+          },
+          readFileBase64: async (_terminalId: string, filePath: string) => {
+            base64ReadCallCount += 1
+            return {
+              path: filePath,
+              contentBase64: 'image-payload',
+              size: 12,
+              mimeType: 'image/png'
+            }
+          },
+          writeTextFile: async () => {
+            writeCallCount += 1
+          }
+        }
+      },
+      confirm: () => true
+    }
+
+    const store = new FileEditorStore(makeAppStoreMock())
+    const opened = await store.openFromFileSystem('term-a', '/tmp/a.png')
+
+    assertEqual(opened, true, 'image preview should open successfully')
+    assertEqual(textReadCallCount, 0, 'image preview should not read text content')
+    assertEqual(base64ReadCallCount, 1, 'image preview should read base64 bytes once')
+    assertEqual(store.mode, 'image', 'image file should enter image mode')
+    assertEqual(store.content, '', 'image preview should not populate editable text content')
+    assertEqual(store.contentBase64, 'image-payload', 'image preview should keep base64 payload')
+    assertEqual(store.mimeType, 'image/png', 'image preview should keep MIME type')
+    assertEqual(store.previewDataUrl, 'data:image/png;base64,image-payload', 'image preview should expose a data URL')
+    assertEqual(store.canSave, false, 'image preview should not be saveable')
+
+    store.updateContent('attempted edit')
+    assertEqual(store.content, '', 'updateContent should ignore read-only image previews')
+    assertEqual(store.dirty, false, 'image preview should remain clean after updateContent')
+    const saved = await store.save()
+    assertEqual(saved, false, 'save should no-op for read-only image previews')
+    assertEqual(writeCallCount, 0, 'save should not call writeTextFile for image previews')
+  })
+
+  await runCase('openFromFileSystem loads PDF previews through readFileBase64 as read-only documents', async () => {
+    let textReadCallCount = 0
+    let base64ReadCallCount = 0
+    ;(globalThis as unknown as { window: unknown }).window = {
+      gyshell: {
+        filesystem: {
+          readTextFile: async () => {
+            textReadCallCount += 1
+            throw new Error('PDF previews should not use readTextFile')
+          },
+          readFileBase64: async (_terminalId: string, filePath: string) => {
+            base64ReadCallCount += 1
+            return {
+              path: filePath,
+              contentBase64: `pdf-payload-${base64ReadCallCount}`,
+              size: 20 + base64ReadCallCount,
+              mimeType: 'application/pdf'
+            }
+          },
+          writeTextFile: async () => {}
+        }
+      },
+      confirm: () => true
+    }
+
+    const store = new FileEditorStore(makeAppStoreMock())
+    const opened = await store.openFromFileSystem('term-a', '/tmp/a.pdf')
+
+    assertEqual(opened, true, 'PDF preview should open successfully')
+    assertEqual(textReadCallCount, 0, 'PDF preview should not read text content')
+    assertEqual(base64ReadCallCount, 1, 'PDF preview should read base64 bytes once')
+    assertEqual(store.mode, 'pdf', 'PDF file should enter pdf mode')
+    assertEqual(store.contentBase64, 'pdf-payload-1', 'PDF preview should keep base64 payload')
+    assertEqual(store.mimeType, 'application/pdf', 'PDF preview should keep MIME type')
+    assertEqual(store.canSave, false, 'PDF preview should not be saveable')
+
+    const refreshed = await store.refresh()
+    assertEqual(refreshed, true, 'refresh should reload PDF preview content')
+    assertEqual(base64ReadCallCount, 2, 'refresh should read PDF base64 bytes again')
+    assertEqual(store.contentBase64, 'pdf-payload-2', 'refresh should replace PDF base64 payload')
+    assertEqual(store.fileSize, 22, 'refresh should update PDF file size')
+  })
+
   await runCase('refresh reloads the current file content from disk', async () => {
     let readCallCount = 0
     ;(globalThis as unknown as { window: unknown }).window = {
@@ -315,6 +407,54 @@ const run = async (): Promise<void> => {
     assertEqual(target.mode, 'text', 'target should leave loading mode after the restarted read')
     assertEqual(target.content, 'restored-content', 'target should receive the reloaded content')
     assertEqual(target.filePath, '/tmp/loading.txt', 'target should keep the restored file path')
+  })
+
+  await runCase('restoreSnapshot resumes media snapshots without persisting base64 payloads', async () => {
+    let base64ReadCallCount = 0
+    ;(globalThis as unknown as { window: unknown }).window = {
+      gyshell: {
+        filesystem: {
+          readTextFile: async () => {
+            throw new Error('media snapshot restore should not use readTextFile')
+          },
+          readFileBase64: async (_terminalId: string, filePath: string) => {
+            base64ReadCallCount += 1
+            return {
+              path: filePath,
+              contentBase64: 'restored-image-payload',
+              size: 24,
+              mimeType: 'image/png'
+            }
+          },
+          writeTextFile: async () => {}
+        }
+      },
+      confirm: () => true
+    }
+
+    const source = new FileEditorStore(makeAppStoreMock())
+    source.terminalId = 'term-a'
+    source.filePath = '/tmp/restored.png'
+    source.mode = 'image'
+    source.contentBase64 = 'stale-image-payload'
+    source.mimeType = 'image/png'
+    source.fileSize = 99
+
+    const snapshot = source.captureSnapshot()
+    assertEqual(snapshot.content, '', 'media snapshots should not persist base64 payloads as text content')
+
+    const target = new FileEditorStore(makeAppStoreMock())
+    const restored = target.restoreSnapshot(snapshot)
+    assertEqual(restored, true, 'restoreSnapshot should accept media snapshots')
+    assertEqual(target.mode, 'loading', 'target should reload media snapshots instead of showing stale payloads')
+    assertEqual(target.contentBase64, '', 'target should not reuse stale media payload before reload')
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assertEqual(base64ReadCallCount, 1, 'restoring a media snapshot should reread base64 content')
+    assertEqual(target.mode, 'image', 'target should restore image mode after rereading media content')
+    assertEqual(target.contentBase64, 'restored-image-payload', 'target should receive freshly read media payload')
+    assertEqual(target.fileSize, 24, 'target should receive freshly read media size')
   })
 
   // --- Load-cancellation race ---

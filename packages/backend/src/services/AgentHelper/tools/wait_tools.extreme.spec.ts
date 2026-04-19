@@ -1,4 +1,3 @@
-import assert from 'node:assert/strict'
 import { waitSchema } from './wait_tools'
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {

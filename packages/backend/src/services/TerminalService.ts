@@ -1042,7 +1042,7 @@ export class TerminalService {
     filePath: string,
     offset: number,
     content: Buffer,
-    options?: { truncate?: boolean }
+    options?: { truncate?: boolean; close?: boolean }
   ): Promise<{ writtenBytes: number; nextOffset: number }> {
     const terminal = this.getTerminalOrThrow(terminalId)
     const resolvedPath = await this.resolvePath(terminalId, filePath)
