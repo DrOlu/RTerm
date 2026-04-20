@@ -704,25 +704,30 @@ const CompactColumnMetric: React.FC<{
   detail?: string
   percent: number
   tone?: MeterTone
-}> = ({ label, value, detail, percent, tone = 'default' }) => (
-  <div className="monitor-compact-column">
-    <div className="monitor-compact-column-head">
-      <span className="monitor-compact-column-label">{label}</span>
-      <span className="monitor-compact-column-value">{value}</span>
-    </div>
-    {detail && (
-      <div className="monitor-compact-column-detail" title={detail}>
-        {detail}
+}> = ({ label, value, detail, percent, tone = 'default' }) => {
+  const fillPercent = clampPercent(percent)
+  return (
+    <div className="monitor-compact-column">
+      <div className="monitor-compact-column-head">
+        <span className="monitor-compact-column-label">{label}</span>
+        <span className="monitor-compact-column-value">{value}</span>
       </div>
-    )}
-    <div className={`monitor-compact-column-track tone-${tone}`}>
-      <div
-        className="monitor-compact-column-fill"
-        style={{ height: `${clampPercent(percent)}%` }}
-      />
+      {detail && (
+        <div className="monitor-compact-column-detail" title={detail}>
+          {detail}
+        </div>
+      )}
+      <div className={`monitor-compact-column-track tone-${tone}`}>
+        {fillPercent > 0 && (
+          <div
+            className="monitor-compact-column-fill"
+            style={{ height: `${fillPercent}%` }}
+          />
+        )}
+      </div>
     </div>
-  </div>
-)
+  )
+}
 
 const CompactInfoPill: React.FC<{
   label: string
