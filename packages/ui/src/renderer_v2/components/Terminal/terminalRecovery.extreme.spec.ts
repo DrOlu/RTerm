@@ -18,12 +18,12 @@ const runCase = (name: string, fn: () => void): void => {
   console.log(`PASS ${name}`)
 }
 
-runCase('mergeTerminalRefitRequests preserves the stronger recovery flags', () => {
+runCase('mergeTerminalRefitRequests preserves renderer recovery flags', () => {
   const merged = mergeTerminalRefitRequests(
     { ...NORMAL_TERMINAL_REFIT_REQUEST },
     { ...RECOVERY_TERMINAL_REFIT_REQUEST }
   )
-  assertEqual(merged.forceBackendResize, true, 'recovery merge should force backend resize')
+  assertEqual(merged.forceBackendResize, false, 'renderer-only recovery should not force backend resize')
   assertEqual(merged.clearTextureAtlas, true, 'recovery merge should clear texture atlas')
 })
 
@@ -41,7 +41,21 @@ runCase('shouldSendTerminalBackendResize keeps normal same-size refits side-effe
   )
 })
 
-runCase('shouldSendTerminalBackendResize forces backend resize for recovery refits', () => {
+runCase('shouldSendTerminalBackendResize keeps same-size recovery refits renderer-only', () => {
+  assertEqual(
+    shouldSendTerminalBackendResize({
+      previousCols: 120,
+      previousRows: 30,
+      nextCols: 120,
+      nextRows: 30,
+      forceBackendResize: RECOVERY_TERMINAL_REFIT_REQUEST.forceBackendResize
+    }),
+    false,
+    'same-size recovery refits should not resend PTY size to the backend'
+  )
+})
+
+runCase('shouldSendTerminalBackendResize preserves explicit backend resize overrides', () => {
   assertEqual(
     shouldSendTerminalBackendResize({
       previousCols: 120,
@@ -51,7 +65,51 @@ runCase('shouldSendTerminalBackendResize forces backend resize for recovery refi
       forceBackendResize: true
     }),
     true,
-    'recovery refits should resend backend size even when geometry is unchanged'
+    'explicit backend resize overrides should still force a backend resize'
+  )
+})
+
+runCase('shouldSendTerminalBackendResize retries a failed same-size backend resize', () => {
+  assertEqual(
+    shouldSendTerminalBackendResize({
+      previousCols: 118,
+      previousRows: 30,
+      nextCols: 118,
+      nextRows: 30,
+      forceBackendResize: RECOVERY_TERMINAL_REFIT_REQUEST.forceBackendResize,
+      failedBackendResize: { cols: 118, rows: 30 }
+    }),
+    true,
+    'same-size recovery refits should retry a previously failed backend resize'
+  )
+})
+
+runCase('shouldSendTerminalBackendResize ignores stale failed resize targets', () => {
+  assertEqual(
+    shouldSendTerminalBackendResize({
+      previousCols: 118,
+      previousRows: 30,
+      nextCols: 118,
+      nextRows: 30,
+      forceBackendResize: RECOVERY_TERMINAL_REFIT_REQUEST.forceBackendResize,
+      failedBackendResize: { cols: 120, rows: 30 }
+    }),
+    false,
+    'failed resize retries should only target the current terminal size'
+  )
+})
+
+runCase('shouldSendTerminalBackendResize still resizes the backend for real geometry changes', () => {
+  assertEqual(
+    shouldSendTerminalBackendResize({
+      previousCols: 120,
+      previousRows: 30,
+      nextCols: 118,
+      nextRows: 30,
+      forceBackendResize: RECOVERY_TERMINAL_REFIT_REQUEST.forceBackendResize
+    }),
+    true,
+    'actual terminal geometry changes should still reach the backend'
   )
 })
 
