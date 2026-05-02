@@ -1,4 +1,5 @@
 import React from 'react'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 const clampPercent = (value: number | undefined): number => {
@@ -56,6 +57,14 @@ const assertContains = (haystack: string, needle: string, message: string): void
 
 const assertNotContains = (haystack: string, needle: string, message: string): void => {
   assert(!haystack.includes(needle), `${message}. needle=${JSON.stringify(needle)} haystack=${haystack}`)
+}
+
+const extractCssBlock = (css: string, selector: string): string => {
+  const start = css.indexOf(`${selector} {`)
+  assert(start >= 0, `expected CSS block for ${selector}`)
+  const end = css.indexOf('\n}', start)
+  assert(end >= 0, `expected closing brace for ${selector}`)
+  return css.slice(start, end)
 }
 
 runCase('fill div renders with inline height when percent is positive', () => {
@@ -149,4 +158,21 @@ runCase('regression: bar heights are strictly ordered by percent', () => {
   for (let i = 1; i < heights.length; i += 1) {
     assert(heights[i] > heights[i - 1], `heights must be strictly increasing: ${heights.join(',')}`)
   }
+})
+
+runCase('regression: compact column bar is positioned before the metric text', () => {
+  const css = readFileSync(new URL('./monitor.scss', import.meta.url), 'utf8')
+  const columnBlock = extractCssBlock(css, '.monitor-compact-column')
+  const headBlock = extractCssBlock(css, '.monitor-compact-column-head')
+  const detailBlock = extractCssBlock(css, '.monitor-compact-column-detail')
+  const trackBlock = extractCssBlock(css, '.monitor-compact-column-track')
+
+  assertContains(
+    columnBlock,
+    'grid-template-columns: 12px minmax(0, 1fr);',
+    'compact column grid should reserve the left column for the bar'
+  )
+  assertContains(headBlock, 'grid-column: 2;', 'metric label/value should render to the right of the bar')
+  assertContains(detailBlock, 'grid-column: 2;', 'metric detail should render to the right of the bar')
+  assertContains(trackBlock, 'grid-column: 1;', 'metric bar should render in the left column')
 })
