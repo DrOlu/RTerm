@@ -1,23 +1,8 @@
-# RTerm — Auto-Sync, Rebrand, Build & Release
-#
-# This workflow:
-#   1. Checks upstream GyShell for new releases
-#   2. Merges upstream changes into RTerm (with -X ours to keep branding)
-#   3. Applies the rebrand script (GyShell → RTerm)
-#   4. Builds all platforms (macOS, Windows, Linux x64 + ARM64)
-#   5. Creates a GitHub release with all assets
-#
-# Triggers:
-#   - Daily at 06:00 UTC (cron)
-#   - Manual dispatch (workflow_dispatch) with optional force rebuild
-#
-# Based on the neuralOS dual-upstream workflow, simplified for single upstream.
-
 name: Sync Build and Release
 
 on:
   schedule:
-    - cron: "0 6 * * *" # Daily at 06:00 UTC
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -37,7 +22,6 @@ env:
   UPSTREAM_BRANCH: "main"
 
 jobs:
-  # ─── Job 1: Check upstream and merge ──────────────────────────
   sync:
     name: Sync from upstream GyShell
     runs-on: ubuntu-latest
@@ -54,16 +38,13 @@ jobs:
       - name: Check upstream version
         id: check
         run: |
-          # Get current RTerm version
           CURRENT_VERSION=$(jq -r '.version' version.json 2>/dev/null || echo "0.0.0")
           echo "current_version=$CURRENT_VERSION"
 
-          # Get latest GyShell release version
           UPSTREAM_LATEST=$(curl -sL "https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/latest" \
             | jq -r '.tag_name // "0.0.0"' | sed 's/^v//')
           echo "upstream_latest=$UPSTREAM_LATEST"
 
-          # Compare versions
           CURRENT_MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
           CURRENT_MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
           CURRENT_PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
@@ -72,7 +53,6 @@ jobs:
           UPSTREAM_MINOR=$(echo "$UPSTREAM_LATEST" | cut -d. -f2)
           UPSTREAM_PATCH=$(echo "$UPSTREAM_LATEST" | cut -d. -f3)
 
-          # Pad with zeros for comparison
           CURRENT_PADDED=$(printf "%03d%03d%03d" "$CURRENT_MAJOR" "$CURRENT_MINOR" "$CURRENT_PATCH")
           UPSTREAM_PADDED=$(printf "%03d%03d%03d" "$UPSTREAM_MAJOR" "$UPSTREAM_MINOR" "$UPSTREAM_PATCH")
 
@@ -81,7 +61,7 @@ jobs:
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "new_version=$UPSTREAM_LATEST" >> $GITHUB_OUTPUT
           elif [ "$UPSTREAM_PADDED" -gt "$CURRENT_PADDED" ]; then
-            echo "New upstream version detected: $CURRENT_VERSION → $UPSTREAM_LATEST"
+            echo "New upstream version: $CURRENT_VERSION → $UPSTREAM_LATEST"
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "new_version=$UPSTREAM_LATEST" >> $GITHUB_OUTPUT
           else
@@ -95,21 +75,14 @@ jobs:
         run: |
           git config user.name "RTerm Sync Bot"
           git config user.email "rterm-bot@hyperspace.ng"
-
-          # Add upstream remote
           git remote add upstream "https://github.com/${{ env.UPSTREAM_REPO }}.git"
           git fetch upstream ${{ env.UPSTREAM_BRANCH }}
-
-          # Merge with -X ours to keep RTerm branding on conflicts
           git merge upstream/${{ env.UPSTREAM_BRANCH }} -X ours --no-edit || {
-            # If there are unresolved conflicts (shouldn't happen with -X ours),
-            # resolve them by keeping ours
             git diff --name-only --diff-filter=U | while read file; do
-              echo "Resolving conflict in $file (keeping ours)"
               git checkout --ours "$file"
               git add "$file"
             done
-            git commit --no-edit -m "chore: merge upstream GyShell (resolve conflicts with ours)"
+            git commit --no-edit -m "chore: merge upstream GyShell (resolve conflicts)"
           }
 
       - name: Apply rebrand
@@ -118,31 +91,9 @@ jobs:
           chmod +x scripts/rebrand.sh 2>/dev/null || true
           if [ -f "scripts/rebrand.sh" ]; then
             bash scripts/rebrand.sh
-          else
-            echo "No rebrand.sh found — applying rebrand inline"
-
-            # Replace GyShell with RTerm in key files
-            # (Keep GyShell in license attributions and upstream references)
-
-            # package.json — already named rterm
-            # version.json — update version
-            NEW_VER="${{ steps.check.outputs.new_version }}"
-            jq --arg v "$NEW_VER" '.version = $v' version.json > version.json.tmp && mv version.json.tmp version.json
-
-            # README.md — replace product name references (not in URLs or license)
-            sed -i 's/GyShell/RTerm/g' README.md 2>/dev/null || true
-            # Restore upstream URL references
-            sed -i 's|RTerm/GyShell|MrOrangeJJ/GyShell|g' README.md 2>/dev/null || true
-
-            # electron-builder.yml — ensure productName is RTerm
-            # (already set to RTerm in the repo)
-
-            # build.sh — replace GyShell-Mobile-Web in zip name
-            sed -i 's/GyShell-Mobile-Web/RTerm-Mobile-Web/g' build.sh 2>/dev/null || true
-            sed -i 's/GyShell\.MobileWeb/RTerm\.MobileWeb/g' build.sh 2>/dev/null || true
           fi
-
-          # Stage all changes
+          jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' version.json > version.json.tmp && mv version.json.tmp version.json
+          jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
           git add -A
           git diff --cached --stat
           git commit -m "chore: sync from GyShell v${{ steps.check.outputs.new_version }} and rebrand" --allow-empty
@@ -151,91 +102,55 @@ jobs:
         if: steps.check.outputs.should_build == 'true'
         run: git push origin main
 
-  # ─── Job 2: Build macOS ─────────────────────────────────────
   build-mac:
     name: Build macOS ARM64
     needs: sync
     if: needs.sync.outputs.should_build == 'true'
     runs-on: macos-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: main
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build backend
-        run: pnpm run build:backend
-
-      - name: Build Electron
-        run: pnpm run build:electron
-
-      - name: Prepare CLI runtime
-        run: pnpm run prepare:cli-runtime -- --target darwin-arm64
-
-      - name: Build macOS DMG
-        run: pnpm run dist:mac
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:backend
+      - run: pnpm run build:electron
+      - run: pnpm run prepare:cli-runtime -- --target darwin-arm64
+      - run: pnpm run dist:mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: rterm-mac
           path: dist/*arm64.dmg
           retention-days: 1
 
-  # ─── Job 3: Build Windows ────────────────────────────────────
   build-win:
     name: Build Windows x64
     needs: sync
     if: needs.sync.outputs.should_build == 'true'
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: main
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build backend
-        run: pnpm run build:backend
-
-      - name: Build Electron
-        run: pnpm run build:electron
-
-      - name: Prepare CLI runtime
-        run: pnpm run prepare:cli-runtime -- --target windows-x64
-
-      - name: Build Windows EXE
-        run: pnpm run dist:win
-
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build:backend
+      - run: pnpm run build:electron
+      - run: pnpm run prepare:cli-runtime -- --target windows-x64
+      - run: pnpm run dist:win
+      - uses: actions/upload-artifact@v4
         with:
           name: rterm-win
           path: |
@@ -243,50 +158,28 @@ jobs:
             dist/*Setup*.exe
           retention-days: 1
 
-  # ─── Job 4: Build Linux x64 ─────────────────────────────────
   build-linux-x64:
     name: Build Linux x64
     needs: sync
     if: needs.sync.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: main
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libarchive-dev rpm dpkg pacman-package-manager || true
-
-      - name: Build backend
-        run: pnpm run build:backend
-
-      - name: Build Electron
-        run: pnpm run build:electron
-
-      - name: Prepare CLI runtime
-        run: pnpm run prepare:cli-runtime -- --target linux-x64
-
-      - name: Build Linux x64 packages
-        run: pnpm run dist:linux
-
-      - name: Upload Linux x64 artifacts
-        uses: actions/upload-artifact@v4
+      - run: pnpm install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y libarchive-dev rpm dpkg || true
+      - run: pnpm run build:backend
+      - run: pnpm run build:electron
+      - run: pnpm run prepare:cli-runtime -- --target linux-x64
+      - run: pnpm run dist:linux
+      - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-x64
           path: |
@@ -296,50 +189,28 @@ jobs:
             dist/*x64.rpm
           retention-days: 1
 
-  # ─── Job 5: Build Linux ARM64 ────────────────────────────────
   build-linux-arm64:
     name: Build Linux ARM64
     needs: sync
     if: needs.sync.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: main
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libarchive-dev rpm dpkg || true
-
-      - name: Build backend
-        run: pnpm run build:backend
-
-      - name: Build Electron
-        run: pnpm run build:electron
-
-      - name: Prepare CLI runtime
-        run: pnpm run prepare:cli-runtime -- --target linux-arm64
-
-      - name: Build Linux ARM64 packages
-        run: pnpm run dist:linux-arm64
-
-      - name: Upload Linux ARM64 artifacts
-        uses: actions/upload-artifact@v4
+      - run: pnpm install --frozen-lockfile
+      - run: sudo apt-get update && sudo apt-get install -y libarchive-dev rpm dpkg || true
+      - run: pnpm run build:backend
+      - run: pnpm run build:electron
+      - run: pnpm run prepare:cli-runtime -- --target linux-arm64
+      - run: pnpm run dist:linux-arm64
+      - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-arm64
           path: |
@@ -348,43 +219,28 @@ jobs:
             dist/*arm64.rpm
           retention-days: 1
 
-  # ─── Job 6: Create Release ───────────────────────────────────
   release:
     name: Create GitHub Release
     needs: [sync, build-mac, build-win, build-linux-x64, build-linux-arm64]
     if: needs.sync.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: main
-
       - name: Get version
         id: version
         run: |
           VERSION=$(jq -r '.version' version.json)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-
-      - name: List release assets
-        id: assets
-        run: |
-          echo "=== Release assets ==="
-          ls -lh dist/ || true
-          echo "=== Checking files ==="
-          for f in dist/*; do
-            [ -f "$f" ] && echo "$(basename $f): $(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null) bytes"
-          done
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: List assets
+        run: ls -lh dist/ || true
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: "RTerm v${{ steps.version.outputs.version }}"
@@ -393,36 +249,11 @@ jobs:
 
             Synced from upstream GyShell v${{ steps.version.outputs.version }}.
 
-            ## Downloads
-
-            | Platform | File |
-            |----------|------|
-            | macOS ARM64 | `RTerm-${{ steps.version.outputs.version }}-arm64.dmg` |
-            | Windows x64 (Portable) | `RTerm.Portable.${{ steps.version.outputs.version }}-x64.exe` |
-            | Windows x64 (Setup) | `RTerm.Setup.${{ steps.version.outputs.version }}-x64.exe` |
-            | Linux x64 (AppImage) | `RTerm-${{ steps.version.outputs.version }}-x64.AppImage` |
-            | Linux x64 (deb) | `RTerm-${{ steps.version.outputs.version }}-x64.deb` |
-            | Linux x64 (pacman) | `RTerm-${{ steps.version.outputs.version }}-x64.pacman` |
-            | Linux x64 (rpm) | `RTerm-${{ steps.version.outputs.version }}-x64.rpm` |
-            | Linux ARM64 (AppImage) | `RTerm-${{ steps.version.outputs.version }}-arm64.AppImage` |
-            | Linux ARM64 (deb) | `RTerm-${{ steps.version.outputs.version }}-arm64.deb` |
-            | Linux ARM64 (rpm) | `RTerm-${{ steps.version.outputs.version }}-arm64.rpm` |
-
-            ## Install
-
-            **macOS:** After installing, run `xattr -cr /Applications/RTerm.app` to remove quarantine.
+            **macOS:** After installing, run `xattr -cr /Applications/RTerm.app`
 
             **Linux AppImage:** `chmod +x RTerm-*.AppImage && ./RTerm-*.AppImage`
 
-            **Linux deb:** `sudo dpkg -i RTerm-*.deb`
-
-            **Linux rpm:** `sudo rpm -i RTerm-*.rpm`
-
-            ## What's Changed
-
-            See [upstream GyShell changelog](https://github.com/MrOrangeJJ/GyShell/releases/tag/v${{ steps.version.outputs.version }}) for details.
-
-            ---
+            See [GyShell changelog](https://github.com/MrOrangeJJ/GyShell/releases/tag/v${{ steps.version.outputs.version }}) for details.
 
             Contact: rterm@hyperspace.ng
           files: |
@@ -442,13 +273,12 @@ jobs:
         run: |
           STATUS="✅ Released"
           if [ "${{ job.status }}" != "success" ]; then STATUS="❌ Failed"; fi
-
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
             -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
             -d parse_mode=Markdown \
             -d text="${STATUS} *RTerm v${{ steps.version.outputs.version }}*
 
-Built from GyShell v${{ steps.version.outputs.version }}.
-All platforms: macOS, Windows, Linux (x64 + ARM64).
+          Built from GyShell v${{ steps.version.outputs.version }}.
+          All platforms: macOS, Windows, Linux (x64 + ARM64).
 
-https://github.com/DrOlu/RTerm/releases/tag/v${{ steps.version.outputs.version }}" || true
+          https://github.com/DrOlu/RTerm/releases/tag/v${{ steps.version.outputs.version }}" || true
