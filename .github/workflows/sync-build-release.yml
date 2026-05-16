@@ -94,6 +94,18 @@ jobs:
           if [ -f "scripts/rebrand.sh" ]; then
             bash scripts/rebrand.sh
           fi
+          # Restore RTerm icons (overwritten by upstream merge)
+          if [ -d "scripts/rterm-icons" ]; then
+            cp -f scripts/rterm-icons/icon.png apps/electron/materials/icon.png
+            cp -f scripts/rterm-icons/icon.icns apps/electron/materials/icon.icns
+            cp -f scripts/rterm-icons/icon.ico apps/electron/materials/icon.ico
+            for size in 16x16 32x32 48x48 64x64 128x128 256x256 512x512; do
+              cp -f scripts/rterm-icons/${size}.png apps/electron/materials/icons/${size}.png 2>/dev/null || true
+            done
+            cp -f scripts/rterm-icons/mobile-web-icon.png apps/electron/mobile-web-runtime/icon.png 2>/dev/null || true
+            cp -f scripts/rterm-icons/mobile-web-public-icon.png apps/mobile-web/public/icon.png 2>/dev/null || true
+            echo "Restored RTerm icons from scripts/rterm-icons/"
+          fi
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' version.json > version.json.tmp && mv version.json.tmp version.json
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v | .name = "rterm" | .packages[""].version = $v | .packages[""].name = "rterm"' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
