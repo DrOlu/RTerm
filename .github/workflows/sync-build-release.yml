@@ -17,7 +17,6 @@ concurrency:
 
 env:
   NODE_VERSION: "22"
-  PNPM_VERSION: "10"
   UPSTREAM_REPO: "MrOrangeJJ/GyShell"
   UPSTREAM_BRANCH: "main"
 
@@ -34,6 +33,12 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
 
       - name: Check upstream version
         id: check
@@ -94,6 +99,7 @@ jobs:
           fi
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' version.json > version.json.tmp && mv version.json.tmp version.json
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
+          npm install --package-lock-only
           git add -A
           git diff --cached --stat
           git commit -m "chore: sync from GyShell v${{ steps.check.outputs.new_version }} and rebrand" --allow-empty
@@ -114,14 +120,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build:backend
-      - run: pnpm run build:electron
-      - run: pnpm run prepare:cli-runtime -- --target darwin-arm64
-      - run: pnpm run dist:mac
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build:backend
+      - run: npm run build:electron
+      - run: npm run prepare:cli-runtime -- --target darwin-arm64
+      - run: npm run dist:mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
       - uses: actions/upload-artifact@v4
@@ -142,14 +146,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build:backend
-      - run: pnpm run build:electron
-      - run: pnpm run prepare:cli-runtime -- --target windows-x64
-      - run: pnpm run dist:win
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build:backend
+      - run: npm run build:electron
+      - run: npm run prepare:cli-runtime -- --target windows-x64
+      - run: npm run dist:win
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-win
@@ -170,15 +172,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - run: pnpm install --frozen-lockfile
+          cache: "npm"
       - run: sudo apt-get update && sudo apt-get install -y libarchive-dev rpm dpkg || true
-      - run: pnpm run build:backend
-      - run: pnpm run build:electron
-      - run: pnpm run prepare:cli-runtime -- --target linux-x64
-      - run: pnpm run dist:linux
+      - run: npm ci
+      - run: npm run build:backend
+      - run: npm run build:electron
+      - run: npm run prepare:cli-runtime -- --target linux-x64
+      - run: npm run dist:linux
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-x64
@@ -201,15 +201,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-      - run: pnpm install --frozen-lockfile
+          cache: "npm"
       - run: sudo apt-get update && sudo apt-get install -y libarchive-dev rpm dpkg || true
-      - run: pnpm run build:backend
-      - run: pnpm run build:electron
-      - run: pnpm run prepare:cli-runtime -- --target linux-arm64
-      - run: pnpm run dist:linux-arm64
+      - run: npm ci
+      - run: npm run build:backend
+      - run: npm run build:electron
+      - run: npm run prepare:cli-runtime -- --target linux-arm64
+      - run: npm run dist:linux-arm64
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-arm64
@@ -249,11 +247,34 @@ jobs:
 
             Synced from upstream GyShell v${{ steps.version.outputs.version }}.
 
-            **macOS:** After installing, run `xattr -cr /Applications/RTerm.app`
+            ## Downloads
+
+            | Platform | File |
+            |----------|------|
+            | macOS ARM64 | `RTerm-${{ steps.version.outputs.version }}-arm64.dmg` |
+            | Windows x64 (Portable) | `RTerm.Portable.${{ steps.version.outputs.version }}-x64.exe` |
+            | Windows x64 (Setup) | `RTerm.Setup.${{ steps.version.outputs.version }}-x64.exe` |
+            | Linux x64 (AppImage) | `RTerm-${{ steps.version.outputs.version }}-x64.AppImage` |
+            | Linux x64 (deb) | `RTerm-${{ steps.version.outputs.version }}-x64.deb` |
+            | Linux x64 (pacman) | `RTerm-${{ steps.version.outputs.version }}-x64.pacman` |
+            | Linux x64 (rpm) | `RTerm-${{ steps.version.outputs.version }}-x64.rpm` |
+            | Linux ARM64 (AppImage) | `RTerm-${{ steps.version.outputs.version }}-arm64.AppImage` |
+            | Linux ARM64 (deb) | `RTerm-${{ steps.version.outputs.version }}-arm64.deb` |
+            | Linux ARM64 (rpm) | `RTerm-${{ steps.version.outputs.version }}-arm64.rpm` |
+
+            ## Install
+
+            **macOS:** After installing, run `xattr -cr /Applications/RTerm.app` to remove quarantine.
 
             **Linux AppImage:** `chmod +x RTerm-*.AppImage && ./RTerm-*.AppImage`
 
+            **Linux deb:** `sudo dpkg -i RTerm-*.deb`
+
+            **Linux rpm:** `sudo rpm -i RTerm-*.rpm`
+
             See [GyShell changelog](https://github.com/MrOrangeJJ/GyShell/releases/tag/v${{ steps.version.outputs.version }}) for details.
+
+            ---
 
             Contact: rterm@hyperspace.ng
           files: |
