@@ -34,12 +34,6 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-
       - name: Check upstream version
         id: check
         run: |
@@ -99,7 +93,6 @@ jobs:
           fi
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' version.json > version.json.tmp && mv version.json.tmp version.json
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
-          npm install --package-lock-only
           git add -A
           git diff --cached --stat
           git commit -m "chore: sync from GyShell v${{ steps.check.outputs.new_version }} and rebrand" --allow-empty
@@ -303,3 +296,4 @@ jobs:
           All platforms: macOS, Windows, Linux (x64 + ARM64).
 
           https://github.com/DrOlu/RTerm/releases/tag/v${{ steps.version.outputs.version }}" || true
+
