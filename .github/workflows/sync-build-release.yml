@@ -93,6 +93,8 @@ jobs:
           fi
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' version.json > version.json.tmp && mv version.json.tmp version.json
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
+          # Update lockfile root name/version to match
+          jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v | .name = "rterm" | .packages[""].version = $v | .packages[""].name = "rterm"' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
           git add -A
           git diff --cached --stat
           git commit -m "chore: sync from GyShell v${{ steps.check.outputs.new_version }} and rebrand" --allow-empty
