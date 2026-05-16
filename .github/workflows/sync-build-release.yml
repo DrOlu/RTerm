@@ -187,7 +187,7 @@ jobs:
       - name: System deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools
+          sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools build-essential python3 build-essential python3
       - run: npm install
       - run: npm run dist:linux
         env:
