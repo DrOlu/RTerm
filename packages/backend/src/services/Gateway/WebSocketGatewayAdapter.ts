@@ -71,6 +71,8 @@ type WebSocketRpcMethod =
   | "agent:renameSession"
   | "agent:rollbackToMessage";
 
+type FileTransferConflictStrategy = "error" | "overwrite" | "rename";
+
 interface WebSocketRpcRequest {
   id?: string | number;
   method: WebSocketRpcMethod | string;
@@ -203,6 +205,7 @@ export interface WebSocketGatewayAdapterOptions {
         transferId?: string;
         chunkSize?: number;
         overwrite?: boolean;
+        conflictStrategy?: FileTransferConflictStrategy;
       },
     ) =>
       | Promise<{
@@ -1128,6 +1131,18 @@ export class WebSocketGatewayAdapter {
             "overwrite must be boolean when provided.",
           );
         }
+        const conflictStrategy = params.conflictStrategy;
+        if (
+          conflictStrategy !== undefined &&
+          conflictStrategy !== "error" &&
+          conflictStrategy !== "overwrite" &&
+          conflictStrategy !== "rename"
+        ) {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            'conflictStrategy must be "error", "overwrite", or "rename" when provided.',
+          );
+        }
         const chunkSize = this.readOptionalPositiveIntegerParam(
           params,
           "chunkSize",
@@ -1141,6 +1156,7 @@ export class WebSocketGatewayAdapter {
             ...(mode !== undefined ? { mode } : {}),
             ...(transferId !== undefined ? { transferId } : {}),
             ...(overwrite !== undefined ? { overwrite } : {}),
+            ...(conflictStrategy !== undefined ? { conflictStrategy } : {}),
             ...(chunkSize !== undefined ? { chunkSize } : {}),
           },
         );

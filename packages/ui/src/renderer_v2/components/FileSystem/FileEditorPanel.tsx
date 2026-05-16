@@ -8,6 +8,7 @@ import {
   findTextMatches,
   isFindShortcutEvent,
 } from "../../lib/textSearch";
+import { PdfPreview } from "./PdfPreview";
 import "./fileEditor.scss";
 
 interface FileEditorPanelProps {
@@ -190,6 +191,12 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(
       setSearchResultIndex(-1);
     }, []);
 
+    React.useEffect(() => {
+      if (fileEditor.mode !== "text" && findOpen) {
+        closeFind();
+      }
+    }, [closeFind, fileEditor.mode, findOpen]);
+
     const moveSearchResult = React.useCallback(
       (direction: "next" | "previous") => {
         if (!normalizedSearchQuery || searchMatches.length <= 0) {
@@ -204,14 +211,14 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(
 
     const handlePanelKeyDownCapture = React.useCallback(
       (event: React.KeyboardEvent<HTMLElement>) => {
-        if (!isFindShortcutEvent(event)) {
+        if (fileEditor.mode !== "text" || !isFindShortcutEvent(event)) {
           return;
         }
         event.preventDefault();
         event.stopPropagation();
         openFind();
       },
-      [openFind],
+      [fileEditor.mode, openFind],
     );
 
     return (
@@ -317,6 +324,33 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(
             <div className="file-editor-error">
               {fileEditor.errorMessage || t.fileEditor.previewErrorFallback}
             </div>
+          ) : fileEditor.mode === "image" ? (
+            <div
+              className="file-editor-image-preview"
+              data-testid="image-preview"
+            >
+              <img
+                className="file-editor-image"
+                src={fileEditor.previewDataUrl}
+                alt={currentPath}
+                draggable={false}
+              />
+            </div>
+          ) : fileEditor.mode === "pdf" ? (
+            <PdfPreview
+              contentBase64={fileEditor.contentBase64}
+              filePath={currentPath}
+              labels={{
+                loadingDocument: t.fileEditor.loadingPdf,
+                renderingPage: t.fileEditor.renderingPdfPage,
+                previousPage: t.fileEditor.previousPdfPage,
+                nextPage: t.fileEditor.nextPdfPage,
+                zoomIn: t.fileEditor.zoomIn,
+                zoomOut: t.fileEditor.zoomOut,
+                pageLabel: t.fileEditor.pdfPageLabel,
+                renderError: t.fileEditor.pdfRenderError,
+              }}
+            />
           ) : (
             <textarea
               ref={textareaRef}

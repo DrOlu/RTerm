@@ -745,6 +745,10 @@
   font-size: 10px;
   color: var(--fg-muted);
   opacity: 0.5;
+
+  &:not(:empty) {
+    margin-left: 8px;
+  }
 }
 
 .stg-count {
@@ -753,14 +757,15 @@
 
 .stg-chevron {
   flex: 0 0 auto;
-  opacity: 0;
+  opacity: 0.25;
+  margin-left: 6px;
   transition: opacity 0.15s ease;
   display: grid;
   place-items: center;
   color: var(--fg-muted);
 
   .stg-header:hover & {
-    opacity: 0.6;
+    opacity: 0.7;
   }
 }
 
@@ -773,14 +778,12 @@
 
 .stg-step {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 5px;
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.6;
   color: color-mix(in srgb, var(--fg) 55%, transparent);
-  white-space: nowrap;
-  overflow: hidden;
 
   &.is-active {
     color: color-mix(in srgb, var(--fg) 80%, transparent);
@@ -795,12 +798,14 @@
   flex: 0 0 auto;
   opacity: 0.35;
   font-size: 10px;
+  line-height: 1.6;
 }
 
 .stg-step-text {
   flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .stg-step-info {

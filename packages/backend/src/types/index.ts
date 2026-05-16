@@ -723,7 +723,7 @@ export interface TerminalFileSystemBackend {
     filePath: string,
     offset: number,
     content: Buffer,
-    options?: { truncate?: boolean }
+    options?: { truncate?: boolean; close?: boolean }
   ): Promise<FileChunkWriteResult>
 
   /**

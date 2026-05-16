@@ -13,7 +13,7 @@ export const FILESYSTEM_SORT_MODE_VALUES = [
 
 export type FileSystemSortMode = (typeof FILESYSTEM_SORT_MODE_VALUES)[number]
 
-export const DEFAULT_FILESYSTEM_SORT_MODE: FileSystemSortMode = 'name-asc'
+export const DEFAULT_FILESYSTEM_SORT_MODE: FileSystemSortMode = 'modified-desc'
 
 export const isHiddenFileSystemEntry = (entry: FileSystemEntry): boolean => {
   const normalizedName = String(entry.name || '').trim()
@@ -72,10 +72,6 @@ export const sortFileSystemEntries = (
   const direction = resolvedMode.endsWith('-asc') ? 'asc' : 'desc'
 
   return entries.slice().sort((left, right) => {
-    if (left.isDirectory !== right.isDirectory) {
-      return left.isDirectory ? -1 : 1
-    }
-
     if (resolvedMode.startsWith('modified-')) {
       const compared = compareOptionalNumber(
         getModifiedTimestamp(left),

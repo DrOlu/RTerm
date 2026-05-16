@@ -90,6 +90,214 @@ const run = async (): Promise<void> => {
     assertEqual(calls.deletePath, 0, 'same-path move short-circuit must not delete source path')
   })
 
+  await runCase('transferEntries treats keep-both identical move path as no-op', async () => {
+    const calls = {
+      uploads: 0,
+      deletePath: 0
+    }
+    const terminalService = {
+      statFile: async (_terminalId: string, filePath: string) => {
+        if (filePath === '/tmp') return { exists: true, isDirectory: true }
+        if (filePath === '/tmp/a.txt') return { exists: true, isDirectory: false, size: 1 }
+        return { exists: false, isDirectory: false }
+      },
+      getRemoteOs: () => 'unix' as const,
+      getTerminalType: () => 'local' as const,
+      getFileSystemIdentity: () => 'local://default',
+      resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
+      uploadFileFromLocalPath: async () => {
+        calls.uploads += 1
+        return { totalBytes: 1 }
+      },
+      deletePath: async () => {
+        calls.deletePath += 1
+      }
+    }
+    const service = new FileSystemService(terminalService as unknown as TerminalService)
+
+    const result = await service.transferEntries('local-a', ['/tmp/a.txt'], 'local-b', '/tmp', {
+      mode: 'move',
+      conflictStrategy: 'rename'
+    })
+
+    assertEqual(result.totalBytes, 0, 'keep-both same-path move should short-circuit with zero bytes')
+    assertEqual(result.totalFiles, 0, 'keep-both same-path move should short-circuit with zero files')
+    assertEqual(calls.uploads, 0, 'keep-both same-path move must not create a numbered copy')
+    assertEqual(calls.deletePath, 0, 'keep-both same-path move must not delete the original file')
+  })
+
+  await runCase('transferEntries can keep both by renaming a same-folder copy', async () => {
+    const calls = {
+      uploads: [] as Array<{ sourcePath: string; targetPath: string }>,
+      deletePath: 0
+    }
+    const existingPaths = new Set(['/dst/report.txt'])
+    const terminalService = {
+      statFile: async (_terminalId: string, filePath: string) => {
+        if (filePath === '/dst') return { exists: true, isDirectory: true }
+        if (filePath === '/dst/report.txt') return { exists: true, isDirectory: false, size: 7 }
+        if (existingPaths.has(filePath)) return { exists: true, isDirectory: false, size: 7 }
+        return { exists: false, isDirectory: false }
+      },
+      getRemoteOs: () => 'unix' as const,
+      getTerminalType: () => 'local' as const,
+      getFileSystemIdentity: () => 'local://x',
+      resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
+      uploadFileFromLocalPath: async (_terminalId: string, sourcePath: string, targetPath: string) => {
+        calls.uploads.push({ sourcePath, targetPath })
+        return { totalBytes: 7 }
+      },
+      deletePath: async () => {
+        calls.deletePath += 1
+      }
+    }
+    const service = new FileSystemService(terminalService as unknown as TerminalService)
+
+    const result = await service.transferEntries('local-a', ['/dst/report.txt'], 'local-a', '/dst', {
+      mode: 'copy',
+      conflictStrategy: 'rename'
+    })
+
+    assertEqual(result.transferredFiles, 1, 'renamed same-folder copy should transfer one file')
+    assertEqual(calls.uploads.length, 1, 'renamed same-folder copy should upload once')
+    assertEqual(calls.uploads[0].targetPath, '/dst/report (1).txt', 'conflicting copy should receive the first numbered suffix')
+    assertEqual(calls.deletePath, 0, 'renamed copy must not delete the existing target')
+  })
+
+  await runCase('transferEntries increments numbered suffixes when keeping both', async () => {
+    const calls = {
+      targets: [] as string[]
+    }
+    const existingPaths = new Set([
+      '/dst/report.txt',
+      '/dst/report (1).txt',
+      '/dst/report (2).txt'
+    ])
+    const terminalService = {
+      statFile: async (_terminalId: string, filePath: string) => {
+        if (filePath === '/dst') return { exists: true, isDirectory: true }
+        if (filePath === '/src/report.txt') return { exists: true, isDirectory: false, size: 5 }
+        if (existingPaths.has(filePath)) return { exists: true, isDirectory: false, size: 5 }
+        return { exists: false, isDirectory: false }
+      },
+      getRemoteOs: () => 'unix' as const,
+      getTerminalType: () => 'local' as const,
+      getFileSystemIdentity: () => 'local://x',
+      resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
+      uploadFileFromLocalPath: async (_terminalId: string, _sourcePath: string, targetPath: string) => {
+        calls.targets.push(targetPath)
+        return { totalBytes: 5 }
+      },
+      deletePath: async () => {}
+    }
+    const service = new FileSystemService(terminalService as unknown as TerminalService)
+
+    await service.transferEntries('local-a', ['/src/report.txt'], 'local-a', '/dst', {
+      mode: 'copy',
+      conflictStrategy: 'rename'
+    })
+
+    assertEqual(calls.targets[0], '/dst/report (3).txt', 'renamed copy should skip existing numbered suffixes')
+  })
+
+  await runCase('transferEntries increments an incoming numbered filename when keeping both', async () => {
+    const calls = {
+      targets: [] as string[]
+    }
+    const existingPaths = new Set(['/dst/report (2).txt'])
+    const terminalService = {
+      statFile: async (_terminalId: string, filePath: string) => {
+        if (filePath === '/dst') return { exists: true, isDirectory: true }
+        if (filePath === '/src/report (2).txt') return { exists: true, isDirectory: false, size: 5 }
+        if (existingPaths.has(filePath)) return { exists: true, isDirectory: false, size: 5 }
+        return { exists: false, isDirectory: false }
+      },
+      getRemoteOs: () => 'unix' as const,
+      getTerminalType: () => 'local' as const,
+      getFileSystemIdentity: () => 'local://x',
+      resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
+      uploadFileFromLocalPath: async (_terminalId: string, _sourcePath: string, targetPath: string) => {
+        calls.targets.push(targetPath)
+        return { totalBytes: 5 }
+      },
+      deletePath: async () => {}
+    }
+    const service = new FileSystemService(terminalService as unknown as TerminalService)
+
+    await service.transferEntries('local-a', ['/src/report (2).txt'], 'local-a', '/dst', {
+      mode: 'copy',
+      conflictStrategy: 'rename'
+    })
+
+    assertEqual(calls.targets[0], '/dst/report (3).txt', 'incoming numeric suffix should continue from its current number')
+  })
+
+  await runCase('transferEntries resets unsafe numeric suffixes when keeping both', async () => {
+    const calls = {
+      targets: [] as string[]
+    }
+    const unsafeSuffix = '99999999999999999999'
+    const sourcePath = `/src/report (${unsafeSuffix}).txt`
+    const existingPaths = new Set([`/dst/report (${unsafeSuffix}).txt`])
+    const terminalService = {
+      statFile: async (_terminalId: string, filePath: string) => {
+        if (filePath === '/dst') return { exists: true, isDirectory: true }
+        if (filePath === sourcePath) return { exists: true, isDirectory: false, size: 5 }
+        if (existingPaths.has(filePath)) return { exists: true, isDirectory: false, size: 5 }
+        return { exists: false, isDirectory: false }
+      },
+      getRemoteOs: () => 'unix' as const,
+      getTerminalType: () => 'local' as const,
+      getFileSystemIdentity: () => 'local://x',
+      resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
+      uploadFileFromLocalPath: async (_terminalId: string, _sourcePath: string, targetPath: string) => {
+        calls.targets.push(targetPath)
+        return { totalBytes: 5 }
+      },
+      deletePath: async () => {}
+    }
+    const service = new FileSystemService(terminalService as unknown as TerminalService)
+
+    await service.transferEntries('local-a', [sourcePath], 'local-a', '/dst', {
+      mode: 'copy',
+      conflictStrategy: 'rename'
+    })
+
+    assertEqual(calls.targets[0], '/dst/report (1).txt', 'unsafe numeric suffix should restart at the first safe suffix')
+  })
+
+  await runCase('transferEntries renames duplicate target names within one keep-both batch', async () => {
+    const calls = {
+      targets: [] as string[]
+    }
+    const terminalService = {
+      statFile: async (_terminalId: string, filePath: string) => {
+        if (filePath === '/dst') return { exists: true, isDirectory: true }
+        if (filePath === '/src-a/a.txt') return { exists: true, isDirectory: false, size: 3 }
+        if (filePath === '/src-b/a.txt') return { exists: true, isDirectory: false, size: 4 }
+        return { exists: false, isDirectory: false }
+      },
+      getRemoteOs: () => 'unix' as const,
+      getTerminalType: () => 'local' as const,
+      getFileSystemIdentity: () => 'local://x',
+      resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
+      uploadFileFromLocalPath: async (_terminalId: string, _sourcePath: string, targetPath: string) => {
+        calls.targets.push(targetPath)
+        return { totalBytes: 3 }
+      },
+      deletePath: async () => {}
+    }
+    const service = new FileSystemService(terminalService as unknown as TerminalService)
+
+    await service.transferEntries('local-a', ['/src-a/a.txt', '/src-b/a.txt'], 'local-a', '/dst', {
+      mode: 'copy',
+      conflictStrategy: 'rename'
+    })
+
+    assertEqual(calls.targets[0], '/dst/a.txt', 'first batch item should use the original name when available')
+    assertEqual(calls.targets[1], '/dst/a (1).txt', 'second batch item should be renamed to avoid batch target collision')
+  })
+
   await runCase('readTextFile enforces maxBytes before full file read', async () => {
     const counters = {
       readFile: 0

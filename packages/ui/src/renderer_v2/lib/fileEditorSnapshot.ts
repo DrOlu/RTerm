@@ -1,4 +1,4 @@
-export type FileEditorSnapshotMode = 'idle' | 'loading' | 'text' | 'error'
+export type FileEditorSnapshotMode = 'idle' | 'loading' | 'text' | 'image' | 'pdf' | 'error'
 
 export interface FileEditorSnapshot {
   terminalId: string | null
@@ -17,7 +17,14 @@ const normalizeOptionalString = (value: unknown): string | null => {
 }
 
 const normalizeMode = (value: unknown): FileEditorSnapshotMode | null => {
-  if (value === 'idle' || value === 'loading' || value === 'text' || value === 'error') {
+  if (
+    value === 'idle' ||
+    value === 'loading' ||
+    value === 'text' ||
+    value === 'image' ||
+    value === 'pdf' ||
+    value === 'error'
+  ) {
     return value
   }
   return null
@@ -29,7 +36,7 @@ export const normalizeFileEditorSnapshot = (value: unknown): FileEditorSnapshot 
   const mode = normalizeMode(raw.mode)
   if (!mode) return null
 
-  const hasDocument = mode === 'loading' || mode === 'text' || mode === 'error'
+  const hasDocument = mode === 'loading' || mode === 'text' || mode === 'image' || mode === 'pdf' || mode === 'error'
   const terminalId = hasDocument ? normalizeOptionalString(raw.terminalId) : null
   const filePath = hasDocument ? normalizeOptionalString(raw.filePath) : null
   if (hasDocument && (!terminalId || !filePath)) {
@@ -40,7 +47,7 @@ export const normalizeFileEditorSnapshot = (value: unknown): FileEditorSnapshot 
     terminalId,
     filePath,
     mode,
-    content: typeof raw.content === 'string' ? raw.content : '',
+    content: mode === 'text' && typeof raw.content === 'string' ? raw.content : '',
     dirty: mode === 'text' && raw.dirty === true,
     errorMessage: normalizeOptionalString(raw.errorMessage),
     statusMessage: normalizeOptionalString(raw.statusMessage)

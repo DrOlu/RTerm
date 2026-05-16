@@ -26,9 +26,10 @@ import type {
   TerminalTabModel,
 } from "../../stores/AppStore";
 import {
-  resolveTextPreviewSupport,
+  MEDIA_PREVIEW_MAX_BYTES,
+  resolveFilePreviewSupport,
   TEXT_PREVIEW_MAX_BYTES,
-} from "./filePreviewSupport";
+} from "../../lib/filePreviewSupport";
 import {
   FILESYSTEM_PANEL_DRAG_MIME,
   encodeFileSystemPanelDragPayload,
@@ -108,6 +109,7 @@ const TERMINAL_TRANSFER_STATUSES = new Set<TransferTaskStatus>([
 ]);
 
 type TransferTaskKind = FileSystemClipboardMode;
+type FileSystemTransferConflictStrategy = "error" | "overwrite" | "rename";
 type TransferTaskStatus =
   | "queued"
   | "running"
@@ -120,6 +122,12 @@ interface InlinePathActionState {
   type: InlinePathActionType;
   sourcePath?: string;
   value: string;
+}
+
+interface FileContextMenuState {
+  anchorX: number;
+  anchorY: number;
+  entries: FileSystemEntry[];
 }
 
 interface TransferTaskState {
@@ -279,6 +287,11 @@ const normalizePathForCompare = (inputPath: string): string => {
   return trimmed.length > 0 ? trimmed : "/";
 };
 
+const normalizeFileNameForConflict = (
+  name: string,
+  osType: "unix" | "windows" | undefined,
+): string => (osType === "windows" ? name.toLocaleLowerCase() : name);
+
 const isSameOrDescendantPath = (
   candidatePath: string,
   rootPath: string,
@@ -328,6 +341,11 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
     const [toolbarMenuStyle, setToolbarMenuStyle] = React.useState<
       React.CSSProperties | undefined
     >(undefined);
+    const [fileContextMenu, setFileContextMenu] =
+      React.useState<FileContextMenuState | null>(null);
+    const [fileContextMenuStyle, setFileContextMenuStyle] = React.useState<
+      React.CSSProperties | undefined
+    >(undefined);
     const pendingOverwriteRef = React.useRef<{
       clipboard: FileSystemClipboardState;
       targetTerminalId: string;
@@ -357,6 +375,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
     const sortMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const moreMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const toolbarMenuRef = React.useRef<HTMLDivElement | null>(null);
+    const fileContextMenuRef = React.useRef<HTMLDivElement | null>(null);
     const searchInputRef = React.useRef<HTMLInputElement | null>(null);
     const explorerRowRefs = React.useRef<Record<string, HTMLDivElement | null>>(
       {},
@@ -657,6 +676,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       setOverwriteConfirmLoading(false);
       pendingOverwriteRef.current = null;
       setOpenToolbarMenu(null);
+      setFileContextMenu(null);
     }, [activeTerminalId]);
 
     React.useEffect(() => {
@@ -784,6 +804,75 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       if (!openToolbarMenu) return;
       recomputeToolbarMenuPosition();
     }, [openToolbarMenu, recomputeToolbarMenuPosition]);
+
+    const recomputeFileContextMenuPosition = React.useCallback(() => {
+      const menu = fileContextMenuRef.current;
+      if (!fileContextMenu || !menu) return;
+
+      const measured = menu.getBoundingClientRect();
+      const placement = resolveFloatingMenuPlacement({
+        anchorRect: {
+          left: fileContextMenu.anchorX,
+          top: fileContextMenu.anchorY,
+          width: 0,
+          height: 0,
+        },
+        menuWidth: Math.ceil(measured.width),
+        menuHeight: Math.ceil(measured.height),
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        margin: 8,
+        gap: 4,
+        preferredMaxHeight: 280,
+      });
+
+      setFileContextMenuStyle({
+        position: "fixed",
+        top: placement.top,
+        left: placement.left,
+        maxHeight: placement.maxHeight,
+        maxWidth: placement.maxWidth,
+      });
+    }, [fileContextMenu]);
+
+    React.useEffect(() => {
+      if (!fileContextMenu) return;
+
+      const onMouseDown = (event: MouseEvent) => {
+        const target = event.target as Node | null;
+        if (!target) return;
+        if (fileContextMenuRef.current?.contains(target)) {
+          return;
+        }
+        setFileContextMenu(null);
+      };
+
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          setFileContextMenu(null);
+        }
+      };
+
+      const onReflow = () => {
+        recomputeFileContextMenuPosition();
+      };
+
+      window.addEventListener("mousedown", onMouseDown);
+      window.addEventListener("keydown", onKeyDown);
+      window.addEventListener("resize", onReflow);
+      window.addEventListener("scroll", onReflow, true);
+      return () => {
+        window.removeEventListener("mousedown", onMouseDown);
+        window.removeEventListener("keydown", onKeyDown);
+        window.removeEventListener("resize", onReflow);
+        window.removeEventListener("scroll", onReflow, true);
+      };
+    }, [fileContextMenu, recomputeFileContextMenuPosition]);
+
+    React.useLayoutEffect(() => {
+      if (!fileContextMenu) return;
+      recomputeFileContextMenuPosition();
+    }, [fileContextMenu, recomputeFileContextMenuPosition]);
 
     const inlineActionSessionKey = React.useMemo(() => {
       if (!inlinePathAction) return null;
@@ -1056,6 +1145,44 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
         });
       },
       [activeTerminalId, updateTabState],
+    );
+
+    const handleEntryContextMenu = React.useCallback(
+      (
+        event: React.MouseEvent<HTMLElement>,
+        entry: FileSystemEntry,
+      ): void => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!activeTerminalId) return;
+        const clickedEntryIsSelected = activeState.selectedPaths.includes(
+          entry.path,
+        );
+        const menuEntries =
+          clickedEntryIsSelected && selectedEntries.length > 0
+            ? selectedEntries
+            : [entry];
+        if (!clickedEntryIsSelected) {
+          updateTabState(activeTerminalId, (current) => ({
+            ...current,
+            selectedPaths: [entry.path],
+            selectionAnchorPath: entry.path,
+            statusMessage: null,
+          }));
+        }
+        setOpenToolbarMenu(null);
+        setFileContextMenu({
+          anchorX: event.clientX,
+          anchorY: event.clientY,
+          entries: menuEntries,
+        });
+      },
+      [
+        activeState.selectedPaths,
+        activeTerminalId,
+        selectedEntries,
+        updateTabState,
+      ],
     );
 
     const handleToolbarMenuToggle = React.useCallback(
@@ -1338,14 +1465,14 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       updateTabState,
     ]);
 
-    const setClipboardFromSelection = React.useCallback(
-      (mode: FileSystemClipboardMode): void => {
-        if (!activeTerminalId || selectedEntries.length <= 0) return;
+    const setClipboardFromEntries = React.useCallback(
+      (entries: FileSystemEntry[], mode: FileSystemClipboardMode): void => {
+        if (!activeTerminalId || entries.length <= 0) return;
         const nextClipboard: FileSystemClipboardState = {
           mode,
           sourceTerminalId: activeTerminalId,
-          sourcePaths: selectedEntries.map((entry) => entry.path),
-          itemNames: selectedEntries.map((entry) => entry.name),
+          sourcePaths: entries.map((entry) => entry.path),
+          itemNames: entries.map((entry) => entry.name),
           sourceBasePath: activeState.currentPath || ".",
           createdAt: Date.now(),
         };
@@ -1354,19 +1481,61 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
           ...current,
           statusMessage:
             mode === "copy"
-              ? t.filesystem.copiedItemsToClipboard(selectedEntries.length)
-              : t.filesystem.cutItemsToClipboard(selectedEntries.length),
+              ? t.filesystem.copiedItemsToClipboard(entries.length)
+              : t.filesystem.cutItemsToClipboard(entries.length),
           errorMessage: null,
         }));
       },
       [
         activeState.currentPath,
         activeTerminalId,
-        selectedEntries,
         store,
         t.filesystem,
         updateTabState,
       ],
+    );
+
+    const setClipboardFromSelection = React.useCallback(
+      (mode: FileSystemClipboardMode): void => {
+        setClipboardFromEntries(selectedEntries, mode);
+      },
+      [selectedEntries, setClipboardFromEntries],
+    );
+
+    const copyFullPathsToClipboard = React.useCallback(
+      (entries: FileSystemEntry[]): void => {
+        if (!activeTerminalId || entries.length <= 0) return;
+        const text = entries.map((entry) => entry.path).join("\n");
+        const writeText = navigator.clipboard?.writeText;
+        if (!writeText) {
+          updateTabState(activeTerminalId, (current) => ({
+            ...current,
+            errorMessage: t.filesystem.copyFullPathFailed,
+            statusMessage: null,
+          }));
+          return;
+        }
+        void writeText
+          .call(navigator.clipboard, text)
+          .then(() => {
+            updateTabState(activeTerminalId, (current) => ({
+              ...current,
+              statusMessage:
+                entries.length === 1
+                  ? t.filesystem.fullPathCopied
+                  : t.filesystem.fullPathsCopied(entries.length),
+              errorMessage: null,
+            }));
+          })
+          .catch((error) => {
+            updateTabState(activeTerminalId, (current) => ({
+              ...current,
+              errorMessage: toErrorMessage(error),
+              statusMessage: null,
+            }));
+          });
+      },
+      [activeTerminalId, t.filesystem, updateTabState],
     );
 
     const queueClipboardTransfer = React.useCallback(
@@ -1374,7 +1543,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
         clipboardPayload: FileSystemClipboardState,
         targetTerminalId: string,
         targetPath: string,
-        overwrite: boolean,
+        conflictStrategy: FileSystemTransferConflictStrategy,
       ): void => {
         const mode = clipboardPayload.mode;
         const sourcePaths = Array.from(clipboardPayload.sourcePaths || []);
@@ -1463,7 +1632,8 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
                 {
                   mode,
                   transferId,
-                  overwrite,
+                  overwrite: conflictStrategy === "overwrite",
+                  conflictStrategy,
                 },
               );
               const successMessage =
@@ -1545,15 +1715,18 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
         clipboardPayload: FileSystemClipboardState,
         targetTerminalId: string,
         targetPath: string,
-        forceOverwrite = false,
+        conflictStrategy: FileSystemTransferConflictStrategy = "error",
       ): void => {
+        const targetOs = activeTab?.remoteOs;
         const existingNameSet = new Set(
-          activeState.entries.map((entry) => entry.name),
+          activeState.entries.map((entry) =>
+            normalizeFileNameForConflict(entry.name, targetOs),
+          ),
         );
         const conflictNames = clipboardPayload.itemNames.filter((name) =>
-          existingNameSet.has(name),
+          existingNameSet.has(normalizeFileNameForConflict(name, targetOs)),
         );
-        if (!forceOverwrite && conflictNames.length > 0) {
+        if (conflictStrategy === "error" && conflictNames.length > 0) {
           pendingOverwriteRef.current = {
             clipboard: clipboardPayload,
             targetTerminalId,
@@ -1567,21 +1740,23 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
           clipboardPayload,
           targetTerminalId,
           targetPath,
-          forceOverwrite,
+          conflictStrategy,
         );
       },
-      [activeState.entries, queueClipboardTransfer],
+      [activeState.entries, activeTab?.remoteOs, queueClipboardTransfer],
     );
 
     const handlePasteClipboard = React.useCallback(
-      (forceOverwrite = false): void => {
+      (
+        conflictStrategy: FileSystemTransferConflictStrategy = "error",
+      ): void => {
         if (!clipboard || !activeTerminalId) return;
         const targetPath = activeState.currentPath || ".";
         requestClipboardTransfer(
           clipboard,
           activeTerminalId,
           targetPath,
-          forceOverwrite,
+          conflictStrategy,
         );
       },
       [
@@ -1592,24 +1767,32 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       ],
     );
 
-    const confirmOverwriteAndPaste =
-      React.useCallback(async (): Promise<void> => {
-        const pending = pendingOverwriteRef.current;
-        if (!pending) return;
-        setOverwriteConfirmLoading(true);
-        try {
-          queueClipboardTransfer(
-            pending.clipboard,
-            pending.targetTerminalId,
-            pending.targetPath,
-            true,
-          );
-          setOverwriteConfirmOpen(false);
-          pendingOverwriteRef.current = null;
-        } finally {
-          setOverwriteConfirmLoading(false);
-        }
-      }, [queueClipboardTransfer]);
+    const confirmConflictAndPaste =
+      React.useCallback(
+        async (
+          conflictStrategy: Exclude<
+            FileSystemTransferConflictStrategy,
+            "error"
+          >,
+        ): Promise<void> => {
+          const pending = pendingOverwriteRef.current;
+          if (!pending) return;
+          setOverwriteConfirmLoading(true);
+          try {
+            queueClipboardTransfer(
+              pending.clipboard,
+              pending.targetTerminalId,
+              pending.targetPath,
+              conflictStrategy,
+            );
+            setOverwriteConfirmOpen(false);
+            pendingOverwriteRef.current = null;
+          } finally {
+            setOverwriteConfirmLoading(false);
+          }
+        },
+        [queueClipboardTransfer],
+      );
 
     const clearClipboard = React.useCallback((): void => {
       pendingOverwriteRef.current = null;
@@ -1650,7 +1833,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
           clipboardPayload,
           activeTerminalId,
           activeState.currentPath || ".",
-          false,
+          "error",
         );
       },
       [
@@ -1729,7 +1912,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
             clipboardPayload,
             activeTerminalId,
             activeState.currentPath || ".",
-            false,
+            "error",
           );
           return;
         }
@@ -2012,6 +2195,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
           )}
           confirmText={t.filesystem.overwriteAndPaste}
           cancelText={t.common.cancel}
+          secondaryText={t.filesystem.keepBothAndPaste}
           danger
           loading={isOverwriteConfirmLoading}
           onCancel={() => {
@@ -2019,8 +2203,11 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
             setOverwriteConfirmOpen(false);
             pendingOverwriteRef.current = null;
           }}
+          onSecondary={() => {
+            void confirmConflictAndPaste("rename");
+          }}
           onConfirm={() => {
-            void confirmOverwriteAndPaste();
+            void confirmConflictAndPaste("overwrite");
           }}
         />
         <div
@@ -2354,6 +2541,88 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
               document.body,
             )
           : null}
+        {fileContextMenu
+          ? createPortal(
+              <div
+                className={
+                  menuPlatformClassName
+                    ? `win-select-menu filesystem-context-menu ${menuPlatformClassName}`
+                    : "win-select-menu filesystem-context-menu"
+                }
+                role="menu"
+                ref={fileContextMenuRef}
+                style={fileContextMenuStyle}
+              >
+                <button
+                  className="win-select-option filesystem-context-menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled={isBusy || fileContextMenu.entries.length <= 0}
+                  onClick={() => {
+                    const entries = fileContextMenu.entries;
+                    setFileContextMenu(null);
+                    setClipboardFromEntries(entries, "copy");
+                  }}
+                >
+                  {t.filesystem.copyPath}
+                </button>
+                <button
+                  className="win-select-option filesystem-context-menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled={isBusy || fileContextMenu.entries.length <= 0}
+                  onClick={() => {
+                    const entries = fileContextMenu.entries;
+                    setFileContextMenu(null);
+                    setClipboardFromEntries(entries, "move");
+                  }}
+                >
+                  {t.filesystem.cutPath}
+                </button>
+                <button
+                  className="win-select-option filesystem-context-menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled={isBusy || fileContextMenu.entries.length !== 1}
+                  onClick={() => {
+                    setFileContextMenu(null);
+                    handleRename();
+                  }}
+                >
+                  {t.filesystem.renamePath}
+                </button>
+                <button
+                  className="win-select-option filesystem-context-menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled={isBusy || fileContextMenu.entries.length <= 0}
+                  onClick={() => {
+                    const entries = fileContextMenu.entries;
+                    setFileContextMenu(null);
+                    copyFullPathsToClipboard(entries);
+                  }}
+                >
+                  {fileContextMenu.entries.length > 1
+                    ? t.filesystem.copyFullPaths
+                    : t.filesystem.copyFullPath}
+                </button>
+                <div className="filesystem-context-menu-separator" />
+                <button
+                  className="win-select-option filesystem-context-menu-item is-danger"
+                  type="button"
+                  role="menuitem"
+                  disabled={isBusy || fileContextMenu.entries.length <= 0}
+                  onClick={() => {
+                    setFileContextMenu(null);
+                    handleDelete();
+                  }}
+                >
+                  {t.common.delete}
+                </button>
+              </div>,
+              document.body,
+            )
+          : null}
 
         {inlinePathAction ? (
           <div className="filesystem-inline-action-bar">
@@ -2478,23 +2747,29 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
                       }}
                       draggable
                       onDragStart={(event) => handleRowDragStart(event, entry)}
+                      onContextMenu={(event) =>
+                        handleEntryContextMenu(event, entry)
+                      }
                       onDoubleClick={() => {
                         if (entry.isDirectory) {
                           navigateDirectory(entry.path);
                           return;
                         }
                         if (!activeTerminalId) return;
-                        const previewSupport = resolveTextPreviewSupport(entry);
+                        const previewSupport = resolveFilePreviewSupport(entry);
                         if (!previewSupport.supported) {
+                          const maxBytes =
+                            previewSupport.kind === "image" ||
+                            previewSupport.kind === "pdf"
+                              ? MEDIA_PREVIEW_MAX_BYTES
+                              : TEXT_PREVIEW_MAX_BYTES;
                           updateTabState(activeTerminalId, (current) => ({
                             ...current,
                             statusMessage:
                               previewSupport.reason === "fileTooLarge"
                                 ? t.filesystem.previewTooLarge(
                                     entry.name,
-                                    Math.floor(
-                                      TEXT_PREVIEW_MAX_BYTES / (1024 * 1024),
-                                    ),
+                                    Math.floor(maxBytes / (1024 * 1024)),
                                   )
                                 : t.filesystem.previewUnsupportedType(
                                     entry.name,
@@ -2535,7 +2810,9 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
                       title={entry.path}
                     >
                       <span className="filesystem-row-main">
-                        <Icon size={14} strokeWidth={2} />
+                        <span className="filesystem-row-icon" aria-hidden="true">
+                          <Icon size={14} strokeWidth={2} />
+                        </span>
                         <span className="filesystem-row-name">
                           {nameSegments.map((segment, index) =>
                             segment.match ? (

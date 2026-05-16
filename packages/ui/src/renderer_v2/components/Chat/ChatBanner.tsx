@@ -604,20 +604,27 @@ function truncate(text: string, max: number): string {
   return text.slice(0, max - 1) + '…'
 }
 
-function getStepDescription(msg: ChatMessage): { text: string; info?: string } {
+function getStepDescription(msg: ChatMessage): { text: string; fullText: string; info?: string } {
   switch (msg.type) {
     case 'command': {
-      const content = truncate(msg.content || '', MAX_STEP_TEXT_LEN)
-      return { text: `$ ${content}` }
+      const raw = msg.content || ''
+      return {
+        text: `$ ${truncate(raw, MAX_STEP_TEXT_LEN)}`,
+        fullText: `$ ${raw}`,
+      }
     }
     case 'tool_call': {
       const toolName = msg.metadata?.toolName || 'tool'
-      const content = truncate(msg.content || '', MAX_STEP_TEXT_LEN - toolName.length - 2)
-      return { text: content ? `${toolName}: ${content}` : toolName }
+      const raw = msg.content || ''
+      const budget = Math.max(8, MAX_STEP_TEXT_LEN - toolName.length - 2)
+      return {
+        text: raw ? `${toolName}: ${truncate(raw, budget)}` : toolName,
+        fullText: raw ? `${toolName}: ${raw}` : toolName,
+      }
     }
     case 'file_edit': {
       const action = msg.metadata?.action || 'edited'
-      const filePath = truncate(msg.metadata?.filePath || msg.content || '', MAX_STEP_TEXT_LEN - 8)
+      const rawPath = msg.metadata?.filePath || msg.content || ''
       const actionLabel = action === 'created' ? 'create' : action === 'error' ? 'error' : 'edit'
       const diff = msg.metadata?.diff || ''
       let info: string | undefined
@@ -630,14 +637,26 @@ function getStepDescription(msg: ChatMessage): { text: string; info?: string } {
         })
         if (added || removed) info = `+${added}/-${removed}`
       }
-      return { text: `${actionLabel} ${filePath}`, info }
+      return {
+        text: `${actionLabel} ${truncate(rawPath, MAX_STEP_TEXT_LEN - 8)}`,
+        fullText: `${actionLabel} ${rawPath}`,
+        info,
+      }
     }
     case 'sub_tool': {
-      const title = truncate(msg.metadata?.subToolTitle || msg.content || 'sub_tool', MAX_STEP_TEXT_LEN)
-      return { text: title }
+      const raw = msg.metadata?.subToolTitle || msg.content || 'sub_tool'
+      return {
+        text: truncate(raw, MAX_STEP_TEXT_LEN),
+        fullText: raw,
+      }
     }
-    default:
-      return { text: truncate(msg.content || '', MAX_STEP_TEXT_LEN) }
+    default: {
+      const raw = msg.content || ''
+      return {
+        text: truncate(raw, MAX_STEP_TEXT_LEN),
+        fullText: raw,
+      }
+    }
   }
 }
 
@@ -655,32 +674,25 @@ export const SeamlessToolGroupBanner = observer(({
   const isStreaming = messages.some((m) => !!m.streaming)
   const stepCount = messages.length
 
-  // Single finished step: render inline without group chrome
-  if (stepCount === 1 && !isStreaming) {
-    const { text, info } = getStepDescription(messages[0])
-    return (
-      <div className="seamless-tool-group is-done is-single">
-        <div className="stg-header">
-          <div className="stg-status-icon"><Check size={12} /></div>
-          <span className="stg-title">{text}</span>
-          {info && <span className="stg-step-info">{info}</span>}
-        </div>
-      </div>
-    )
-  }
-
   const lastMsg = messages[messages.length - 1]
   const lastStep = lastMsg ? getStepDescription(lastMsg) : null
 
-  const headerText = isStreaming
-    ? (lastStep ? truncate(lastStep.text, 48) : 'Working...')
-    : `Done · ${stepCount} steps`
+  let headerText: string
+  if (isStreaming) {
+    headerText = lastStep ? truncate(lastStep.text, 48) : 'Working...'
+  } else if (stepCount === 1) {
+    headerText = lastStep ? lastStep.text : 'Done'
+  } else {
+    headerText = `Done · ${stepCount} steps`
+  }
 
   const shouldSweep = isStreaming
+  const headerInfo =
+    !isStreaming && stepCount === 1 ? lastStep?.info : undefined
 
   return (
     <div
-      className={`seamless-tool-group${isStreaming ? ' is-streaming' : ' is-done'}${expanded ? ' is-expanded' : ''}`}
+      className={`seamless-tool-group${isStreaming ? ' is-streaming' : ' is-done'}${stepCount === 1 ? ' is-single' : ''}${expanded ? ' is-expanded' : ''}`}
     >
       <div className="stg-header" onClick={() => setExpanded(!expanded)}>
         <div className="stg-status-icon">
@@ -696,6 +708,8 @@ export const SeamlessToolGroupBanner = observer(({
         <div className="stg-meta">
           {isStreaming && stepCount > 1 ? (
             <span className="stg-count">{stepCount} steps</span>
+          ) : headerInfo ? (
+            <span className="stg-step-info">{headerInfo}</span>
           ) : null}
         </div>
         <div className="stg-chevron">
@@ -705,7 +719,7 @@ export const SeamlessToolGroupBanner = observer(({
       {expanded && (
         <div className="stg-steps">
           {messages.map((msg, idx) => {
-            const { text, info } = getStepDescription(msg)
+            const { fullText, info } = getStepDescription(msg)
             const isDone = !msg.streaming
             const isLast = idx === messages.length - 1
             return (
@@ -714,7 +728,7 @@ export const SeamlessToolGroupBanner = observer(({
                 className={`stg-step${isDone ? ' is-done' : ' is-active'}${isLast && isStreaming ? ' is-current' : ''}`}
               >
                 <span className="stg-step-connector">{isLast ? '└' : '├'}</span>
-                <span className="stg-step-text">{text}</span>
+                <span className="stg-step-text">{fullText}</span>
                 {info && <span className="stg-step-info">{info}</span>}
               </div>
             )

@@ -722,6 +722,7 @@ export class ElectronGatewayIpcAdapter {
           transferId?: string;
           chunkSize?: number;
           overwrite?: boolean;
+          conflictStrategy?: "error" | "overwrite" | "rename";
         },
       ) => {
         const transferId =
@@ -749,6 +750,7 @@ export class ElectronGatewayIpcAdapter {
             {
               mode,
               overwrite: options?.overwrite === true,
+              conflictStrategy: options?.conflictStrategy,
               chunkSize: options?.chunkSize,
               transferId,
               signal: controller.signal,

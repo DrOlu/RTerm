@@ -2418,7 +2418,7 @@ echo "__GYSHELL_READY__"
     filePath: string,
     offset: number,
     content: Buffer,
-    options?: { truncate?: boolean }
+    options?: { truncate?: boolean; close?: boolean }
   ): Promise<{ writtenBytes: number; nextOffset: number }> {
     const sftp = await this.getSftp(ptyId)
     const normalizedPath = this.normalizeRemotePath(filePath)
@@ -2466,6 +2466,9 @@ echo "__GYSHELL_READY__"
         await this.sftpWrite(session.sftp, session.handle, payload, 0, payload.length, safeOffset)
       }
       session.expectedOffset = safeOffset + payload.length
+      if (options?.close === true) {
+        await this.disposeWriteSession(sessionKey)
+      }
     } catch (error) {
       await this.disposeWriteSession(sessionKey)
       throw error

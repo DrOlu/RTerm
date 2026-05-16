@@ -1,5 +1,9 @@
 import type { FileSystemEntry } from '../../lib/ipcTypes'
-import { filterFileSystemEntriesByHidden, sortFileSystemEntries } from './filesystemSort'
+import {
+  DEFAULT_FILESYSTEM_SORT_MODE,
+  filterFileSystemEntriesByHidden,
+  sortFileSystemEntries
+} from './filesystemSort'
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
   if (actual !== expected) {
@@ -69,37 +73,46 @@ const FIXTURES: FileSystemEntry[] = [
   }),
 ]
 
-runCase('name sorting keeps directories first and orders alphabetically', () => {
+runCase('default sorting uses latest modified timestamp first', () => {
+  assertEqual(DEFAULT_FILESYSTEM_SORT_MODE, 'modified-desc', 'default sort mode should be latest modified first')
+  assertPathOrder(
+    sortFileSystemEntries(FIXTURES),
+    ['/alpha.log', '/docs', '/zeta.txt', '/archive', '/gamma.txt', '/beta'],
+    'default sorting should match modified newest ordering'
+  )
+})
+
+runCase('name sorting mixes directories with files alphabetically', () => {
   assertPathOrder(
     sortFileSystemEntries(FIXTURES, 'name-asc'),
-    ['/archive', '/docs', '/alpha.log', '/beta', '/gamma.txt', '/zeta.txt'],
-    'name ascending should keep directories first and sort entries alphabetically'
+    ['/alpha.log', '/archive', '/beta', '/docs', '/gamma.txt', '/zeta.txt'],
+    'name ascending should sort directories and files together alphabetically'
   )
   assertPathOrder(
     sortFileSystemEntries(FIXTURES, 'name-desc'),
-    ['/docs', '/archive', '/zeta.txt', '/gamma.txt', '/beta', '/alpha.log'],
-    'name descending should reverse order within directory and file groups'
+    ['/zeta.txt', '/gamma.txt', '/docs', '/beta', '/archive', '/alpha.log'],
+    'name descending should reverse the mixed directory and file order'
   )
 })
 
 runCase('modified sorting prefers timestamps and leaves unknown timestamps last', () => {
   assertPathOrder(
     sortFileSystemEntries(FIXTURES, 'modified-desc'),
-    ['/docs', '/archive', '/alpha.log', '/zeta.txt', '/gamma.txt', '/beta'],
+    ['/alpha.log', '/docs', '/zeta.txt', '/archive', '/gamma.txt', '/beta'],
     'modified newest should order known timestamps first and keep missing timestamps at the end'
   )
   assertPathOrder(
     sortFileSystemEntries(FIXTURES, 'modified-asc'),
-    ['/archive', '/docs', '/gamma.txt', '/zeta.txt', '/alpha.log', '/beta'],
+    ['/gamma.txt', '/archive', '/zeta.txt', '/docs', '/alpha.log', '/beta'],
     'modified oldest should still leave missing timestamps at the end'
   )
 })
 
-runCase('size sorting orders larger files first while preserving directory grouping', () => {
+runCase('size sorting mixes directories with files by size', () => {
   assertPathOrder(
     sortFileSystemEntries(FIXTURES, 'size-desc'),
-    ['/archive', '/docs', '/alpha.log', '/gamma.txt', '/beta', '/zeta.txt'],
-    'size descending should sort by size inside each directory/file group'
+    ['/alpha.log', '/gamma.txt', '/beta', '/zeta.txt', '/archive', '/docs'],
+    'size descending should sort directories and files together by size'
   )
   assertPathOrder(
     sortFileSystemEntries(FIXTURES, 'size-asc'),
@@ -111,13 +124,13 @@ runCase('size sorting orders larger files first while preserving directory group
 runCase('type sorting groups files by extension with name fallback', () => {
   assertPathOrder(
     sortFileSystemEntries(FIXTURES, 'type-asc'),
-    ['/archive', '/docs', '/beta', '/alpha.log', '/gamma.txt', '/zeta.txt'],
+    ['/archive', '/beta', '/docs', '/alpha.log', '/gamma.txt', '/zeta.txt'],
     'type ascending should group extension-less files before extension buckets'
   )
   assertPathOrder(
     sortFileSystemEntries(FIXTURES, 'type-desc'),
-    ['/archive', '/docs', '/gamma.txt', '/zeta.txt', '/alpha.log', '/beta'],
-    'type descending should reverse extension buckets while keeping directories grouped first'
+    ['/gamma.txt', '/zeta.txt', '/alpha.log', '/archive', '/beta', '/docs'],
+    'type descending should reverse extension buckets without forcing directories first'
   )
 })
 

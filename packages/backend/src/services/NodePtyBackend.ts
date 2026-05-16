@@ -881,7 +881,7 @@ export class NodePtyBackend implements TerminalBackend {
     filePath: string,
     offset: number,
     content: Buffer,
-    options?: { truncate?: boolean }
+    options?: { truncate?: boolean; close?: boolean }
   ): Promise<{ writtenBytes: number; nextOffset: number }> {
     const safeOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0
     const payload = Buffer.isBuffer(content) ? content : Buffer.from(content)

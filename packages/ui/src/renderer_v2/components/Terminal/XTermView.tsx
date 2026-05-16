@@ -35,6 +35,7 @@ import {
   RECOVERY_TERMINAL_REFIT_REQUEST,
   shouldScheduleTerminalRecoveryOnActivate,
   shouldSendTerminalBackendResize,
+  type TerminalBackendResizeFailure,
   type TerminalRefitRequest,
 } from "./terminalRecovery";
 import { isRuntimeOwnedByUi } from "./runtimeOwnership";
@@ -133,6 +134,8 @@ interface TerminalRuntime {
   refitFrame: number | null;
   settleRefitFrame: number | null;
   pendingRefitRequest: TerminalRefitRequest;
+  backendResizeGeneration: number;
+  failedBackendResize: TerminalBackendResizeFailure | null;
   lastHandledRecoveryEpoch: number;
   pendingRecoveryRefit: boolean;
 }
@@ -158,6 +161,27 @@ const clearAnimationFrame = (frameId: number | null): void => {
 const noteTerminalRecoveryEvent = (): number => {
   terminalRecoveryEpoch += 1;
   return terminalRecoveryEpoch;
+};
+
+const requestBackendResize = (
+  runtime: TerminalRuntime,
+  cols: number,
+  rows: number,
+): void => {
+  const generation = runtime.backendResizeGeneration + 1;
+  runtime.backendResizeGeneration = generation;
+  runtime.failedBackendResize = null;
+  try {
+    void window.gyshell.terminal
+      .resize(runtime.terminalId, cols, rows)
+      .catch(() => {
+        if (runtime.backendResizeGeneration !== generation) return;
+        runtime.failedBackendResize = { cols, rows };
+      });
+  } catch {
+    if (runtime.backendResizeGeneration !== generation) return;
+    runtime.failedBackendResize = { cols, rows };
+  }
 };
 
 const refitRuntime = (
@@ -186,13 +210,10 @@ const refitRuntime = (
         nextCols: size.cols,
         nextRows: size.rows,
         forceBackendResize: request.forceBackendResize,
+        failedBackendResize: runtime.failedBackendResize,
       })
     ) {
-      void window.gyshell.terminal
-        .resize(runtime.terminalId, size.cols, size.rows)
-        .catch(() => {
-          // ignore transient backend issues during recovery or hot reload
-        });
+      requestBackendResize(runtime, size.cols, size.rows);
     }
     runtime.term.refresh(0, Math.max(0, runtime.term.rows - 1));
   } catch {
@@ -338,6 +359,8 @@ const createRuntime = (
     refitFrame: null,
     settleRefitFrame: null,
     pendingRefitRequest: { ...NORMAL_TERMINAL_REFIT_REQUEST },
+    backendResizeGeneration: 0,
+    failedBackendResize: null,
     lastHandledRecoveryEpoch: terminalRecoveryEpoch,
     pendingRecoveryRefit: false,
   };
@@ -531,9 +554,7 @@ const createRuntime = (
     .catch(() => {
       // ignore: backend is idempotent and may fail during hot reload; user will see logs in devtools
     });
-  window.gyshell.terminal.resize(config.id, size.cols, size.rows).catch(() => {
-    // ignore
-  });
+  requestBackendResize(runtime, size.cols, size.rows);
 
   const syncBufferedOutput = async (): Promise<void> => {
     try {

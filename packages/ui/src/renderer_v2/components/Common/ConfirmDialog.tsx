@@ -11,7 +11,10 @@ export function ConfirmDialog(props: {
   cancelText: string
   danger?: boolean
   loading?: boolean
+  secondaryText?: string
+  secondaryDanger?: boolean
   onConfirm: () => void
+  onSecondary?: () => void
   onCancel: () => void
 }): React.ReactElement | null {
   if (!props.open) return null
@@ -34,6 +37,15 @@ export function ConfirmDialog(props: {
           <button className="gy-btn gy-btn-secondary" onClick={props.onCancel} disabled={!!props.loading}>
             {props.cancelText}
           </button>
+          {props.secondaryText && props.onSecondary ? (
+            <button
+              className={props.secondaryDanger ? 'gy-btn gy-btn-danger' : 'gy-btn gy-btn-secondary'}
+              onClick={props.onSecondary}
+              disabled={!!props.loading}
+            >
+              {props.secondaryText}
+            </button>
+          ) : null}
           <button
             className={props.danger ? 'gy-btn gy-btn-danger' : 'gy-btn gy-btn-primary'}
             onClick={props.onConfirm}
@@ -54,4 +66,3 @@ export function ConfirmDialog(props: {
     document.body
   )
 }
-

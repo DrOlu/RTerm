@@ -314,6 +314,8 @@ export const en = {
     createFile: "Create File",
     renamePath: "Rename",
     copyPath: "Copy",
+    copyFullPath: "Copy Full Path",
+    copyFullPaths: "Copy Full Paths",
     cutPath: "Cut",
     pastePath: "Paste",
     cancelClipboard: "Cancel Copy/Cut",
@@ -336,6 +338,9 @@ export const en = {
     cutItemsToClipboard: (count: number) => `Cut ${count} item(s).`,
     copiedToClipboard: (name: string) => `Copied: ${name}`,
     cutToClipboard: (name: string) => `Cut: ${name}`,
+    fullPathCopied: "Full path copied.",
+    fullPathsCopied: (count: number) => `${count} full paths copied.`,
+    copyFullPathFailed: "Failed to copy full path.",
     clipboardReadyToPasteCopy: (count: number) =>
       `Clipboard: copy ${count} item(s). Switch to target tab and press Cmd/Ctrl+V.`,
     clipboardReadyToPasteMove: (count: number) =>
@@ -360,8 +365,9 @@ export const en = {
     cancelTransfer: "Cancel transfer",
     pasteConflictTitle: "Name Conflict Detected",
     pasteConflictMessage: (count: number, namesPreview: string) =>
-      `${count} conflicting item(s) exist in target: ${namesPreview}. Continue paste to overwrite them.`,
+      `${count} conflicting item(s) exist in target: ${namesPreview}. Choose whether to overwrite them or keep both with numbered names.`,
     overwriteAndPaste: "Overwrite and Paste",
+    keepBothAndPaste: "Keep Both",
     loadingDirectory: "Loading directory...",
     openingEditor: (name: string) => `Opening in editor: ${name}`,
     openedInEditor: (name: string) => `Opened in editor: ${name}`,
@@ -373,11 +379,20 @@ export const en = {
       `File is too large to preview (${name}, limit ${maxMb}MB).`,
   },
   fileEditor: {
-    title: "Text Editor",
+    title: "File Editor",
     searchPlaceholder: "Find in file...",
     emptyHint: "Double-click a file in the Files panel to open it here.",
     loadingPreview: "Loading file...",
     previewErrorFallback: "File preview is unavailable.",
+    loadingPdf: "Loading PDF...",
+    renderingPdfPage: "Rendering page...",
+    previousPdfPage: "Previous",
+    nextPdfPage: "Next",
+    zoomIn: "Zoom In",
+    zoomOut: "Zoom Out",
+    pdfPageLabel: (current: number, total: number) =>
+      `Page ${current} / ${total}`,
+    pdfRenderError: "Failed to render PDF.",
     unsavedChanges: "Unsaved",
     unsavedChangesConfirm:
       "Current file has unsaved changes. Continue without saving?",

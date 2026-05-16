@@ -529,6 +529,7 @@ export interface GyShellAPI {
         transferId?: string;
         chunkSize?: number;
         overwrite?: boolean;
+        conflictStrategy?: "error" | "overwrite" | "rename";
       },
     ) => Promise<{
       mode: "copy" | "move";

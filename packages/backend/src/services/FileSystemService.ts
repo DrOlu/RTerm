@@ -9,6 +9,8 @@ const MIN_TRANSFER_CHUNK_SIZE = 16 * 1024
 // MAX intentionally equals DEFAULT: callers cannot request larger chunks so that
 // per-chunk memory allocation stays bounded regardless of what the UI sends.
 const MAX_TRANSFER_CHUNK_SIZE = 1024 * 1024
+const DUPLICATE_NAME_SEARCH_LIMIT = 10000
+const MAX_SAFE_DUPLICATE_START_INDEX = Number.MAX_SAFE_INTEGER - DUPLICATE_NAME_SEARCH_LIMIT
 export const FILESYSTEM_TRANSFER_CANCELLED_CODE = 'GYSHELL_FS_TRANSFER_CANCELLED'
 export const FILESYSTEM_DOWNLOAD_CANCELLED_CODE = FILESYSTEM_TRANSFER_CANCELLED_CODE
 
@@ -27,6 +29,7 @@ export interface ReadBase64FileResult {
 }
 
 export type FileTransferMode = 'copy' | 'move'
+export type FileTransferConflictStrategy = 'error' | 'overwrite' | 'rename'
 
 export interface TransferEntriesProgress {
   transferId?: string
@@ -60,6 +63,12 @@ interface TransferRootPlan {
   targetAlreadyExisted: boolean
   removeExistingTarget: boolean
   node: TransferNode
+}
+
+interface ResolveTransferTargetPathResult {
+  targetPath: string
+  targetAlreadyExisted: boolean
+  removeExistingTarget: boolean
 }
 
 const createTransferCancelledError = (): Error & { code: string } => {
@@ -210,6 +219,7 @@ export class FileSystemService {
     options?: {
       mode?: FileTransferMode
       overwrite?: boolean
+      conflictStrategy?: FileTransferConflictStrategy
       chunkSize?: number
       transferId?: string
       signal?: AbortSignal
@@ -217,7 +227,8 @@ export class FileSystemService {
     }
   ): Promise<TransferEntriesResult> {
     const mode: FileTransferMode = options?.mode === 'move' ? 'move' : 'copy'
-    const overwrite = options?.overwrite === true
+    const conflictStrategy = this.resolveConflictStrategy(options?.conflictStrategy, options?.overwrite)
+    const overwrite = conflictStrategy === 'overwrite'
     const chunkSize = this.normalizeChunkSize(options?.chunkSize)
     const sourceList = sourcePaths
       .map((item) => (typeof item === 'string' ? item.trim() : ''))
@@ -256,36 +267,65 @@ export class FileSystemService {
       const resolvedTargetPath = await this.terminalService.resolvePathForFileSystem(targetTerminalId, targetPath)
 
       if (sameFileSystem && this.pathsEqual(resolvedSourcePath, resolvedTargetPath, compareOs)) {
+        if (mode === 'move') {
+          continue
+        }
+        if (conflictStrategy !== 'rename') {
+          throw new Error(`Source and target are identical: ${resolvedSourcePath}`)
+        }
+      }
+      if (conflictStrategy !== 'rename') {
+        if (
+          mode === 'move'
+          && sameFileSystem
+          && node.isDirectory
+          && this.isSameOrDescendantPath(resolvedTargetPath, resolvedSourcePath, compareOs)
+        ) {
+          throw new Error(`Cannot move directory into itself or a descendant: ${resolvedSourcePath}`)
+        }
+      }
+
+      const resolvedTarget = await this.resolveTransferTargetPath({
+        targetTerminalId,
+        targetDirPath,
+        targetOs,
+        node,
+        initialResolvedTargetPath: resolvedTargetPath,
+        conflictStrategy,
+        reservedTargetKeys: targetPathSet
+      })
+
+      if (
+        conflictStrategy === 'rename' &&
+        sameFileSystem &&
+        this.pathsEqual(resolvedSourcePath, resolvedTarget.targetPath, compareOs)
+      ) {
         if (mode === 'copy') {
           throw new Error(`Source and target are identical: ${resolvedSourcePath}`)
         }
         continue
       }
       if (
+        conflictStrategy === 'rename' &&
         mode === 'move'
         && sameFileSystem
         && node.isDirectory
-        && this.isSameOrDescendantPath(resolvedTargetPath, resolvedSourcePath, compareOs)
+        && this.isSameOrDescendantPath(resolvedTarget.targetPath, resolvedSourcePath, compareOs)
       ) {
         throw new Error(`Cannot move directory into itself or a descendant: ${resolvedSourcePath}`)
       }
 
-      const targetKey = this.normalizePathForCompare(resolvedTargetPath, targetOs)
+      const targetKey = this.normalizePathForCompare(resolvedTarget.targetPath, targetOs)
       if (targetPathSet.has(targetKey)) {
-        throw new Error(`Duplicate target path in transfer batch: ${resolvedTargetPath}`)
+        throw new Error(`Duplicate target path in transfer batch: ${resolvedTarget.targetPath}`)
       }
       targetPathSet.add(targetKey)
 
-      const targetStat = await this.terminalService.statFile(targetTerminalId, resolvedTargetPath)
-      if (targetStat.exists && !overwrite) {
-        throw new Error(`Target path already exists: ${resolvedTargetPath}`)
-      }
-
       rootPlans.push({
         sourcePath: resolvedSourcePath,
-        targetPath: resolvedTargetPath,
-        targetAlreadyExisted: targetStat.exists,
-        removeExistingTarget: targetStat.exists && overwrite && !(node.isDirectory && targetStat.isDirectory),
+        targetPath: resolvedTarget.targetPath,
+        targetAlreadyExisted: resolvedTarget.targetAlreadyExisted,
+        removeExistingTarget: resolvedTarget.removeExistingTarget,
         node
       })
     }
@@ -379,6 +419,110 @@ export class FileSystemService {
         throw createTransferCancelledError()
       }
       throw error
+    }
+  }
+
+  private resolveConflictStrategy(
+    strategy: FileTransferConflictStrategy | undefined,
+    overwrite: boolean | undefined
+  ): FileTransferConflictStrategy {
+    if (strategy === 'rename' || strategy === 'overwrite' || strategy === 'error') {
+      return strategy
+    }
+    return overwrite === true ? 'overwrite' : 'error'
+  }
+
+  private async resolveTransferTargetPath(params: {
+    targetTerminalId: string
+    targetDirPath: string
+    targetOs: 'unix' | 'windows' | undefined
+    node: TransferNode
+    initialResolvedTargetPath: string
+    conflictStrategy: FileTransferConflictStrategy
+    reservedTargetKeys: Set<string>
+  }): Promise<ResolveTransferTargetPathResult> {
+    const {
+      targetTerminalId,
+      targetDirPath,
+      targetOs,
+      node,
+      initialResolvedTargetPath,
+      conflictStrategy,
+      reservedTargetKeys
+    } = params
+    const initialTargetStat = await this.terminalService.statFile(targetTerminalId, initialResolvedTargetPath)
+    const initialTargetKey = this.normalizePathForCompare(initialResolvedTargetPath, targetOs)
+    const initialTargetReserved = reservedTargetKeys.has(initialTargetKey)
+
+    if (conflictStrategy !== 'rename') {
+      if (initialTargetReserved) {
+        throw new Error(`Duplicate target path in transfer batch: ${initialResolvedTargetPath}`)
+      }
+      if (initialTargetStat.exists && conflictStrategy !== 'overwrite') {
+        throw new Error(`Target path already exists: ${initialResolvedTargetPath}`)
+      }
+      return {
+        targetPath: initialResolvedTargetPath,
+        targetAlreadyExisted: initialTargetStat.exists,
+        removeExistingTarget:
+          initialTargetStat.exists &&
+          conflictStrategy === 'overwrite' &&
+          !(node.isDirectory && initialTargetStat.isDirectory)
+      }
+    }
+
+    if (!initialTargetStat.exists && !initialTargetReserved) {
+      return {
+        targetPath: initialResolvedTargetPath,
+        targetAlreadyExisted: false,
+        removeExistingTarget: false
+      }
+    }
+
+    const duplicateName = this.parseDuplicateName(node.name)
+    for (let index = duplicateName.nextIndex; index < duplicateName.nextIndex + DUPLICATE_NAME_SEARCH_LIMIT; index += 1) {
+      const candidateName = `${duplicateName.baseName} (${index})${duplicateName.extension}`
+      const candidatePath = this.joinPathForOs(targetDirPath, candidateName, targetOs)
+      const resolvedCandidatePath = await this.terminalService.resolvePathForFileSystem(targetTerminalId, candidatePath)
+      const candidateKey = this.normalizePathForCompare(resolvedCandidatePath, targetOs)
+      if (reservedTargetKeys.has(candidateKey)) {
+        continue
+      }
+      const candidateStat = await this.terminalService.statFile(targetTerminalId, resolvedCandidatePath)
+      if (!candidateStat.exists) {
+        return {
+          targetPath: resolvedCandidatePath,
+          targetAlreadyExisted: false,
+          removeExistingTarget: false
+        }
+      }
+    }
+
+    throw new Error(`Unable to find an available duplicate name for: ${node.name}`)
+  }
+
+  private parseDuplicateName(fileName: string): {
+    baseName: string
+    extension: string
+    nextIndex: number
+  } {
+    const extension = extname(fileName)
+    const stem = extension ? fileName.slice(0, -extension.length) : fileName
+    const match = stem.match(/^(.*) \((\d+)\)$/)
+    if (match && match[1] && match[2]) {
+      const parsed = Number.parseInt(match[2], 10)
+      return {
+        baseName: match[1],
+        extension,
+        nextIndex: Number.isSafeInteger(parsed) && parsed >= 1 && parsed < MAX_SAFE_DUPLICATE_START_INDEX
+          ? parsed + 1
+          : 1
+      }
+    }
+    return {
+      baseName: stem,
+      extension,
+      nextIndex: 1
     }
   }
 
@@ -510,7 +654,10 @@ export class FileSystemService {
     } = params
 
     if (fileSize <= 0) {
-      await this.terminalService.writeFileChunk(targetTerminalId, targetPath, 0, Buffer.alloc(0), { truncate: true })
+      await this.terminalService.writeFileChunk(targetTerminalId, targetPath, 0, Buffer.alloc(0), {
+        truncate: true,
+        close: true
+      })
       return
     }
 
@@ -585,7 +732,10 @@ export class FileSystemService {
           targetPath,
           offset,
           chunk.chunk,
-          { truncate: offset === 0 }
+          {
+            truncate: offset === 0,
+            close: chunk.eof
+          }
         )
         onChunkWritten(chunk.bytesRead)
       }
@@ -747,6 +897,14 @@ export class FileSystemService {
         return 'image/gif'
       case '.webp':
         return 'image/webp'
+      case '.bmp':
+        return 'image/bmp'
+      case '.ico':
+        return 'image/x-icon'
+      case '.svg':
+        return 'image/svg+xml'
+      case '.avif':
+        return 'image/avif'
       case '.pdf':
         return 'application/pdf'
       case '.json':
@@ -782,7 +940,7 @@ export class FileSystemService {
 
   private isLikelyBinary(filePath: string, bytes: Uint8Array): boolean {
     const ext = extname(filePath).toLowerCase()
-    if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.zip', '.tar', '.gz', '.7z', '.exe', '.bin'].includes(ext)) {
+    if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg', '.avif', '.pdf', '.zip', '.tar', '.gz', '.7z', '.exe', '.bin'].includes(ext)) {
       return true
     }
     if (this.detectUtf16Encoding(bytes)) {
