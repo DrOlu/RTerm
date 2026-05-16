@@ -16,9 +16,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: "22"
+  NODE_VERSION: "20"
   UPSTREAM_REPO: "MrOrangeJJ/GyShell"
   UPSTREAM_BRANCH: "main"
+
+permissions:
+  contents: write
 
 jobs:
   sync:
@@ -93,7 +96,6 @@ jobs:
           fi
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' version.json > version.json.tmp && mv version.json.tmp version.json
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
-          # Update lockfile root name/version to match
           jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v | .name = "rterm" | .packages[""].version = $v | .packages[""].name = "rterm"' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
           git add -A
           git diff --cached --stat
@@ -115,14 +117,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-      - run: npm ci
-      - run: npm run build:backend
-      - run: npm run build:electron
-      - run: npm run prepare:cli-runtime -- --target darwin-arm64
+      - run: npm install
       - run: npm run dist:mac
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+      - name: Upload artifacts
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+        run: |
+          find dist -maxdepth 1 -name "*.dmg" | while read f; do
+            echo "Uploading $f"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-mac
@@ -141,12 +147,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-      - run: npm ci
-      - run: npm run build:backend
-      - run: npm run build:electron
-      - run: npm run prepare:cli-runtime -- --target windows-x64
+      - run: npm install
+      - name: Fix Windows spawnSync
+        shell: pwsh
+        run: |
+          $files = @('apps/electron/prepare-cli-runtime.mjs', 'apps/electron/prepare-mobile-web.mjs')
+          foreach ($f in $files) {
+            if (Test-Path $f) {
+              $content = Get-Content $f -Raw
+              $patched = $content -replace "stdio: 'inherit'", "shell: true, stdio: 'inherit'"
+              Set-Content $f $patched -NoNewline
+              Write-Host "Patched $f"
+            }
+          }
       - run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-win
@@ -167,13 +184,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-      - run: sudo apt-get update && sudo apt-get install -y libarchive-dev rpm dpkg || true
-      - run: npm ci
-      - run: npm run build:backend
-      - run: npm run build:electron
-      - run: npm run prepare:cli-runtime -- --target linux-x64
+      - name: System deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools
+      - run: npm install
       - run: npm run dist:linux
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-x64
@@ -188,7 +207,7 @@ jobs:
     name: Build Linux ARM64
     needs: sync
     if: needs.sync.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
@@ -196,13 +215,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-      - run: sudo apt-get update && sudo apt-get install -y libarchive-dev rpm dpkg || true
-      - run: npm ci
-      - run: npm run build:backend
-      - run: npm run build:electron
-      - run: npm run prepare:cli-runtime -- --target linux-arm64
+      - name: System deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools
+      - run: npm install
       - run: npm run dist:linux-arm64
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-arm64
@@ -298,4 +319,3 @@ jobs:
           All platforms: macOS, Windows, Linux (x64 + ARM64).
 
           https://github.com/DrOlu/RTerm/releases/tag/v${{ steps.version.outputs.version }}" || true
-
