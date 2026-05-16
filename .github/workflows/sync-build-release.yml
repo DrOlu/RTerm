@@ -147,9 +147,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Install GTK (for canvas)
-        run: choco install gtk-runtime -y
-      - run: npm install
+      - run: npm install --ignore-scripts
+      - run: npx electron-rebuild -f -w better-sqlite3-electron,node-pty,ssh2
+      - run: npm run ensure:node-pty-electron-runtime
       - name: Fix Windows spawnSync
         shell: pwsh
         run: |
@@ -189,8 +189,10 @@ jobs:
       - name: System deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools build-essential python3 libcairo2-dev libjpeg-dev libpango1.0-dev libgif-dev librsvg2-dev build-essential python3
-      - run: npm install
+          sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools
+      - run: npm install --ignore-scripts
+      - run: npx electron-rebuild -f -w better-sqlite3-electron,node-pty,ssh2
+      - run: npm run ensure:node-pty-electron-runtime
       - run: npm run dist:linux
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -221,7 +223,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools
-      - run: npm install
+      - run: npm install --ignore-scripts
+      - run: npx electron-rebuild -f -w better-sqlite3-electron,node-pty,ssh2
+      - run: npm run ensure:node-pty-electron-runtime
       - run: npm run dist:linux-arm64
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
