@@ -156,11 +156,6 @@ jobs:
         with:
           bun-version: latest
       - run: npm install --ignore-scripts
-      - name: Remove canvas (fails without GTK dev headers)
-        shell: pwsh
-        run: Remove-Item -Recurse -Force node_modules\canvas -ErrorAction SilentlyContinue
-      - run: npm run rebuild:native
-      - run: npm run ensure:node-pty-electron-runtime
       - name: Fix Windows spawnSync
         shell: pwsh
         run: |
@@ -206,10 +201,6 @@ jobs:
         with:
           bun-version: latest
       - run: npm install --ignore-scripts
-      - name: Remove canvas (fails without GTK/Cairo dev headers)
-        run: rm -rf node_modules/canvas
-      - run: npm run rebuild:native
-      - run: npm run ensure:node-pty-electron-runtime
       - run: npm run dist:linux
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -245,10 +236,6 @@ jobs:
         with:
           bun-version: latest
       - run: npm install --ignore-scripts
-      - name: Remove canvas (fails without GTK/Cairo dev headers)
-        run: rm -rf node_modules/canvas
-      - run: npm run rebuild:native
-      - run: npm run ensure:node-pty-electron-runtime
       - run: npm run dist:linux-arm64
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
