@@ -25,8 +25,8 @@ zip_mobile_web() {
   local app_version="$1"
   local mobile_dist_dir="apps/mobile-web/dist"
   local stage_root="out/mobile-web-package"
-  local stage_dir="$stage_root/GyShell-Mobile-Web"
-  local zip_name="GyShell.MobileWeb.${app_version}.zip"
+  local stage_dir="$stage_root/RTerm-Mobile-Web"
+  local zip_name="RTerm.MobileWeb.${app_version}.zip"
 
   if ! command -v zip >/dev/null 2>&1; then
     echo "Error: 'zip' command not found. Please install zip first."
@@ -44,7 +44,7 @@ zip_mobile_web() {
 
   (
     cd "$stage_root"
-    zip -rq "../../dist/$zip_name" "GyShell-Mobile-Web"
+    zip -rq "../../dist/$zip_name" "RTerm-Mobile-Web"
   )
 
   echo "Mobile-web package: dist/$zip_name"

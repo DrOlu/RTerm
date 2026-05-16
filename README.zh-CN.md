@@ -1,4 +1,4 @@
-# <img src="./demo_imgs/icon.png" width="40" height="40" align="center" style="margin-right: 10px;"> GyShell
+# <img src="./demo_imgs/icon.png" width="40" height="40" align="center" style="margin-right: 10px;"> RTerm
 
 > **会思考、会执行、可协作的 AI 原生终端。**
 
@@ -9,7 +9,7 @@
 [English README](./README.md) | 中文 README  
 最新发布说明：[`changelogs/v1.4.3.md`](./changelogs/v1.4.3.md)
 
-如果有任何建议或者问题，欢迎在 [GitHub Discussions](https://github.com/MrOrangeJJ/GyShell/discussions) 中提交。
+如果有任何建议或者问题，欢迎在 [GitHub Discussions](https://github.com/MrOrangeJJ/RTerm/discussions) 中提交。
 
 使用教程:
 [`docs/mobile-web-usage.md`](./docs/mobile-web-usage.md) ·
@@ -20,7 +20,7 @@
 > **项目处于快速迭代阶段**：如果某个版本引入了历史数据兼容性变更，会在发布说明中明确标注。
 
 > [!NOTE]
-> **v1.4.0 升级提示**：从 1.4.0 以下版本升级后的首次启动可能会短暂阻塞，因为 GyShell 会把旧的 JSON 历史迁移到 SQLite，并写入带时间戳的备份文件。v1.4.3 无需额外迁移步骤。
+> **v1.4.0 升级提示**：从 1.4.0 以下版本升级后的首次启动可能会短暂阻塞，因为 RTerm 会把旧的 JSON 历史迁移到 SQLite，并写入带时间戳的备份文件。v1.4.3 无需额外迁移步骤。
 
 <p align="center">
   <img src="./demo_imgs/demo.png" width="100%">
@@ -31,11 +31,11 @@
 
 ---
 
-## GyShell 的差异化价值
+## RTerm 的差异化价值
 
 很多 AI 终端工具要么一次性给脚本，要么跑在与真实工作流脱节的隔离沙盒里。
 
-GyShell 的定位是“运行在真实终端中的持续执行系统”：
+RTerm 的定位是“运行在真实终端中的持续执行系统”：
 
 - **持续执行闭环**：读取输出 -> 判断状态 -> 继续推进。
 - **天然可干预**：你可以随时接管，不打断工作流。
@@ -170,8 +170,8 @@ GyShell 的定位是“运行在真实终端中的持续执行系统”：
 ### 本地开发
 
 ```bash
-git clone https://github.com/MrOrangeJJ/GyShell.git
-cd GyShell
+git clone https://github.com/MrOrangeJJ/RTerm.git
+cd RTerm
 npm install
 npm run dev
 ```
@@ -185,9 +185,9 @@ gyll --help
 gyll "规划并执行：运行测试、修复失败并总结改动"
 ```
 
-### 一句话理解 GyShell
+### 一句话理解 RTerm
 
-`GyShell = 持续 AI 运行时 + 真实终端控制 + 随时人工接管。`
+`RTerm = 持续 AI 运行时 + 真实终端控制 + 随时人工接管。`
 
 ### Mobile Web 开发
 
@@ -205,7 +205,7 @@ npm run dev:tui
 
 ## 桌面版内置 CLI（`gyll`）
 
-安装并启动一次 GyShell 桌面版后，可使用 `gyll`。
+安装并启动一次 RTerm 桌面版后，可使用 `gyll`。
 
 不传 `--url` 时，CLI 会尝试连接本机桌面后端（默认 `127.0.0.1:17888`）。
 
@@ -256,7 +256,7 @@ gyll --sessionid "your-session-id"
 
 ## 架构说明（简版）
 
-GyShell 采用严格分层：
+RTerm 采用严格分层：
 
 - `packages/*`：承载实现逻辑。
 - `apps/*`：仅承载组合、启动、构建壳层。
@@ -314,4 +314,4 @@ GyShell 采用严格分层：
 
 ---
 
-**GyShell** - _会和你一起思考并执行的终端。_
+**RTerm** - _会和你一起思考并执行的终端。_

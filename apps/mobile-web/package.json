@@ -1,5 +1,5 @@
 {
-  "name": "@gyshell/mobile-web",
+  "name": "@rterm/mobile-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",

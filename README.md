@@ -1,4 +1,4 @@
-# <img src="./demo_imgs/icon.png" width="40" height="40" align="center" style="margin-right: 10px;"> GyShell
+# <img src="./demo_imgs/icon.png" width="40" height="40" align="center" style="margin-right: 10px;"> RTerm
 
 > **The AI-Native Terminal that thinks, executes, and collaborates with you.**
 
@@ -9,7 +9,7 @@
 English README | [中文 README](./README.zh-CN.md)  
 Latest release notes: [`changelogs/v1.4.3.md`](./changelogs/v1.4.3.md)
 
-If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/GyShell/discussions).
+If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/RTerm/discussions).
 
 Usage guides:
 [`docs/mobile-web-usage.md`](./docs/mobile-web-usage.md) ·
@@ -24,10 +24,10 @@ Usage guides:
 > - **Local (Mac Studio)**: Qwen3.5 / Minimax2.5
 
 > [!WARNING]
-> **Active Development**: GyShell evolves quickly. If a version introduces history compatibility breaks, it will be called out explicitly in release notes.
+> **Active Development**: RTerm evolves quickly. If a version introduces history compatibility breaks, it will be called out explicitly in release notes.
 
 > [!NOTE]
-> **v1.4.0 upgrade note**: the first launch after upgrading from a pre-1.4.0 version may briefly block while GyShell migrates legacy JSON history into SQLite and writes timestamped backup files. v1.4.3 has no additional migration step.
+> **v1.4.0 upgrade note**: the first launch after upgrading from a pre-1.4.0 version may briefly block while RTerm migrates legacy JSON history into SQLite and writes timestamped backup files. v1.4.3 has no additional migration step.
 
 <p align="center">
   <img src="./demo_imgs/demo.png" width="100%">
@@ -38,11 +38,11 @@ Usage guides:
 
 ---
 
-## Why GyShell Is Different
+## Why RTerm Is Different
 
 Most AI terminal tools either generate one-shot scripts, or run in isolated sandboxes detached from real shell workflows.
 
-GyShell is built for **persistent execution in your real terminal runtime**:
+RTerm is built for **persistent execution in your real terminal runtime**:
 
 - **Persistent execution loop**: observe output -> reason -> continue.
 - **Human-in-the-loop by design**: intervene anytime without breaking flow.
@@ -177,8 +177,8 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 ### Development
 
 ```bash
-git clone https://github.com/MrOrangeJJ/GyShell.git
-cd GyShell
+git clone https://github.com/MrOrangeJJ/RTerm.git
+cd RTerm
 npm install
 npm run dev
 ```
@@ -194,7 +194,7 @@ gyll "Plan and execute: run tests, fix failures, and summarize changes"
 
 ### One-line Mental Model
 
-`GyShell = persistent AI runtime + real terminal control + human override at any time.`
+`RTerm = persistent AI runtime + real terminal control + human override at any time.`
 
 ### Mobile-web development
 
@@ -212,7 +212,7 @@ npm run dev:tui
 
 ## Desktop Bundled CLI (`gyll`)
 
-After installing and launching GyShell desktop once, `gyll` is available from the desktop runtime setup.
+After installing and launching RTerm desktop once, `gyll` is available from the desktop runtime setup.
 
 If `--url` is not provided, CLI will try the local desktop backend (`127.0.0.1:17888` by default).
 
@@ -263,7 +263,7 @@ Hook mode is useful for callback-style self-wakeup in long workflows.
 
 ## Architecture Notes
 
-GyShell follows strict layering:
+RTerm follows strict layering:
 
 - `packages/*`: implementation logic.
 - `apps/*`: composition/bootstrap/build wrappers.
@@ -321,4 +321,4 @@ Special acknowledgment: inspirations and references from [Tabby](https://github.
 
 ---
 
-**GyShell** - _The shell that thinks with you._
+**RTerm** - _The shell that thinks with you._

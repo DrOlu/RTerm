@@ -1,4 +1,4 @@
-appId: com.gyshell.app
+appId: com.rterm.app
 productName: RTerm
 npmRebuild: false
 afterPack: apps/electron/scripts/after-pack.mjs
@@ -68,7 +68,7 @@ portable:
   artifactName: "${productName}.Portable.${version}-${arch}.${ext}"
 linux:
   icon: apps/electron/materials/icons
-  executableName: gyshell
+  executableName: rterm
   target:
     - target: AppImage
     - target: deb
