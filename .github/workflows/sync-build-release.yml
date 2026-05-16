@@ -155,7 +155,8 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: npm install || exit 0
+      - run: npm install
+        continue-on-error: true
       - name: Remove canvas (fails without dev headers)
         shell: pwsh
         run: Remove-Item -Recurse -Force node_modules\canvas -ErrorAction SilentlyContinue
