@@ -2,6 +2,12 @@ name: Notify Multica on Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to notify about (e.g. v1.4.3)'
+        required: false
+        default: ''
 
 jobs:
   notify:
@@ -10,13 +16,14 @@ jobs:
       - name: Trigger Multica autopilot
         env:
           WEBHOOK_URL: https://api.multica.ai/api/webhooks/autopilots/awt_jZXas3khd6pPhcNi7CkZTSBRbI_iDUsz-jSV2PN_blw
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
           python3 -c "
           import json, urllib.request, os
           payload = json.dumps({
             'action': 'published',
             'release': {
-              'tag_name': os.environ.get('GITHUB_REF_NAME', ''),
+              'tag_name': os.environ.get('TAG_NAME', ''),
               'draft': False,
               'prerelease': False
             },
