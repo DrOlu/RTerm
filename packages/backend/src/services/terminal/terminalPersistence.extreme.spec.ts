@@ -57,6 +57,8 @@ class FakeTerminalBackend implements TerminalBackend {
   private readonly homeDirByPtyId = new Map<string, string>()
   private readonly refreshCallbacksByPtyId = new Map<string, () => Promise<void> | void>()
   private readonly listDirectoryCalls: Array<{ ptyId: string; dirPath: string }> = []
+  private readonly spawnConfigs: TerminalConfig[] = []
+  private readonly resizeCalls: Array<{ ptyId: string; cols: number; rows: number }> = []
 
   private getPtyIdForTerminalId(terminalId: string): string {
     return `pty-${terminalId}`
@@ -118,6 +120,14 @@ class FakeTerminalBackend implements TerminalBackend {
     return this.listDirectoryCalls[this.listDirectoryCalls.length - 1]
   }
 
+  getLastSpawnConfig(): TerminalConfig | undefined {
+    return this.spawnConfigs[this.spawnConfigs.length - 1]
+  }
+
+  getResizeCalls(): Array<{ ptyId: string; cols: number; rows: number }> {
+    return this.resizeCalls.slice()
+  }
+
   failSpawnForTerminalId(terminalId: string): void {
     this.spawnFailures.add(terminalId)
   }
@@ -132,6 +142,7 @@ class FakeTerminalBackend implements TerminalBackend {
     if (this.spawnFailures.has(config.id)) {
       throw new Error(`intentional spawn failure for ${config.id}`)
     }
+    this.spawnConfigs.push(JSON.parse(JSON.stringify(config)) as TerminalConfig)
     const id = this.getPtyIdForTerminalId(config.id)
     this.sessions.set(id, {
       id,
@@ -154,7 +165,9 @@ class FakeTerminalBackend implements TerminalBackend {
 
   write(_ptyId: string, _data: string): void {}
 
-  resize(_ptyId: string, _cols: number, _rows: number): void {}
+  resize(ptyId: string, cols: number, rows: number): void {
+    this.resizeCalls.push({ ptyId, cols, rows })
+  }
 
   kill(ptyId: string): void {
     const session = this.sessions.get(ptyId)
@@ -712,6 +725,68 @@ const run = async (): Promise<void> => {
         120,
         'idempotent remount should still update terminal dimensions'
       )
+    })
+
+    await runCase('pending resize before terminal registration is used for backend spawn geometry', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      service.resize('ssh-race-size', 132, 43)
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'ssh-race-size',
+        title: 'SSH Race Size',
+        host: '10.0.0.5',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        password: 'secret',
+        cols: 80,
+        rows: 24
+      })
+
+      const spawned = backend.getLastSpawnConfig()
+      const tab = service.getDisplayTerminals().find((terminal) => terminal.id === 'ssh-race-size')
+
+      assertEqual(spawned?.cols, 132, 'pending renderer resize should override the initial spawn cols')
+      assertEqual(spawned?.rows, 43, 'pending renderer resize should override the initial spawn rows')
+      assertEqual(tab?.cols, 132, 'terminal inventory should expose the pending resize cols')
+      assertEqual(tab?.rows, 43, 'terminal inventory should expose the pending resize rows')
+    })
+
+    await runCase('idempotent terminal remount forwards changed dimensions to the live backend', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'ssh-remount-resize',
+        title: 'SSH Remount Resize',
+        host: '10.0.0.5',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        password: 'secret',
+        cols: 80,
+        rows: 24
+      })
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'ssh-remount-resize',
+        title: 'SSH Remount Resize',
+        host: '10.0.0.5',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        password: 'secret',
+        cols: 120,
+        rows: 40
+      })
+
+      const resizeCall = backend.getResizeCalls()[0]
+      assertEqual(resizeCall?.ptyId, 'pty-ssh-remount-resize', 'remount resize should target the existing PTY')
+      assertEqual(resizeCall?.cols, 120, 'remount resize should forward the changed cols')
+      assertEqual(resizeCall?.rows, 40, 'remount resize should forward the changed rows')
     })
 
     await runCase('monitor identity scopes ssh tabs by username on the same host', async () => {
