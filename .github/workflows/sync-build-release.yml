@@ -339,17 +339,44 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 
+      - name: Notify Multica autopilot
+        if: success()
+        run: |
+          # Fire the Multica RTerm Release Pipeline autopilot directly.
+          # We cannot rely on the release: published event because GitHub
+          # blocks that event from triggering downstream workflows when the
+          # release is created inside a running workflow (even with a PAT).
+          python3 -c "
+          import json, urllib.request, os
+          payload = json.dumps({
+            'action': 'published',
+            'release': {
+              'tag_name': 'v${{ steps.version.outputs.version }}',
+              'draft': False,
+              'prerelease': False
+            },
+            'repository': {
+              'full_name': 'DrOlu/RTerm',
+              'name': 'RTerm'
+            }
+          }).encode()
+          req = urllib.request.Request(
+            'https://api.multica.ai/api/webhooks/autopilots/awt_jZXas3khd6pPhcNi7CkZTSBRbI_iDUsz-jSV2PN_blw',
+            data=payload,
+            headers={'Content-Type': 'application/json'}
+          )
+          urllib.request.urlopen(req)
+          print('Multica RTerm autopilot notified')
+          "
+
       - name: Notify via Telegram
         if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           STATUS="✅ Released"
           if [ "${{ job.status }}" != "success" ]; then STATUS="❌ Failed"; fi
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d parse_mode=Markdown \
-            -d text="${STATUS} *RTerm v${{ steps.version.outputs.version }}*
-
-          Built from GyShell v${{ steps.version.outputs.version }}.
-          All platforms: macOS, Windows, Linux (x64 + ARM64).
-
-          https://github.com/DrOlu/RTerm/releases/tag/v${{ steps.version.outputs.version }}" || true
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "{"chat_id":"${TELEGRAM_CHAT_ID}","parse_mode":"Markdown","text":"${STATUS} *RTerm v${{ steps.version.outputs.version }}*\n\nBuilt from GyShell v${{ steps.version.outputs.version }}.\nAll platforms: macOS, Windows, Linux (x64 + ARM64).\n\nhttps://github.com/DrOlu/RTerm/releases/tag/v${{ steps.version.outputs.version }}"}" || true
