@@ -37,6 +37,11 @@ import {
 
 const GYSHELL_READY_MARKER = '__GYSHELL_READY__'
 
+interface TerminalWindowSize {
+  cols: number
+  rows: number
+}
+
 interface SSHInstance {
   client: ssh2.Client
   sshConfig?: SSHConnectionConfig
@@ -46,6 +51,8 @@ interface SSHInstance {
   sftpInitError?: string
   dataCallbacks: Set<(data: string) => void>
   exitCallbacks: Set<(code: number) => void>
+  requestedCols?: number
+  requestedRows?: number
   isInitializing: boolean
   buffer: string
   oscBuffer: string
@@ -102,6 +109,63 @@ export class SSHBackend implements TerminalBackend {
   private static readonly SYSTEM_INFO_RETRY_BASE_MS = 1500
   private static readonly SYSTEM_INFO_RETRY_MAX_MS = 8000
   private static readonly SYSTEM_INFO_RETRY_MAX_ATTEMPTS = 6
+
+  private normalizeWindowSize(
+    cols: number | undefined,
+    rows: number | undefined
+  ): TerminalWindowSize | null {
+    if (
+      typeof cols !== 'number' ||
+      typeof rows !== 'number' ||
+      !Number.isFinite(cols) ||
+      !Number.isFinite(rows) ||
+      cols <= 0 ||
+      rows <= 0
+    ) {
+      return null
+    }
+    return {
+      cols: Math.max(1, Math.floor(cols)),
+      rows: Math.max(1, Math.floor(rows))
+    }
+  }
+
+  private updateRequestedWindowSize(
+    instance: SSHInstance,
+    cols: number,
+    rows: number
+  ): TerminalWindowSize | null {
+    const size = this.normalizeWindowSize(cols, rows)
+    if (!size) return null
+    instance.requestedCols = size.cols
+    instance.requestedRows = size.rows
+    return size
+  }
+
+  private resolveRequestedWindowSize(
+    instance: SSHInstance,
+    fallback: TerminalWindowSize
+  ): TerminalWindowSize {
+    return (
+      this.normalizeWindowSize(instance.requestedCols, instance.requestedRows) ||
+      this.normalizeWindowSize(fallback.cols, fallback.rows) ||
+      { cols: 80, rows: 24 }
+    )
+  }
+
+  private applyRequestedWindowSize(instance: SSHInstance): void {
+    if (!instance.stream) return
+    const size = this.resolveRequestedWindowSize(instance, {
+      cols: 80,
+      rows: 24
+    })
+    try {
+      instance.stream.setWindow(size.rows, size.cols, 0, 0)
+    } catch {
+      // SSH window-size updates are best-effort; the latest size remains cached
+      // and will be re-applied when a later resize arrives.
+    }
+  }
 
   /**
    * Public exec wrapper for ResourceMonitorService.
@@ -1091,6 +1155,8 @@ export class SSHBackend implements TerminalBackend {
       sshConfig,
       dataCallbacks: new Set(),
       exitCallbacks: new Set(),
+      requestedCols: config.cols,
+      requestedRows: config.rows,
       isInitializing: true,
       buffer: '',
       oscBuffer: '',
@@ -1166,11 +1232,15 @@ export class SSHBackend implements TerminalBackend {
 
         emit('\x1b[36m▹ Opening interactive shell...\x1b[0m\r\n')
         console.log(`[SSH] Opening interactive shell...`)
+        const initialWindowSize = this.resolveRequestedWindowSize(instance, {
+          cols: config.cols,
+          rows: config.rows
+        })
         client.shell(
           { 
             term: 'xterm-256color', 
-            cols: config.cols, 
-            rows: config.rows,
+            cols: initialWindowSize.cols,
+            rows: initialWindowSize.rows,
           },
           {
             // Fix for Chinese characters rendering issues in packaged apps
@@ -1189,6 +1259,7 @@ export class SSHBackend implements TerminalBackend {
             return
           }
           instance.stream = stream
+          this.applyRequestedWindowSize(instance)
           emit('\x1b[36m▹ Initializing shell integration...\x1b[0m\r\n')
           console.log(`[SSH] Shell stream opened. Starting robust initialization...`)
 
@@ -1358,8 +1429,15 @@ export class SSHBackend implements TerminalBackend {
 
   resize(ptyId: string, cols: number, rows: number): void {
     const instance = this.sessions.get(ptyId)
-    if (instance && instance.stream) {
-      instance.stream.setWindow(rows, cols, 0, 0)
+    if (instance) {
+      const size = this.updateRequestedWindowSize(instance, cols, rows)
+      if (size && instance.stream) {
+        try {
+          instance.stream.setWindow(size.rows, size.cols, 0, 0)
+        } catch {
+          // Keep the requested size cached for any later retry path.
+        }
+      }
     }
   }
 

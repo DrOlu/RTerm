@@ -401,6 +401,28 @@ const run = async (): Promise<void> => {
     )
   })
 
+  await runCase('resize requests before SSH shell stream opens are cached and applied on attach', async () => {
+    const backend = new SSHBackend() as any
+    const session = createSession()
+    const windowCalls: Array<{ rows: number; cols: number; height: number; width: number }> = []
+    ;(backend as any).sessions.set('pty-window-race', session)
+
+    backend.resize('pty-window-race', 132.9, 43.8)
+    assertEqual(session.requestedCols, 132, 'pending SSH resize should store normalized cols')
+    assertEqual(session.requestedRows, 43, 'pending SSH resize should store normalized rows')
+
+    session.stream = {
+      setWindow: (rows: number, cols: number, height: number, width: number) => {
+        windowCalls.push({ rows, cols, height, width })
+      }
+    }
+    backend.applyRequestedWindowSize(session)
+
+    assertEqual(windowCalls.length, 1, 'attaching the stream should apply the cached window size once')
+    assertEqual(windowCalls[0]?.rows, 43, 'SSH setWindow should receive the cached row count')
+    assertEqual(windowCalls[0]?.cols, 132, 'SSH setWindow should receive the cached column count')
+  })
+
   await runCase('getSystemInfo schedules a backend retry when remote os is not ready yet', async () => {
     const backend = new SSHBackend()
     const session = createSession()

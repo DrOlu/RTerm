@@ -100,6 +100,11 @@ interface TerminalServiceOptions {
   terminalStateStore?: TerminalStateStore | null
 }
 
+interface TerminalResizeTarget {
+  cols: number
+  rows: number
+}
+
 export interface RestoreTerminalResult {
   restored: string[]
   failed: Array<{ id: string; reason: string }>
@@ -117,10 +122,24 @@ const normalizeTerminalConfigForRuntime = (config: TerminalConfig): TerminalConf
   return normalized
 }
 
+const normalizeTerminalResizeTarget = (
+  cols: number,
+  rows: number
+): TerminalResizeTarget | null => {
+  if (!Number.isFinite(cols) || cols <= 0 || !Number.isFinite(rows) || rows <= 0) {
+    return null
+  }
+  return {
+    cols: Math.max(1, Math.floor(cols)),
+    rows: Math.max(1, Math.floor(rows))
+  }
+}
+
 export class TerminalService {
   private backends: Map<ConnectionType, TerminalBackend> = new Map()
   private terminals: Map<string, TerminalTab> = new Map()
   private terminalConfigs: Map<string, TerminalConfig> = new Map()
+  private pendingResizeByTerminal: Map<string, TerminalResizeTarget> = new Map()
   private buffers: Map<string, RingBuffer> = new Map()
   private headlessPtys: Map<string, TerminalType> = new Map()
   private selectionByTerminal: Map<string, string> = new Map()
@@ -381,7 +400,16 @@ export class TerminalService {
   }
 
   async createTerminal(rawConfig: TerminalConfig): Promise<TerminalTab> {
-    const config = normalizeTerminalConfigForRuntime(rawConfig)
+    let config = normalizeTerminalConfigForRuntime(rawConfig)
+    const pendingResizeBeforeCreate = this.pendingResizeByTerminal.get(config.id)
+    if (pendingResizeBeforeCreate) {
+      config = normalizeTerminalConfigForRuntime({
+        ...config,
+        cols: pendingResizeBeforeCreate.cols,
+        rows: pendingResizeBeforeCreate.rows
+      } as TerminalConfig)
+      this.pendingResizeByTerminal.delete(config.id)
+    }
 
     // Idempotent: renderer may call createTab more than once (dev reload / re-mount).
     const existing = this.terminals.get(config.id)
@@ -390,6 +418,10 @@ export class TerminalService {
       const mergedConfig = existingConfig
         ? this.mergeTerminalConfigForIdempotent(existingConfig, config)
         : config
+      const shouldResizeBackend =
+        existing.cols !== mergedConfig.cols ||
+        existing.rows !== mergedConfig.rows ||
+        Boolean(pendingResizeBeforeCreate)
 
       // Keep size updated
       existing.cols = mergedConfig.cols
@@ -401,6 +433,11 @@ export class TerminalService {
       const headless = this.headlessPtys.get(config.id)
       if (headless) {
         headless.resize(mergedConfig.cols, mergedConfig.rows)
+      }
+
+      if (shouldResizeBackend) {
+        const backend = this.getBackend(existing.type)
+        backend.resize(existing.ptyId, mergedConfig.cols, mergedConfig.rows)
       }
 
       this.terminalConfigs.set(config.id, mergedConfig)
@@ -415,6 +452,16 @@ export class TerminalService {
 
     const backend = this.getBackend(config.type)
     const ptyId = await backend.spawn(config)
+    const pendingResizeAfterSpawn = this.pendingResizeByTerminal.get(config.id)
+    if (pendingResizeAfterSpawn) {
+      this.pendingResizeByTerminal.delete(config.id)
+      config = normalizeTerminalConfigForRuntime({
+        ...config,
+        cols: pendingResizeAfterSpawn.cols,
+        rows: pendingResizeAfterSpawn.rows
+      } as TerminalConfig)
+      backend.resize(ptyId, config.cols, config.rows)
+    }
 
     const tab: TerminalTab = {
       id: config.id,
@@ -814,6 +861,7 @@ export class TerminalService {
       this.startMarkerByTaskId.delete(activeTaskId)
     }
     this.pendingTaskFinishByTerminal.delete(terminalId)
+    this.pendingResizeByTerminal.delete(terminalId)
     this.headlessWriteSeqByTerminal.delete(terminalId)
     this.headlessFlushedSeqByTerminal.delete(terminalId)
 
@@ -857,29 +905,36 @@ export class TerminalService {
   }
 
   resize(terminalId: string, cols: number, rows: number): void {
+    const size = normalizeTerminalResizeTarget(cols, rows)
+    if (!size) return
+
     const terminal = this.terminals.get(terminalId)
-    if (terminal) {
-      terminal.cols = cols
-      terminal.rows = rows
-      const config = this.terminalConfigs.get(terminalId)
-      if (config) {
-        this.terminalConfigs.set(terminalId, {
-          ...config,
-          cols: Number.isFinite(cols) && cols > 0 ? Math.max(1, Math.floor(cols)) : config.cols,
-          rows: Number.isFinite(rows) && rows > 0 ? Math.max(1, Math.floor(rows)) : config.rows
-        } as TerminalConfig)
-      }
-      const backend = this.getBackend(terminal.type)
-      backend.resize(terminal.ptyId, cols, rows)
-      
-      const headless = this.headlessPtys.get(terminalId)
-      if (headless) {
-        headless.resize(cols, rows)
-      }
+    if (!terminal) {
+      this.pendingResizeByTerminal.set(terminalId, size)
+      return
+    }
+
+    terminal.cols = size.cols
+    terminal.rows = size.rows
+    const config = this.terminalConfigs.get(terminalId)
+    if (config) {
+      this.terminalConfigs.set(terminalId, {
+        ...config,
+        cols: size.cols,
+        rows: size.rows
+      } as TerminalConfig)
+    }
+    const backend = this.getBackend(terminal.type)
+    backend.resize(terminal.ptyId, size.cols, size.rows)
+
+    const headless = this.headlessPtys.get(terminalId)
+    if (headless) {
+      headless.resize(size.cols, size.rows)
     }
   }
 
   kill(terminalId: string): void {
+    this.pendingResizeByTerminal.delete(terminalId)
     const terminal = this.terminals.get(terminalId)
     if (terminal) {
       const backend = this.getBackend(terminal.type)
