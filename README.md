@@ -16,13 +16,6 @@ Usage guides:
 [`docs/tui-usage.md`](./docs/tui-usage.md) ·
 [`docs/gybackend-usage.md`](./docs/gybackend-usage.md)
 
-> [!TIP]
-> **Recommended Models**:
->
-> - **Cost-Performance**: Thinking-GLM 5 + Action/Global-Minimax2.5
-> - **Best Performance**: Thinking-Gemini 3.1 Pro + Action/Global-Gemini 3 Flash
-> - **Local (Mac Studio)**: Qwen3.5 / Minimax2.5
-
 > [!WARNING]
 > **Active Development**: GyShell evolves quickly. If a version introduces history compatibility breaks, it will be called out explicitly in release notes.
 
