@@ -305,14 +305,19 @@
 }
 
 .chat-history-item-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   font-family: var(--font-mono);
   font-weight: 600;
   font-size: 12px;
+  line-height: 16px;
   color: var(--fg);
-  margin-bottom: 2px;
+  height: 32px;
+  margin-bottom: 4px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .chat-history-item-meta {

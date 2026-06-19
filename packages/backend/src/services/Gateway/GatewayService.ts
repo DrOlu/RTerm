@@ -49,8 +49,7 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
   private backgroundExecCommandsByAgentRun: Map<
     string,
     Map<string, RunBackgroundExecCommand>
-  > =
-    new Map();
+  > = new Map();
 
   constructor(
     private terminalService: IGatewayTerminalRuntime,
@@ -449,6 +448,40 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     return this.agentService.rollbackToMessage(sessionId, messageId);
   }
 
+  async branchSessionFromMessage(
+    sessionId: string,
+    messageId: string,
+  ): Promise<{
+    ok: boolean;
+    sessionId?: string;
+    title?: string;
+    messageCount?: number;
+    reason?: string;
+  }> {
+    const sourceContext = this.sessions.get(sessionId);
+    if (sourceContext && sourceContext.status !== "idle") {
+      return {
+        ok: false,
+        reason: "Cannot branch a session while it is running.",
+      };
+    }
+
+    const branchSessionId = uuidv4();
+    this.sessions.set(
+      branchSessionId,
+      this.createEmptySessionContext(branchSessionId),
+    );
+    const result = this.agentService.branchFromMessage(
+      sessionId,
+      messageId,
+      branchSessionId,
+    );
+    if (!result.ok) {
+      this.sessions.delete(branchSessionId);
+    }
+    return result;
+  }
+
   private async waitForRunCompletionIfAny(sessionId: string): Promise<void> {
     const context = this.sessions.get(sessionId);
     if (!context) return;
@@ -675,8 +708,13 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
         this.queuedInsertionsByAgentRun.delete(agentRunId);
       }
     }
-    for (const [agentRunId, commands] of this.backgroundExecCommandsByAgentRun) {
-      if (Array.from(commands.values()).some((item) => item.sessionId === sessionId)) {
+    for (const [agentRunId, commands] of this
+      .backgroundExecCommandsByAgentRun) {
+      if (
+        Array.from(commands.values()).some(
+          (item) => item.sessionId === sessionId,
+        )
+      ) {
         this.backgroundExecCommandsByAgentRun.delete(agentRunId);
       }
     }

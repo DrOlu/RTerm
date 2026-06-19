@@ -1,5 +1,5 @@
 import { LayoutStore } from './LayoutStore'
-import type { LayoutTree } from '../layout'
+import { computeLayoutGeometry, getPanelMinHeightPx, validateLayoutTree, type LayoutTree } from '../layout'
 
 const assertCondition = (condition: unknown, message: string): void => {
   if (!condition) {
@@ -443,7 +443,7 @@ const run = async (): Promise<void> => {
     assertCondition(Array.isArray(lastPayload.layout?.panelSizes), 'persisted payload should include legacy panelSizes')
   })
 
-  await runCase('setSplitSizes rejects invalid chat height changes', async () => {
+  await runCase('setSplitSizes clamps invalid chat height changes', async () => {
     const spy: SettingsSetSpy = { calls: [] }
     installWindowMock(spy)
 
@@ -479,7 +479,18 @@ const run = async (): Promise<void> => {
     if (afterRoot.type !== 'split') return
     const after = afterRoot.sizes.join(',')
 
-    assertEqual(after, before, 'invalid chat-min-height resize must be rejected')
+    assertCondition(after !== before, 'invalid chat-min-height resize should be clamped instead of reverted')
+    assertCondition(afterRoot.sizes[0] >= (getPanelMinHeightPx('chat', 1200) / 1200) * 100 - 0.001, 'chat resize should land at or above its minimum percentage')
+
+    const validation = validateLayoutTree(store.tree, store.viewport)
+    assertEqual(validation.valid, true, 'clamped resize should keep the layout valid')
+
+    const chatPanelId = store.panelNodes.find((node) => node.panel.kind === 'chat')?.panel.id
+    assertCondition(Boolean(chatPanelId), 'chat panel should exist after split')
+    const geometry = computeLayoutGeometry(store.tree, store.viewport)
+    const chatRect = geometry.panelRects[chatPanelId!]
+    assertCondition(Boolean(chatRect), 'chat panel rect should be computed')
+    assertCondition(chatRect.height >= getPanelMinHeightPx('chat', 1200) - 0.5, 'chat panel height should not fall below the minimum')
   })
 
   await runCase('commitDragging center swaps panel payloads', async () => {

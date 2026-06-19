@@ -14,6 +14,7 @@ import {
 import {
   type ChatOffscreenMeasurementRetentionState,
   buildChatVirtualLayout,
+  resolveChatAutoScrollOnRender,
   resolveChatOffscreenLayoutChangedItems,
   resolveChatOffscreenStreamingItems,
   resolveNextChatOffscreenMeasurementRetentionState,
@@ -35,6 +36,7 @@ interface ChatMessageListProps {
   };
   onAskDecision: (messageId: string, decision: "allow" | "deny") => void;
   onRollback: (message: ChatMessage) => void;
+  onBranch: (message: ChatMessage) => void;
   searchTargetMessageId?: string | null;
   searchTargetVersion?: number;
   searchMatchedMessageIds?: ReadonlySet<string>;
@@ -99,6 +101,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
     askLabels,
     onAskDecision,
     onRollback,
+    onBranch,
     searchTargetMessageId = null,
     searchTargetVersion = -1,
     searchMatchedMessageIds,
@@ -109,6 +112,9 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
     const scrollFrameRef = React.useRef<number | null>(null);
     const pendingScrollAdjustmentRef = React.useRef(0);
     const renderItemIndexByIdRef = React.useRef<Map<string, number>>(new Map());
+    const lastUserTailAutoScrollMessageIdRef = React.useRef<string | null>(
+      null,
+    );
     const previousRenderItemsSnapshotRef = React.useRef<{
       sessionId: string | null;
       itemsById: Map<string, ChatRenderItem>;
@@ -252,6 +258,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       setScrollTop(0);
       setViewportHeight(0);
       pendingScrollAdjustmentRef.current = 0;
+      lastUserTailAutoScrollMessageIdRef.current = null;
       rowHeightsRef.current = new Map();
       setRetainedOffscreenMeasurementState({});
       setMeasurementEpoch((current) => current + 1);
@@ -363,13 +370,25 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       const element = scrollRef.current;
       if (!element) return;
 
-      const isNewUserMessage = lastMessage?.role === "user";
-      if (isNewUserMessage && !shouldAutoScrollRef.current) {
-        shouldAutoScrollRef.current = true;
-        setShouldAutoScroll(true);
+      const decision = resolveChatAutoScrollOnRender({
+        lastMessageId,
+        lastMessageRole:
+          lastMessage?.role === "user" || lastMessage?.role === "assistant"
+            ? lastMessage.role
+            : null,
+        autoScrollEnabled: shouldAutoScrollRef.current,
+        lastUserTailAutoScrollMessageId:
+          lastUserTailAutoScrollMessageIdRef.current,
+      });
+      lastUserTailAutoScrollMessageIdRef.current =
+        decision.nextLastUserTailAutoScrollMessageId;
+
+      if (decision.nextAutoScrollEnabled !== shouldAutoScrollRef.current) {
+        shouldAutoScrollRef.current = decision.nextAutoScrollEnabled;
+        setShouldAutoScroll(decision.nextAutoScrollEnabled);
       }
 
-      if (!isNewUserMessage && !shouldAutoScrollRef.current) {
+      if (!decision.shouldScrollToBottom) {
         return;
       }
 
@@ -379,6 +398,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       );
       scheduleScrollMetricSync();
     }, [
+      lastMessageId,
       lastMessage?.role,
       messageCount,
       scheduleScrollMetricSync,
@@ -572,12 +592,14 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                     messageId={item.id}
                     onAskDecision={onAskDecision}
                     onRollback={onRollback}
+                    onBranch={onBranch}
                     askLabels={askLabels}
                     isThinking={isThinking}
                     mergeWithPreviousAssistant={item.mergeWithPreviousAssistant}
                     showAssistantRoleLabel={item.showAssistantRoleLabel}
                     showAssistantGroupCopy={item.showAssistantGroupCopy}
                     assistantGroupMessageIds={item.assistantGroupMessageIds}
+                    assistantGroupBranchMessageId={item.assistantGroupBranchMessageId}
                     seamlessGroupMessageIds={item.seamlessGroupMessageIds}
                     bannerUiState={bannerUiStateByKey[bannerUiStateKey]}
                     onBannerUiStateChange={(patch) =>
@@ -619,12 +641,14 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                     messageId={item.id}
                     onAskDecision={onAskDecision}
                     onRollback={onRollback}
+                    onBranch={onBranch}
                     askLabels={askLabels}
                     isThinking={isThinking}
                     mergeWithPreviousAssistant={item.mergeWithPreviousAssistant}
                     showAssistantRoleLabel={item.showAssistantRoleLabel}
                     showAssistantGroupCopy={item.showAssistantGroupCopy}
                     assistantGroupMessageIds={item.assistantGroupMessageIds}
+                    assistantGroupBranchMessageId={item.assistantGroupBranchMessageId}
                     seamlessGroupMessageIds={item.seamlessGroupMessageIds}
                     bannerUiState={bannerUiStateByKey[bannerUiStateKey]}
                     onBannerUiStateChange={(patch) =>

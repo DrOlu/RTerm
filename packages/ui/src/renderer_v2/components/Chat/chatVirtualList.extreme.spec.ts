@@ -1,6 +1,7 @@
 import {
   buildChatVirtualLayout,
   CHAT_MESSAGE_LIST_BOTTOM_PADDING,
+  resolveChatAutoScrollOnRender,
   resolveChatOffscreenLayoutChangedItems,
   resolveNextChatOffscreenMeasurementRetentionState,
   resolveChatOffscreenStreamingItems,
@@ -88,6 +89,90 @@ runCase('virtual range expands in both directions when overscan is enabled', () 
     range.endIndex,
     2,
     'overscan should include rows whose top edge enters the overscan window',
+  )
+})
+
+runCase('auto-scroll stays disabled for an already handled user tail', () => {
+  const decision = resolveChatAutoScrollOnRender({
+    lastMessageId: 'user-1',
+    lastMessageRole: 'user',
+    autoScrollEnabled: false,
+    lastUserTailAutoScrollMessageId: 'user-1',
+  })
+
+  assertEqual(
+    decision.shouldScrollToBottom,
+    false,
+    'layout changes after a handled user tail must not force bottom scroll',
+  )
+  assertEqual(
+    decision.nextAutoScrollEnabled,
+    false,
+    'handled user tail must preserve manual scroll-away mode',
+  )
+  assertEqual(
+    decision.nextLastUserTailAutoScrollMessageId,
+    'user-1',
+    'handled user tail id should remain tracked',
+  )
+})
+
+runCase('auto-scroll re-enables once when a new user tail appears', () => {
+  const firstDecision = resolveChatAutoScrollOnRender({
+    lastMessageId: 'user-2',
+    lastMessageRole: 'user',
+    autoScrollEnabled: false,
+    lastUserTailAutoScrollMessageId: 'user-1',
+  })
+
+  assertEqual(
+    firstDecision.shouldScrollToBottom,
+    true,
+    'a newly appended user tail should force the list to the bottom once',
+  )
+  assertEqual(
+    firstDecision.nextAutoScrollEnabled,
+    true,
+    'new user tail should re-enable bottom follow mode',
+  )
+  assertEqual(
+    firstDecision.nextLastUserTailAutoScrollMessageId,
+    'user-2',
+    'new user tail id should be recorded after the forced scroll',
+  )
+
+  const secondDecision = resolveChatAutoScrollOnRender({
+    lastMessageId: 'user-2',
+    lastMessageRole: 'user',
+    autoScrollEnabled: false,
+    lastUserTailAutoScrollMessageId:
+      firstDecision.nextLastUserTailAutoScrollMessageId,
+  })
+
+  assertEqual(
+    secondDecision.shouldScrollToBottom,
+    false,
+    'the same user tail should not repeatedly force bottom scroll after the user scrolls away',
+  )
+})
+
+runCase('auto-scroll remains disabled for assistant tails when the user scrolls away', () => {
+  const decision = resolveChatAutoScrollOnRender({
+    lastMessageId: 'assistant-1',
+    lastMessageRole: 'assistant',
+    autoScrollEnabled: false,
+    lastUserTailAutoScrollMessageId: 'user-1',
+  })
+
+  assertEqual(
+    decision.shouldScrollToBottom,
+    false,
+    'assistant tails should respect manual scroll-away mode',
+  )
+  assertEqual(
+    decision.nextAutoScrollEnabled,
+    false,
+    'assistant tails should not re-enable auto-scroll by themselves',
   )
 })
 

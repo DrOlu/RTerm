@@ -1,6 +1,7 @@
 import {
   MAX_LAYOUT_PANELS,
   MAX_LAYOUT_SPLIT_CHILDREN,
+  clampSplitSizesToChildMinSizePercentages,
   computeChildMinSizePercentages,
   determineDropDirection,
   getPanelMinHeightPx,
@@ -166,6 +167,14 @@ runCase('computeChildMinSizePercentages reflects chat minimum height requirement
   const expectedChatMinPx = getPanelMinHeightPx('chat', 1200)
   assertCondition(Math.abs(percentages[0] - (expectedChatMinPx / 1200) * 100) < 0.001, 'chat min percentage should be exact')
   assertCondition(percentages[0] > percentages[1], 'chat min percentage should exceed terminal in this viewport')
+})
+
+runCase('clampSplitSizesToChildMinSizePercentages keeps resize sizes above child minimums', () => {
+  const sizes = clampSplitSizesToChildMinSizePercentages([1, 99], [33.333333, 7.5])
+  const total = sizes.reduce((sum, size) => sum + size, 0)
+  assertCondition(Math.abs(total - 100) < 0.001, 'clamped sizes should still sum to ~100')
+  assertCondition(sizes[0] >= 33.333333 - 0.001, 'first child should be clamped to its minimum')
+  assertCondition(sizes[1] <= 66.666667 + 0.001, 'second child should give up overflow space')
 })
 
 runCase('validateLayoutTree enforces per-panel minimum width', () => {

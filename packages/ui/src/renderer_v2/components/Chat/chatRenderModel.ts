@@ -10,6 +10,7 @@ export interface ChatRenderItem {
   showAssistantRoleLabel: boolean
   showAssistantGroupCopy: boolean
   assistantGroupMessageIds: string[]
+  assistantGroupBranchMessageId?: string | null
   // Seamless mode: when set, this item represents a group of tool-call messages
   seamlessGroupMessageIds?: string[]
   // Seamless mode: true if any message in the group is currently streaming
@@ -206,6 +207,7 @@ export const buildChatRenderItems = (
         showAssistantRoleLabel: false,
         showAssistantGroupCopy: false,
         assistantGroupMessageIds: [],
+        assistantGroupBranchMessageId: null,
       })
       visibleIndex += 1
       continue
@@ -240,6 +242,7 @@ export const buildChatRenderItems = (
         showAssistantRoleLabel: !turnAlreadyHasLabel,
         showAssistantGroupCopy: false,
         assistantGroupMessageIds: [],
+        assistantGroupBranchMessageId: null,
         seamlessGroupMessageIds,
         seamlessGroupStreaming: isGroupStreaming,
       })
@@ -269,6 +272,7 @@ export const buildChatRenderItems = (
       runMessages.every((message) => !message.streaming) &&
       (nextVisibleKind === 'user' ||
         (!nextVisibleRow && !isThinking))
+    const branchTargetMessageId = visibleRows[runEnd]?.id ?? null
 
     let turnAlreadyHasLabel = hasAssistantItemInCurrentTurn(items)
     for (let index = runStart; index <= runEnd; index += 1) {
@@ -288,6 +292,10 @@ export const buildChatRenderItems = (
           canShowGroupCopy && index === runEnd
             ? assistantGroupMessageIds
             : [],
+        assistantGroupBranchMessageId:
+          canShowGroupCopy && index === runEnd
+            ? branchTargetMessageId
+            : null,
       })
     }
 

@@ -30,6 +30,8 @@ const PANEL_MIN_HEIGHT_PX: Record<Exclude<PanelKind, 'chat'>, number> = {
   monitor: 120
 }
 
+const MIN_SIZE_PERCENTAGE_EPSILON = 0.000001
+
 export interface LayoutGeometry {
   nodeRects: Record<string, LayoutRect>
   panelRects: Record<string, LayoutRect>
@@ -253,6 +255,42 @@ export const computeChildMinSizePercentages = (
     const childMin = computeNodeMinSize(child, viewportHeight)
     const minPx = horizontal ? childMin.minWidthPx : childMin.minHeightPx
     return Math.max(0, (minPx / axisSize) * 100)
+  })
+}
+
+export const clampSplitSizesToChildMinSizePercentages = (
+  sizes: number[],
+  minPercentages: number[]
+): number[] => {
+  const count = minPercentages.length
+  if (count <= 0) return []
+
+  const normalized = normalizeSizes(sizes, count)
+  const minimums = minPercentages.map((percentage) => {
+    if (!Number.isFinite(percentage) || percentage <= 0) return 0
+    return Math.min(100, percentage + MIN_SIZE_PERCENTAGE_EPSILON)
+  })
+  const minTotal = minimums.reduce((sum, percentage) => sum + percentage, 0)
+  if (minTotal <= 0) return normalized
+
+  if (minTotal >= 100) {
+    return normalizeSizes(minimums, count)
+  }
+
+  const clamped = normalized.map((size, index) => Math.max(size, minimums[index] ?? 0))
+  const clampedTotal = clamped.reduce((sum, size) => sum + size, 0)
+  const overflow = clampedTotal - 100
+  if (overflow <= 0) return clamped
+
+  const flexibleAmounts = clamped.map((size, index) => Math.max(0, size - (minimums[index] ?? 0)))
+  const flexibleTotal = flexibleAmounts.reduce((sum, size) => sum + size, 0)
+  if (flexibleTotal <= 0) {
+    return normalizeSizes(clamped, count)
+  }
+
+  return clamped.map((size, index) => {
+    const reduction = overflow * (flexibleAmounts[index] / flexibleTotal)
+    return Math.max(minimums[index] ?? 0, size - reduction)
   })
 }
 

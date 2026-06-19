@@ -37,6 +37,21 @@ export interface ChatScrollAnchorAdjustmentInput {
   autoScrollEnabled: boolean
 }
 
+export type ChatTailMessageRole = 'user' | 'assistant' | null
+
+export interface ChatAutoScrollOnRenderInput {
+  lastMessageId: string | null
+  lastMessageRole: ChatTailMessageRole
+  autoScrollEnabled: boolean
+  lastUserTailAutoScrollMessageId: string | null
+}
+
+export interface ChatAutoScrollOnRenderDecision {
+  shouldScrollToBottom: boolean
+  nextAutoScrollEnabled: boolean
+  nextLastUserTailAutoScrollMessageId: string | null
+}
+
 const normalizeViewportWidth = (
   width: number | null | undefined,
 ): number | null =>
@@ -60,6 +75,43 @@ export const shouldInvalidateChatMeasuredHeights = (
   }
 
   return normalizedPreviousWidth !== normalizedNextWidth
+}
+
+export const resolveChatAutoScrollOnRender = ({
+  lastMessageId,
+  lastMessageRole,
+  autoScrollEnabled,
+  lastUserTailAutoScrollMessageId,
+}: ChatAutoScrollOnRenderInput): ChatAutoScrollOnRenderDecision => {
+  const isNewUserTail =
+    lastMessageRole === 'user' &&
+    !!lastMessageId &&
+    lastMessageId !== lastUserTailAutoScrollMessageId
+  const nextLastUserTailAutoScrollMessageId = isNewUserTail
+    ? lastMessageId
+    : lastUserTailAutoScrollMessageId
+
+  if (isNewUserTail) {
+    return {
+      shouldScrollToBottom: true,
+      nextAutoScrollEnabled: true,
+      nextLastUserTailAutoScrollMessageId,
+    }
+  }
+
+  if (!autoScrollEnabled) {
+    return {
+      shouldScrollToBottom: false,
+      nextAutoScrollEnabled: false,
+      nextLastUserTailAutoScrollMessageId,
+    }
+  }
+
+  return {
+    shouldScrollToBottom: true,
+    nextAutoScrollEnabled: true,
+    nextLastUserTailAutoScrollMessageId,
+  }
 }
 
 export const buildChatVirtualLayout = (

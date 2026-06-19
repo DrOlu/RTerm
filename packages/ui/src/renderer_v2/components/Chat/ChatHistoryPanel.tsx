@@ -15,10 +15,7 @@ import {
 } from "lucide-react";
 import type { AppStore } from "../../stores/AppStore";
 import { ConfirmDialog } from "../Common/ConfirmDialog";
-import {
-  formatChatHistorySessionTitle,
-  normalizeSessionTitleText,
-} from "../../lib/sessionTitleDisplay";
+import { normalizeSessionTitleText } from "../../lib/sessionTitleDisplay";
 import "./chatHistory.scss";
 
 interface StoredChatSession {
@@ -304,7 +301,7 @@ export const ChatHistoryPanel: React.FC<ChatHistoryPanelProps> = observer(
                   </div>
                 ) : (
                   <div className="chat-history-item-title">
-                    {formatChatHistorySessionTitle(session.title)}
+                    {normalizeSessionTitleText(session.title)}
                   </div>
                 )}
                 <div className="chat-history-item-meta">

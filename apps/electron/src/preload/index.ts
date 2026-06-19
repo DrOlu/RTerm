@@ -604,6 +604,16 @@ export interface GyShellAPI {
       sessionId: string,
       messageId: string,
     ) => Promise<{ ok: boolean; removedCount: number }>;
+    branchFromMessage: (
+      sessionId: string,
+      messageId: string,
+    ) => Promise<{
+      ok: boolean;
+      sessionId?: string;
+      title?: string;
+      messageCount?: number;
+      reason?: string;
+    }>;
     replyMessage: (messageId: string, payload: any) => Promise<{ ok: boolean }>;
     onEvent: (
       callback: (data: { sessionId: string; event: AgentEvent }) => void,
@@ -984,6 +994,8 @@ const api: GyShellAPI = {
       ipcRenderer.invoke("agent:deleteChatSessions", sessionIds),
     rollbackToMessage: (sessionId, messageId) =>
       ipcRenderer.invoke("agent:rollbackToMessage", sessionId, messageId),
+    branchFromMessage: (sessionId, messageId) =>
+      ipcRenderer.invoke("agent:branchFromMessage", sessionId, messageId),
     replyMessage: (messageId, payload) =>
       ipcRenderer.invoke("agent:replyMessage", messageId, payload),
     onEvent: (callback) => {

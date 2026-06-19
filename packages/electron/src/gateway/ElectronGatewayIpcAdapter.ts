@@ -268,6 +268,12 @@ export class ElectronGatewayIpcAdapter {
         return this.gateway.rollbackSessionToMessage(sessionId, messageId);
       },
     );
+    ipcMain.handle(
+      "agent:branchFromMessage",
+      async (_: any, sessionId: string, messageId: string) => {
+        return this.gateway.branchSessionFromMessage(sessionId, messageId);
+      },
+    );
 
     ipcMain.handle(
       "system:saveImageAttachment",
@@ -560,7 +566,8 @@ export class ElectronGatewayIpcAdapter {
             lastExitCode: terminal.lastExitCode,
             remoteOs: terminal.remoteOs,
             systemInfo: terminal.systemInfo,
-            monitorIdentity: this.terminalService.getMonitorIdentity(terminal.id) ?? undefined,
+            monitorIdentity:
+              this.terminalService.getMonitorIdentity(terminal.id) ?? undefined,
           })),
       };
     });

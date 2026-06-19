@@ -16,15 +16,22 @@ import {
   splitPanelWithPanelId,
   swapPanels,
   type DropDirection,
+  type LayoutNode,
   type LayoutPanelTabBinding,
   type LayoutRect,
+  type LayoutSplitNode,
   type LayoutTree,
   type LayoutViewport,
   type PanelKind,
   type SplitDirection,
   type TabDragPayload
 } from '../layout'
-import { computeLayoutGeometry, validateLayoutTree } from '../layout'
+import {
+  clampSplitSizesToChildMinSizePercentages,
+  computeChildMinSizePercentages,
+  computeLayoutGeometry,
+  validateLayoutTree
+} from '../layout'
 
 const DEFAULT_VIEWPORT: LayoutViewport = {
   width: 0,
@@ -53,6 +60,23 @@ const unique = (items: string[]): string[] => {
   })
   return next
 }
+
+const findSplitNodeById = (node: LayoutNode, splitNodeId: string): LayoutSplitNode | null => {
+  if (node.type !== 'split') return null
+  if (node.id === splitNodeId) return node
+  for (const child of node.children) {
+    const match = findSplitNodeById(child, splitNodeId)
+    if (match) return match
+  }
+  return null
+}
+
+const getViewportRect = (viewport: LayoutViewport): LayoutRect => ({
+  left: 0,
+  top: 0,
+  width: viewport.width,
+  height: viewport.height
+})
 
 type DragType = 'panel' | 'tab' | null
 type TabReorderTarget = {
@@ -272,7 +296,14 @@ export class LayoutStore {
   }
 
   setSplitSizes(splitNodeId: string, sizes: number[]) {
-    const nextTree = setSplitSizes(this.tree, splitNodeId, sizes)
+    const splitNode = findSplitNodeById(this.tree.root, splitNodeId)
+    const nextSizes = (() => {
+      if (!splitNode) return sizes
+      const parentRect = this.geometry.nodeRects[splitNode.id] || getViewportRect(this.viewport)
+      const minPercentages = computeChildMinSizePercentages(splitNode, parentRect, this.viewport.height)
+      return clampSplitSizesToChildMinSizePercentages(sizes, minPercentages)
+    })()
+    const nextTree = setSplitSizes(this.tree, splitNodeId, nextSizes)
     this.applyTree(nextTree)
   }
 

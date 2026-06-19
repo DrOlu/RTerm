@@ -129,6 +129,16 @@ runCase(
       ['a1', 'a2'],
       'assistant run tail should expose the full assistant group',
     )
+    assertEqual(
+      items[1]?.assistantGroupBranchMessageId,
+      null,
+      'assistant run head should not expose branch source',
+    )
+    assertEqual(
+      items[2]?.assistantGroupBranchMessageId,
+      'a2',
+      'assistant run tail should expose the selected assistant branch target',
+    )
   },
 )
 
@@ -233,6 +243,11 @@ runCase(
       items.map((item) => item.mergeWithPreviousAssistant),
       [false, false, true],
       'seamless text after a leading tool group should merge under the top label',
+    )
+    assertEqual(
+      items[2]?.assistantGroupBranchMessageId,
+      'a1',
+      'seamless assistant text tail should branch from the selected assistant message',
     )
   },
 )
