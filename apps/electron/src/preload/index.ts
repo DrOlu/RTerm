@@ -145,6 +145,10 @@ type TerminalRecoveryReason =
 
 type AppSettings = BackendSettings & UiSettings;
 
+type SyncSettingsPatch = {
+  layout: NonNullable<BackendSettings["layout"]>;
+};
+
 interface CommandPolicyLists {
   allowlist: string[];
   denylist: string[];
@@ -426,6 +430,7 @@ export interface GyShellAPI {
   settings: {
     get: () => Promise<BackendSettings>;
     set: (settings: Partial<BackendSettings>) => Promise<void>;
+    setSync: (settings: SyncSettingsPatch) => void;
     setWsGatewayAccess: (
       access: BackendSettings["gateway"]["ws"]["access"],
     ) => Promise<BackendSettings["gateway"]["ws"]>;
@@ -773,6 +778,12 @@ const api: GyShellAPI = {
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),
     set: (settings) => ipcRenderer.invoke("settings:set", settings),
+    setSync: (settings) => {
+      const result = ipcRenderer.sendSync("settings:setSync", settings);
+      if (result?.ok === false) {
+        throw new Error(result.error || "Failed to persist settings.");
+      }
+    },
     setWsGatewayAccess: (access) =>
       ipcRenderer.invoke("settings:setWsGatewayAccess", access),
     setWsGatewayConfig: (ws) =>

@@ -28,13 +28,20 @@ interface SettingsSetPayload {
 
 interface SettingsSetSpy {
   calls: SettingsSetPayload[]
+  syncCalls?: SettingsSetPayload[]
 }
 
 const installWindowMock = (spy: SettingsSetSpy): void => {
+  const syncCalls = spy.syncCalls ?? []
+  spy.syncCalls = syncCalls
   ;(globalThis as unknown as { window: unknown }).window = {
     gyshell: {
       settings: {
         set: async (payload: SettingsSetPayload) => {
+          spy.calls.push(payload)
+        },
+        setSync: (payload: SettingsSetPayload) => {
+          syncCalls.push(payload)
           spy.calls.push(payload)
         }
       }
@@ -441,6 +448,28 @@ const run = async (): Promise<void> => {
     assertCondition(Boolean(lastPayload.layout?.v2), 'persisted payload should contain layout.v2')
     assertCondition(Array.isArray(lastPayload.layout?.panelOrder), 'persisted payload should include legacy panelOrder')
     assertCondition(Array.isArray(lastPayload.layout?.panelSizes), 'persisted payload should include legacy panelSizes')
+  })
+
+  await runCase('flushPendingSaveSync immediately persists pending layout changes', async () => {
+    const spy: SettingsSetSpy = { calls: [], syncCalls: [] }
+    installWindowMock(spy)
+
+    const store = createStore()
+    store.bootstrap()
+    store.setViewport(1440, 900)
+    const sourcePanelId = store.panelNodes[0]?.panel.id
+    assertCondition(Boolean(sourcePanelId), 'source panel should exist')
+
+    store.splitPanel(sourcePanelId!, 'terminal', 'horizontal', 'after')
+    store.flushPendingSaveSync()
+
+    assertEqual(spy.syncCalls?.length || 0, 1, 'sync settings.set should be used for unload flush')
+    const flushedPayload = spy.syncCalls?.[0]
+    assertCondition(Boolean(flushedPayload?.layout?.v2), 'flushed payload should contain layout.v2')
+
+    await sleep(220)
+    assertEqual(spy.syncCalls?.length || 0, 1, 'flush should clear the pending debounce timer')
+    assertEqual(spy.calls.length, 1, 'pending async save should not run after sync flush')
   })
 
   await runCase('setSplitSizes clamps invalid chat height changes', async () => {

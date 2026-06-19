@@ -1274,34 +1274,74 @@ export class LayoutStore {
     }, 120)
   }
 
-  private async saveLayout() {
-    if (typeof (this.appStore as any).shouldPersistLayout === 'function') {
-      const canPersist = (this.appStore as any).shouldPersistLayout()
-      if (!canPersist) {
-        return
-      }
+  flushPendingSaveSync(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
     }
 
+    if (!this.shouldPersistLayout()) {
+      return
+    }
+
+    const payload = this.buildLayoutSettingsPayload()
+    try {
+      const setSync = window.gyshell.settings.setSync
+      if (typeof setSync === 'function') {
+        setSync(payload)
+      } else {
+        void window.gyshell.settings.set(payload)
+      }
+      this.applyLayoutSettingsPayload(payload.layout)
+    } catch (error) {
+      console.error('Failed to flush layout before window unload', error)
+    }
+  }
+
+  private async saveLayout() {
+    if (!this.shouldPersistLayout()) {
+      return
+    }
+
+    const payload = this.buildLayoutSettingsPayload()
+    await window.gyshell.settings.set(payload)
+    this.applyLayoutSettingsPayload(payload.layout)
+  }
+
+  private shouldPersistLayout(): boolean {
+    if (typeof (this.appStore as any).shouldPersistLayout !== 'function') {
+      return true
+    }
+    return (this.appStore as any).shouldPersistLayout() !== false
+  }
+
+  private buildLayoutSettingsPayload() {
     const legacy = deriveLegacyLayoutSnapshot(this.tree)
     const treeSnapshot = toJS(this.tree)
 
-    await window.gyshell.settings.set({
+    return {
       layout: {
         panelOrder: legacy.panelOrder,
         panelSizes: legacy.panelSizes,
         v2: treeSnapshot
       }
-    })
+    }
+  }
 
+  private applyLayoutSettingsPayload(payload: {
+    panelOrder?: string[]
+    panelSizes?: number[]
+    v2?: unknown
+  }) {
     runInAction(() => {
       if (this.appStore.settings) {
         this.appStore.settings = {
           ...this.appStore.settings,
           layout: {
             ...this.appStore.settings.layout,
-            panelOrder: legacy.panelOrder,
-            panelSizes: legacy.panelSizes,
-            v2: treeSnapshot
+            panelOrder: payload.panelOrder,
+            panelSizes: payload.panelSizes,
+            v2: payload.v2
           }
         }
       }

@@ -33,6 +33,7 @@ import { resolveTheme } from "../../../shared/src/theme/themes";
 import type { WebSocketGatewayControlService } from "../../../backend/src/services/Gateway/WebSocketGatewayControlService";
 import type { UiSettingsStore } from "../settings/UiSettingsStore";
 import type { ThemeConfigStore } from "../theme/ThemeConfigStore";
+import { normalizeSyncSettingsPatch } from "./settingsSyncPatch";
 
 type AccessTokenRuntime = {
   listTokens: () => Promise<
@@ -407,6 +408,21 @@ export class ElectronGatewayIpcAdapter {
       this.settingsService.setSettings(settings);
       const currentSettings = this.settingsService.getSettings();
       this.agentService.updateSettings(currentSettings);
+    });
+
+    ipcMain.on("settings:setSync", (event: any, settings: any) => {
+      try {
+        const patch = normalizeSyncSettingsPatch(settings);
+        this.settingsService.setSettings(patch);
+        const currentSettings = this.settingsService.getSettings();
+        this.agentService.updateSettings(currentSettings);
+        event.returnValue = { ok: true };
+      } catch (error) {
+        event.returnValue = {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     });
 
     ipcMain.handle(
