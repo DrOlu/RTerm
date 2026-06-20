@@ -499,6 +499,14 @@ export interface GpuSnapshot {
   sharedMemoryUsedMiB?: number
   /** GPU temperature in Celsius */
   temperatureC?: number
+  /** Current board power draw in watts when available */
+  powerUsageWatts?: number
+  /** Board power cap or rated power in watts when available */
+  powerLimitWatts?: number
+  /** Vendor-reported power/performance state when available */
+  powerState?: string
+  /** Memory clock in MHz when available */
+  memoryClockMHz?: number
 }
 
 export interface NetworkSnapshot {

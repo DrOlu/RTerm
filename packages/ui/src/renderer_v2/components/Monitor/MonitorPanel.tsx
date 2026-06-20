@@ -75,6 +75,16 @@ const formatPercent = (value: number | undefined): string =>
 const formatMiB = (value: number | undefined): string =>
   formatBytes((Number.isFinite(value) ? Number(value) : 0) * 1024 ** 2)
 
+const formatWatts = (value: number | undefined): string => {
+  if (value === undefined || !Number.isFinite(value)) return '--'
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)} W`
+}
+
+const formatMHz = (value: number | undefined): string => {
+  if (value === undefined || !Number.isFinite(value)) return '--'
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)} MHz`
+}
+
 const formatUptime = (seconds: number | undefined): string => {
   if (seconds === undefined || !Number.isFinite(seconds)) return '--'
   const days = Math.floor(seconds / 86400)
@@ -148,9 +158,41 @@ const formatGpuCompactValue = (gpu: GpuEntry): string => {
   ) {
     parts.push(`MEM ${formatPercent(gpu.memoryUtilizationPercent)}`)
   }
+  if (gpu.powerUsageWatts !== undefined) {
+    parts.push(formatWatts(gpu.powerUsageWatts))
+  }
   if (gpu.temperatureC !== undefined) {
     parts.push(`${gpu.temperatureC}°C`)
   }
+  return parts.join(' · ')
+}
+
+const resolveGpuPowerUsagePercent = (gpu: GpuEntry): number | undefined => {
+  if (
+    typeof gpu.powerUsageWatts === 'number' &&
+    Number.isFinite(gpu.powerUsageWatts) &&
+    typeof gpu.powerLimitWatts === 'number' &&
+    Number.isFinite(gpu.powerLimitWatts) &&
+    gpu.powerLimitWatts > 0
+  ) {
+    return (gpu.powerUsageWatts / gpu.powerLimitWatts) * 100
+  }
+  return undefined
+}
+
+const formatGpuPowerFootprint = (gpu: GpuEntry): string => {
+  if (gpu.powerUsageWatts === undefined) return '--'
+  if (gpu.powerLimitWatts !== undefined && gpu.powerLimitWatts > 0) {
+    return `${formatWatts(gpu.powerUsageWatts)} / ${formatWatts(gpu.powerLimitWatts)}`
+  }
+  return formatWatts(gpu.powerUsageWatts)
+}
+
+const formatGpuSupplemental = (gpu: GpuEntry): string => {
+  const parts = [
+    gpu.powerState,
+    gpu.memoryClockMHz !== undefined ? `MEMCLK ${formatMHz(gpu.memoryClockMHz)}` : null,
+  ].filter((value): value is string => !!value)
   return parts.join(' · ')
 }
 
@@ -159,6 +201,13 @@ const resolveGpuMemoryTone = (percent: number | undefined): MeterTone => {
   if (percent >= 90) return 'danger'
   if (percent >= 75) return 'warn'
   return 'rx'
+}
+
+const resolveGpuPowerTone = (percent: number | undefined): MeterTone => {
+  if (percent === undefined) return 'default'
+  if (percent >= 95) return 'danger'
+  if (percent >= 80) return 'warn'
+  return 'tx'
 }
 
 const MiniHistory: React.FC<{
@@ -606,6 +655,7 @@ const MonitorDetailDock: React.FC<{
         <div className="monitor-disk-list">
           {gpuEntries.map((gpu: GpuEntry, index: number) => {
             const memoryUsagePercent = resolveGpuMemoryUsagePercent(gpu)
+            const powerUsagePercent = resolveGpuPowerUsagePercent(gpu)
             return (
               <div key={`detail-gpu-${index}`} className="monitor-disk-row">
                 <div className="monitor-disk-row-head">
@@ -638,11 +688,23 @@ const MonitorDetailDock: React.FC<{
                         tone="rx"
                       />
                     )}
+                  {gpu.powerUsageWatts !== undefined && (
+                    <InlineMeter
+                      label="POWER"
+                      value={formatGpuPowerFootprint(gpu)}
+                      percent={powerUsagePercent || 0}
+                      tone={resolveGpuPowerTone(powerUsagePercent)}
+                    />
+                  )}
                 </div>
                 <div className="monitor-disk-row-foot">
-                  <span>{formatGpuMemoryFootprint(gpu)}</span>
+                  <span>{formatGpuSupplemental(gpu) || formatGpuMemoryFootprint(gpu)}</span>
                   <span>
-                    {gpu.temperatureC !== undefined ? `${gpu.temperatureC}°C` : '--'}
+                    {gpu.temperatureC !== undefined
+                      ? `${gpu.temperatureC}°C`
+                      : gpu.powerUsageWatts !== undefined
+                        ? formatWatts(gpu.powerUsageWatts)
+                        : '--'}
                   </span>
                 </div>
               </div>
@@ -972,7 +1034,9 @@ const MonitorTabView: React.FC<{
   const compactGpuRows = visibleGpus.map((gpu: GpuEntry, index: number) => ({
     id: `compact-gpu-${index}`,
     label: gpu.name || `GPU ${index + 1}`,
-    detail: formatGpuMemoryFootprint(gpu),
+    detail: [formatGpuMemoryFootprint(gpu), formatGpuSupplemental(gpu)]
+      .filter(Boolean)
+      .join(' · '),
     value: formatGpuCompactValue(gpu),
   }))
   const visibleCorePercents = cpuCoreRows.rows
@@ -2099,6 +2163,7 @@ const MonitorTabView: React.FC<{
                   <div className="monitor-disk-list">
                     {visibleGpus.map((gpu: GpuEntry, index: number) => {
                       const memoryUsagePercent = resolveGpuMemoryUsagePercent(gpu)
+                      const powerUsagePercent = resolveGpuPowerUsagePercent(gpu)
                       return (
                         <div key={`gpu-${index}`} className="monitor-disk-row">
                           <div className="monitor-disk-row-head">
@@ -2131,11 +2196,23 @@ const MonitorTabView: React.FC<{
                                   tone="rx"
                                 />
                               )}
+                            {gpu.powerUsageWatts !== undefined && (
+                              <InlineMeter
+                                label="POWER"
+                                value={formatGpuPowerFootprint(gpu)}
+                                percent={powerUsagePercent || 0}
+                                tone={resolveGpuPowerTone(powerUsagePercent)}
+                              />
+                            )}
                           </div>
                           <div className="monitor-disk-row-foot">
-                            <span>{formatGpuMemoryFootprint(gpu)}</span>
+                            <span>{formatGpuSupplemental(gpu) || formatGpuMemoryFootprint(gpu)}</span>
                             <span>
-                              {gpu.temperatureC !== undefined ? `${gpu.temperatureC}°C` : '--'}
+                              {gpu.temperatureC !== undefined
+                                ? `${gpu.temperatureC}°C`
+                                : gpu.powerUsageWatts !== undefined
+                                  ? formatWatts(gpu.powerUsageWatts)
+                                  : '--'}
                             </span>
                           </div>
                         </div>
