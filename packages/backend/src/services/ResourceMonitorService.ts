@@ -62,7 +62,6 @@ interface EnriginEcuDmonInfo {
   memoryTotalMiB?: number
   temperatureC?: number
   powerUsageWatts?: number
-  powerState?: string
   memoryClockMHz?: number
 }
 
@@ -725,35 +724,30 @@ export class ResourceMonitorService {
     const parsedGpus = parsed.gpus ?? parsed.g
     const parsedUptime = parsed.uptimeSeconds ?? parsed.u
 
-    const socketEntries: RawSocketEntry[] = Array.isArray(parsedSockets)
-      ? parsedSockets
-          .map((entry: any) => this.normalizeSocketEntry(entry))
-          .filter((entry: RawSocketEntry | null): entry is RawSocketEntry => entry !== null)
-      : []
+    const socketEntries: RawSocketEntry[] = this.coerceArray(parsedSockets)
+      .map((entry: any) => this.normalizeSocketEntry(entry))
+      .filter((entry: RawSocketEntry | null): entry is RawSocketEntry => entry !== null)
+
+    const disks = this.coerceArray(parsedDisks)
+      .map((entry: any) => this.normalizeDisk(entry))
+      .filter((entry: DiskSnapshot) => entry.totalBytes > 0)
+      .sort((left: DiskSnapshot, right: DiskSnapshot) => right.usedBytes - left.usedBytes)
+    const gpus = this.coerceArray(parsedGpus).map((entry: any) => this.normalizeGpu(entry))
+    const network = this.coerceArray(parsedNetwork)
+      .map((entry: any) => this.normalizeNetwork(entry))
+      .filter((entry: NetworkSnapshot | null): entry is NetworkSnapshot => entry !== null)
+    const processes = this.coerceArray(parsedProcesses)
+      .map((entry: any) => this.normalizeProcess(entry))
+      .filter((entry: ProcessSnapshot | null): entry is ProcessSnapshot => entry !== null)
 
     return {
       system: parsedSystem ? this.normalizeWindowsSystem(parsedSystem) : undefined,
       cpu: parsedCpu ? this.normalizeWindowsCpu(parsedCpu) : undefined,
       memory: parsedMemory ? this.normalizeWindowsMemory(parsedMemory) : undefined,
-      disks: Array.isArray(parsedDisks)
-        ? parsedDisks
-            .map((entry: any) => this.normalizeDisk(entry))
-            .filter((entry: DiskSnapshot) => entry.totalBytes > 0)
-            .sort((left: DiskSnapshot, right: DiskSnapshot) => right.usedBytes - left.usedBytes)
-        : undefined,
-      gpus: Array.isArray(parsedGpus)
-        ? parsedGpus.map((entry: any) => this.normalizeGpu(entry))
-        : undefined,
-      network: Array.isArray(parsedNetwork)
-        ? parsedNetwork
-            .map((entry: any) => this.normalizeNetwork(entry))
-            .filter((entry: NetworkSnapshot | null): entry is NetworkSnapshot => entry !== null)
-        : undefined,
-      processes: Array.isArray(parsedProcesses)
-        ? parsedProcesses
-            .map((entry: any) => this.normalizeProcess(entry))
-            .filter((entry: ProcessSnapshot | null): entry is ProcessSnapshot => entry !== null)
-        : undefined,
+      disks: disks.length > 0 ? disks : undefined,
+      gpus: gpus.length > 0 ? gpus : undefined,
+      network: network.length > 0 ? network : undefined,
+      processes: processes.length > 0 ? processes : undefined,
       networkConnections:
         socketEntries.length > 0 ? this.aggregateSocketEntries(socketEntries) : undefined,
       uptimeSeconds: this.asNumber(parsedUptime),
@@ -831,7 +825,7 @@ export class ResourceMonitorService {
       `printf '%s\\n' '${ENRIGIN_GPU_QUERY_MARKER}';`,
       'gyshell_ersmi -q;',
       `printf '%s\\n' '${ENRIGIN_GPU_DMON_MARKER}';`,
-      'gyshell_ersmi --dmon -s all -c 1;',
+      'gyshell_ersmi -dmon -c 1;',
       'fi',
     ].join(' ')
 
@@ -1436,11 +1430,13 @@ export class ResourceMonitorService {
           (query?.memoryUsedMiB !== undefined && memoryTotalMiB > 0
             ? this.percent(query.memoryUsedMiB, memoryTotalMiB)
             : undefined)
+        // ERSMI reports VRAM as a usage percentage of the total, so derive the
+        // used MiB as `percent × total` (identical to the vendor `ersmi` tool),
+        // falling back to the absolute figure from the `-q` query when present.
         const memoryUsedMiB =
-          query?.memoryUsedMiB ??
-          (memoryUsagePercent !== undefined && memoryTotalMiB > 0
+          memoryUsagePercent !== undefined && memoryTotalMiB > 0
             ? this.roundToTenth((memoryTotalMiB * memoryUsagePercent) / 100)
-            : 0)
+            : query?.memoryUsedMiB ?? 0
 
         return {
           name: query?.name || `Enrigin ECU ${index}`,
@@ -1452,7 +1448,7 @@ export class ResourceMonitorService {
           temperatureC: dmon?.temperatureC ?? query?.temperatureC,
           powerUsageWatts: dmon?.powerUsageWatts ?? query?.powerUsageWatts,
           powerLimitWatts: query?.powerLimitWatts,
-          powerState: dmon?.powerState ?? query?.powerState,
+          powerState: query?.powerState,
           memoryClockMHz: dmon?.memoryClockMHz ?? query?.memoryClockMHz,
         }
       })
@@ -1529,26 +1525,22 @@ export class ResourceMonitorService {
     return entries
   }
 
+  // `ersmi -dmon -c 1` prints a fixed-width table whose data rows start with the
+  // numeric device index and expose 12 columns. Column meaning (0-indexed),
+  // matching the vendor tool:
+  //   [0] idx  [1] power(W)  [2] temp(C)  [3] SIP util(%)  [7] VRAM used(%)
+  //   [8] VRAM total(MiB)    [10] memory clock(MHz)
+  // Header/unit rows (prefixed with # or *, or with a non-numeric first token)
+  // are naturally skipped by the index/column-count guard.
   private parseErsmiDmonInfo(output: string): Map<number, EnriginEcuDmonInfo> {
     const entries = new Map<number, EnriginEcuDmonInfo>()
-    let sawDmonHeader = false
 
     for (const line of output.split('\n')) {
       const trimmed = line.trim()
       if (!trimmed) continue
 
-      if (trimmed.startsWith('*')) {
-        if (/\bDev\b/i.test(trimmed) || /\bIdx\b/i.test(trimmed)) {
-          sawDmonHeader = true
-        }
-        continue
-      }
-
       const parts = trimmed.split(/\s+/)
-      if (!/^\d+$/.test(parts[0] || '') || parts.length < 8) {
-        continue
-      }
-      if (!sawDmonHeader && parts.length < 9) {
+      if (parts.length < 12 || !/^\d+$/.test(parts[0] || '')) {
         continue
       }
 
@@ -1556,6 +1548,7 @@ export class ResourceMonitorService {
       if (index === undefined) continue
 
       const entry: EnriginEcuDmonInfo = { index }
+
       const powerUsageWatts = this.parseErsmiNumber(parts[1])
       if (powerUsageWatts !== undefined) entry.powerUsageWatts = powerUsageWatts
 
@@ -1565,29 +1558,18 @@ export class ResourceMonitorService {
       const sipUtilizationPercent = this.parseErsmiNumber(parts[3])
       if (sipUtilizationPercent !== undefined) {
         entry.sipUtilizationPercent = sipUtilizationPercent
+        entry.utilizationPercent = sipUtilizationPercent
       }
 
-      const utilizationPercent = this.parseErsmiNumber(parts[4])
-      if (utilizationPercent !== undefined) {
-        entry.utilizationPercent = utilizationPercent
-      }
-
-      const powerState = this.sanitizeTextField(parts[5])
-      if (powerState) entry.powerState = powerState
-
-      const memoryUsagePercent = this.parseErsmiNumber(parts[6])
+      const memoryUsagePercent = this.parseErsmiNumber(parts[7])
       if (memoryUsagePercent !== undefined) {
         entry.memoryUsagePercent = memoryUsagePercent
       }
 
-      const memoryTotalMiB = this.parseErsmiMemoryMiB(parts[7])
+      const memoryTotalMiB = this.parseErsmiMemoryMiB(parts[8])
       if (memoryTotalMiB !== undefined) entry.memoryTotalMiB = memoryTotalMiB
 
-      let cursor = 8
-      if (parts[cursor] && !this.isErsmiNumericToken(parts[cursor])) {
-        cursor += 1
-      }
-      const memoryClockMHz = this.parseErsmiNumber(parts[cursor])
+      const memoryClockMHz = this.parseErsmiNumber(parts[10])
       if (memoryClockMHz !== undefined) {
         entry.memoryClockMHz = memoryClockMHz
       }
@@ -1621,10 +1603,6 @@ export class ResourceMonitorService {
     if (!match) return undefined
     const parsed = Number(match[0])
     return Number.isFinite(parsed) ? this.roundToTenth(parsed) : undefined
-  }
-
-  private isErsmiNumericToken(value: string): boolean {
-    return /^[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?$/i.test(value)
   }
 
   private parseLinuxNetDevOutput(
@@ -2450,6 +2428,16 @@ export class ResourceMonitorService {
   private roundToTenth(value: number): number {
     if (!Number.isFinite(value)) return 0
     return Math.round(value * 10) / 10
+  }
+
+  // PowerShell's `ConvertTo-Json` collapses single-element collections into a
+  // bare object, so a host with exactly one GPU/disk/etc. arrives as an object
+  // rather than an array. Coerce back to an array so single-item resources are
+  // not silently dropped by downstream `Array.isArray` checks.
+  private coerceArray(value: unknown): any[] {
+    if (Array.isArray(value)) return value
+    if (value === undefined || value === null) return []
+    return [value]
   }
 
   private asNumber(value: unknown): number | undefined {

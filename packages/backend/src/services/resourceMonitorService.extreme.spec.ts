@@ -186,10 +186,10 @@ const run = async (): Promise<void> => {
         '    Process Info',
         '       1234   python   512   1   2   Active   3   4096   1500',
         '__GYSHELL_ENRIGIN_GPU_DMON__',
-        '*Dev Pwr      DTemp   Sip   DUsed Dpm      MUsed Mem     Mclk',
-        '*Idx W        C       %     %     L        %     Mib     MHz',
-        '0    90       39      12.5  44.4  Active   2.4   42976   6400',
-        '1    55       41      80.0  70.0  Sleep    12.5  16384   5200',
+        '# Idx  Pwr   Temp   SIP   DUsed  ENC   DEC   MUsed  Mem     Dclk   Mclk   Volt',
+        '#  -    W     C      %     %      %     %     %      Mib     MHz    MHz    V',
+        '0      90    39     44.4  10.0   0.0   0.0   2.4    42976   1200   6400   0.812',
+        '1      55    41     70.0  12.0   0.0   0.0   12.5   16384   1100   5200   0.788',
       ].join('\n'),
       network: [
         'Inter-|   Receive                                                |  Transmit',
@@ -211,15 +211,15 @@ const run = async (): Promise<void> => {
       'numeric rows inside the ERSMI query region must not leak into dmon devices'
     )
     assertEqual(snapshot.gpus?.[0]?.name, 'D10', 'ERSMI query should provide the ECU model name')
-    assertEqual(snapshot.gpus?.[0]?.utilizationPercent, 44.4, 'DUsed should map to GPU utilization')
-    assertEqual(snapshot.gpus?.[0]?.memoryUsagePercent, 2.4, 'MUsed should map to VRAM usage percentage')
-    assertEqual(snapshot.gpus?.[0]?.memoryUsedMiB, 1031, 'ERSMI query memory usage should be preserved')
-    assertEqual(snapshot.gpus?.[0]?.memoryTotalMiB, 42976, 'ERSMI dmon memory size should map to MiB')
+    assertEqual(snapshot.gpus?.[0]?.utilizationPercent, 44.4, 'ERSMI SIP util should map to GPU utilization')
+    assertEqual(snapshot.gpus?.[0]?.memoryUsagePercent, 2.4, 'ERSMI dmon column 7 should map to VRAM usage percentage')
+    assertEqual(snapshot.gpus?.[0]?.memoryUsedMiB, 1031.4, 'ERSMI VRAM used should derive from percent × total')
+    assertEqual(snapshot.gpus?.[0]?.memoryTotalMiB, 42976, 'ERSMI dmon column 8 should map VRAM total to MiB')
     assertEqual(snapshot.gpus?.[0]?.temperatureC, 39, 'ERSMI dmon temperature should parse')
     assertEqual(snapshot.gpus?.[0]?.powerUsageWatts, 90, 'ERSMI dmon power should parse')
     assertEqual(snapshot.gpus?.[0]?.powerLimitWatts, 85, 'ERSMI query power cap should parse')
-    assertEqual(snapshot.gpus?.[0]?.powerState, 'Active', 'ERSMI DPM state should parse')
-    assertEqual(snapshot.gpus?.[0]?.memoryClockMHz, 6400, 'ERSMI memory clock should parse')
+    assertEqual(snapshot.gpus?.[0]?.powerState, 'Active', 'ERSMI query DPM state should parse')
+    assertEqual(snapshot.gpus?.[0]?.memoryClockMHz, 6400, 'ERSMI dmon column 10 should map memory clock')
     assertEqual(snapshot.gpus?.[1]?.name, 'Enrigin ECU 1', 'ERSMI dmon-only rows should get a stable fallback name')
     assertEqual(snapshot.gpus?.[1]?.memoryUsedMiB, 2048, 'ERSMI dmon-only memory usage should derive used MiB')
   })
@@ -415,7 +415,7 @@ const run = async (): Promise<void> => {
       'linux command should retain nvidia-smi telemetry collection'
     )
     assert(
-      linuxCommand.includes('ersmi --dmon -s all -c 1') &&
+      linuxCommand.includes('ersmi -dmon -c 1') &&
         linuxCommand.includes('sudo -n ersmi'),
       'linux command should collect Enrigin ERSMI telemetry with non-interactive sudo fallback'
     )
@@ -581,6 +581,34 @@ const run = async (): Promise<void> => {
     assertEqual(snapshot.networkConnections?.[0]?.localPort, 22, 'windows socket should aggregate by local port')
     assertEqual(snapshot.networkConnections?.[0]?.remoteHostCount, 1, 'windows listener should track unique remote hosts')
     assertEqual(snapshot.networkConnections?.[0]?.connectionCount, 1, 'windows listener should track connection count')
+  })
+
+  await runCase('windows single-resource payloads serialized as objects are coerced to arrays', async () => {
+    const terminal = {
+      id: 'ssh-win-single',
+      type: 'ssh',
+      title: 'win-single',
+      remoteOs: 'windows',
+    }
+    // PowerShell's ConvertTo-Json emits single-item collections as bare objects
+    // (no surrounding array). A single-GPU host must still surface its GPU.
+    const output = JSON.stringify({
+      system: { hostname: 'solo-win', osName: 'Windows 11', shell: 'powershell.exe' },
+      cpu: { usagePercent: 10, corePercents: [10], logicalCoreCount: 1 },
+      memory: { totalBytes: 8589934592, usedBytes: 4294967296, usagePercent: 50 },
+      d: { filesystem: 'NTFS', mountPoint: 'C:\\', totalBytes: 1024, usedBytes: 512, usagePercent: 50 },
+      g: { n: 'NVIDIA RTX 4090', u: 42, m: 4096, t: 16384, p: 25, tc: 60 },
+      n: { interface: 'Ethernet0', rxBytesPerSec: 100, txBytesPerSec: 50 },
+      uptimeSeconds: 3600,
+    })
+
+    const service = createService(terminal, output)
+    const snapshot = await service.collectSnapshot('ssh-win-single')
+
+    assertEqual(snapshot.gpus?.length, 1, 'single windows GPU object should be coerced into a one-item array')
+    assertEqual(snapshot.gpus?.[0]?.name, 'NVIDIA RTX 4090', 'single windows GPU name should parse')
+    assertEqual(snapshot.disks?.length, 1, 'single windows disk object should be coerced into a one-item array')
+    assertEqual(snapshot.network?.length, 1, 'single windows interface object should be coerced into a one-item array')
   })
 
   await runCase('windows monitor launcher keeps the payload plain and unobfuscated', async () => {
