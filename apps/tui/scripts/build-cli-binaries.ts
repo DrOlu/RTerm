@@ -174,7 +174,7 @@ async function ensureCrossPlatformOpenTui(withInstall: boolean): Promise<void> {
   if (!version) {
     throw new Error('Missing @opentui/core version in package.json')
   }
-  await $`bun install --os="*" --cpu="*" @opentui/core@${version}`.cwd(workspaceRoot)
+  await $`bun install --ignore-scripts --os="*" --cpu="*" @opentui/core@${version}`.cwd(workspaceRoot)
 }
 
 async function compileTarget(target: Target, options: BuildOptions, parserWorker: string): Promise<void> {

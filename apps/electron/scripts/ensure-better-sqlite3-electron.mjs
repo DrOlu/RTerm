@@ -51,7 +51,7 @@ console.warn(
 const rebuild = run(npxBinary, [
   "electron-rebuild",
   "-f",
-  "-w",
+  "-o",
   "better-sqlite3-electron",
 ]);
 if (rebuild.status !== 0) {
