@@ -50,6 +50,43 @@ zip_mobile_web() {
   echo "Mobile-web package: dist/$zip_name"
 }
 
+restore_host_electron_native() {
+  local status=$?
+
+  if [ "${RESTORE_HOST_ELECTRON_NATIVE:-false}" != true ]; then
+    exit "$status"
+  fi
+
+  if [ ! -d "node_modules/better-sqlite3-electron" ]; then
+    exit "$status"
+  fi
+
+  local host_platform
+  local host_arch
+  if ! host_platform="$(node -p "process.platform")"; then
+    echo "Warning: failed to detect host platform while restoring Electron native runtime." >&2
+    exit "$status"
+  fi
+  if ! host_arch="$(node -p "process.arch")"; then
+    echo "Warning: failed to detect host architecture while restoring Electron native runtime." >&2
+    exit "$status"
+  fi
+
+  echo "Restoring host Electron native runtime (${host_platform}-${host_arch})..."
+  set +e
+  npm run ensure:sqlite3-target-prebuilt -- --platform "$host_platform" --arch "$host_arch"
+  local restore_status=$?
+  set -e
+  if [ "$restore_status" -ne 0 ]; then
+    echo "Warning: failed to restore host Electron native runtime." >&2
+    if [ "$status" -eq 0 ]; then
+      status="$restore_status"
+    fi
+  fi
+
+  exit "$status"
+}
+
 # Initialize flags
 BUILD_MAC=false
 BUILD_WIN=false
@@ -102,6 +139,12 @@ if [ "$BUILD_LINUX" = true ]; then
   BUILD_LINUX_X64=true
   BUILD_LINUX_ARM64=true
 fi
+
+RESTORE_HOST_ELECTRON_NATIVE=false
+if [ "$BUILD_MAC" = true ] || [ "$BUILD_WIN" = true ] || [ "$BUILD_LINUX_X64" = true ] || [ "$BUILD_LINUX_ARM64" = true ]; then
+  RESTORE_HOST_ELECTRON_NATIVE=true
+fi
+trap restore_host_electron_native EXIT
 
 echo "Cleaning build directories..."
 rm -rf dist out
