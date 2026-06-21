@@ -1,4 +1,9 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import {
+  contextBridge,
+  ipcRenderer,
+  webUtils,
+  type IpcRendererEvent,
+} from "electron";
 
 // Types (duplicated to avoid cross-project imports)
 interface BackendSettings {
@@ -408,6 +413,7 @@ export interface GyShellAPI {
     saveImageAttachment: (
       payload: SaveImageAttachmentPayload,
     ) => Promise<InputImageAttachment>;
+    getPathForFile: (file: File) => string;
   };
   gateway: {
     isSameMachine: () => Promise<{ sameMachine: boolean }>;
@@ -742,6 +748,13 @@ const api: GyShellAPI = {
       ipcRenderer.invoke("system:openExternal", url),
     saveImageAttachment: (payload: SaveImageAttachmentPayload) =>
       ipcRenderer.invoke("system:saveImageAttachment", payload),
+    getPathForFile: (file: File) => {
+      try {
+        return webUtils.getPathForFile(file);
+      } catch {
+        return "";
+      }
+    },
   },
   gateway: {
     isSameMachine: () => ipcRenderer.invoke("gateway:isSameMachine"),

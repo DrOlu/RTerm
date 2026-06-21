@@ -8,7 +8,9 @@ import {
   hasFileSystemPanelDragPayloadType,
   hasNativeFileDragType,
   getFileMentionDisplayName,
+  getNativeFilePathResolver,
   parseFileSystemPanelDragPayload,
+  resolveNativeFilePath,
   resolveTerminalDropPaths,
   resolveTerminalDropPathsForTarget
 } from './filesystemDragDrop'
@@ -142,6 +144,66 @@ const run = async (): Promise<void> => {
     assertEqual(paths.length, 2, 'native paths should be deduplicated')
     assertEqual(paths[0], '/tmp/beta.txt', 'first native path should be preserved')
     assertEqual(paths[1], '/tmp/gamma.txt', 'second native path should be preserved')
+  })
+
+  await runCase('native file path resolver supersedes removed Electron File.path property', () => {
+    const nativeFileList = [
+      { name: 'no-legacy-path.txt' },
+      { name: 'second.txt', path: '/tmp/legacy-ignored.txt' }
+    ] as unknown as FileList
+    const dataTransfer = {
+      types: ['Files'],
+      getData: () => '',
+      files: nativeFileList
+    }
+    const paths = resolveTerminalDropPaths(
+      dataTransfer as unknown as Pick<DataTransfer, 'types' | 'getData' | 'files'>,
+      (file) => `/tmp/resolved/${file.name}`
+    )
+    assertEqual(paths.length, 2, 'resolver paths should be collected')
+    assertEqual(paths[0], '/tmp/resolved/no-legacy-path.txt', 'resolver should cover files without legacy path')
+    assertEqual(paths[1], '/tmp/resolved/second.txt', 'resolver should take precedence over legacy path')
+  })
+
+  await runCase('getNativeFilePathResolver bridges to the preload getPathForFile when available', () => {
+    const globalRef = globalThis as { gyshell?: unknown }
+    const original = globalRef.gyshell
+    try {
+      globalRef.gyshell = {
+        system: { getPathForFile: (file: File) => `/tmp/bridged/${file.name}` }
+      }
+      const resolver = getNativeFilePathResolver()
+      assertCondition(typeof resolver === 'function', 'resolver should be returned when bridge exists')
+      assertEqual(
+        resolver?.({ name: 'bridged.txt' } as unknown as File),
+        '/tmp/bridged/bridged.txt',
+        'resolver should delegate to preload getPathForFile'
+      )
+
+      globalRef.gyshell = { system: {} }
+      assertEqual(getNativeFilePathResolver(), undefined, 'missing getPathForFile should yield undefined resolver')
+
+      globalRef.gyshell = undefined
+      assertEqual(getNativeFilePathResolver(), undefined, 'missing gyshell bridge should yield undefined resolver')
+    } finally {
+      globalRef.gyshell = original
+    }
+  })
+
+  await runCase('native file path resolver falls back safely for older Electron and tests', () => {
+    const file = { path: '/tmp/legacy.txt' } as unknown as File
+    assertEqual(
+      resolveNativeFilePath(file, () => ''),
+      '/tmp/legacy.txt',
+      'empty resolver result should fall back to legacy path'
+    )
+    assertEqual(
+      resolveNativeFilePath(file, () => {
+        throw new Error('resolver failed')
+      }),
+      '/tmp/legacy.txt',
+      'throwing resolver should fall back to legacy path'
+    )
   })
 
   await runCase('resolveTerminalDropPathsForTarget blocks cross-terminal payload drops', () => {

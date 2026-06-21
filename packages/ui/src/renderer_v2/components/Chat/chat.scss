@@ -380,24 +380,26 @@ body.chat-drag-selection-suppressed * {
   }
 
   .mention-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 0 6px;
+    display: inline;
+    padding: 0.02em 0.24em;
     border-radius: 4px;
     font-weight: 700;
     font-size: 11px;
     font-family: var(--font-mono);
     margin: 0 2px;
-    background: color-mix(in srgb, var(--accent-2) 15%, transparent);
+    background: color-mix(in srgb, var(--accent-2) 24%, transparent);
     color: var(--fg);
-    border: 1px solid color-mix(in srgb, var(--accent-2) 30%, transparent);
-    height: 1.4em; /* Use relative height */
-    line-height: 1;
+    border: 1px solid color-mix(in srgb, var(--accent-2) 42%, transparent);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    line-height: inherit;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    vertical-align: middle;
+    letter-spacing: 0;
+    vertical-align: baseline;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     position: relative;
-    top: -1px; /* Fine-tune alignment */
   }
 
   .message-user-images {

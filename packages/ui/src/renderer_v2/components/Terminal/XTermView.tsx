@@ -40,6 +40,7 @@ import {
 } from "./terminalRecovery";
 import { isRuntimeOwnedByUi } from "./runtimeOwnership";
 import {
+  getNativeFilePathResolver,
   hasFileSystemPanelDragPayloadType,
   hasNativeFileDragType,
   resolveTerminalDropPathsForTarget,
@@ -429,6 +430,7 @@ const createRuntime = (
     const paths = resolveTerminalDropPathsForTarget(
       event.dataTransfer,
       config.id,
+      getNativeFilePathResolver(),
     );
     if (!paths.length) return;
     window.gyshell.terminal.writePaths(config.id, paths).catch(() => {

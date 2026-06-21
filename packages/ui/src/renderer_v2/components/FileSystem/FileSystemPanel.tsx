@@ -33,6 +33,8 @@ import {
 import {
   FILESYSTEM_PANEL_DRAG_MIME,
   encodeFileSystemPanelDragPayload,
+  extractNativeDropFilePaths,
+  getNativeFilePathResolver,
   hasFileSystemPanelDragPayloadType,
   hasNativeFileDragType,
   parseFileSystemPanelDragPayload,
@@ -261,24 +263,6 @@ const basenameFromPath = (inputPath: string): string => {
     .split(/[\\/]/)
     .filter(Boolean);
   return segments[segments.length - 1] || normalized;
-};
-
-const getNativeDropFilePaths = (
-  dataTransfer: DataTransfer | null | undefined,
-): string[] => {
-  if (!dataTransfer?.files) return [];
-  const seen = new Set<string>();
-  const next: string[] = [];
-  Array.from(dataTransfer.files).forEach((file) => {
-    const maybePath =
-      typeof (file as any)?.path === "string"
-        ? String((file as any).path).trim()
-        : "";
-    if (!maybePath || seen.has(maybePath)) return;
-    seen.add(maybePath);
-    next.push(maybePath);
-  });
-  return next;
 };
 
 const normalizePathForCompare = (inputPath: string): string => {
@@ -1896,7 +1880,10 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
         setExplorerDropHot(false);
 
         const payload = parseFileSystemPanelDragPayload(event.dataTransfer);
-        const nativePaths = getNativeDropFilePaths(event.dataTransfer);
+        const nativePaths = extractNativeDropFilePaths(
+          event.dataTransfer,
+          getNativeFilePathResolver(),
+        );
         if (!activeTerminalId) return;
 
         if (payload) {

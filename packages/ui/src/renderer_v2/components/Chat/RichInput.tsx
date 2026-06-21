@@ -20,7 +20,9 @@ import {
 import {
   encodeTerminalScopedFilePath,
   getFileMentionDisplayName,
+  getNativeFilePathResolver,
   parseFileSystemPanelDragPayload,
+  resolveNativeFilePath,
 } from "../../lib/filesystemDragDrop";
 import {
   createImeCompositionTracker,
@@ -30,6 +32,7 @@ import {
   shouldLetImeHandleKeyDown,
   shouldSuppressPostCompositionEnter,
 } from "../../lib/imeComposition";
+import { truncateMentionDisplayText } from "../../lib/mentionDisplay";
 import "./richInput.scss";
 
 type DraftInputImageAttachment = InputImageAttachment & {
@@ -63,17 +66,6 @@ type RichMentionItem = {
   name: string;
   id?: string;
   preview?: string;
-};
-
-const MENTION_DISPLAY_CHAR_LIMIT = 18;
-
-const truncateMentionDisplayText = (value: string): string => {
-  const text = String(value || "");
-  const chars = Array.from(text);
-  if (chars.length <= MENTION_DISPLAY_CHAR_LIMIT) {
-    return text;
-  }
-  return `${chars.slice(0, MENTION_DISPLAY_CHAR_LIMIT).join("")}...`;
 };
 
 const escapeHtml = (value: string): string =>
@@ -368,6 +360,15 @@ export const RichInput = observer(
         selection.addRange(range);
       };
 
+      const createEditorEndRange = (): Range | null => {
+        const editor = editorRef.current;
+        if (!editor) return null;
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false);
+        return range;
+      };
+
       const placeCaretAfterInsertedTag = (tag: HTMLElement) => {
         const selection = window.getSelection();
         if (!selection) return;
@@ -390,11 +391,17 @@ export const RichInput = observer(
       };
 
       const insertMention = (item: RichMentionItem) => {
-        const selection = window.getSelection();
-        if (!selection || selection.rangeCount === 0) return;
-        const range = selection.getRangeAt(0);
+        const editor = editorRef.current;
+        if (!editor) return;
 
-        const info = getMentionInfo() as any;
+        const selection = window.getSelection();
+        const activeRange =
+          selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+        const activeRangeInEditor = activeRange
+          ? editor.contains(activeRange.commonAncestorContainer)
+          : false;
+
+        const info = activeRangeInEditor ? (getMentionInfo() as any) : null;
         const replacementRange = document.createRange();
 
         // 1. Handle the re-select case where we have a direct targetTag
@@ -414,23 +421,29 @@ export const RichInput = observer(
           }
         } else if (info && !info.isReSelect) {
           // 2. Standard insertion case (triggered by '@')
-          const textNode = range.startContainer;
+          if (!activeRange) return;
+          const textNode = activeRange.startContainer;
           if (textNode.nodeType !== Node.TEXT_NODE) return;
           replacementRange.setStart(textNode, info.index);
-          replacementRange.setEnd(textNode, range.startOffset);
+          replacementRange.setEnd(textNode, activeRange.startOffset);
         } else {
           // 3. Fallback for file drops and programmatic insertions (no '@' context)
-          replacementRange.setStart(range.startContainer, range.startOffset);
-          replacementRange.setEnd(range.startContainer, range.startOffset);
-          if (
-            editorRef.current &&
-            !editorRef.current.contains(range.commonAncestorContainer)
-          ) {
-            replacementRange.selectNodeContents(editorRef.current);
-            replacementRange.collapse(false);
-          }
+          const fallbackRange =
+            activeRange && activeRangeInEditor
+              ? activeRange
+              : createEditorEndRange();
+          if (!fallbackRange) return;
+          replacementRange.setStart(
+            fallbackRange.startContainer,
+            fallbackRange.startOffset,
+          );
+          replacementRange.setEnd(
+            fallbackRange.startContainer,
+            fallbackRange.startOffset,
+          );
         }
 
+        editor.focus();
         setSelectionRange(replacementRange);
         const insertId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const html = buildMentionHtml(item, insertId);
@@ -446,6 +459,7 @@ export const RichInput = observer(
         editorRef.current?.focus();
         pendingMentionDeleteRef.current = null;
         setShowSuggestions(false);
+        onInput?.(buildDraft());
       };
 
       const serialize = (): string => {
@@ -883,8 +897,9 @@ export const RichInput = observer(
             void attachLocalImages(imageCandidates);
           }
           const localTerminalId = store.getPreferredLocalTerminalId();
+          const getPathForFile = getNativeFilePathResolver();
           files.forEach((f) => {
-            const path = (f as any).path;
+            const path = resolveNativeFilePath(f, getPathForFile);
             if (path && !isRecognizedImageFile(f)) {
               const mentionPath = localTerminalId
                 ? encodeTerminalScopedFilePath(localTerminalId, path)
