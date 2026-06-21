@@ -156,6 +156,42 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
       !assistantGroupBranchMessage.streaming &&
       !isThinking;
 
+    // Shared copy/branch controls rendered at the tail of an assistant turn.
+    // Kept as a single element so both classic rows and seamless tool groups
+    // surface identical actions.
+    const assistantGroupActions =
+      shouldShowGroupCopy || canBranchAssistantGroup ? (
+        <div className="message-assistant-group-actions">
+          {shouldShowGroupCopy && (
+            <button
+              className="message-copy-btn message-assistant-copy-btn"
+              title="Copy assistant message group"
+              aria-label="Copy assistant message group"
+              onClick={() => {
+                void copyConnectedAssistantRun();
+              }}
+            >
+              {copiedKey === groupCopyKey ? (
+                <Check size={12} />
+              ) : (
+                <Copy size={12} />
+              )}
+            </button>
+          )}
+          {canBranchAssistantGroup && assistantGroupBranchMessage && (
+            <button
+              type="button"
+              className="message-copy-btn message-assistant-branch-btn"
+              title="Branch from here"
+              aria-label="Branch from here"
+              onClick={() => onBranch(assistantGroupBranchMessage)}
+            >
+              <GitBranch size={12} />
+            </button>
+          )}
+        </div>
+      ) : null;
+
     // Seamless mode: render a grouped tool-activity banner for multiple messages
     if (seamlessGroupMessageIds && seamlessGroupMessageIds.length > 0) {
       const groupMessages = seamlessGroupMessageIds
@@ -176,6 +212,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
               onBannerUiStateChange?.({ expanded })
             }
           />
+          {assistantGroupActions}
         </div>
       );
     }
@@ -218,37 +255,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
           <div className="message-role-label assistant">ASSISTANT</div>
         )}
         {children}
-        {(shouldShowGroupCopy || canBranchAssistantGroup) && (
-          <div className="message-assistant-group-actions">
-            {shouldShowGroupCopy && (
-              <button
-                className="message-copy-btn message-assistant-copy-btn"
-                title="Copy assistant message group"
-                aria-label="Copy assistant message group"
-                onClick={() => {
-                  void copyConnectedAssistantRun();
-                }}
-              >
-                {copiedKey === groupCopyKey ? (
-                  <Check size={12} />
-                ) : (
-                  <Copy size={12} />
-                )}
-              </button>
-            )}
-            {canBranchAssistantGroup && assistantGroupBranchMessage && (
-              <button
-                type="button"
-                className="message-copy-btn message-assistant-branch-btn"
-                title="Branch from here"
-                aria-label="Branch from here"
-                onClick={() => onBranch(assistantGroupBranchMessage)}
-              >
-                <GitBranch size={12} />
-              </button>
-            )}
-          </div>
-        )}
+        {assistantGroupActions}
       </div>
     );
 

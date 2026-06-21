@@ -234,15 +234,28 @@ export const buildChatRenderItems = (
       const prevIsAssistant = items.length > 0 && items[items.length - 1].kind === 'assistant'
       const turnAlreadyHasLabel = hasAssistantItemInCurrentTurn(items)
 
+      // When this grouped tool activity is the tail of an assistant turn
+      // (followed by a user row, or the end of a settled session), it owns the
+      // copy/branch controls for the turn — mirroring a trailing text run.
+      // Otherwise the controls would vanish whenever a turn ends on a tool call.
+      const groupTailRow = visibleRows[visibleIndex]
+      const nextVisibleRow = visibleRows[visibleIndex + 1]
+      const nextVisibleKind = nextVisibleRow?.kind ?? null
+      const isTurnTail =
+        !isGroupStreaming &&
+        (nextVisibleKind === 'user' || (!nextVisibleRow && !isThinking))
+
       items.push({
         id: groupFirstId,
         kind: 'assistant',
         estimatedHeight: 48 + seamlessGroupMessageIds.length * 22,
         mergeWithPreviousAssistant: prevIsAssistant,
         showAssistantRoleLabel: !turnAlreadyHasLabel,
-        showAssistantGroupCopy: false,
-        assistantGroupMessageIds: [],
-        assistantGroupBranchMessageId: null,
+        showAssistantGroupCopy: isTurnTail,
+        assistantGroupMessageIds: isTurnTail ? [...seamlessGroupMessageIds] : [],
+        assistantGroupBranchMessageId: isTurnTail
+          ? (groupTailRow?.id ?? null)
+          : null,
         seamlessGroupMessageIds,
         seamlessGroupStreaming: isGroupStreaming,
       })
