@@ -8,10 +8,16 @@
 
 .panel-chat {
   --panel-find-offset-top: calc(var(--panel-tab-header-height) + 8px);
+  --chat-footer-profile-selector-width: 160px;
+  --chat-footer-actions-width: 99px;
+  --chat-footer-group-gap: 8px;
+  --chat-footer-content-min-width: 291px;
+  --chat-panel-min-width: 292px;
   background: var(--panel-bg);
   border-right: 1px solid var(--border);
   position: relative;
   z-index: 1; /* Lower than settings/connections */
+  min-width: var(--chat-panel-min-width);
 }
 
 .panel-chat:focus {
@@ -630,6 +636,8 @@ body.chat-drag-selection-suppressed * {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--chat-footer-group-gap);
+  min-width: var(--chat-footer-content-min-width);
   padding: 4px 12px 8px 12px;
   border-top: 1px solid color-mix(in srgb, var(--fg) 5%, transparent);
 }
@@ -639,6 +647,7 @@ body.chat-drag-selection-suppressed * {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex: 0 0 auto;
 }
 
 .token-progress-bar {
@@ -693,9 +702,10 @@ body.chat-drag-selection-suppressed * {
   border-radius: 2px;
   background: transparent;
   cursor: pointer;
-  max-width: 160px;
-  width: auto;
-  flex: 0 0 auto;
+  width: var(--chat-footer-profile-selector-width);
+  min-width: var(--chat-footer-profile-selector-width);
+  max-width: var(--chat-footer-profile-selector-width);
+  flex: 0 0 var(--chat-footer-profile-selector-width);
 }
 
 .chat-profile-selector:hover {
@@ -748,22 +758,44 @@ body.chat-drag-selection-suppressed * {
   display: block;
 }
 
+.chat-profile-selector .win-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-profile-selector .win-select-trigger {
+  width: 100%;
+  max-width: 100%;
+}
+
+.chat-profile-selector .win-select-label {
+  display: block;
+  flex: 1 1 auto;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .input-actions {
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
   gap: 8px !important;
+  flex: 0 0 var(--chat-footer-actions-width);
+  min-width: var(--chat-footer-actions-width);
 }
 
 .input-actions-static {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
 }
 
 .input-actions-runtime {
   width: 63px; /* 1.5x of 42px action width */
   min-width: 63px;
+  flex: 0 0 63px;
   display: inline-flex;
   align-items: center;
   justify-content: stretch;

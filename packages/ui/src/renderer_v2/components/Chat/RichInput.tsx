@@ -65,6 +65,40 @@ type RichMentionItem = {
   preview?: string;
 };
 
+const MENTION_DISPLAY_CHAR_LIMIT = 18;
+
+const truncateMentionDisplayText = (value: string): string => {
+  const text = String(value || "");
+  const chars = Array.from(text);
+  if (chars.length <= MENTION_DISPLAY_CHAR_LIMIT) {
+    return text;
+  }
+  return `${chars.slice(0, MENTION_DISPLAY_CHAR_LIMIT).join("")}...`;
+};
+
+const escapeHtml = (value: string): string =>
+  String(value || "").replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return char;
+    }
+  });
+
+const setMentionDisplayText = (span: HTMLElement, rawText: string): void => {
+  span.textContent = truncateMentionDisplayText(rawText);
+  span.title = rawText;
+};
+
 export const RichInput = observer(
   forwardRef<RichInputHandle, RichInputProps>(
     ({ store, placeholder, onSend, onInput, disabled }, ref) => {
@@ -309,9 +343,22 @@ export const RichInput = observer(
 
       const buildMentionHtml = (item: RichMentionItem, uid: string): string => {
         const fileName = getFileMentionDisplayName(item.name) || item.name;
-        const displayText =
+        const rawDisplayText =
           item.type === "file" ? item.preview || fileName : `@${item.name}`;
-        return `<span class="mention-tag" contenteditable="false" data-insert-id="${uid}" data-type="${item.type}" data-name="${item.name}" ${item.id ? `data-id="${item.id}"` : ""} ${item.preview ? `data-preview="${item.preview}"` : ""}>${displayText}</span>${cursorMarker}`;
+        const displayText = truncateMentionDisplayText(rawDisplayText);
+        const attributes = [
+          `class="mention-tag"`,
+          `contenteditable="false"`,
+          `title="${escapeHtml(rawDisplayText)}"`,
+          `data-insert-id="${escapeHtml(uid)}"`,
+          `data-type="${escapeHtml(item.type)}"`,
+          `data-name="${escapeHtml(item.name)}"`,
+          item.id ? `data-id="${escapeHtml(item.id)}"` : "",
+          item.preview ? `data-preview="${escapeHtml(item.preview)}"` : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return `<span ${attributes}>${escapeHtml(displayText)}</span>${cursorMarker}`;
       };
 
       const setSelectionRange = (range: Range) => {
@@ -464,7 +511,7 @@ export const RichInput = observer(
                 span.contentEditable = "false";
                 span.dataset.type = "skill";
                 span.dataset.name = skillMatch[1];
-                span.textContent = `@${skillMatch[1]}`;
+                setMentionDisplayText(span, `@${skillMatch[1]}`);
                 editorRef.current?.appendChild(span);
               } else if (terminalMatch) {
                 const span = document.createElement("span");
@@ -473,7 +520,7 @@ export const RichInput = observer(
                 span.dataset.type = "terminal";
                 span.dataset.name = terminalMatch[1];
                 span.dataset.id = terminalMatch[2];
-                span.textContent = `@${terminalMatch[1]}`;
+                setMentionDisplayText(span, `@${terminalMatch[1]}`);
                 editorRef.current?.appendChild(span);
               } else if (part.match(/\[MENTION_FILE:#(.+?)#\]/)) {
                 const fileMatch = part.match(/\[MENTION_FILE:#(.+?)#\]/);
@@ -486,7 +533,7 @@ export const RichInput = observer(
                   // Extract only the file/folder name for display
                   const fileName =
                     getFileMentionDisplayName(fileMatch[1]) || fileMatch[1];
-                  span.textContent = fileName;
+                  setMentionDisplayText(span, fileName);
                   editorRef.current?.appendChild(span);
                 }
               } else if (part.match(/\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/)) {
@@ -503,7 +550,7 @@ export const RichInput = observer(
                     imageMatch[2] ||
                     getFileMentionDisplayName(imageMatch[1]) ||
                     imageMatch[1];
-                  span.textContent = imageName;
+                  setMentionDisplayText(span, imageName);
                   editorRef.current?.appendChild(span);
                 }
               } else if (part) {
@@ -541,7 +588,7 @@ export const RichInput = observer(
                 span.contentEditable = "false";
                 span.dataset.type = "skill";
                 span.dataset.name = skillMatch[1];
-                span.textContent = `@${skillMatch[1]}`;
+                setMentionDisplayText(span, `@${skillMatch[1]}`);
                 editorRef.current?.appendChild(span);
               } else if (terminalMatch) {
                 const span = document.createElement("span");
@@ -550,7 +597,7 @@ export const RichInput = observer(
                 span.dataset.type = "terminal";
                 span.dataset.name = terminalMatch[1];
                 span.dataset.id = terminalMatch[2];
-                span.textContent = `@${terminalMatch[1]}`;
+                setMentionDisplayText(span, `@${terminalMatch[1]}`);
                 editorRef.current?.appendChild(span);
               } else if (part.match(/\[MENTION_FILE:#(.+?)#\]/)) {
                 const fileMatch = part.match(/\[MENTION_FILE:#(.+?)#\]/);
@@ -562,7 +609,7 @@ export const RichInput = observer(
                   span.dataset.name = fileMatch[1];
                   const fileName =
                     getFileMentionDisplayName(fileMatch[1]) || fileMatch[1];
-                  span.textContent = fileName;
+                  setMentionDisplayText(span, fileName);
                   editorRef.current?.appendChild(span);
                 }
               } else if (part.match(/\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/)) {
@@ -579,7 +626,7 @@ export const RichInput = observer(
                     imageMatch[2] ||
                     getFileMentionDisplayName(imageMatch[1]) ||
                     imageMatch[1];
-                  span.textContent = imageName;
+                  setMentionDisplayText(span, imageName);
                   editorRef.current?.appendChild(span);
                 }
               } else if (part) {

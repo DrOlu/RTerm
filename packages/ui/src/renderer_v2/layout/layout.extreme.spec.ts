@@ -1,4 +1,5 @@
 import {
+  CHAT_PANEL_MIN_WIDTH_PX,
   MAX_LAYOUT_PANELS,
   MAX_LAYOUT_SPLIT_CHILDREN,
   clampSplitSizesToChildMinSizePercentages,
@@ -196,8 +197,9 @@ runCase('validateLayoutTree enforces per-panel minimum width', () => {
   assertCondition(Boolean(result.reason?.startsWith('panel-width-limit:')), 'width limit reason should be reported')
 })
 
-runCase('panel minimum sizes remain per-kind and use the reduced thresholds', () => {
-  assertEqual(getPanelMinWidthPx('chat'), 140, 'chat min width should use per-kind reduced threshold')
+runCase('panel minimum sizes remain per-kind', () => {
+  assertEqual(CHAT_PANEL_MIN_WIDTH_PX, 292, 'chat composer footer minimum width should stay explicit')
+  assertEqual(getPanelMinWidthPx('chat'), CHAT_PANEL_MIN_WIDTH_PX, 'chat min width should fit composer footer controls')
   assertEqual(getPanelMinWidthPx('terminal'), 160, 'terminal min width should use per-kind reduced threshold')
   assertEqual(getPanelMinWidthPx('monitor'), 170, 'monitor min width should use per-kind reduced threshold')
   assertEqual(getPanelMinHeightPx('terminal', 900), 90, 'terminal min height should use per-kind reduced threshold')
