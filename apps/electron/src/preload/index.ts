@@ -414,6 +414,7 @@ export interface GyShellAPI {
       payload: SaveImageAttachmentPayload,
     ) => Promise<InputImageAttachment>;
     getPathForFile: (file: File) => string;
+    startFileDrag: (filePaths: string[]) => void;
   };
   gateway: {
     isSameMachine: () => Promise<{ sameMachine: boolean }>;
@@ -754,6 +755,16 @@ const api: GyShellAPI = {
       } catch {
         return "";
       }
+    },
+    startFileDrag: (filePaths: string[]) => {
+      const paths = Array.isArray(filePaths)
+        ? filePaths.filter(
+            (path): path is string =>
+              typeof path === "string" && path.length > 0,
+          )
+        : [];
+      if (paths.length === 0) return;
+      ipcRenderer.send("system:startFileDrag", paths);
     },
   },
   gateway: {

@@ -585,6 +585,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
     const activeTab =
       tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null;
     const activeTerminalId = activeTab?.id || null;
+    const isActiveTerminalLocal = activeTab?.config?.type === "local";
     const activeState = activeTerminalId
       ? stateByTabId[activeTerminalId] || createInitialTabState()
       : createInitialTabState();
@@ -1950,6 +1951,27 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
         if (!activeTerminalId || !event.dataTransfer) return;
         const dragEntries = resolveDragEntries(entry);
         if (dragEntries.length <= 0) return;
+
+        // Local entries map to real on-disk absolute paths, so we hand the drag
+        // over to Electron's native drag-out (Finder/desktop/other apps). All
+        // in-app drop targets already accept native local paths, so internal
+        // drops keep working through the native file payload.
+        if (isActiveTerminalLocal) {
+          const nativePaths = dragEntries
+            .map((item) => item.path)
+            .filter(
+              (path): path is string =>
+                typeof path === "string" && path.length > 0,
+            );
+          if (nativePaths.length > 0) {
+            event.preventDefault();
+            window.gyshell?.system?.startFileDrag?.(nativePaths);
+            return;
+          }
+        }
+
+        // Remote (SSH) entries: keep the in-app payload only; their bytes are not
+        // on this machine, so native drag-out is not possible here.
         const payload = {
           version: 1 as const,
           sourceTerminalId: activeTerminalId,
@@ -1969,7 +1991,12 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
         );
         event.dataTransfer.effectAllowed = "copyMove";
       },
-      [activeState.currentPath, activeTerminalId, resolveDragEntries],
+      [
+        activeState.currentPath,
+        activeTerminalId,
+        isActiveTerminalLocal,
+        resolveDragEntries,
+      ],
     );
 
     const handlePanelKeyDown = React.useCallback(

@@ -1,4 +1,5 @@
-import { ipcMain, shell, Menu, BrowserWindow } from "electron";
+import { ipcMain, shell, Menu, BrowserWindow, app, nativeImage } from "electron";
+import type { NativeImage } from "electron";
 import type {
   StartTaskOptions,
   StartTaskInput,
@@ -43,6 +44,35 @@ type AccessTokenRuntime = {
     name: string,
   ) => Promise<{ id: string; name: string; createdAt: number; token: string }>;
   deleteToken: (id: string) => Promise<boolean>;
+};
+
+const FALLBACK_DRAG_ICON_SIZE = 32;
+
+/**
+ * macOS requires `webContents.startDrag` to receive a non-empty icon. We prefer the
+ * real OS file icon (via `app.getFileIcon`), and fall back to a neutral square so the
+ * drag never throws when the icon cannot be resolved.
+ */
+const createFallbackDragIcon = (): NativeImage => {
+  const side = FALLBACK_DRAG_ICON_SIZE;
+  const bitmap = Buffer.alloc(side * side * 4);
+  for (let offset = 0; offset < bitmap.length; offset += 4) {
+    bitmap[offset] = 0x8a; // B
+    bitmap[offset + 1] = 0x8a; // G
+    bitmap[offset + 2] = 0x8a; // R
+    bitmap[offset + 3] = 0xff; // A
+  }
+  return nativeImage.createFromBitmap(bitmap, { width: side, height: side });
+};
+
+const resolveDragIcon = async (filePath: string): Promise<NativeImage> => {
+  try {
+    const icon = await app.getFileIcon(filePath, { size: "normal" });
+    if (icon && !icon.isEmpty()) return icon;
+  } catch {
+    // fall through to the neutral fallback icon below
+  }
+  return createFallbackDragIcon();
 };
 
 export class ElectronGatewayIpcAdapter {
@@ -296,6 +326,35 @@ export class ElectronGatewayIpcAdapter {
         await shell.openExternal(url);
       }
     });
+
+    // Native drag-out: hand local on-disk files to the OS (Finder/desktop/other apps).
+    // The renderer only sends real local absolute paths (local terminals); remote
+    // entries are never routed here since their bytes are not on this machine.
+    ipcMain.on(
+      "system:startFileDrag",
+      async (event: any, filePaths: unknown) => {
+        const paths = Array.isArray(filePaths)
+          ? filePaths.filter(
+              (path): path is string =>
+                typeof path === "string" && path.trim().length > 0,
+            )
+          : [];
+        if (paths.length === 0) return;
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (!win || win.isDestroyed()) return;
+        const icon = await resolveDragIcon(paths[0]);
+        if (win.isDestroyed()) return;
+        try {
+          win.webContents.startDrag({
+            file: paths[0],
+            ...(paths.length > 1 ? { files: paths } : {}),
+            icon,
+          });
+        } catch (error) {
+          console.error("[system:startFileDrag] failed to start drag:", error);
+        }
+      },
+    );
 
     ipcMain.handle("gateway:isSameMachine", async () => {
       return { sameMachine: true };
