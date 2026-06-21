@@ -110,18 +110,14 @@
 
   .mention-tag {
     display: inline;
-    background: linear-gradient(
-      to top,
-      color-mix(in srgb, var(--accent-2) 26%, transparent) 0 58%,
-      transparent 58% 100%
-    );
+    background: color-mix(in srgb, var(--accent-2) 24%, transparent);
     color: var(--fg);
-    padding: 0 0.22em;
-    border-radius: 3px;
+    padding: 0.02em 0.24em;
+    border-radius: 4px;
     margin: 0 2px;
     font-weight: 700;
     font-family: var(--font-mono);
-    border-bottom: 1px solid
+    border: 1px solid
       color-mix(in srgb, var(--accent-2) 42%, transparent);
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
