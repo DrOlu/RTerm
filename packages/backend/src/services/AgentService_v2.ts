@@ -52,6 +52,15 @@ import {
   captureRawResponseChunk,
 } from "./AgentHelper/utils/raw_response";
 import {
+  EMPTY_MALFORMED_TOOL_CALL_FINISH_KEY,
+  SKIPPED_EMPTY_GENERIC_CHUNKS_KEY,
+  appendStreamedModelResponseChunk,
+  extractStreamedResponseUsage,
+  getStreamedResponseModelName,
+  hasEmptyMalformedToolCallFinishFlag,
+  isEmptyMalformedToolCallFinish,
+} from "./AgentHelper/utils/streamed_model_response";
+import {
   buildDynamicRequestHistory,
   invokeWithRetryAndSanitizedInput,
   sanitizeStoredMessagesForChatRuntime,
@@ -364,6 +373,7 @@ export class AgentService_v2 {
         "file_tools",
         "read_file",
         "mcp_tools",
+        "token_pruner_runtime",
         "task_completion_guard",
         "final_output",
       ],
@@ -878,6 +888,7 @@ export class AgentService_v2 {
           });
 
           let response: any = null;
+          let skippedEmptyGenericChunks = 0;
           const streamReasoningExtractor = createStreamReasoningExtractor();
           const attemptDebugRawChunks: any[] = [];
           let activeReasoningBannerId: string | null = null;
@@ -921,7 +932,15 @@ export class AgentService_v2 {
                 chunk as any,
                 rawChunk,
               );
-              response = response ? response.concat(chunk) : chunk;
+              const appendResult = appendStreamedModelResponseChunk(
+                response,
+                chunk,
+                rawChunk,
+              );
+              response = appendResult.response;
+              if (appendResult.skippedEmptyGenericChunk) {
+                skippedEmptyGenericChunks += 1;
+              }
               const rawDelta = this.helpers.extractText(chunk.content);
               if (rawDelta) {
                 partialText += rawDelta;
@@ -965,7 +984,54 @@ export class AgentService_v2 {
             }
             throw err;
           }
+          if (!response) {
+            throw new Error("Model stream ended without a usable response.");
+          }
+          if (skippedEmptyGenericChunks > 0) {
+            response.additional_kwargs = {
+              ...(response.additional_kwargs || {}),
+              [SKIPPED_EMPTY_GENERIC_CHUNKS_KEY]: skippedEmptyGenericChunks,
+            };
+          }
           reasoningContent = streamReasoningExtractor.getReasoningContent();
+
+          if (
+            isEmptyMalformedToolCallFinish(response, attemptDebugRawChunks) &&
+            typeof (modelWithTools as any).invoke === "function"
+          ) {
+            console.warn(
+              `[AgentService_v2] Stream ended with malformed empty tool-call finish; retrying same request with non-stream invoke (sessionId=${sessionId}).`,
+            );
+            const invokeResponse = await modelWithTools.invoke(
+              streamInputMessages,
+              {
+                signal: config?.signal,
+              },
+            );
+            captureRawResponseChunk(
+              invokeResponse as any,
+              attemptDebugRawChunks,
+            );
+            if (
+              !isEmptyMalformedToolCallFinish(
+                invokeResponse,
+                attemptDebugRawChunks,
+              )
+            ) {
+              const invokeText = this.helpers.extractText(
+                invokeResponse.content,
+              );
+              if (invokeText) {
+                this.helpers.sendEvent(sessionId, {
+                  messageId,
+                  type: "say",
+                  content: invokeText,
+                });
+              }
+              response = invokeResponse;
+            }
+          }
+
           debugRawChunks = attemptDebugRawChunks;
           return response;
         },
@@ -988,6 +1054,17 @@ export class AgentService_v2 {
       if (reasoningContent) {
         fullResponse.additional_kwargs.reasoning_content = reasoningContent;
       }
+      const emptyMalformedToolCallFinish = isEmptyMalformedToolCallFinish(
+        fullResponse,
+        debugRawChunks,
+      );
+      if (emptyMalformedToolCallFinish) {
+        fullResponse.additional_kwargs = {
+          ...(fullResponse.additional_kwargs || {}),
+          [EMPTY_MALFORMED_TOOL_CALL_FINISH_KEY]: true,
+        };
+        this.helpers.markEphemeral(fullResponse);
+      }
       if (this.shouldKeepDebugPayloadInPersistence()) {
         const persistedRawResponse = buildDebugRawResponse(debugRawChunks);
         if (typeof persistedRawResponse !== "undefined") {
@@ -998,16 +1075,18 @@ export class AgentService_v2 {
       }
 
       // Extract usage metadata if available
-      const usage =
-        (fullResponse as any).usage_metadata ||
-        (fullResponse as any).additional_kwargs?.usage;
+      const usageInfo = extractStreamedResponseUsage(
+        fullResponse,
+        debugRawChunks,
+      );
       let currentTokens = state.token_state.current_tokens;
 
-      if (usage) {
-        currentTokens = usage.total_tokens || usage.totalTokens || 0;
+      if (usageInfo) {
+        currentTokens = usageInfo.totalTokens;
         const modelName =
-          (fullResponse as any).response_metadata?.model_name ||
+          getStreamedResponseModelName(fullResponse, debugRawChunks) ||
           (baseModel as any)?.modelName ||
+          (baseModel as any)?.model ||
           "unknown";
         this.helpers.sendEvent(sessionId, {
           type: "tokens_count",
@@ -1041,6 +1120,25 @@ export class AgentService_v2 {
       const lastMessage = messages[messages.length - 1];
 
       let pendingToolCalls: any[] = [];
+
+      if (
+        AIMessage.isInstance(lastMessage) &&
+        (hasEmptyMalformedToolCallFinishFlag(lastMessage) ||
+          isEmptyMalformedToolCallFinish(lastMessage, []))
+      ) {
+        this.helpers.sendEvent(sessionId, {
+          type: "alert",
+          message:
+            "The model ended with a tool-call finish signal but did not provide tool-call payload or assistant text. GyShell stopped this turn after a non-stream fallback also failed to produce a usable response.",
+          level: "warning",
+          messageId: `malformed-tool-call-finish-${uuidv4()}`,
+        });
+        return {
+          messages,
+          sessionId,
+          pendingToolCalls,
+        };
+      }
 
       if (!AIMessage.isInstance(lastMessage)) {
         return { messages, sessionId, pendingToolCalls };
@@ -2278,6 +2376,18 @@ export class AgentService_v2 {
       return "tools";
     }
 
+    const messages: BaseMessage[] = Array.isArray(state.messages)
+      ? state.messages
+      : [];
+    const lastMessage = messages[messages.length - 1];
+    if (
+      AIMessage.isInstance(lastMessage) &&
+      (hasEmptyMalformedToolCallFinishFlag(lastMessage) ||
+        isEmptyMalformedToolCallFinish(lastMessage, []))
+    ) {
+      return "final_output";
+    }
+
     if (state.taskFinishGuardEnabled !== false) {
       return "task_completion_guard";
     }
@@ -2636,7 +2746,7 @@ export class AgentService_v2 {
         });
         let response: any = null;
         for await (const chunk of stream) {
-          response = response ? response.concat(chunk) : chunk;
+          response = appendStreamedModelResponseChunk(response, chunk).response;
         }
 
         if (!response) {
