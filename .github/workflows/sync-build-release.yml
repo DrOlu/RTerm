@@ -377,6 +377,16 @@ jobs:
         run: |
           STATUS="✅ Released"
           if [ "${{ job.status }}" != "success" ]; then STATUS="❌ Failed"; fi
+          VERSION="${{ steps.version.outputs.version }}"
+          PAYLOAD=$(jq -nc \
+            --arg chat_id "$TELEGRAM_CHAT_ID" \
+            --arg text "${STATUS} *RTerm v${VERSION}*
+
+          Built from GyShell v${VERSION}.
+          All platforms: macOS, Windows, Linux (x64 + ARM64).
+
+          https://github.com/DrOlu/RTerm/releases/tag/v${VERSION}" \
+            '{chat_id:$chat_id,parse_mode:"Markdown",text:$text}')
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -H "Content-Type: application/json" \
-            -d "{"chat_id":"${TELEGRAM_CHAT_ID}","parse_mode":"Markdown","text":"${STATUS} *RTerm v${{ steps.version.outputs.version }}*\n\nBuilt from GyShell v${{ steps.version.outputs.version }}.\nAll platforms: macOS, Windows, Linux (x64 + ARM64).\n\nhttps://github.com/DrOlu/RTerm/releases/tag/v${{ steps.version.outputs.version }}"}" || true
+            -d "$PAYLOAD" || true
