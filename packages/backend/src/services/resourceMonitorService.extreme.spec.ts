@@ -129,6 +129,101 @@ const run = async (): Promise<void> => {
     assertEqual(snapshot.networkConnections?.[0]?.connectionCount, 1, 'listener should aggregate active connections')
   })
 
+  await runCase('linux ssh snapshot parses Enrigin ERSMI gpu telemetry', async () => {
+    const terminal = {
+      id: 'ssh-enrigin',
+      type: 'ssh',
+      title: 'enrigin-box',
+      remoteOs: 'unix',
+      systemInfo: {
+        platform: 'linux',
+        os: 'Ubuntu 22.04',
+        release: '6.5.0',
+        arch: 'x86_64',
+        hostname: 'enrigin-host',
+        isRemote: true,
+        shell: '/bin/bash',
+      },
+    }
+    const output = buildSectionedOutput({
+      system: [
+        'enrigin-host',
+        'Ubuntu 22.04.4 LTS',
+        '6.5.0-generic',
+        'x86_64',
+        '/bin/bash',
+      ].join('\n'),
+      cpu: [
+        'cpu  4705 0 4313 1362393 17 0 12 0 0 0',
+        'cpu0 2300 0 2100 680000 9 0 6 0 0 0',
+      ].join('\n'),
+      memory: [
+        'MemTotal:        16384000 kB',
+        'MemFree:          2048000 kB',
+        'MemAvailable:     8192000 kB',
+      ].join('\n'),
+      disks: [
+        'Filesystem     1024-blocks     Used Available Capacity Mounted on',
+        '/dev/sda1        20971520 10485760  10485760      50% /',
+      ].join('\n'),
+      gpu: [
+        '__GYSHELL_ENRIGIN_GPU_QUERY__',
+        'DEV ID 0',
+        '    Device Info',
+        '       Dev Name                  : D10',
+        '       Dev UUID                  : ECU-U53000080105',
+        '    Clock Info',
+        '       Mem CLK                   : 6400 MHz',
+        '    Power Info',
+        '       En Power Capa             : 85 W',
+        '       Cur Power                 : 35 W',
+        '       Dpm Level                 : Active',
+        '    Device Mem Info',
+        '       Mem Size                  : 42976 MiB',
+        '       Mem Usage                 : 1031 MiB',
+        '    Temperature Info',
+        '       ECU Temp                  : 39 C',
+        '    Process Info',
+        '       1234   python   512   1   2   Active   3   4096   1500',
+        '__GYSHELL_ENRIGIN_GPU_DMON__',
+        '# Idx  Pwr   Temp   SIP   DUsed  ENC   DEC   MUsed  Mem     Dclk   Mclk   Volt',
+        '#  -    W     C      %     %      %     %     %      Mib     MHz    MHz    V',
+        '0      90    39     44.4  10.0   0.0   0.0   2.4    42976   1200   6400   0.812',
+        '1      55    41     70.0  12.0   0.0   0.0   12.5   16384   1100   5200   0.788',
+      ].join('\n'),
+      network: [
+        'Inter-|   Receive                                                |  Transmit',
+        ' face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed',
+        'eth0: 1048576 0 0 0 0 0 0 0 524288 0 0 0 0 0 0 0',
+      ].join('\n'),
+      load: '0.42 0.37 0.31 1/256 1234',
+      uptime: '3600.00 0.00',
+      processes: '',
+      sockets: '',
+    })
+
+    const service = createService(terminal, output)
+    const snapshot = await service.collectSnapshot('ssh-enrigin')
+
+    assertEqual(snapshot.gpus?.length, 2, 'linux should parse two Enrigin ECU devices')
+    assert(
+      !snapshot.gpus?.some((gpu) => gpu.name === 'Enrigin ECU 1234'),
+      'numeric rows inside the ERSMI query region must not leak into dmon devices'
+    )
+    assertEqual(snapshot.gpus?.[0]?.name, 'D10', 'ERSMI query should provide the ECU model name')
+    assertEqual(snapshot.gpus?.[0]?.utilizationPercent, 44.4, 'ERSMI SIP util should map to GPU utilization')
+    assertEqual(snapshot.gpus?.[0]?.memoryUsagePercent, 2.4, 'ERSMI dmon column 7 should map to VRAM usage percentage')
+    assertEqual(snapshot.gpus?.[0]?.memoryUsedMiB, 1031.4, 'ERSMI VRAM used should derive from percent × total')
+    assertEqual(snapshot.gpus?.[0]?.memoryTotalMiB, 42976, 'ERSMI dmon column 8 should map VRAM total to MiB')
+    assertEqual(snapshot.gpus?.[0]?.temperatureC, 39, 'ERSMI dmon temperature should parse')
+    assertEqual(snapshot.gpus?.[0]?.powerUsageWatts, 90, 'ERSMI dmon power should parse')
+    assertEqual(snapshot.gpus?.[0]?.powerLimitWatts, 85, 'ERSMI query power cap should parse')
+    assertEqual(snapshot.gpus?.[0]?.powerState, 'Active', 'ERSMI query DPM state should parse')
+    assertEqual(snapshot.gpus?.[0]?.memoryClockMHz, 6400, 'ERSMI dmon column 10 should map memory clock')
+    assertEqual(snapshot.gpus?.[1]?.name, 'Enrigin ECU 1', 'ERSMI dmon-only rows should get a stable fallback name')
+    assertEqual(snapshot.gpus?.[1]?.memoryUsedMiB, 2048, 'ERSMI dmon-only memory usage should derive used MiB')
+  })
+
   await runCase('darwin ssh snapshot parses vm_stat and lsof output', async () => {
     const terminal = {
       id: 'ssh-darwin',
@@ -316,6 +411,15 @@ const run = async (): Promise<void> => {
       'linux command should export utf-8 locale before sampling'
     )
     assert(
+      linuxCommand.includes('nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,utilization.memory,temperature.gpu'),
+      'linux command should retain nvidia-smi telemetry collection'
+    )
+    assert(
+      linuxCommand.includes('ersmi -dmon -c 1') &&
+        linuxCommand.includes('sudo -n ersmi'),
+      'linux command should collect Enrigin ERSMI telemetry with non-interactive sudo fallback'
+    )
+    assert(
       darwinCommand.includes("LC_ALL='en_US.UTF-8'; LANG='en_US.UTF-8'; export LC_ALL LANG"),
       'darwin command should export utf-8 locale before sampling'
     )
@@ -477,6 +581,34 @@ const run = async (): Promise<void> => {
     assertEqual(snapshot.networkConnections?.[0]?.localPort, 22, 'windows socket should aggregate by local port')
     assertEqual(snapshot.networkConnections?.[0]?.remoteHostCount, 1, 'windows listener should track unique remote hosts')
     assertEqual(snapshot.networkConnections?.[0]?.connectionCount, 1, 'windows listener should track connection count')
+  })
+
+  await runCase('windows single-resource payloads serialized as objects are coerced to arrays', async () => {
+    const terminal = {
+      id: 'ssh-win-single',
+      type: 'ssh',
+      title: 'win-single',
+      remoteOs: 'windows',
+    }
+    // PowerShell's ConvertTo-Json emits single-item collections as bare objects
+    // (no surrounding array). A single-GPU host must still surface its GPU.
+    const output = JSON.stringify({
+      system: { hostname: 'solo-win', osName: 'Windows 11', shell: 'powershell.exe' },
+      cpu: { usagePercent: 10, corePercents: [10], logicalCoreCount: 1 },
+      memory: { totalBytes: 8589934592, usedBytes: 4294967296, usagePercent: 50 },
+      d: { filesystem: 'NTFS', mountPoint: 'C:\\', totalBytes: 1024, usedBytes: 512, usagePercent: 50 },
+      g: { n: 'NVIDIA RTX 4090', u: 42, m: 4096, t: 16384, p: 25, tc: 60 },
+      n: { interface: 'Ethernet0', rxBytesPerSec: 100, txBytesPerSec: 50 },
+      uptimeSeconds: 3600,
+    })
+
+    const service = createService(terminal, output)
+    const snapshot = await service.collectSnapshot('ssh-win-single')
+
+    assertEqual(snapshot.gpus?.length, 1, 'single windows GPU object should be coerced into a one-item array')
+    assertEqual(snapshot.gpus?.[0]?.name, 'NVIDIA RTX 4090', 'single windows GPU name should parse')
+    assertEqual(snapshot.disks?.length, 1, 'single windows disk object should be coerced into a one-item array')
+    assertEqual(snapshot.network?.length, 1, 'single windows interface object should be coerced into a one-item array')
   })
 
   await runCase('windows monitor launcher keeps the payload plain and unobfuscated', async () => {

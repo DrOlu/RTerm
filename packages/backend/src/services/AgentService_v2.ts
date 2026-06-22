@@ -232,17 +232,15 @@ export class AgentService_v2 {
   private queuedInsertionProvider: QueuedAgentInsertionProvider | null = null;
   private queuedInsertionAcknowledger: QueuedAgentInsertionAcknowledger | null =
     null;
-  private queuedInsertionAvailabilityWaiter:
-    | QueuedAgentInsertionAvailabilityWaiter
-    | null = null;
+  private queuedInsertionAvailabilityWaiter: QueuedAgentInsertionAvailabilityWaiter | null =
+    null;
   private queuedInsertionEnqueuer: QueuedAgentInsertionEnqueuer | null = null;
   private backgroundExecCommandRegistrar: RunBackgroundExecCommandRegistrar | null =
     null;
   private backgroundExecCommandCompleter: RunBackgroundExecCommandCompleter | null =
     null;
-  private unfinishedBackgroundExecCommandProvider:
-    | UnfinishedRunBackgroundExecCommandProvider
-    | null = null;
+  private unfinishedBackgroundExecCommandProvider: UnfinishedRunBackgroundExecCommandProvider | null =
+    null;
   private imageAttachmentService: ImageAttachmentService | null = null;
   private activeAgentRunIdsBySession: Map<string, string> = new Map();
 
@@ -1695,7 +1693,9 @@ export class AgentService_v2 {
       const lastMessage = messages[messages.length - 1];
       const lastMessageIsAi = AIMessage.isInstance(lastMessage);
       const guardMessages =
-        lastMessageIsAi || messages.length === 0 ? messages : messages.slice(0, -1);
+        lastMessageIsAi || messages.length === 0
+          ? messages
+          : messages.slice(0, -1);
 
       if (!lastMessageIsAi && lastMessage) {
         console.warn(
@@ -2926,9 +2926,8 @@ export class AgentService_v2 {
     // }
 
     let storedMessages = mapChatMessagesToStoredMessages(persisted) as any[];
-    const sanitizedStoredMessages = sanitizeStoredMessagesForChatRuntime(
-      storedMessages,
-    );
+    const sanitizedStoredMessages =
+      sanitizeStoredMessagesForChatRuntime(storedMessages);
     if (sanitizedStoredMessages.removedCount > 0) {
       console.warn(
         `[AgentService_v2] Dropped ${sanitizedStoredMessages.removedCount} invalid stored message(s) before history persistence.`,
@@ -2993,6 +2992,165 @@ export class AgentService_v2 {
     return this.chatHistoryService.exportSession(sessionId);
   }
 
+  private findStoredMessageIndex(
+    entries: Array<[string, any]>,
+    messageId: string,
+  ): number {
+    return entries.findIndex(([id, msg]) => {
+      if (id === messageId) return true;
+      const storedId = (msg as any)?.data?.additional_kwargs?._gyshellMessageId;
+      return storedId === messageId;
+    });
+  }
+
+  private buildBranchTitle(sourceTitle: string): string {
+    const normalized = String(sourceTitle || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return normalized ? `${normalized}_branch` : "Branch";
+  }
+
+  private resolveBranchSourceTitle(
+    sourceSessionId: string,
+    fallbackTitle: string,
+  ): string {
+    const uiTitle = this.uiHistoryService.getSession(sourceSessionId)?.title;
+    const normalizedUiTitle = String(uiTitle || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (normalizedUiTitle) {
+      return normalizedUiTitle;
+    }
+    return fallbackTitle;
+  }
+
+  private prepareMessagesBeforeCutIndex(
+    entries: Array<[string, any]>,
+    cutIndex: number,
+    sessionId: string,
+  ): BaseMessage[] {
+    const keptMessages = entries.slice(0, cutIndex).map(([, msg]) => msg);
+    const sanitizedKeptStoredMessages = sanitizeStoredMessagesForChatRuntime(
+      keptMessages as any[],
+    );
+    if (sanitizedKeptStoredMessages.removedCount > 0) {
+      console.warn(
+        `[AgentService_v2] Dropped ${sanitizedKeptStoredMessages.removedCount} invalid stored message(s) while preparing branch/rollback history (sessionId=${sessionId}).`,
+      );
+    }
+    const chatMessages = mapStoredMessagesToChatMessages(
+      sanitizedKeptStoredMessages.messages as any[],
+    );
+    return sanitizeCompressionAfterRollback(chatMessages, {
+      pruneToolWindow: 10,
+      protectedNormalRounds: COMPACTION_PROTECTED_NORMAL_USER_ROUNDS,
+    }).messages;
+  }
+
+  private findUiAnchoredBranchCutIndex(
+    entries: Array<[string, any]>,
+    sourceSessionId: string,
+    messageId: string,
+  ): number | null {
+    const uiMessages = this.uiHistoryService.getMessages(sourceSessionId);
+    const targetUiIndex = uiMessages.findIndex(
+      (message) => message.backendMessageId === messageId,
+    );
+    if (targetUiIndex === -1) {
+      return null;
+    }
+
+    const agentIndexByMessageId = new Map<string, number>();
+    entries.forEach(([id, msg], index) => {
+      agentIndexByMessageId.set(id, index);
+      const storedId = (msg as any)?.data?.additional_kwargs?._gyshellMessageId;
+      if (typeof storedId === "string" && storedId.length > 0) {
+        agentIndexByMessageId.set(storedId, index);
+      }
+    });
+
+    for (let index = targetUiIndex - 1; index >= 0; index -= 1) {
+      const backendMessageId = uiMessages[index]?.backendMessageId;
+      if (!backendMessageId) continue;
+      const agentIndex = agentIndexByMessageId.get(backendMessageId);
+      if (typeof agentIndex === "number") {
+        return agentIndex + 1;
+      }
+    }
+
+    return 0;
+  }
+
+  branchFromMessage(
+    sourceSessionId: string,
+    messageId: string,
+    branchSessionId: string,
+  ): {
+    ok: boolean;
+    sessionId?: string;
+    title?: string;
+    messageCount?: number;
+    reason?: string;
+  } {
+    const sourceSession = this.chatHistoryService.loadSession(sourceSessionId);
+    if (!sourceSession) {
+      return { ok: false, reason: "Source session not found." };
+    }
+    const entries = Array.from(sourceSession.messages.entries());
+    const storedTargetIndex = this.findStoredMessageIndex(entries, messageId);
+    const branchCutIndex =
+      storedTargetIndex >= 0
+        ? storedTargetIndex + 1
+        : this.findUiAnchoredBranchCutIndex(
+            entries,
+            sourceSessionId,
+            messageId,
+          );
+    if (branchCutIndex === null) {
+      return { ok: false, reason: "Branch target message not found." };
+    }
+
+    const branchTitle = this.buildBranchTitle(
+      this.resolveBranchSourceTitle(sourceSessionId, sourceSession.title),
+    );
+    const branchMessages = this.prepareMessagesBeforeCutIndex(
+      entries,
+      branchCutIndex,
+      sourceSessionId,
+    );
+    const branchSession: ChatSession = {
+      id: branchSessionId,
+      title: branchTitle,
+      messages: new Map(),
+      lastCheckpointOffset: 0,
+      lastProfileMaxTokens: sourceSession.lastProfileMaxTokens,
+    };
+    this.updateSessionFromMessages(
+      branchSession,
+      branchMessages,
+      sourceSession.lastProfileMaxTokens,
+    );
+
+    this.chatHistoryService.saveSession(branchSession);
+    const uiBranch = this.uiHistoryService.branchFromMessage(
+      sourceSessionId,
+      branchSessionId,
+      messageId,
+      branchTitle,
+    );
+    if (!uiBranch.ok) {
+      this.chatHistoryService.deleteSession(branchSessionId);
+      return uiBranch;
+    }
+
+    return {
+      ok: true,
+      sessionId: branchSessionId,
+      title: branchTitle,
+      messageCount: uiBranch.messageCount ?? branchMessages.length,
+    };
+  }
+
   rollbackToMessage(
     sessionId: string,
     messageId: string,
@@ -3003,36 +3161,14 @@ export class AgentService_v2 {
     }
 
     const entries = Array.from(session.messages.entries());
-    const idx = entries.findIndex(([id, msg]) => {
-      if (id === messageId) return true;
-      const storedId = (msg as any)?.data?.additional_kwargs?._gyshellMessageId;
-      return storedId === messageId;
-    });
+    const idx = this.findStoredMessageIndex(entries, messageId);
     if (idx === -1) {
       return { ok: false, removedCount: 0 };
     }
 
-    const kept = entries.slice(0, idx);
-    const keptStoredMessages = kept.map(([, msg]) => msg);
-    const sanitizedKeptStoredMessages = sanitizeStoredMessagesForChatRuntime(
-      keptStoredMessages as any[],
-    );
-    if (sanitizedKeptStoredMessages.removedCount > 0) {
-      console.warn(
-        `[AgentService_v2] Dropped ${sanitizedKeptStoredMessages.removedCount} invalid stored message(s) while preparing rollback history (sessionId=${sessionId}).`,
-      );
-    }
-    const keptMessages = mapStoredMessagesToChatMessages(
-      sanitizedKeptStoredMessages.messages as any[],
-    );
-    const rollbackSanitized = sanitizeCompressionAfterRollback(keptMessages, {
-      pruneToolWindow: 10,
-      protectedNormalRounds: COMPACTION_PROTECTED_NORMAL_USER_ROUNDS,
-    });
-
     this.updateSessionFromMessages(
       session,
-      rollbackSanitized.messages,
+      this.prepareMessagesBeforeCutIndex(entries, idx, sessionId),
       session.lastProfileMaxTokens,
     );
     this.chatHistoryService.saveSession(session);

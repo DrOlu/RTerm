@@ -1,6 +1,8 @@
 import {
+  CHAT_PANEL_MIN_WIDTH_PX,
   MAX_LAYOUT_PANELS,
   MAX_LAYOUT_SPLIT_CHILDREN,
+  clampSplitSizesToChildMinSizePercentages,
   computeChildMinSizePercentages,
   determineDropDirection,
   getPanelMinHeightPx,
@@ -168,6 +170,14 @@ runCase('computeChildMinSizePercentages reflects chat minimum height requirement
   assertCondition(percentages[0] > percentages[1], 'chat min percentage should exceed terminal in this viewport')
 })
 
+runCase('clampSplitSizesToChildMinSizePercentages keeps resize sizes above child minimums', () => {
+  const sizes = clampSplitSizesToChildMinSizePercentages([1, 99], [33.333333, 7.5])
+  const total = sizes.reduce((sum, size) => sum + size, 0)
+  assertCondition(Math.abs(total - 100) < 0.001, 'clamped sizes should still sum to ~100')
+  assertCondition(sizes[0] >= 33.333333 - 0.001, 'first child should be clamped to its minimum')
+  assertCondition(sizes[1] <= 66.666667 + 0.001, 'second child should give up overflow space')
+})
+
 runCase('validateLayoutTree enforces per-panel minimum width', () => {
   const tree: LayoutTree = {
     schemaVersion: 2,
@@ -187,8 +197,9 @@ runCase('validateLayoutTree enforces per-panel minimum width', () => {
   assertCondition(Boolean(result.reason?.startsWith('panel-width-limit:')), 'width limit reason should be reported')
 })
 
-runCase('panel minimum sizes remain per-kind and use the reduced thresholds', () => {
-  assertEqual(getPanelMinWidthPx('chat'), 140, 'chat min width should use per-kind reduced threshold')
+runCase('panel minimum sizes remain per-kind', () => {
+  assertEqual(CHAT_PANEL_MIN_WIDTH_PX, 292, 'chat composer footer minimum width should stay explicit')
+  assertEqual(getPanelMinWidthPx('chat'), CHAT_PANEL_MIN_WIDTH_PX, 'chat min width should fit composer footer controls')
   assertEqual(getPanelMinWidthPx('terminal'), 160, 'terminal min width should use per-kind reduced threshold')
   assertEqual(getPanelMinWidthPx('monitor'), 170, 'monitor min width should use per-kind reduced threshold')
   assertEqual(getPanelMinHeightPx('terminal', 900), 90, 'terminal min height should use per-kind reduced threshold')

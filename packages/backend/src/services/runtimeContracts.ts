@@ -127,18 +127,14 @@ export interface IAgentRuntime {
   setFeedbackWaiter(
     waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>,
   ): void;
-  setQueuedInsertionProvider?(
-    provider: QueuedAgentInsertionProvider,
-  ): void;
+  setQueuedInsertionProvider?(provider: QueuedAgentInsertionProvider): void;
   setQueuedInsertionAcknowledger?(
     acknowledger: QueuedAgentInsertionAcknowledger,
   ): void;
   setQueuedInsertionAvailabilityWaiter?(
     waiter: QueuedAgentInsertionAvailabilityWaiter,
   ): void;
-  setQueuedInsertionEnqueuer?(
-    enqueuer: QueuedAgentInsertionEnqueuer,
-  ): void;
+  setQueuedInsertionEnqueuer?(enqueuer: QueuedAgentInsertionEnqueuer): void;
   setBackgroundExecCommandRegistrar?(
     registrar: RunBackgroundExecCommandRegistrar,
   ): void;
@@ -167,4 +163,15 @@ export interface IAgentRuntime {
     sessionId: string,
     messageId: string,
   ): { ok: boolean; removedCount: number };
+  branchFromMessage(
+    sourceSessionId: string,
+    messageId: string,
+    branchSessionId: string,
+  ): {
+    ok: boolean;
+    sessionId?: string;
+    title?: string;
+    messageCount?: number;
+    reason?: string;
+  };
 }

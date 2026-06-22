@@ -15,8 +15,25 @@ import {
 } from './types'
 import { getPanelCount, normalizeSizes } from './tree'
 
+const CHAT_FOOTER_HORIZONTAL_PADDING_PX = 24
+const CHAT_FOOTER_PROFILE_SELECTOR_WIDTH_PX = 160
+const CHAT_FOOTER_GROUP_GAP_PX = 8
+const CHAT_FOOTER_QUEUE_BUTTON_WIDTH_PX = 28
+const CHAT_FOOTER_ACTIONS_GAP_PX = 8
+const CHAT_FOOTER_RUNTIME_ACTIONS_WIDTH_PX = 63
+const CHAT_PANEL_BORDER_WIDTH_PX = 1
+
+export const CHAT_PANEL_MIN_WIDTH_PX =
+  CHAT_FOOTER_HORIZONTAL_PADDING_PX +
+  CHAT_FOOTER_PROFILE_SELECTOR_WIDTH_PX +
+  CHAT_FOOTER_GROUP_GAP_PX +
+  CHAT_FOOTER_QUEUE_BUTTON_WIDTH_PX +
+  CHAT_FOOTER_ACTIONS_GAP_PX +
+  CHAT_FOOTER_RUNTIME_ACTIONS_WIDTH_PX +
+  CHAT_PANEL_BORDER_WIDTH_PX
+
 const PANEL_MIN_WIDTH_PX: Record<PanelKind, number> = {
-  chat: 140,
+  chat: CHAT_PANEL_MIN_WIDTH_PX,
   terminal: 160,
   filesystem: 160,
   fileEditor: 160,
@@ -29,6 +46,8 @@ const PANEL_MIN_HEIGHT_PX: Record<Exclude<PanelKind, 'chat'>, number> = {
   fileEditor: 90,
   monitor: 120
 }
+
+const MIN_SIZE_PERCENTAGE_EPSILON = 0.000001
 
 export interface LayoutGeometry {
   nodeRects: Record<string, LayoutRect>
@@ -253,6 +272,42 @@ export const computeChildMinSizePercentages = (
     const childMin = computeNodeMinSize(child, viewportHeight)
     const minPx = horizontal ? childMin.minWidthPx : childMin.minHeightPx
     return Math.max(0, (minPx / axisSize) * 100)
+  })
+}
+
+export const clampSplitSizesToChildMinSizePercentages = (
+  sizes: number[],
+  minPercentages: number[]
+): number[] => {
+  const count = minPercentages.length
+  if (count <= 0) return []
+
+  const normalized = normalizeSizes(sizes, count)
+  const minimums = minPercentages.map((percentage) => {
+    if (!Number.isFinite(percentage) || percentage <= 0) return 0
+    return Math.min(100, percentage + MIN_SIZE_PERCENTAGE_EPSILON)
+  })
+  const minTotal = minimums.reduce((sum, percentage) => sum + percentage, 0)
+  if (minTotal <= 0) return normalized
+
+  if (minTotal >= 100) {
+    return normalizeSizes(minimums, count)
+  }
+
+  const clamped = normalized.map((size, index) => Math.max(size, minimums[index] ?? 0))
+  const clampedTotal = clamped.reduce((sum, size) => sum + size, 0)
+  const overflow = clampedTotal - 100
+  if (overflow <= 0) return clamped
+
+  const flexibleAmounts = clamped.map((size, index) => Math.max(0, size - (minimums[index] ?? 0)))
+  const flexibleTotal = flexibleAmounts.reduce((sum, size) => sum + size, 0)
+  if (flexibleTotal <= 0) {
+    return normalizeSizes(clamped, count)
+  }
+
+  return clamped.map((size, index) => {
+    const reduction = overflow * (flexibleAmounts[index] / flexibleTotal)
+    return Math.max(minimums[index] ?? 0, size - reduction)
   })
 }
 

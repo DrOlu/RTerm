@@ -1,6 +1,6 @@
 import React from "react";
 import { observer } from "mobx-react-lite";
-import { Check, Copy, CornerUpLeft } from "lucide-react";
+import { Check, Copy, CornerUpLeft, GitBranch } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AppStore } from "../../stores/AppStore";
@@ -25,12 +25,14 @@ interface MessageRowProps {
   messageId: string;
   onAskDecision: (messageId: string, decision: "allow" | "deny") => void;
   onRollback: (msg: ChatMessage) => void;
+  onBranch: (msg: ChatMessage) => void;
   askLabels: { allow: string; deny: string; allowed: string; denied: string };
   isThinking: boolean;
   mergeWithPreviousAssistant?: boolean;
   showAssistantRoleLabel?: boolean;
   showAssistantGroupCopy?: boolean;
   assistantGroupMessageIds?: string[];
+  assistantGroupBranchMessageId?: string | null;
   // Seamless mode: when set, render a grouped tool-activity banner
   seamlessGroupMessageIds?: string[];
   bannerUiState?: ChatBannerUiState;
@@ -63,12 +65,14 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
     messageId,
     onAskDecision,
     onRollback,
+    onBranch,
     askLabels,
     isThinking,
     mergeWithPreviousAssistant = false,
     showAssistantRoleLabel = false,
     showAssistantGroupCopy = false,
     assistantGroupMessageIds = [],
+    assistantGroupBranchMessageId = null,
     seamlessGroupMessageIds,
     bannerUiState,
     onBannerUiStateChange,
@@ -141,6 +145,52 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
     );
 
     if (!session) return null;
+    const assistantGroupBranchMessage = assistantGroupBranchMessageId
+      ? session.messagesById.get(assistantGroupBranchMessageId)
+      : null;
+    const canBranchAssistantGroup =
+      shouldShowGroupCopy &&
+      !!assistantGroupBranchMessage &&
+      assistantGroupBranchMessage?.role !== "system" &&
+      !!assistantGroupBranchMessage.backendMessageId &&
+      !assistantGroupBranchMessage.streaming &&
+      !isThinking;
+
+    // Shared copy/branch controls rendered at the tail of an assistant turn.
+    // Kept as a single element so both classic rows and seamless tool groups
+    // surface identical actions.
+    const assistantGroupActions =
+      shouldShowGroupCopy || canBranchAssistantGroup ? (
+        <div className="message-assistant-group-actions">
+          {shouldShowGroupCopy && (
+            <button
+              className="message-copy-btn message-assistant-copy-btn"
+              title="Copy assistant message group"
+              aria-label="Copy assistant message group"
+              onClick={() => {
+                void copyConnectedAssistantRun();
+              }}
+            >
+              {copiedKey === groupCopyKey ? (
+                <Check size={12} />
+              ) : (
+                <Copy size={12} />
+              )}
+            </button>
+          )}
+          {canBranchAssistantGroup && assistantGroupBranchMessage && (
+            <button
+              type="button"
+              className="message-copy-btn message-assistant-branch-btn"
+              title="Branch from here"
+              aria-label="Branch from here"
+              onClick={() => onBranch(assistantGroupBranchMessage)}
+            >
+              <GitBranch size={12} />
+            </button>
+          )}
+        </div>
+      ) : null;
 
     // Seamless mode: render a grouped tool-activity banner for multiple messages
     if (seamlessGroupMessageIds && seamlessGroupMessageIds.length > 0) {
@@ -162,6 +212,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
               onBannerUiStateChange?.({ expanded })
             }
           />
+          {assistantGroupActions}
         </div>
       );
     }
@@ -204,24 +255,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
           <div className="message-role-label assistant">ASSISTANT</div>
         )}
         {children}
-        {shouldShowGroupCopy && (
-          <div className="message-assistant-group-actions">
-            <button
-              className="message-copy-btn message-assistant-copy-btn"
-              title="Copy assistant message group"
-              aria-label="Copy assistant message group"
-              onClick={() => {
-                void copyConnectedAssistantRun();
-              }}
-            >
-              {copiedKey === groupCopyKey ? (
-                <Check size={12} />
-              ) : (
-                <Copy size={12} />
-              )}
-            </button>
-          </div>
-        )}
+        {assistantGroupActions}
       </div>
     );
 
@@ -258,14 +292,18 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
                 </div>
               )}
             </div>
-            <button
-              className="message-rollback-btn"
-              title="Rollback and re-edit"
-              onClick={() => onRollback(msg)}
-              disabled={!canRollback}
-            >
-              <CornerUpLeft size={14} />
-            </button>
+            <div className="message-user-actions">
+              <button
+                type="button"
+                className="message-action-btn message-rollback-btn"
+                aria-label="Rollback and re-edit"
+                title="Rollback and re-edit"
+                onClick={() => onRollback(msg)}
+                disabled={!canRollback}
+              >
+                <CornerUpLeft size={14} />
+              </button>
+            </div>
           </div>
         </div>
       );

@@ -20,6 +20,8 @@ const SNAPSHOT_COMMAND_TIMEOUT_MS = 10000
 const WINDOWS_SNAPSHOT_COMMAND_TIMEOUT_MS = 20000
 const WINDOWS_SNAPSHOT_RETRY_TIMEOUT_MS = 25000
 const SECTION_MARKER = '__GYSHELL_MONITOR_SECTION__::'
+const ENRIGIN_GPU_QUERY_MARKER = '__GYSHELL_ENRIGIN_GPU_QUERY__'
+const ENRIGIN_GPU_DMON_MARKER = '__GYSHELL_ENRIGIN_GPU_DMON__'
 const MAX_TOP_PROCESSES = 16
 const MAX_SOCKET_ROWS = 24
 const UNIX_MONITOR_LOCALE_EXPORT =
@@ -38,6 +40,29 @@ interface CpuCounters {
 
 interface NetCounters {
   [iface: string]: { rxBytes: number; txBytes: number }
+}
+
+interface EnriginEcuQueryInfo {
+  index: number
+  name?: string
+  memoryTotalMiB?: number
+  memoryUsedMiB?: number
+  temperatureC?: number
+  powerUsageWatts?: number
+  powerLimitWatts?: number
+  powerState?: string
+  memoryClockMHz?: number
+}
+
+interface EnriginEcuDmonInfo {
+  index: number
+  utilizationPercent?: number
+  sipUtilizationPercent?: number
+  memoryUsagePercent?: number
+  memoryTotalMiB?: number
+  temperatureC?: number
+  powerUsageWatts?: number
+  memoryClockMHz?: number
 }
 
 type MonitorTargetPlatform = 'linux' | 'darwin' | 'windows' | 'unknown'
@@ -580,7 +605,7 @@ export class ResourceMonitorService {
     const cpu = this.parseProcStatForCpu(sections.get('cpu') || '', session)
     const memory = this.parseLinuxMeminfo(sections.get('memory') || '')
     const disks = this.parseDfOutput(sections.get('disks') || '')
-    const gpus = this.parseNvidiaSmiOutput(sections.get('gpu') || '')
+    const gpus = this.parseLinuxGpuOutput(sections.get('gpu') || '')
     const network = this.parseLinuxNetDevOutput(sections.get('network') || '', session)
     const processes = this.parseUnixProcessOutput(sections.get('processes') || '')
     const socketEntries = this.parseLinuxSocketEntries(sections.get('sockets') || '')
@@ -699,35 +724,30 @@ export class ResourceMonitorService {
     const parsedGpus = parsed.gpus ?? parsed.g
     const parsedUptime = parsed.uptimeSeconds ?? parsed.u
 
-    const socketEntries: RawSocketEntry[] = Array.isArray(parsedSockets)
-      ? parsedSockets
-          .map((entry: any) => this.normalizeSocketEntry(entry))
-          .filter((entry: RawSocketEntry | null): entry is RawSocketEntry => entry !== null)
-      : []
+    const socketEntries: RawSocketEntry[] = this.coerceArray(parsedSockets)
+      .map((entry: any) => this.normalizeSocketEntry(entry))
+      .filter((entry: RawSocketEntry | null): entry is RawSocketEntry => entry !== null)
+
+    const disks = this.coerceArray(parsedDisks)
+      .map((entry: any) => this.normalizeDisk(entry))
+      .filter((entry: DiskSnapshot) => entry.totalBytes > 0)
+      .sort((left: DiskSnapshot, right: DiskSnapshot) => right.usedBytes - left.usedBytes)
+    const gpus = this.coerceArray(parsedGpus).map((entry: any) => this.normalizeGpu(entry))
+    const network = this.coerceArray(parsedNetwork)
+      .map((entry: any) => this.normalizeNetwork(entry))
+      .filter((entry: NetworkSnapshot | null): entry is NetworkSnapshot => entry !== null)
+    const processes = this.coerceArray(parsedProcesses)
+      .map((entry: any) => this.normalizeProcess(entry))
+      .filter((entry: ProcessSnapshot | null): entry is ProcessSnapshot => entry !== null)
 
     return {
       system: parsedSystem ? this.normalizeWindowsSystem(parsedSystem) : undefined,
       cpu: parsedCpu ? this.normalizeWindowsCpu(parsedCpu) : undefined,
       memory: parsedMemory ? this.normalizeWindowsMemory(parsedMemory) : undefined,
-      disks: Array.isArray(parsedDisks)
-        ? parsedDisks
-            .map((entry: any) => this.normalizeDisk(entry))
-            .filter((entry: DiskSnapshot) => entry.totalBytes > 0)
-            .sort((left: DiskSnapshot, right: DiskSnapshot) => right.usedBytes - left.usedBytes)
-        : undefined,
-      gpus: Array.isArray(parsedGpus)
-        ? parsedGpus.map((entry: any) => this.normalizeGpu(entry))
-        : undefined,
-      network: Array.isArray(parsedNetwork)
-        ? parsedNetwork
-            .map((entry: any) => this.normalizeNetwork(entry))
-            .filter((entry: NetworkSnapshot | null): entry is NetworkSnapshot => entry !== null)
-        : undefined,
-      processes: Array.isArray(parsedProcesses)
-        ? parsedProcesses
-            .map((entry: any) => this.normalizeProcess(entry))
-            .filter((entry: ProcessSnapshot | null): entry is ProcessSnapshot => entry !== null)
-        : undefined,
+      disks: disks.length > 0 ? disks : undefined,
+      gpus: gpus.length > 0 ? gpus : undefined,
+      network: network.length > 0 ? network : undefined,
+      processes: processes.length > 0 ? processes : undefined,
       networkConnections:
         socketEntries.length > 0 ? this.aggregateSocketEntries(socketEntries) : undefined,
       uptimeSeconds: this.asNumber(parsedUptime),
@@ -784,10 +804,7 @@ export class ResourceMonitorService {
       ['cpu', 'cat /proc/stat'],
       ['memory', 'cat /proc/meminfo'],
       ['disks', 'df -P -k'],
-      [
-        'gpu',
-        'if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,utilization.memory,temperature.gpu --format=csv,noheader,nounits; fi',
-      ],
+      ['gpu', this.buildLinuxGpuMonitorCommand()],
       ['network', 'cat /proc/net/dev'],
       ['load', 'cat /proc/loadavg'],
       ['uptime', 'cat /proc/uptime'],
@@ -797,6 +814,22 @@ export class ResourceMonitorService {
       ],
       ['sockets', 'ss -H -tunap 2>/dev/null || netstat -tunap 2>/dev/null || true'],
     ])
+  }
+
+  private buildLinuxGpuMonitorCommand(): string {
+    const nvidiaCommand =
+      'if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,utilization.memory,temperature.gpu --format=csv,noheader,nounits; fi'
+    const enriginCommand = [
+      'if command -v ersmi >/dev/null 2>&1; then',
+      'gyshell_ersmi(){ ersmi "$@" || { command -v sudo >/dev/null 2>&1 && sudo -n ersmi "$@"; }; };',
+      `printf '%s\\n' '${ENRIGIN_GPU_QUERY_MARKER}';`,
+      'gyshell_ersmi -q;',
+      `printf '%s\\n' '${ENRIGIN_GPU_DMON_MARKER}';`,
+      'gyshell_ersmi -dmon -c 1;',
+      'fi',
+    ].join(' ')
+
+    return [nvidiaCommand, enriginCommand].join('; ')
   }
 
   private buildDarwinMonitorCommand(): string {
@@ -1334,6 +1367,13 @@ export class ResourceMonitorService {
     }
   }
 
+  private parseLinuxGpuOutput(output: string): GpuSnapshot[] {
+    return [
+      ...this.parseNvidiaSmiOutput(output),
+      ...this.parseErsmiGpuOutput(output),
+    ]
+  }
+
   private parseNvidiaSmiOutput(output: string): GpuSnapshot[] {
     if (!output || output.trim().length === 0) return []
 
@@ -1364,6 +1404,205 @@ export class ResourceMonitorService {
       })
     }
     return entries
+  }
+
+  private parseErsmiGpuOutput(output: string): GpuSnapshot[] {
+    if (!output || output.trim().length === 0) return []
+
+    const queryRegion = this.sliceErsmiRegion(
+      output,
+      ENRIGIN_GPU_QUERY_MARKER,
+      ENRIGIN_GPU_DMON_MARKER
+    )
+    const dmonRegion = this.sliceErsmiRegion(output, ENRIGIN_GPU_DMON_MARKER)
+    const queryInfo = this.parseErsmiQueryInfo(queryRegion)
+    const dmonInfo = this.parseErsmiDmonInfo(dmonRegion)
+    const indices = new Set<number>([...queryInfo.keys(), ...dmonInfo.keys()])
+
+    return Array.from(indices)
+      .sort((left, right) => left - right)
+      .map((index) => {
+        const query = queryInfo.get(index)
+        const dmon = dmonInfo.get(index)
+        const memoryTotalMiB = dmon?.memoryTotalMiB ?? query?.memoryTotalMiB ?? 0
+        const memoryUsagePercent =
+          dmon?.memoryUsagePercent ??
+          (query?.memoryUsedMiB !== undefined && memoryTotalMiB > 0
+            ? this.percent(query.memoryUsedMiB, memoryTotalMiB)
+            : undefined)
+        // ERSMI reports VRAM as a usage percentage of the total, so derive the
+        // used MiB as `percent × total` (identical to the vendor `ersmi` tool),
+        // falling back to the absolute figure from the `-q` query when present.
+        const memoryUsedMiB =
+          memoryUsagePercent !== undefined && memoryTotalMiB > 0
+            ? this.roundToTenth((memoryTotalMiB * memoryUsagePercent) / 100)
+            : query?.memoryUsedMiB ?? 0
+
+        return {
+          name: query?.name || `Enrigin ECU ${index}`,
+          utilizationPercent:
+            dmon?.utilizationPercent ?? dmon?.sipUtilizationPercent ?? 0,
+          memoryUsedMiB,
+          memoryTotalMiB,
+          memoryUsagePercent,
+          temperatureC: dmon?.temperatureC ?? query?.temperatureC,
+          powerUsageWatts: dmon?.powerUsageWatts ?? query?.powerUsageWatts,
+          powerLimitWatts: query?.powerLimitWatts,
+          powerState: query?.powerState,
+          memoryClockMHz: dmon?.memoryClockMHz ?? query?.memoryClockMHz,
+        }
+      })
+  }
+
+  // Isolate the text emitted between two ERSMI section markers so the `-q` and
+  // `--dmon` outputs are parsed independently instead of scanning the combined
+  // blob. Returns '' when the start marker is absent (e.g. ERSMI not installed).
+  private sliceErsmiRegion(
+    output: string,
+    startMarker: string,
+    endMarker?: string
+  ): string {
+    const startIndex = output.indexOf(startMarker)
+    if (startIndex === -1) return ''
+    const regionStart = startIndex + startMarker.length
+    const regionEnd = endMarker ? output.indexOf(endMarker, regionStart) : -1
+    return regionEnd === -1
+      ? output.slice(regionStart)
+      : output.slice(regionStart, regionEnd)
+  }
+
+  private parseErsmiQueryInfo(output: string): Map<number, EnriginEcuQueryInfo> {
+    const entries = new Map<number, EnriginEcuQueryInfo>()
+    const blockPattern = /(?:^|\n)\s*DEV\s+ID\s+(\d+)([\s\S]*?)(?=\n\s*DEV\s+ID\s+\d+|\s*$)/g
+    let match: RegExpExecArray | null
+
+    while ((match = blockPattern.exec(output)) !== null) {
+      const index = parseInt(match[1], 10)
+      if (!Number.isFinite(index)) continue
+      const block = match[2] || ''
+      const entry: EnriginEcuQueryInfo = { index }
+
+      const name = this.extractErsmiLabeledValue(block, 'Dev Name')
+      if (name) entry.name = name
+
+      const memoryTotalMiB = this.parseErsmiMemoryMiB(
+        this.extractErsmiLabeledValue(block, 'Mem Size')
+      )
+      if (memoryTotalMiB !== undefined) entry.memoryTotalMiB = memoryTotalMiB
+
+      const memoryUsedMiB = this.parseErsmiMemoryMiB(
+        this.extractErsmiLabeledValue(block, 'Mem Usage')
+      )
+      if (memoryUsedMiB !== undefined) entry.memoryUsedMiB = memoryUsedMiB
+
+      const temperatureC = this.parseErsmiNumber(
+        this.extractErsmiLabeledValue(block, 'ECU Temp')
+      )
+      if (temperatureC !== undefined) entry.temperatureC = temperatureC
+
+      const powerUsageWatts = this.parseErsmiNumber(
+        this.extractErsmiLabeledValue(block, 'Cur Power')
+      )
+      if (powerUsageWatts !== undefined) entry.powerUsageWatts = powerUsageWatts
+
+      const powerLimitWatts = this.parseErsmiNumber(
+        this.extractErsmiLabeledValue(block, 'En Power Capa') ??
+          this.extractErsmiLabeledValue(block, 'Power Capa')
+      )
+      if (powerLimitWatts !== undefined) entry.powerLimitWatts = powerLimitWatts
+
+      const powerState = this.extractErsmiLabeledValue(block, 'Dpm Level')
+      if (powerState) entry.powerState = powerState
+
+      const memoryClockMHz = this.parseErsmiNumber(
+        this.extractErsmiLabeledValue(block, 'Mem CLK')
+      )
+      if (memoryClockMHz !== undefined) entry.memoryClockMHz = memoryClockMHz
+
+      entries.set(index, entry)
+    }
+
+    return entries
+  }
+
+  // `ersmi -dmon -c 1` prints a fixed-width table whose data rows start with the
+  // numeric device index and expose 12 columns. Column meaning (0-indexed),
+  // matching the vendor tool:
+  //   [0] idx  [1] power(W)  [2] temp(C)  [3] SIP util(%)  [7] VRAM used(%)
+  //   [8] VRAM total(MiB)    [10] memory clock(MHz)
+  // Header/unit rows (prefixed with # or *, or with a non-numeric first token)
+  // are naturally skipped by the index/column-count guard.
+  private parseErsmiDmonInfo(output: string): Map<number, EnriginEcuDmonInfo> {
+    const entries = new Map<number, EnriginEcuDmonInfo>()
+
+    for (const line of output.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+
+      const parts = trimmed.split(/\s+/)
+      if (parts.length < 12 || !/^\d+$/.test(parts[0] || '')) {
+        continue
+      }
+
+      const index = this.asNumber(parts[0])
+      if (index === undefined) continue
+
+      const entry: EnriginEcuDmonInfo = { index }
+
+      const powerUsageWatts = this.parseErsmiNumber(parts[1])
+      if (powerUsageWatts !== undefined) entry.powerUsageWatts = powerUsageWatts
+
+      const temperatureC = this.parseErsmiNumber(parts[2])
+      if (temperatureC !== undefined) entry.temperatureC = temperatureC
+
+      const sipUtilizationPercent = this.parseErsmiNumber(parts[3])
+      if (sipUtilizationPercent !== undefined) {
+        entry.sipUtilizationPercent = sipUtilizationPercent
+        entry.utilizationPercent = sipUtilizationPercent
+      }
+
+      const memoryUsagePercent = this.parseErsmiNumber(parts[7])
+      if (memoryUsagePercent !== undefined) {
+        entry.memoryUsagePercent = memoryUsagePercent
+      }
+
+      const memoryTotalMiB = this.parseErsmiMemoryMiB(parts[8])
+      if (memoryTotalMiB !== undefined) entry.memoryTotalMiB = memoryTotalMiB
+
+      const memoryClockMHz = this.parseErsmiNumber(parts[10])
+      if (memoryClockMHz !== undefined) {
+        entry.memoryClockMHz = memoryClockMHz
+      }
+
+      entries.set(index, entry)
+    }
+
+    return entries
+  }
+
+  private extractErsmiLabeledValue(block: string, label: string): string | undefined {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = block.match(new RegExp(`^\\s*${escapedLabel}\\s*:\\s*(.+?)\\s*$`, 'im'))
+    return match ? this.sanitizeTextField(match[1]) : undefined
+  }
+
+  private parseErsmiMemoryMiB(value: string | undefined): number | undefined {
+    const match = String(value || '').match(/([-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?)\s*([kmgt]?i?b|[kmgt]b)?/i)
+    if (!match) return undefined
+    const amount = Number(match[1])
+    if (!Number.isFinite(amount)) return undefined
+    const unit = (match[2] || 'mib').toLowerCase()
+    if (unit.startsWith('k')) return this.roundToTenth(amount / 1024)
+    if (unit.startsWith('g')) return this.roundToTenth(amount * 1024)
+    if (unit.startsWith('t')) return this.roundToTenth(amount * 1024 * 1024)
+    return this.roundToTenth(amount)
+  }
+
+  private parseErsmiNumber(value: string | undefined): number | undefined {
+    const match = String(value || '').match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/i)
+    if (!match) return undefined
+    const parsed = Number(match[0])
+    return Number.isFinite(parsed) ? this.roundToTenth(parsed) : undefined
   }
 
   private parseLinuxNetDevOutput(
@@ -2136,6 +2375,10 @@ export class ResourceMonitorService {
       ),
       sharedMemoryUsedMiB: this.asNumber(entry.sharedMemoryUsedMiB ?? entry.s),
       temperatureC: this.asNumber(entry.temperatureC ?? entry.tc),
+      powerUsageWatts: this.asNumber(entry.powerUsageWatts ?? entry.pw),
+      powerLimitWatts: this.asNumber(entry.powerLimitWatts ?? entry.pl),
+      powerState: entry.powerState ?? entry.ps ? String(entry.powerState ?? entry.ps) : undefined,
+      memoryClockMHz: this.asNumber(entry.memoryClockMHz ?? entry.mc),
     }
   }
 
@@ -2185,6 +2428,16 @@ export class ResourceMonitorService {
   private roundToTenth(value: number): number {
     if (!Number.isFinite(value)) return 0
     return Math.round(value * 10) / 10
+  }
+
+  // PowerShell's `ConvertTo-Json` collapses single-element collections into a
+  // bare object, so a host with exactly one GPU/disk/etc. arrives as an object
+  // rather than an array. Coerce back to an array so single-item resources are
+  // not silently dropped by downstream `Array.isArray` checks.
+  private coerceArray(value: unknown): any[] {
+    if (Array.isArray(value)) return value
+    if (value === undefined || value === null) return []
+    return [value]
   }
 
   private asNumber(value: unknown): number | undefined {

@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#核心能力)
 
 [English README](./README.md) | 中文 README  
-最新发布说明：[`changelogs/v1.4.3.md`](./changelogs/v1.4.3.md)
+最新发布说明：[`changelogs/v1.5.0.md`](./changelogs/v1.5.0.md)
 
 如果有任何建议或者问题，欢迎在 [GitHub Discussions](https://github.com/MrOrangeJJ/RTerm/discussions) 中提交。
 

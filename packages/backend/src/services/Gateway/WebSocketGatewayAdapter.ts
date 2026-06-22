@@ -69,6 +69,7 @@ type WebSocketRpcMethod =
   | "agent:deleteChatSession"
   | "agent:deleteChatSessions"
   | "agent:renameSession"
+  | "agent:branchFromMessage"
   | "agent:rollbackToMessage";
 
 type FileTransferConflictStrategy = "error" | "overwrite" | "rename";
@@ -1552,6 +1553,14 @@ export class WebSocketGatewayAdapter {
         const newTitle = this.readStringParam(params, "newTitle");
         this.gateway.renameSession(sessionId, newTitle);
         return { ok: true };
+      }
+      case "agent:branchFromMessage": {
+        const sessionId = this.readStringParam(params, "sessionId");
+        const messageId = this.readStringParam(params, "messageId");
+        return await this.gateway.branchSessionFromMessage(
+          sessionId,
+          messageId,
+        );
       }
       case "agent:rollbackToMessage": {
         const sessionId = this.readStringParam(params, "sessionId");

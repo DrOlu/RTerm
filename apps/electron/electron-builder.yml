@@ -17,11 +17,64 @@ files:
       - apps/gybackend/dist/**/*
       - apps/gybackend/package.json
       - package.json
+      - "!**/*.map"
+      - "!**/*.d.ts"
+      - "!**/*.d.cts"
+      - "!**/*.d.mts"
+      - "!node_modules/@types/**"
+      - "!node_modules/@xterm/addon-fit/**"
+      - "!node_modules/@xterm/addon-search/**"
+      - "!node_modules/@xterm/addon-web-links/**"
+      - "!node_modules/@xterm/addon-webgl/**"
+      - "!node_modules/@xterm/xterm/**"
+      - "!node_modules/canvas/**"
+      - "!node_modules/clsx/**"
+      - "!node_modules/i18next/**"
+      - "!node_modules/lucide-react/**"
+      - "!node_modules/mobx/**"
+      - "!node_modules/mobx-react-lite/**"
+      - "!node_modules/pdfjs-dist/**"
+      - "!node_modules/pdf-parse/lib/pdf.js/v1.9.426/**"
+      - "!node_modules/pdf-parse/lib/pdf.js/v1.10.88/**"
+      - "!node_modules/pdf-parse/lib/pdf.js/v2.0.550/**"
+      - "!node_modules/react/**"
+      - "!node_modules/react-dom/**"
+      - "!node_modules/react-i18next/**"
+      - "!node_modules/react-markdown/**"
+      - "!node_modules/react-resizable-panels/**"
+      - "!node_modules/remark-gfm/**"
+      - "!node_modules/better-sqlite3/bin/**"
+      - "!node_modules/better-sqlite3/deps/**"
+      - "!node_modules/better-sqlite3/src/**"
+      - "!node_modules/better-sqlite3/binding.gyp"
+      - "!node_modules/better-sqlite3/build/deps/**"
+      - "!node_modules/better-sqlite3/build/*.mk"
+      - "!node_modules/better-sqlite3/build/*.Makefile"
+      - "!node_modules/better-sqlite3/build/Makefile"
+      - "!node_modules/better-sqlite3/build/config.gypi"
+      - "!node_modules/better-sqlite3/build/gyp-mac-tool"
+      - "!node_modules/better-sqlite3-electron/bin/**"
+      - "!node_modules/better-sqlite3-electron/deps/**"
+      - "!node_modules/better-sqlite3-electron/src/**"
+      - "!node_modules/better-sqlite3-electron/binding.gyp"
+      - "!node_modules/better-sqlite3-electron/build/deps/**"
+      - "!node_modules/better-sqlite3-electron/build/*.mk"
+      - "!node_modules/better-sqlite3-electron/build/*.Makefile"
+      - "!node_modules/better-sqlite3-electron/build/Makefile"
+      - "!node_modules/better-sqlite3-electron/build/config.gypi"
+      - "!node_modules/better-sqlite3-electron/build/gyp-mac-tool"
+      - "!node_modules/tree-sitter-bash/bin/**"
+      - "!node_modules/tree-sitter-bash/build/**"
+      - "!node_modules/tree-sitter-bash/prebuilds/**"
+      - "!node_modules/tree-sitter-bash/src/**"
+      - "!node_modules/tree-sitter-bash/node_modules/**"
+      - "!node_modules/tree-sitter-bash/binding.gyp"
+      - "!node_modules/web-tree-sitter/debug/**"
 extraResources:
   - from: apps/electron/cli-runtime
     to: cli
     filter:
-      - '**/*'
+      - "**/*"
   - from: node_modules/better-sqlite3-electron/build/Release
     to: native-modules/better-sqlite3
     filter:
@@ -29,14 +82,14 @@ extraResources:
   - from: apps/electron/mobile-web-runtime
     to: mobile-web
     filter:
-      - '**/*'
+      - "**/*"
   - from: apps/electron/materials/icons/512x512.png
     to: icon.png
 asarUnpack:
-  - '**/*.node'
-  - 'node_modules/node-pty/lib/**/*.js'
-  - 'node_modules/node-pty/prebuilds/**/*'
-  - 'node_modules/node-pty/build/Release/**/*'
+  - "**/*.node"
+  - "node_modules/node-pty/lib/**/*.js"
+  - "node_modules/node-pty/prebuilds/**/*"
+  - "node_modules/node-pty/build/Release/**/*"
 mac:
   icon: apps/electron/materials/icon.icns
   identity: null

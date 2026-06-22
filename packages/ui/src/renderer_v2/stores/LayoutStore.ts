@@ -16,15 +16,22 @@ import {
   splitPanelWithPanelId,
   swapPanels,
   type DropDirection,
+  type LayoutNode,
   type LayoutPanelTabBinding,
   type LayoutRect,
+  type LayoutSplitNode,
   type LayoutTree,
   type LayoutViewport,
   type PanelKind,
   type SplitDirection,
   type TabDragPayload
 } from '../layout'
-import { computeLayoutGeometry, validateLayoutTree } from '../layout'
+import {
+  clampSplitSizesToChildMinSizePercentages,
+  computeChildMinSizePercentages,
+  computeLayoutGeometry,
+  validateLayoutTree
+} from '../layout'
 
 const DEFAULT_VIEWPORT: LayoutViewport = {
   width: 0,
@@ -53,6 +60,23 @@ const unique = (items: string[]): string[] => {
   })
   return next
 }
+
+const findSplitNodeById = (node: LayoutNode, splitNodeId: string): LayoutSplitNode | null => {
+  if (node.type !== 'split') return null
+  if (node.id === splitNodeId) return node
+  for (const child of node.children) {
+    const match = findSplitNodeById(child, splitNodeId)
+    if (match) return match
+  }
+  return null
+}
+
+const getViewportRect = (viewport: LayoutViewport): LayoutRect => ({
+  left: 0,
+  top: 0,
+  width: viewport.width,
+  height: viewport.height
+})
 
 type DragType = 'panel' | 'tab' | null
 type TabReorderTarget = {
@@ -272,7 +296,14 @@ export class LayoutStore {
   }
 
   setSplitSizes(splitNodeId: string, sizes: number[]) {
-    const nextTree = setSplitSizes(this.tree, splitNodeId, sizes)
+    const splitNode = findSplitNodeById(this.tree.root, splitNodeId)
+    const nextSizes = (() => {
+      if (!splitNode) return sizes
+      const parentRect = this.geometry.nodeRects[splitNode.id] || getViewportRect(this.viewport)
+      const minPercentages = computeChildMinSizePercentages(splitNode, parentRect, this.viewport.height)
+      return clampSplitSizesToChildMinSizePercentages(sizes, minPercentages)
+    })()
+    const nextTree = setSplitSizes(this.tree, splitNodeId, nextSizes)
     this.applyTree(nextTree)
   }
 
@@ -1243,34 +1274,74 @@ export class LayoutStore {
     }, 120)
   }
 
-  private async saveLayout() {
-    if (typeof (this.appStore as any).shouldPersistLayout === 'function') {
-      const canPersist = (this.appStore as any).shouldPersistLayout()
-      if (!canPersist) {
-        return
-      }
+  flushPendingSaveSync(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
     }
 
+    if (!this.shouldPersistLayout()) {
+      return
+    }
+
+    const payload = this.buildLayoutSettingsPayload()
+    try {
+      const setSync = window.gyshell.settings.setSync
+      if (typeof setSync === 'function') {
+        setSync(payload)
+      } else {
+        void window.gyshell.settings.set(payload)
+      }
+      this.applyLayoutSettingsPayload(payload.layout)
+    } catch (error) {
+      console.error('Failed to flush layout before window unload', error)
+    }
+  }
+
+  private async saveLayout() {
+    if (!this.shouldPersistLayout()) {
+      return
+    }
+
+    const payload = this.buildLayoutSettingsPayload()
+    await window.gyshell.settings.set(payload)
+    this.applyLayoutSettingsPayload(payload.layout)
+  }
+
+  private shouldPersistLayout(): boolean {
+    if (typeof (this.appStore as any).shouldPersistLayout !== 'function') {
+      return true
+    }
+    return (this.appStore as any).shouldPersistLayout() !== false
+  }
+
+  private buildLayoutSettingsPayload() {
     const legacy = deriveLegacyLayoutSnapshot(this.tree)
     const treeSnapshot = toJS(this.tree)
 
-    await window.gyshell.settings.set({
+    return {
       layout: {
         panelOrder: legacy.panelOrder,
         panelSizes: legacy.panelSizes,
         v2: treeSnapshot
       }
-    })
+    }
+  }
 
+  private applyLayoutSettingsPayload(payload: {
+    panelOrder?: string[]
+    panelSizes?: number[]
+    v2?: unknown
+  }) {
     runInAction(() => {
       if (this.appStore.settings) {
         this.appStore.settings = {
           ...this.appStore.settings,
           layout: {
             ...this.appStore.settings.layout,
-            panelOrder: legacy.panelOrder,
-            panelSizes: legacy.panelSizes,
-            v2: treeSnapshot
+            panelOrder: payload.panelOrder,
+            panelSizes: payload.panelSizes,
+            v2: payload.v2
           }
         }
       }

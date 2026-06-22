@@ -129,6 +129,16 @@ runCase(
       ['a1', 'a2'],
       'assistant run tail should expose the full assistant group',
     )
+    assertEqual(
+      items[1]?.assistantGroupBranchMessageId,
+      null,
+      'assistant run head should not expose branch source',
+    )
+    assertEqual(
+      items[2]?.assistantGroupBranchMessageId,
+      'a2',
+      'assistant run tail should expose the selected assistant branch target',
+    )
   },
 )
 
@@ -233,6 +243,99 @@ runCase(
       items.map((item) => item.mergeWithPreviousAssistant),
       [false, false, true],
       'seamless text after a leading tool group should merge under the top label',
+    )
+    assertEqual(
+      items[2]?.assistantGroupBranchMessageId,
+      'a1',
+      'seamless assistant text tail should branch from the selected assistant message',
+    )
+  },
+)
+
+runCase(
+  'seamless tool group at the turn tail owns the copy/branch controls',
+  () => {
+    const session = createSession([
+      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+      createMessage({
+        id: 'a1',
+        role: 'assistant',
+        type: 'text',
+        content: 'let me check',
+        streaming: false,
+      }),
+      createMessage({
+        id: 'tool1',
+        role: 'assistant',
+        type: 'tool_call',
+        content: '{"query":"example"}',
+        backendMessageId: 'b-tool1',
+        streaming: false,
+      }),
+      createMessage({
+        id: 'cmd1',
+        role: 'assistant',
+        type: 'command',
+        content: 'pwd',
+        backendMessageId: 'b-cmd1',
+        streaming: false,
+      }),
+    ])
+
+    const items = buildChatRenderItems(session, false, 'seamless')
+    assertDeepEqual(
+      items.map((item) => item.id),
+      ['u1', 'a1', 'tool1'],
+      'seamless mode should group the trailing tool activity into one row',
+    )
+    assertDeepEqual(
+      items[2]?.seamlessGroupMessageIds,
+      ['tool1', 'cmd1'],
+      'trailing tool group should include consecutive tool activity',
+    )
+    assertEqual(
+      items[2]?.showAssistantGroupCopy,
+      true,
+      'a settled tool group ending the turn should expose the copy control',
+    )
+    assertDeepEqual(
+      items[2]?.assistantGroupMessageIds,
+      ['tool1', 'cmd1'],
+      'the tail tool group should copy its grouped tool messages',
+    )
+    assertEqual(
+      items[2]?.assistantGroupBranchMessageId,
+      'cmd1',
+      'the tail tool group should branch from its last tool message',
+    )
+  },
+)
+
+runCase(
+  'streaming seamless tool group tail keeps copy/branch hidden until settled',
+  () => {
+    const session = createSession([
+      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+      createMessage({
+        id: 'tool1',
+        role: 'assistant',
+        type: 'tool_call',
+        content: '{"query":"example"}',
+        backendMessageId: 'b-tool1',
+        streaming: true,
+      }),
+    ])
+
+    const items = buildChatRenderItems(session, true, 'seamless')
+    assertEqual(
+      items[1]?.showAssistantGroupCopy,
+      false,
+      'a streaming tool group should not expose the copy control yet',
+    )
+    assertEqual(
+      items[1]?.assistantGroupBranchMessageId,
+      null,
+      'a streaming tool group should not expose a branch target yet',
     )
   },
 )

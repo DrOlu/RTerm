@@ -23,5 +23,6 @@ demo.md
 .PKGINFO
 *.tsbuildinfo
 .gybackend-data/
+.codex-backups/
 apps/electron/cli-runtime/
 bun.lock

@@ -1,4 +1,9 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import {
+  contextBridge,
+  ipcRenderer,
+  webUtils,
+  type IpcRendererEvent,
+} from "electron";
 
 // Types (duplicated to avoid cross-project imports)
 interface BackendSettings {
@@ -144,6 +149,10 @@ type TerminalRecoveryReason =
   | "display-metrics-changed";
 
 type AppSettings = BackendSettings & UiSettings;
+
+type SyncSettingsPatch = {
+  layout: NonNullable<BackendSettings["layout"]>;
+};
 
 interface CommandPolicyLists {
   allowlist: string[];
@@ -404,6 +413,8 @@ export interface GyShellAPI {
     saveImageAttachment: (
       payload: SaveImageAttachmentPayload,
     ) => Promise<InputImageAttachment>;
+    getPathForFile: (file: File) => string;
+    startFileDrag: (filePaths: string[]) => void;
   };
   gateway: {
     isSameMachine: () => Promise<{ sameMachine: boolean }>;
@@ -426,6 +437,7 @@ export interface GyShellAPI {
   settings: {
     get: () => Promise<BackendSettings>;
     set: (settings: Partial<BackendSettings>) => Promise<void>;
+    setSync: (settings: SyncSettingsPatch) => void;
     setWsGatewayAccess: (
       access: BackendSettings["gateway"]["ws"]["access"],
     ) => Promise<BackendSettings["gateway"]["ws"]>;
@@ -604,6 +616,16 @@ export interface GyShellAPI {
       sessionId: string,
       messageId: string,
     ) => Promise<{ ok: boolean; removedCount: number }>;
+    branchFromMessage: (
+      sessionId: string,
+      messageId: string,
+    ) => Promise<{
+      ok: boolean;
+      sessionId?: string;
+      title?: string;
+      messageCount?: number;
+      reason?: string;
+    }>;
     replyMessage: (messageId: string, payload: any) => Promise<{ ok: boolean }>;
     onEvent: (
       callback: (data: { sessionId: string; event: AgentEvent }) => void,
@@ -727,6 +749,23 @@ const api: GyShellAPI = {
       ipcRenderer.invoke("system:openExternal", url),
     saveImageAttachment: (payload: SaveImageAttachmentPayload) =>
       ipcRenderer.invoke("system:saveImageAttachment", payload),
+    getPathForFile: (file: File) => {
+      try {
+        return webUtils.getPathForFile(file);
+      } catch {
+        return "";
+      }
+    },
+    startFileDrag: (filePaths: string[]) => {
+      const paths = Array.isArray(filePaths)
+        ? filePaths.filter(
+            (path): path is string =>
+              typeof path === "string" && path.length > 0,
+          )
+        : [];
+      if (paths.length === 0) return;
+      ipcRenderer.send("system:startFileDrag", paths);
+    },
   },
   gateway: {
     isSameMachine: () => ipcRenderer.invoke("gateway:isSameMachine"),
@@ -763,6 +802,12 @@ const api: GyShellAPI = {
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),
     set: (settings) => ipcRenderer.invoke("settings:set", settings),
+    setSync: (settings) => {
+      const result = ipcRenderer.sendSync("settings:setSync", settings);
+      if (result?.ok === false) {
+        throw new Error(result.error || "Failed to persist settings.");
+      }
+    },
     setWsGatewayAccess: (access) =>
       ipcRenderer.invoke("settings:setWsGatewayAccess", access),
     setWsGatewayConfig: (ws) =>
@@ -984,6 +1029,8 @@ const api: GyShellAPI = {
       ipcRenderer.invoke("agent:deleteChatSessions", sessionIds),
     rollbackToMessage: (sessionId, messageId) =>
       ipcRenderer.invoke("agent:rollbackToMessage", sessionId, messageId),
+    branchFromMessage: (sessionId, messageId) =>
+      ipcRenderer.invoke("agent:branchFromMessage", sessionId, messageId),
     replyMessage: (messageId, payload) =>
       ipcRenderer.invoke("agent:replyMessage", messageId, payload),
     onEvent: (callback) => {

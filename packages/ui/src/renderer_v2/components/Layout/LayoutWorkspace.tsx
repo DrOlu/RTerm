@@ -378,7 +378,7 @@ const SplitNodeView: React.FC<{
 }> = observer(
   ({ node, store, onHeaderContextMenu, onRequestCloseTabsByKind }) => {
     const panelGroupRef = React.useRef<ImperativePanelGroupHandle | null>(null);
-    const applyingLayoutRef = React.useRef(false);
+    const applyingLayoutRef = React.useRef(true);
 
     const parentRect = store.layout.geometry.nodeRects[node.id] || {
       left: 0,
@@ -402,15 +402,18 @@ const SplitNodeView: React.FC<{
       [node.children],
     );
 
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
       const group = panelGroupRef.current;
-      if (!group?.setLayout) return;
-
       applyingLayoutRef.current = true;
-      group.setLayout(node.sizes);
-      requestAnimationFrame(() => {
+      if (group?.setLayout) {
+        group.setLayout(node.sizes);
+      }
+      const frameId = requestAnimationFrame(() => {
         applyingLayoutRef.current = false;
       });
+      return () => {
+        cancelAnimationFrame(frameId);
+      };
     }, [sizeSignature, childSignature]);
 
     return (
@@ -420,7 +423,6 @@ const SplitNodeView: React.FC<{
         className="gyshell-layout-split"
         onLayout={(sizes) => {
           if (applyingLayoutRef.current) {
-            applyingLayoutRef.current = false;
             return;
           }
           store.layout.setSplitSizes(node.id, sizes);

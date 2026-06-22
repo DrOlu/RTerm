@@ -507,6 +507,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       }
     };
 
+    const handleBranchFromMessage = async (message: ChatMessage) => {
+      if (!activeSession?.id || !message.backendMessageId) return;
+      try {
+        const result = await store.chat.branchFromMessage(
+          activeSession.id,
+          message.backendMessageId,
+        );
+        if (!result.sessionId) return;
+        store.layout.attachTabToPanel("chat", result.sessionId, panelId);
+        onSelectSession(result.sessionId);
+      } catch (error) {
+        console.error("Failed to branch chat session:", error);
+      }
+    };
+
     const handleQueueEditRequest = (item: QueueItem) => {
       const currentDraft = richInputRef.current?.getDraft() || {
         text: "",
@@ -968,6 +983,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           askLabels={askLabels}
           onAskDecision={handleAskDecision}
           onRollback={(message) => setRollbackTarget(message)}
+          onBranch={(message) => {
+            void handleBranchFromMessage(message);
+          }}
           searchTargetMessageId={activeSearchMessageId}
           searchTargetVersion={searchResultIndex}
           searchMatchedMessageIds={searchResultMessageIdSet}

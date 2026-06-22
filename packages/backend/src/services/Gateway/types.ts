@@ -125,5 +125,15 @@ export interface IGatewayRuntime extends IGateway {
     sessionId: string,
     messageId: string,
   ): Promise<{ ok: boolean; removedCount: number }>;
+  branchSessionFromMessage(
+    sessionId: string,
+    messageId: string,
+  ): Promise<{
+    ok: boolean;
+    sessionId?: string;
+    title?: string;
+    messageCount?: number;
+    reason?: string;
+  }>;
   broadcastRaw(channel: string, data: any): void;
 }

@@ -19,6 +19,8 @@ export interface TerminalScopedFilePath {
   filePath: string
 }
 
+export type NativeFilePathResolver = (file: File) => string | null | undefined
+
 const TERMINAL_SCOPED_FILE_PATTERN = /^@terminal\(([^)]+)\):(.*)$/
 
 const collectUniquePaths = (paths: Array<string | null | undefined>): string[] => {
@@ -31,6 +33,38 @@ const collectUniquePaths = (paths: Array<string | null | undefined>): string[] =
     next.push(normalized)
   }
   return next
+}
+
+const normalizeNativeFilePath = (value: string | null | undefined): string => {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+export const resolveNativeFilePath = (
+  file: File,
+  resolvePath?: NativeFilePathResolver
+): string => {
+  const fromResolver = (() => {
+    if (!resolvePath) return ''
+    try {
+      return normalizeNativeFilePath(resolvePath(file))
+    } catch {
+      return ''
+    }
+  })()
+  if (fromResolver) return fromResolver
+  const legacyPath = (file as File & { path?: unknown }).path
+  return normalizeNativeFilePath(typeof legacyPath === 'string' ? legacyPath : '')
+}
+
+/**
+ * Resolves the preload-exposed native file path resolver (Electron `webUtils.getPathForFile`).
+ * Electron removed `File.path`, so renderer drop handlers must go through this bridge.
+ * Returns `undefined` when unavailable (older Electron / tests), letting callers fall back to legacy `path`.
+ */
+export const getNativeFilePathResolver = (): NativeFilePathResolver | undefined => {
+  const resolver = (globalThis as { gyshell?: { system?: { getPathForFile?: unknown } } })
+    .gyshell?.system?.getPathForFile
+  return typeof resolver === 'function' ? (resolver as NativeFilePathResolver) : undefined
 }
 
 export const encodeFileSystemPanelDragPayload = (payload: FileSystemPanelDragPayload): string =>
@@ -97,13 +131,12 @@ export const hasNativeFileDragType = (
 }
 
 export const extractNativeDropFilePaths = (
-  dataTransfer: Pick<DataTransfer, 'files'> | null | undefined
+  dataTransfer: Pick<DataTransfer, 'files'> | null | undefined,
+  resolvePath?: NativeFilePathResolver
 ): string[] => {
   if (!dataTransfer?.files) return []
   const paths = Array.from(dataTransfer.files).map((file) => {
-    return typeof (file as File & { path?: unknown }).path === 'string'
-      ? String((file as File & { path?: string }).path)
-      : ''
+    return resolveNativeFilePath(file, resolvePath)
   })
   return collectUniquePaths(paths)
 }
@@ -117,18 +150,20 @@ export const extractFileSystemPayloadPaths = (
 }
 
 export const resolveTerminalDropPaths = (
-  dataTransfer: Pick<DataTransfer, 'types' | 'getData' | 'files'> | null | undefined
+  dataTransfer: Pick<DataTransfer, 'types' | 'getData' | 'files'> | null | undefined,
+  resolvePath?: NativeFilePathResolver
 ): string[] => {
   const payloadPaths = extractFileSystemPayloadPaths(dataTransfer)
   if (payloadPaths.length > 0) {
     return payloadPaths
   }
-  return extractNativeDropFilePaths(dataTransfer)
+  return extractNativeDropFilePaths(dataTransfer, resolvePath)
 }
 
 export const resolveTerminalDropPathsForTarget = (
   dataTransfer: Pick<DataTransfer, 'types' | 'getData' | 'files'> | null | undefined,
-  targetTerminalId: string
+  targetTerminalId: string,
+  resolvePath?: NativeFilePathResolver
 ): string[] => {
   const payload = parseFileSystemPanelDragPayload(dataTransfer)
   if (payload) {
@@ -138,7 +173,7 @@ export const resolveTerminalDropPathsForTarget = (
     }
     return collectUniquePaths(payload.entries.map((entry) => entry.path))
   }
-  return extractNativeDropFilePaths(dataTransfer)
+  return extractNativeDropFilePaths(dataTransfer, resolvePath)
 }
 
 export const encodeTerminalScopedFilePath = (terminalId: string, filePath: string): string => {

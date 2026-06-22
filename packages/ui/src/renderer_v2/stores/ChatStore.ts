@@ -122,6 +122,7 @@ export class ChatStore {
       deleteChatSession: action,
       deleteChatSessions: action,
       renameChatSession: action,
+      branchFromMessage: action,
       rollbackToMessage: action,
       setSessionLockedProfile: action,
       setQueueRunner: action,
@@ -821,6 +822,30 @@ export class ChatStore {
       console.error("Failed to rename chat session:", error);
       throw error;
     }
+  }
+
+  async branchFromMessage(
+    sessionId: string,
+    backendMessageId: string,
+  ): Promise<{
+    ok: boolean;
+    sessionId?: string;
+    title?: string;
+    messageCount?: number;
+    reason?: string;
+  }> {
+    const result = await window.gyshell.agent.branchFromMessage(
+      sessionId,
+      backendMessageId,
+    );
+    if (!result?.ok || !result.sessionId) {
+      throw new Error(result?.reason || "Failed to branch chat session.");
+    }
+    await this.hydrateSessionFromBackend(result.sessionId, {
+      activate: true,
+      loadAgentContext: true,
+    });
+    return result;
   }
 
   rollbackToMessage(sessionId: string, backendMessageId: string): void {

@@ -647,6 +647,53 @@ export class UIHistoryService {
     return removedCount;
   }
 
+  branchFromMessage(
+    sourceSessionId: string,
+    branchSessionId: string,
+    backendMessageId: string,
+    title: string,
+  ): {
+    ok: boolean;
+    sessionId?: string;
+    title?: string;
+    messageCount?: number;
+    reason?: string;
+  } {
+    const source = this.getOrLoadSession(sourceSessionId);
+    if (!source) {
+      return { ok: false, reason: "Source UI session not found." };
+    }
+    const index = source.messages.findIndex(
+      (message) => message.backendMessageId === backendMessageId,
+    );
+    if (index === -1) {
+      return { ok: false, reason: "Branch target UI message not found." };
+    }
+
+    const updatedAt = Date.now();
+    const branch: UIChatSession = {
+      id: branchSessionId,
+      title: title.trim() || "Branch",
+      updatedAt,
+      messages: source.messages.slice(0, index + 1).map((message) => ({
+        ...JSON.parse(JSON.stringify(message)),
+        id: uuidv4(),
+        streaming: false,
+      })),
+    };
+    this.sessionsCache[branchSessionId] = branch;
+    this.syncSessionSummary(branchSessionId);
+    this.dirtySessions.add(branchSessionId);
+    this.flush(branchSessionId);
+
+    return {
+      ok: true,
+      sessionId: branchSessionId,
+      title: branch.title,
+      messageCount: branch.messages.length,
+    };
+  }
+
   toReadableMarkdown(messages: ChatMessage[], title: string): string {
     const lines: string[] = [];
     lines.push(`# ${title || "Conversation"}`);

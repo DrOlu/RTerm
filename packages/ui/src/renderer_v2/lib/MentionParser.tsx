@@ -1,5 +1,6 @@
 import React from 'react';
 import { getFileMentionDisplayName } from './filesystemDragDrop';
+import { truncateMentionDisplayText } from './mentionDisplay';
 
 /**
  * Shared by:
@@ -85,16 +86,24 @@ export const renderMentionContent = (content: string): (string | React.ReactElem
           ? 'skill'
           : 'terminal';
       return (
-        <span key={`mention-${i}`} className={`mention-badge ${cls}`}>
-          {mentionText}
+        <span
+          key={`mention-${i}`}
+          className={`mention-badge ${cls}`}
+          title={mentionText}
+        >
+          {truncateMentionDisplayText(mentionText)}
         </span>
       );
     }
 
     if (part.startsWith('[MENTION_FILE:') || part.startsWith('[MENTION_IMAGE:')) {
       return (
-        <span key={`mention-${i}`} className="mention-badge file">
-          {mentionText}
+        <span
+          key={`mention-${i}`}
+          className="mention-badge file"
+          title={mentionText}
+        >
+          {truncateMentionDisplayText(mentionText)}
         </span>
       );
     }

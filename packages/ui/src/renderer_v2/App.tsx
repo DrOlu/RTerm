@@ -17,6 +17,28 @@ export const App: React.FC = observer(() => {
   }, []);
 
   React.useEffect(() => {
+    if (window.gyshell.system.platform !== "win32") {
+      return;
+    }
+
+    let flushed = false;
+    const flushLayoutBeforeUnload = () => {
+      if (flushed || !store.isBootstrapped || !store.layout.isReady) {
+        return;
+      }
+      flushed = true;
+      store.layout.flushPendingSaveSync();
+    };
+
+    window.addEventListener("beforeunload", flushLayoutBeforeUnload);
+    window.addEventListener("pagehide", flushLayoutBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", flushLayoutBeforeUnload);
+      window.removeEventListener("pagehide", flushLayoutBeforeUnload);
+    };
+  }, []);
+
+  React.useEffect(() => {
     const canHandleNativeFileDrop = (target: EventTarget | null): boolean => {
       const element = target as HTMLElement | null;
       if (!element || typeof element.closest !== "function") {
