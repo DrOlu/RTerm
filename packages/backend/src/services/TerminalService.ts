@@ -357,6 +357,39 @@ export class TerminalService {
     this.persistTerminalStateNow()
   }
 
+  private async spawnBackendRuntime(
+    initialConfig: TerminalConfig
+  ): Promise<{ config: TerminalConfig; ptyId: string }> {
+    let config = initialConfig
+    const backend = this.getBackend(config.type)
+    const ptyId = await backend.spawn(config)
+    const pendingResizeAfterSpawn = this.pendingResizeByTerminal.get(config.id)
+    if (pendingResizeAfterSpawn) {
+      this.pendingResizeByTerminal.delete(config.id)
+      config = normalizeTerminalConfigForRuntime({
+        ...config,
+        cols: pendingResizeAfterSpawn.cols,
+        rows: pendingResizeAfterSpawn.rows
+      } as TerminalConfig)
+      backend.resize(ptyId, config.cols, config.rows)
+    }
+    return { config, ptyId }
+  }
+
+  private registerBackendRuntimeHandlers(
+    terminalId: string,
+    terminalType: ConnectionType,
+    ptyId: string
+  ): void {
+    const backend = this.getBackend(terminalType)
+    backend.onData(ptyId, (data: string) => {
+      this.handleData(terminalId, data)
+    })
+    backend.onExit(ptyId, (code: number) => {
+      this.handleExit(terminalId, code)
+    })
+  }
+
   async restorePersistedTerminals(): Promise<RestoreTerminalResult> {
     if (!this.terminalStateStore) {
       return { restored: [], failed: [] }
@@ -450,22 +483,12 @@ export class TerminalService {
       return existing
     }
 
-    const backend = this.getBackend(config.type)
-    const ptyId = await backend.spawn(config)
-    const pendingResizeAfterSpawn = this.pendingResizeByTerminal.get(config.id)
-    if (pendingResizeAfterSpawn) {
-      this.pendingResizeByTerminal.delete(config.id)
-      config = normalizeTerminalConfigForRuntime({
-        ...config,
-        cols: pendingResizeAfterSpawn.cols,
-        rows: pendingResizeAfterSpawn.rows
-      } as TerminalConfig)
-      backend.resize(ptyId, config.cols, config.rows)
-    }
+    const runtime = await this.spawnBackendRuntime(config)
+    config = runtime.config
 
     const tab: TerminalTab = {
       id: config.id,
-      ptyId,
+      ptyId: runtime.ptyId,
       title: config.title,
       cols: config.cols,
       rows: config.rows,
@@ -491,15 +514,7 @@ export class TerminalService {
       this.primaryLocalTerminalId = config.id
     }
 
-    // Setup data handler
-    backend.onData(ptyId, (data: string) => {
-      this.handleData(config.id, data)
-    })
-
-    // Setup exit handler
-    backend.onExit(ptyId, (code: number) => {
-      this.handleExit(config.id, code)
-    })
+    this.registerBackendRuntimeHandlers(config.id, config.type, runtime.ptyId)
 
     this.hydrateTerminalRuntimeMetadata(config.id)
 
@@ -512,6 +527,98 @@ export class TerminalService {
     this.schedulePersistTerminalState()
 
     return tab
+  }
+
+  async reconnectTerminal(terminalId: string): Promise<TerminalTab> {
+    const tab = this.terminals.get(terminalId)
+    if (!tab) {
+      throw new Error(`Terminal ${terminalId} not found`)
+    }
+    if (tab.type !== 'ssh') {
+      throw new Error(`Terminal ${terminalId} is not a remote SSH terminal`)
+    }
+    if (tab.runtimeState !== 'exited') {
+      throw new Error(`Terminal ${terminalId} is not disconnected`)
+    }
+
+    const existingConfig = this.terminalConfigs.get(terminalId)
+    if (!existingConfig || !isSshConnectionConfig(existingConfig)) {
+      throw new Error(
+        `Terminal ${terminalId} does not have a reconnectable SSH config`
+      )
+    }
+
+    const backend = this.getBackend(tab.type)
+    try {
+      backend.kill(tab.ptyId)
+    } catch {
+      // The previous SSH runtime is normally already gone after exit.
+    }
+
+    const previousLastExitCode = tab.lastExitCode
+    const reconnectConfig = normalizeTerminalConfigForRuntime({
+      ...existingConfig,
+      id: tab.id,
+      title: tab.title,
+      cols: tab.cols,
+      rows: tab.rows
+    } as TerminalConfig)
+
+    tab.isInitializing = true
+    tab.runtimeState = 'initializing'
+    tab.lastExitCode = undefined
+    tab.capabilities = resolveTerminalConnectionCapabilities(reconnectConfig)
+    this.terminalConfigs.set(terminalId, reconnectConfig)
+    this.publishTerminalTabsChanged()
+
+    try {
+      const runtime = await this.spawnBackendRuntime(reconnectConfig)
+      const nextConfig = runtime.config
+      tab.ptyId = runtime.ptyId
+      tab.title = nextConfig.title
+      tab.cols = nextConfig.cols
+      tab.rows = nextConfig.rows
+      tab.type = nextConfig.type
+      tab.capabilities = resolveTerminalConnectionCapabilities(nextConfig)
+      tab.isInitializing = nextConfig.type === 'ssh'
+      tab.runtimeState = nextConfig.type === 'ssh' ? 'initializing' : 'ready'
+      tab.lastExitCode = undefined
+      this.terminalConfigs.set(terminalId, nextConfig)
+
+      const headless = this.headlessPtys.get(terminalId)
+      if (headless) {
+        headless.resize(nextConfig.cols, nextConfig.rows)
+      } else {
+        this.headlessPtys.set(
+          terminalId,
+          new Terminal({
+            cols: nextConfig.cols,
+            rows: nextConfig.rows,
+            scrollback: SCROLLBACK_SIZE,
+            allowProposedApi: true
+          })
+        )
+      }
+
+      this.registerBackendRuntimeHandlers(
+        terminalId,
+        nextConfig.type,
+        runtime.ptyId
+      )
+      this.hydrateTerminalRuntimeMetadata(terminalId)
+      this.publishTerminalTabsChanged()
+      this.schedulePersistTerminalState()
+
+      return tab
+    } catch (error) {
+      tab.isInitializing = false
+      tab.runtimeState = 'exited'
+      tab.lastExitCode =
+        typeof previousLastExitCode === 'number' ? previousLastExitCode : -1
+      this.publishTerminalTabsChanged()
+      this.schedulePersistTerminalState()
+      throw error
+    }
   }
 
   private handleData(terminalId: string, data: string): void {

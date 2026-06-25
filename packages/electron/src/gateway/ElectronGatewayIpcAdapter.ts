@@ -1,4 +1,11 @@
-import { ipcMain, shell, Menu, BrowserWindow, app, nativeImage } from "electron";
+import {
+  ipcMain,
+  shell,
+  Menu,
+  BrowserWindow,
+  app,
+  nativeImage,
+} from "electron";
 import type { NativeImage } from "electron";
 import type {
   StartTaskOptions,
@@ -649,6 +656,11 @@ export class ElectronGatewayIpcAdapter {
 
     ipcMain.handle("terminal:createTab", async (_: any, config: any) => {
       const tab = await this.terminalService.createTerminal(config);
+      return { id: tab.id };
+    });
+
+    ipcMain.handle("terminal:reconnect", async (_: any, terminalId: string) => {
+      const tab = await this.terminalService.reconnectTerminal(terminalId);
       return { id: tab.id };
     });
 

@@ -346,6 +346,7 @@ export class AppStore {
       createSshTab: action,
       saveSshConnection: action,
       deleteSshConnection: action,
+      reconnectTerminal: action,
       closeTab: action,
       setActiveTerminal: action,
       setTerminalSelection: action,
@@ -2743,6 +2744,44 @@ export class AppStore {
       }
     });
     await window.gyshell.settings.set({ connections: nextConnections });
+  }
+
+  async reconnectTerminal(tabId: string): Promise<boolean> {
+    const tab = this.terminalTabs.find((entry) => entry.id === tabId);
+    if (!tab || tab.config.type !== "ssh" || tab.runtimeState !== "exited") {
+      return false;
+    }
+
+    runInAction(() => {
+      const current = this.terminalTabs.find((entry) => entry.id === tabId);
+      if (!current) return;
+      current.runtimeState = "initializing";
+      current.lastExitCode = undefined;
+    });
+
+    try {
+      await window.gyshell.terminal.reconnect(tabId);
+      const snapshot = await window.gyshell.terminal.list();
+      runInAction(() => {
+        this.reconcileTerminalTabs(snapshot);
+      });
+      return true;
+    } catch (error) {
+      console.error("Failed to reconnect terminal", error);
+      try {
+        const snapshot = await window.gyshell.terminal.list();
+        runInAction(() => {
+          this.reconcileTerminalTabs(snapshot);
+        });
+      } catch {
+        runInAction(() => {
+          const current = this.terminalTabs.find((entry) => entry.id === tabId);
+          if (!current) return;
+          current.runtimeState = "exited";
+        });
+      }
+      return false;
+    }
   }
 
   async closeTab(tabId: string): Promise<void> {

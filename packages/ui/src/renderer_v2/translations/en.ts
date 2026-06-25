@@ -455,6 +455,7 @@ export const en = {
     splitRight: "Split Right",
     splitUp: "Split Up",
     splitDown: "Split Down",
+    reconnectTab: "Reconnect",
     closePanel: "Close Panel",
     closeTab: "Close",
     closeOtherTabs: "Close Other",

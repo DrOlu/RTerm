@@ -438,6 +438,7 @@ export const zh = {
     splitRight: "向右拆分",
     splitUp: "向上拆分",
     splitDown: "向下拆分",
+    reconnectTab: "重新连接",
     closePanel: "关闭面板",
     closeTab: "关闭",
     closeOtherTabs: "关闭其他",
