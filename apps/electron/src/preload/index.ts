@@ -140,6 +140,9 @@ interface UiSettings {
   chat: {
     displayMode: "classic" | "seamless";
   };
+  runtime?: {
+    preventSleepWhileRunning?: boolean;
+  };
   monitorEnabledSources?: string[];
 }
 

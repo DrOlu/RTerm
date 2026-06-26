@@ -29,6 +29,9 @@ export const DEFAULT_UI_SETTINGS: UiSettings = {
   },
   chat: {
     displayMode: 'classic',
+  },
+  runtime: {
+    preventSleepWhileRunning: true,
   }
 }
 
@@ -42,6 +45,7 @@ function pickUiSnapshot(raw: unknown): Partial<UiSettings> {
     panelTabs: raw.panelTabs,
     commandDraft: raw.commandDraft,
     chat: raw.chat,
+    runtime: raw.runtime,
     monitorEnabledSources: raw.monitorEnabledSources,
   } as Partial<UiSettings>
 }
@@ -68,6 +72,12 @@ function normalizeUiSettings(settings: UiSettings): UiSettings {
   }
   if (next.chat?.displayMode !== 'classic' && next.chat?.displayMode !== 'seamless') {
     next.chat = { displayMode: 'classic' }
+  }
+  if (typeof next.runtime?.preventSleepWhileRunning !== 'boolean') {
+    next.runtime = {
+      ...(next.runtime || {}),
+      preventSleepWhileRunning: true,
+    }
   }
   if (!Array.isArray(next.monitorEnabledSources)) {
     next.monitorEnabledSources = undefined

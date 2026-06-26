@@ -34,6 +34,13 @@ type QueuedInsertionWaiterEntry = {
   cleanup: () => void;
 };
 
+export interface GatewayRunStateSnapshot {
+  activeSessionIds: string[];
+  activeCount: number;
+}
+
+type GatewayRunStateListener = (snapshot: GatewayRunStateSnapshot) => void;
+
 export class GatewayService extends EventEmitter implements IGatewayRuntime {
   private sessions: Map<string, SessionContext> = new Map();
   private eventBus: EventEmitter = new EventEmitter();
@@ -50,6 +57,8 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     string,
     Map<string, RunBackgroundExecCommand>
   > = new Map();
+  private runStateListeners: Set<GatewayRunStateListener> = new Set();
+  private lastRunStateKey = "";
 
   constructor(
     private terminalService: IGatewayTerminalRuntime,
@@ -114,6 +123,12 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
 
   public unregisterTransport(transportId: string) {
     this.transportHub.unregister(transportId);
+  }
+
+  public onRunStateChanged(listener: GatewayRunStateListener): () => void {
+    this.runStateListeners.add(listener);
+    listener(this.getRunStateSnapshot());
+    return () => this.runStateListeners.delete(listener);
   }
 
   private setupServiceSubscriptions() {
@@ -199,6 +214,7 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     if (context.metadata.agentRunRestartInProgress === agentRunId) {
       delete context.metadata.agentRunRestartInProgress;
     }
+    this.publishRunStateChanged();
 
     try {
       // AgentService has been refactored as stateless run
@@ -721,12 +737,16 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
   }
 
   private clearRunState(context: SessionContext) {
+    const wasActive = context.status !== "idle";
     context.status = "idle";
     context.activeRunId = null;
     context.abortController = null;
     // Clean up cache for this session's messages if any remain
     // (In a real scenario, we might need a way to map messageId to sessionId here,
     // but for now, the cache is self-cleaning on read)
+    if (wasActive) {
+      this.publishRunStateChanged();
+    }
   }
 
   private releaseSessionProfileLock(context: SessionContext) {
@@ -829,7 +849,10 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
 
   async pauseTask(sessionId: string): Promise<void> {
     const context = this.sessions.get(sessionId);
-    if (context) context.status = "paused";
+    if (context && context.status !== "paused") {
+      context.status = "paused";
+      this.publishRunStateChanged();
+    }
   }
 
   async resumeTask(_sessionId: string): Promise<void> {
@@ -905,5 +928,24 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 160);
+  }
+
+  private getRunStateSnapshot(): GatewayRunStateSnapshot {
+    const activeSessionIds = Array.from(this.sessions.values())
+      .filter((context) => context.status !== "idle")
+      .map((context) => context.sessionId)
+      .sort();
+    return {
+      activeSessionIds,
+      activeCount: activeSessionIds.length,
+    };
+  }
+
+  private publishRunStateChanged(): void {
+    const snapshot = this.getRunStateSnapshot();
+    const stateKey = snapshot.activeSessionIds.join("\0");
+    if (stateKey === this.lastRunStateKey) return;
+    this.lastRunStateKey = stateKey;
+    this.runStateListeners.forEach((listener) => listener(snapshot));
   }
 }

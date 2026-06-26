@@ -342,6 +342,7 @@ export class AppStore {
       monitorTabs: computed,
       panelTabDisplayMode: computed,
       chatDisplayMode: computed,
+      preventSleepWhileRunning: computed,
       commandDraftProfileId: computed,
       openSettings: action,
       closeSettings: action,
@@ -365,6 +366,7 @@ export class AppStore {
       setTerminalSettings: action,
       setPanelTabDisplayMode: action,
       setChatDisplayMode: action,
+      setPreventSleepWhileRunning: action,
       setCommandDraftProfileId: action,
       saveModel: action,
       deleteModel: action,
@@ -1195,6 +1197,10 @@ export class AppStore {
     return this.settings?.chat?.displayMode ?? "classic";
   }
 
+  get preventSleepWhileRunning(): boolean {
+    return this.settings?.runtime?.preventSleepWhileRunning !== false;
+  }
+
   get commandDraftProfileId(): string {
     const profiles = this.settings?.models?.profiles ?? [];
     const storedId = String(
@@ -1583,6 +1589,21 @@ export class AppStore {
       };
     });
     await window.gyshell.uiSettings.set({ chat: nextChat });
+  }
+
+  async setPreventSleepWhileRunning(enabled: boolean): Promise<void> {
+    const nextRuntime = {
+      ...(this.settings?.runtime || {}),
+      preventSleepWhileRunning: enabled,
+    };
+    runInAction(() => {
+      if (!this.settings) return;
+      this.settings = {
+        ...this.settings,
+        runtime: nextRuntime,
+      };
+    });
+    await window.gyshell.uiSettings.set({ runtime: nextRuntime });
   }
 
   async setCommandDraftProfileId(profileId: string): Promise<void> {

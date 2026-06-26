@@ -896,6 +896,24 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                     ]}
                   />
                 </div>
+                <div className="settings-row">
+                  <div className="settings-row-label-with-info">
+                    <label>{t.settings.preventSleepWhileRunning}</label>
+                    <InfoTooltip
+                      content={t.settings.tooltips.preventSleepWhileRunning}
+                    />
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={store.preventSleepWhileRunning}
+                      onChange={(e) =>
+                        store.setPreventSleepWhileRunning(e.target.checked)
+                      }
+                    />
+                    <span className="switch-slider" />
+                  </label>
+                </div>
               </div>
 
                 <div

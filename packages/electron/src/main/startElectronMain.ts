@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   ipcMain,
+  powerSaveBlocker,
   powerMonitor,
   screen,
   shell,
@@ -54,6 +55,7 @@ import {
 import { HistoryMigrationCoordinator } from "./HistoryMigrationCoordinator";
 import { HistorySqliteStore } from "../../../backend/src/services/history/HistorySqliteStore";
 import { HistoryStorageMigration } from "../../../backend/src/services/history/HistoryStorageMigration";
+import { SleepBlockerService } from "./SleepBlockerService";
 
 let mainWindow: BrowserWindow | null = null;
 let settingsService: SettingsService;
@@ -78,6 +80,7 @@ let mobileWebServerService: MobileWebServerService | null = null;
 let resourceMonitorService: ResourceMonitorService;
 let monitorWindowRegistry: MonitorWindowRegistry;
 let historyStore: HistorySqliteStore | null = null;
+let sleepBlockerService: SleepBlockerService | null = null;
 
 type AppWindowRole = "main" | "detached";
 
@@ -369,6 +372,31 @@ export async function startElectronMain(): Promise<void> {
           settingsService,
           mcpToolService,
         );
+        sleepBlockerService = new SleepBlockerService(powerSaveBlocker);
+        const syncSleepBlockerSetting = (
+          settings = uiSettingsStore.getSettings(),
+        ) => {
+          sleepBlockerService?.setEnabled(
+            settings.runtime?.preventSleepWhileRunning !== false,
+          );
+        };
+        syncSleepBlockerSetting();
+        const unsubscribeSleepBlockerSettings =
+          uiSettingsStore.onChange(syncSleepBlockerSetting);
+        const unsubscribeRunState = gatewayService.onRunStateChanged(
+          (snapshot) => {
+            sleepBlockerService?.setReasonActive(
+              "agent-running",
+              snapshot.activeCount > 0,
+            );
+          },
+        );
+        app.once("before-quit", () => {
+          unsubscribeRunState();
+          unsubscribeSleepBlockerSettings();
+          sleepBlockerService?.dispose();
+          sleepBlockerService = null;
+        });
         const terminalRestoreResult =
           await terminalService.restorePersistedTerminals();
         if (
