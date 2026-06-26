@@ -99,6 +99,13 @@ const deriveMonitorIdentityFromConfig = (
   return `ssh://${username}@${host}:${port}`;
 };
 
+const shouldInitializeLocalTerminalSilently = (): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return window.gyshell?.system?.platform === "win32";
+};
+
 const resolveSuppressionKinds = (kind: PanelKind): WindowScopedTabKind[] =>
   kind === "chat"
     ? ["chat"]
@@ -2420,7 +2427,9 @@ export class AppStore {
       config: cfg,
       capabilities: resolveTerminalConnectionCapabilities(cfg),
       connectionRef: { type: "local" },
-      runtimeState: "initializing",
+      runtimeState: shouldInitializeLocalTerminalSilently()
+        ? "initializing"
+        : "ready",
     };
     this.terminalTabs.push(tab);
     this.terminalTabsHydrated = true;

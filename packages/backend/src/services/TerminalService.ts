@@ -18,6 +18,7 @@ import type {
   CommandTask
 } from '../types'
 import {
+  isLocalConnectionConfig,
   isSshConnectionConfig,
   isTerminalFileSystemBackend,
 } from '../types'
@@ -160,6 +161,7 @@ export class TerminalService {
   private commandTrackingMaxConsecutiveErrors = 8
   private commandTrackingPromptSyncPollIntervalMs = 50
   private syntheticCommandQuietWindowMs = 1000
+  private readonly terminalIdsBeingKilled = new Set<string>()
 
   constructor(options?: TerminalServiceOptions) {
     this.backends.set('local', new NodePtyBackend())
@@ -621,6 +623,63 @@ export class TerminalService {
     }
   }
 
+  private async restartLocalTerminalAfterExit(
+    terminalId: string,
+    code: number
+  ): Promise<void> {
+    const tab = this.terminals.get(terminalId)
+    const existingConfig = this.terminalConfigs.get(terminalId)
+    if (!tab || !existingConfig || !isLocalConnectionConfig(existingConfig)) {
+      return
+    }
+
+    const restartConfig = normalizeTerminalConfigForRuntime({
+      ...existingConfig,
+      id: tab.id,
+      title: tab.title,
+      cols: tab.cols,
+      rows: tab.rows
+    } as TerminalConfig)
+
+    tab.isInitializing = os.platform() === 'win32'
+    tab.runtimeState = tab.isInitializing ? 'initializing' : 'ready'
+    tab.lastExitCode = undefined
+    tab.capabilities = resolveTerminalConnectionCapabilities(restartConfig)
+    this.terminalConfigs.set(terminalId, restartConfig)
+    this.publishTerminalTabsChanged()
+
+    try {
+      const runtime = await this.spawnBackendRuntime(restartConfig)
+      const nextConfig = runtime.config
+      tab.ptyId = runtime.ptyId
+      tab.title = nextConfig.title
+      tab.cols = nextConfig.cols
+      tab.rows = nextConfig.rows
+      tab.type = nextConfig.type
+      tab.capabilities = resolveTerminalConnectionCapabilities(nextConfig)
+      tab.isInitializing = nextConfig.type === 'local' && os.platform() === 'win32'
+      tab.runtimeState = tab.isInitializing ? 'initializing' : 'ready'
+      tab.lastExitCode = undefined
+      this.terminalConfigs.set(terminalId, nextConfig)
+
+      const headless = this.headlessPtys.get(terminalId)
+      if (headless) {
+        headless.resize(nextConfig.cols, nextConfig.rows)
+      }
+
+      this.registerBackendRuntimeHandlers(terminalId, nextConfig.type, runtime.ptyId)
+      this.hydrateTerminalRuntimeMetadata(terminalId)
+      this.publishTerminalTabsChanged()
+      this.schedulePersistTerminalState()
+    } catch {
+      tab.isInitializing = false
+      tab.runtimeState = 'exited'
+      tab.lastExitCode = typeof code === 'number' ? code : -1
+      this.publishTerminalTabsChanged()
+      this.schedulePersistTerminalState()
+    }
+  }
+
   private handleData(terminalId: string, data: string): void {
     const sanitizedData = stripInternalControlMarkers(data)
     const tab = this.terminals.get(terminalId)
@@ -975,6 +1034,10 @@ export class TerminalService {
     // UI lifecycle is user-driven. Do not auto-remove tab metadata on backend exit.
     // We only update runtime state and keep captured output until user closes the tab.
     if (tab) {
+      if (tab.type === 'local' && !this.terminalIdsBeingKilled.has(terminalId)) {
+        void this.restartLocalTerminalAfterExit(terminalId, code)
+        return
+      }
       tab.isInitializing = false
       tab.runtimeState = 'exited'
       tab.lastExitCode = typeof code === 'number' ? code : -1
@@ -994,9 +1057,16 @@ export class TerminalService {
     this.schedulePersistTerminalState()
   }
 
+  private canWriteToTerminal(terminal: TerminalTab): boolean {
+    if (terminal.type === 'local') {
+      return terminal.runtimeState !== 'exited'
+    }
+    return terminal.runtimeState === 'ready'
+  }
+
   write(terminalId: string, data: string): void {
     const terminal = this.terminals.get(terminalId)
-    if (terminal && terminal.runtimeState === 'ready') {
+    if (terminal && this.canWriteToTerminal(terminal)) {
       const backend = this.getBackend(terminal.type)
       backend.write(terminal.ptyId, data)
     }
@@ -1045,7 +1115,12 @@ export class TerminalService {
     const terminal = this.terminals.get(terminalId)
     if (terminal) {
       const backend = this.getBackend(terminal.type)
-      backend.kill(terminal.ptyId)
+      this.terminalIdsBeingKilled.add(terminalId)
+      try {
+        backend.kill(terminal.ptyId)
+      } finally {
+        this.terminalIdsBeingKilled.delete(terminalId)
+      }
       
       const headless = this.headlessPtys.get(terminalId)
       if (headless) {

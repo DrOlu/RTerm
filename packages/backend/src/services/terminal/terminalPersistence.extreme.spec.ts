@@ -63,6 +63,7 @@ class FakeTerminalBackend implements TerminalBackend {
   private readonly listDirectoryCalls: Array<{ ptyId: string; dirPath: string }> = []
   private readonly spawnConfigs: TerminalConfig[] = []
   private readonly resizeCalls: Array<{ ptyId: string; cols: number; rows: number }> = []
+  private readonly writeCalls: Array<{ ptyId: string; data: string }> = []
 
   private getPtyIdForTerminalId(terminalId: string): string {
     return `pty-${terminalId}`
@@ -136,6 +137,10 @@ class FakeTerminalBackend implements TerminalBackend {
     return this.resizeCalls.slice()
   }
 
+  getWriteCalls(): Array<{ ptyId: string; data: string }> {
+    return this.writeCalls.slice()
+  }
+
   failSpawnForTerminalId(terminalId: string): void {
     this.spawnFailures.add(terminalId)
   }
@@ -191,7 +196,9 @@ class FakeTerminalBackend implements TerminalBackend {
     return id
   }
 
-  write(_ptyId: string, _data: string): void {}
+  write(ptyId: string, data: string): void {
+    this.writeCalls.push({ ptyId, data })
+  }
 
   resize(ptyId: string, cols: number, rows: number): void {
     this.resizeCalls.push({ ptyId, cols, rows })
@@ -822,6 +829,126 @@ const run = async (): Promise<void> => {
       assertEqual(resizeCall?.ptyId, 'pty-ssh-remount-resize', 'remount resize should target the existing PTY')
       assertEqual(resizeCall?.cols, 120, 'remount resize should forward the changed cols')
       assertEqual(resizeCall?.rows, 40, 'remount resize should forward the changed rows')
+    })
+
+    await runCase('local terminals remain writable while renderer-visible state is initializing', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'local',
+        id: 'local-writable-initializing',
+        title: 'Local Writable Initializing',
+        cols: 80,
+        rows: 24
+      })
+
+      const tab = service
+        .getDisplayTerminals()
+        .find((terminal) => terminal.id === 'local-writable-initializing')
+      assertCondition(!!tab, 'local terminal should exist before write test')
+      tab!.runtimeState = 'initializing'
+
+      service.write('local-writable-initializing', 'echo ok\n')
+
+      const writeCall = backend.getWriteCalls()[0]
+      assertEqual(
+        writeCall?.ptyId,
+        'pty-local-writable-initializing',
+        'initializing local terminal writes should still target the backend pty'
+      )
+      assertEqual(
+        writeCall?.data,
+        'echo ok\n',
+        'initializing local terminal writes should preserve input data'
+      )
+    })
+
+    await runCase('ssh terminals still reject writes until runtime is ready', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'ssh-not-ready-write',
+        title: 'SSH Not Ready Write',
+        host: '10.0.0.5',
+        port: 22,
+        username: 'root',
+        authMethod: 'password',
+        password: 'secret',
+        cols: 80,
+        rows: 24
+      })
+
+      service.write('ssh-not-ready-write', 'echo blocked\n')
+
+      assertEqual(
+        backend.getWriteCalls().length,
+        0,
+        'initializing ssh terminal writes should remain blocked'
+      )
+    })
+
+    await runCase('local terminals auto-restart after an unexpected backend exit', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'local',
+        id: 'local-auto-restart',
+        title: 'Local Auto Restart',
+        cols: 80,
+        rows: 24
+      })
+
+      backend.emitExitForTerminalId('local-auto-restart', 129)
+      await sleep(20)
+
+      const tab = service
+        .getDisplayTerminals()
+        .find((terminal) => terminal.id === 'local-auto-restart')
+      assertEqual(tab?.runtimeState, 'ready', 'local tab should stay ready after auto-restart')
+      assertEqual(tab?.lastExitCode, undefined, 'local auto-restart should clear the old exit code')
+      assertEqual(
+        backend.getSpawnConfigs().filter((config) => config.id === 'local-auto-restart').length,
+        2,
+        'local auto-restart should respawn the backend runtime with the same tab id'
+      )
+
+      service.write('local-auto-restart', 'echo after-restart\n')
+      const writeCall = backend.getWriteCalls().at(-1)
+      assertEqual(
+        writeCall?.ptyId,
+        'pty-local-auto-restart',
+        'writes after local auto-restart should target the respawned pty'
+      )
+    })
+
+    await runCase('killed local terminals are removed instead of auto-restarted', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'local',
+        id: 'local-user-closed',
+        title: 'Local User Closed',
+        cols: 80,
+        rows: 24
+      })
+
+      service.kill('local-user-closed')
+      await sleep(20)
+
+      assertCondition(
+        !service.getDisplayTerminals().some((terminal) => terminal.id === 'local-user-closed'),
+        'user-closed local tab should be removed from display inventory'
+      )
+      assertEqual(
+        backend.getSpawnConfigs().filter((config) => config.id === 'local-user-closed').length,
+        1,
+        'user-closed local tab should not be respawned'
+      )
     })
 
     await runCase('reconnectTerminal respawns an exited ssh tab with the same terminal id', async () => {

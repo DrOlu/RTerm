@@ -302,6 +302,33 @@ const run = async (): Promise<void> => {
   );
 
   await runCase(
+    "createLocalTab marks non-Windows local tabs ready immediately",
+    () => {
+      (globalThis as unknown as { window: unknown }).window = {
+        gyshell: {
+          system: {
+            platform: "darwin",
+          },
+        },
+      };
+      const store = new AppStore();
+      (store.layout as any).getPrimaryPanelId = () => null;
+      (store.layout as any).ensurePrimaryPanelForKind = () => null;
+      (store.layout as any).attachTabToPanel = () => {};
+      (store.layout as any).syncPanelBindings = () => {};
+
+      const tabId = store.createLocalTab();
+      const tab = store.terminalTabs.find((entry) => entry.id === tabId);
+
+      assertEqual(
+        tab?.runtimeState,
+        "ready",
+        "non-Windows local tabs should not render as disconnected while backend hydration catches up",
+      );
+    },
+  );
+
+  await runCase(
     "collectPersistedChatInventoryState preserves focused chat active tab",
     async () => {
       const store = new AppStore();
