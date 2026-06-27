@@ -6,7 +6,7 @@ export const BACKEND_SETTINGS_SCHEMA_VERSION = 3;
 
 const DEFAULT_BUILTIN_TOOLS = BUILTIN_TOOL_INFO.reduce(
   (acc: Record<string, boolean>, tool) => {
-    acc[tool.name] = true;
+    acc[tool.name] = tool.defaultEnabled ?? true;
     return acc;
   },
   {},

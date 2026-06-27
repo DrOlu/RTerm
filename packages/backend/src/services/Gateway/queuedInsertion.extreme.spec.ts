@@ -6,7 +6,10 @@ import {
   CONTINUE_INSTRUCTION_TAG,
   createBaseSystemPromptText,
 } from "../AgentHelper/prompts";
-import { buildExecCommandNowaitCompletedInsertion } from "../AgentHelper/queuedInsertions";
+import {
+  buildExecCommandNowaitCompletedInsertion,
+  buildFileTransferFinishedInsertion,
+} from "../AgentHelper/queuedInsertions";
 import type { StartTaskInput, StartTaskMode } from "./types";
 import type {
   QueuedAgentInsertionAcknowledger,
@@ -309,6 +312,42 @@ const run = async (): Promise<void> => {
         systemPrompt.includes("exec_command_nowait_completed"),
         true,
         "system prompt should document the nowait completion notification type",
+      );
+    },
+  );
+
+  await runCase(
+    "file transfer failure notification warns about incomplete target output",
+    () => {
+      const insertion = buildFileTransferFinishedInsertion({
+        transferId: "transfer-1",
+        sourceTerminalId: "source-terminal",
+        sourceTerminalName: "Source",
+        targetTerminalId: "target-terminal",
+        targetTerminalName: "Target",
+        sourcePaths: ["/src/report.txt"],
+        targetDirPath: "/dst",
+        status: "error",
+        error: "source terminal tab was closed",
+      });
+
+      const payload = JSON.parse(
+        insertion.content.slice(AGENT_NOTIFICATION_TAG.length),
+      );
+      assertEqual(
+        payload.notification_type,
+        "file_transfer_finished",
+        "file transfer notification should use the generic notification body",
+      );
+      assertEqual(
+        payload.target_output_may_be_incomplete,
+        true,
+        "failed transfer notification should mark target output as potentially incomplete",
+      );
+      assertEqual(
+        payload.instruction.includes("incomplete files"),
+        true,
+        "failed transfer notification should warn the agent before it reads target files",
       );
     },
   );

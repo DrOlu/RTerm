@@ -20,6 +20,7 @@ import {
 import { RunnableLambda } from "@langchain/core/runnables";
 import type { ChatSession, BackendSettings } from "../types";
 import { TerminalService } from "./TerminalService";
+import type { FileTransferService } from "./FileTransferService";
 import type {
   IChatHistoryRuntime,
   ICommandPolicyRuntime,
@@ -42,6 +43,8 @@ import {
   writeAndEditSchema,
   waitSchema,
   waitTerminalIdleSchema,
+  copyBetweenTabsSchema,
+  readFileTransferStatusSchema,
   toolImplementations,
   buildSkillToolDescription,
 } from "./AgentHelper/tools";
@@ -105,6 +108,7 @@ import { TokenManager } from "./AgentHelper/TokenManager";
 import { InputParseHelper } from "./AgentHelper/InputParseHelper";
 import { ImageAttachmentService } from "./ImageAttachmentService";
 import {
+  buildUnfinishedFileTransferContinueInstruction,
   buildUnfinishedExecCommandContinueInstruction,
   type QueuedAgentInsertionAcknowledger,
   type QueuedAgentInsertionAvailabilityWaiter,
@@ -113,7 +117,10 @@ import {
   type RunBackgroundExecCommand,
   type RunBackgroundExecCommandCompleter,
   type RunBackgroundExecCommandRegistrar,
+  type RunBackgroundFileTransferCompleter,
+  type RunBackgroundFileTransferRegistrar,
   type UnfinishedRunBackgroundExecCommandProvider,
+  type UnfinishedRunBackgroundFileTransferProvider,
 } from "./AgentHelper/queuedInsertions";
 
 const Ann: any = Annotation;
@@ -226,6 +233,7 @@ export class AgentService_v2 {
   private skillService: ISkillRuntime;
   private memoryService: IMemoryRuntime;
   private uiHistoryService: UIHistoryService;
+  private fileTransferService: FileTransferService | null = null;
   private settings: BackendSettings | null = null;
 
   private graph: any = null;
@@ -250,6 +258,12 @@ export class AgentService_v2 {
     null;
   private unfinishedBackgroundExecCommandProvider: UnfinishedRunBackgroundExecCommandProvider | null =
     null;
+  private backgroundFileTransferRegistrar: RunBackgroundFileTransferRegistrar | null =
+    null;
+  private backgroundFileTransferCompleter: RunBackgroundFileTransferCompleter | null =
+    null;
+  private unfinishedBackgroundFileTransferProvider: UnfinishedRunBackgroundFileTransferProvider | null =
+    null;
   private imageAttachmentService: ImageAttachmentService | null = null;
   private activeAgentRunIdsBySession: Map<string, string> = new Map();
 
@@ -262,6 +276,7 @@ export class AgentService_v2 {
     uiHistoryService: UIHistoryService,
     chatHistoryService: IChatHistoryRuntime,
     imageAttachmentService?: ImageAttachmentService,
+    fileTransferService?: FileTransferService,
   ) {
     this.terminalService = terminalService;
     this.chatHistoryService = chatHistoryService;
@@ -271,6 +286,7 @@ export class AgentService_v2 {
     this.memoryService = memoryService;
     this.uiHistoryService = uiHistoryService;
     this.imageAttachmentService = imageAttachmentService || null;
+    this.fileTransferService = fileTransferService || null;
     this.helpers = new AgentHelpers();
     this.checkpointer = new MemorySaver();
     this.initializeGraph();
@@ -328,6 +344,24 @@ export class AgentService_v2 {
     provider: UnfinishedRunBackgroundExecCommandProvider,
   ): void {
     this.unfinishedBackgroundExecCommandProvider = provider;
+  }
+
+  setBackgroundFileTransferRegistrar(
+    registrar: RunBackgroundFileTransferRegistrar,
+  ): void {
+    this.backgroundFileTransferRegistrar = registrar;
+  }
+
+  setBackgroundFileTransferCompleter(
+    completer: RunBackgroundFileTransferCompleter,
+  ): void {
+    this.backgroundFileTransferCompleter = completer;
+  }
+
+  setUnfinishedBackgroundFileTransferProvider(
+    provider: UnfinishedRunBackgroundFileTransferProvider,
+  ): void {
+    this.unfinishedBackgroundFileTransferProvider = provider;
   }
 
   isAbortError(error: unknown): boolean {
@@ -1402,6 +1436,34 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "copy_between_tabs": {
+          try {
+            const validatedArgs = copyBetweenTabsSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.copyBetweenTabs(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for copy_between_tabs: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "read_file_transfer_status": {
+          try {
+            const validatedArgs = readFileTransferStatusSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.readFileTransferStatus(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for read_file_transfer_status: ${(err as Error).message}`;
+          }
+          break;
+        }
         default:
           result = `Tool "${toolCall.name}" is not supported.`;
       }
@@ -1759,6 +1821,15 @@ export class AgentService_v2 {
     );
   }
 
+  private consumeUnfinishedBackgroundFileTransfersForGuard(sessionId: string) {
+    const agentRunId = this.activeAgentRunIdsBySession.get(sessionId);
+    if (!agentRunId) return [];
+    return (
+      this.unfinishedBackgroundFileTransferProvider?.(sessionId, agentRunId) ||
+      []
+    );
+  }
+
   private emitRemoveMessageIfPresent(
     sessionId: string,
     lastMessage: BaseMessage | undefined,
@@ -1833,6 +1904,25 @@ export class AgentService_v2 {
         (continueMessage as any).additional_kwargs = {
           _gyshellMessageId: uuidv4(),
           input_kind: "unfinished_background_exec_command_guard",
+        };
+        return {
+          messages: [...guardMessages, continueMessage],
+          sessionId,
+          pendingToolCalls: [],
+          completionGuardDecision: "continue" as const,
+        };
+      }
+
+      const unfinishedBackgroundTransfers =
+        this.consumeUnfinishedBackgroundFileTransfersForGuard(sessionId);
+      if (unfinishedBackgroundTransfers.length > 0) {
+        this.emitRemoveMessageIfPresent(sessionId, lastMessage);
+        const continueMessage = new HumanMessage(
+          `${CONTINUE_INSTRUCTION_TAG}${buildUnfinishedFileTransferContinueInstruction(unfinishedBackgroundTransfers)}`,
+        );
+        (continueMessage as any).additional_kwargs = {
+          _gyshellMessageId: uuidv4(),
+          input_kind: "unfinished_background_file_transfer_guard",
         };
         return {
           messages: [...guardMessages, continueMessage],
@@ -2091,6 +2181,7 @@ export class AgentService_v2 {
       sessionId,
       messageId,
       terminalService: this.terminalService,
+      fileTransferService: this.fileTransferService ?? undefined,
       sendEvent: this.helpers.sendEvent.bind(this.helpers),
       waitForFeedback: this.waitForFeedback ?? undefined,
       commandPolicyService: this.commandPolicyService,
@@ -2125,6 +2216,20 @@ export class AgentService_v2 {
             this.backgroundExecCommandCompleter?.(sessionId, {
               ...command,
               originAgentRunId: command.originAgentRunId || agentRunId,
+            })
+        : undefined,
+      registerBackgroundFileTransfer: this.backgroundFileTransferRegistrar
+        ? (transfer) =>
+            this.backgroundFileTransferRegistrar?.(sessionId, {
+              ...transfer,
+              originAgentRunId: transfer.originAgentRunId || agentRunId,
+            })
+        : undefined,
+      completeBackgroundFileTransfer: this.backgroundFileTransferCompleter
+        ? (transfer) =>
+            this.backgroundFileTransferCompleter?.(sessionId, {
+              ...transfer,
+              originAgentRunId: transfer.originAgentRunId || agentRunId,
             })
         : undefined,
       signal: config?.signal,

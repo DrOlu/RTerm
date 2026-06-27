@@ -80,6 +80,7 @@ interface RingBuffer {
 }
 
 type RawEventPublisher = (channel: string, data: unknown) => void
+type TerminalClosedListener = (terminalId: string) => void
 type PendingTaskFinish = {
   requiredWriteSeq: number
   exitCode?: number
@@ -162,6 +163,7 @@ export class TerminalService {
   private commandTrackingPromptSyncPollIntervalMs = 50
   private syntheticCommandQuietWindowMs = 1000
   private readonly terminalIdsBeingKilled = new Set<string>()
+  private readonly terminalClosedListeners = new Set<TerminalClosedListener>()
 
   constructor(options?: TerminalServiceOptions) {
     this.backends.set('local', new NodePtyBackend())
@@ -171,6 +173,13 @@ export class TerminalService {
 
   setRawEventPublisher(publisher: RawEventPublisher): void {
     this.rawEventPublisher = publisher
+  }
+
+  onTerminalClosed(listener: TerminalClosedListener): () => void {
+    this.terminalClosedListeners.add(listener)
+    return () => {
+      this.terminalClosedListeners.delete(listener)
+    }
   }
 
   private listRenderableTerminals(): TerminalTabSnapshot[] {
@@ -1148,9 +1157,20 @@ export class TerminalService {
         const nextLocal = Array.from(this.terminals.values()).find((item) => item.type === 'local')
         this.primaryLocalTerminalId = nextLocal?.id || null
       }
+      this.notifyTerminalClosed(terminalId)
     }
     this.publishTerminalTabsChanged()
     this.schedulePersistTerminalState()
+  }
+
+  private notifyTerminalClosed(terminalId: string): void {
+    for (const listener of this.terminalClosedListeners) {
+      try {
+        listener(terminalId)
+      } catch (error) {
+        console.warn(`[TerminalService] terminal close listener failed for ${terminalId}:`, error)
+      }
+    }
   }
 
   interrupt(terminalId: string): void {
@@ -1598,6 +1618,37 @@ export class TerminalService {
 
   getAllTerminals(): TerminalTab[] {
     return Array.from(this.terminals.values()).filter((t) => !t.isInitializing && t.runtimeState === 'ready')
+  }
+
+  getTransferMachineIdentity(terminalId: string): string | null {
+    const terminal = this.terminals.get(terminalId)
+    const config = this.terminalConfigs.get(terminalId)
+    if (!terminal || !config) {
+      return null
+    }
+    if (!terminal.capabilities?.supportsFilesystem) {
+      return null
+    }
+    if (isLocalConnectionConfig(config)) {
+      return 'local://default'
+    }
+    if (isSshConnectionConfig(config)) {
+      const host = config.host.trim().toLowerCase()
+      if (this.isLoopbackHost(host)) {
+        return 'local://default'
+      }
+      return `ssh://${host}:${config.port || 22}`
+    }
+    return `${config.type}:${terminalId}`
+  }
+
+  private isLoopbackHost(host: string): boolean {
+    const normalized = host.replace(/^\[|\]$/g, '')
+    return (
+      normalized === 'localhost' ||
+      normalized === '127.0.0.1' ||
+      normalized === '::1'
+    )
   }
 
   getCommandTask(terminalId: string, commandId: string): CommandTask | undefined {

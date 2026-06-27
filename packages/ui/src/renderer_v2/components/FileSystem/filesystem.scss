@@ -509,6 +509,14 @@
   letter-spacing: 0.25px;
 }
 
+.filesystem-transfer-origin {
+  color: var(--accent);
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.25px;
+}
+
 .filesystem-transfer-name {
   flex: 1;
   min-width: 0;

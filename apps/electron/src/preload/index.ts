@@ -245,6 +245,7 @@ interface BuiltInToolSummary {
   name: string;
   description?: string;
   enabled: boolean;
+  experimental?: boolean;
 }
 
 interface SkillSummary {
@@ -409,6 +410,38 @@ export interface ReadBase64FileResult {
   mimeType: string;
 }
 
+export interface FileTransferTaskSnapshot {
+  id: string;
+  origin: "user" | "agent";
+  mode: "copy" | "move";
+  sourceTerminalId: string;
+  sourceTerminalName: string;
+  sourceMachineIdentity: string | null;
+  sourcePaths: string[];
+  targetTerminalId: string;
+  targetTerminalName: string;
+  targetMachineIdentity: string | null;
+  targetDirPath: string;
+  itemNames: string[];
+  conflictStrategy: "error" | "overwrite" | "rename";
+  status: "queued" | "scanning" | "running" | "success" | "error" | "cancelled";
+  bytesDone: number;
+  totalBytes: number;
+  transferredFiles: number;
+  totalFiles: number;
+  percent: number;
+  message: string | null;
+  errorMessage: string | null;
+  cancelRequested: boolean;
+  createdAt: number;
+  updatedAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  sessionId?: string;
+  agentRunId?: string;
+  toolMessageId?: string;
+}
+
 export interface GyShellAPI {
   system: {
     platform: NodeJS.Platform;
@@ -554,6 +587,35 @@ export interface GyShellAPI {
       totalFiles: number;
     }>;
     cancelTransfer: (transferId: string) => Promise<{ ok: boolean }>;
+    startTransfer: (input: {
+      origin: "user" | "agent";
+      mode?: "copy" | "move";
+      sourceTerminalId: string;
+      sourcePaths: string[];
+      targetTerminalId: string;
+      targetDirPath: string;
+      transferId?: string;
+      chunkSize?: number;
+      overwrite?: boolean;
+      conflictStrategy?: "error" | "overwrite" | "rename";
+      requireDistinctMachine?: boolean;
+      sessionId?: string;
+      agentRunId?: string;
+      toolMessageId?: string;
+    }) => Promise<FileTransferTaskSnapshot>;
+    getTransfer: (
+      transferId: string,
+    ) => Promise<FileTransferTaskSnapshot | null>;
+    listTransfers: (options?: {
+      includeCompleted?: boolean;
+      origin?: "user" | "agent";
+      terminalId?: string;
+      sessionId?: string;
+      agentRunId?: string;
+    }) => Promise<FileTransferTaskSnapshot[]>;
+    cancelTransferTask: (
+      transferId: string,
+    ) => Promise<FileTransferTaskSnapshot | null>;
     createDirectory: (terminalId: string, dirPath: string) => Promise<void>;
     createFile: (terminalId: string, filePath: string) => Promise<void>;
     deletePath: (
@@ -580,6 +642,12 @@ export interface GyShellAPI {
         totalFiles: number;
         eof: boolean;
       }) => void,
+    ) => () => void;
+    onTransferTaskUpdated: (
+      callback: (payload: FileTransferTaskSnapshot) => void,
+    ) => () => void;
+    onTransferTaskRemoved: (
+      callback: (payload: { transferId: string }) => void,
     ) => () => void;
   };
 
@@ -941,6 +1009,14 @@ const api: GyShellAPI = {
       ),
     cancelTransfer: (transferId) =>
       ipcRenderer.invoke("filesystem:cancelTransfer", transferId),
+    startTransfer: (input) =>
+      ipcRenderer.invoke("filesystem:startTransfer", input),
+    getTransfer: (transferId) =>
+      ipcRenderer.invoke("filesystem:getTransfer", transferId),
+    listTransfers: (options) =>
+      ipcRenderer.invoke("filesystem:listTransfers", options),
+    cancelTransferTask: (transferId) =>
+      ipcRenderer.invoke("filesystem:cancelTransferTask", transferId),
     createDirectory: (terminalId, dirPath) =>
       ipcRenderer.invoke("filesystem:createDirectory", terminalId, dirPath),
     createFile: (terminalId, filePath) =>
@@ -978,6 +1054,22 @@ const api: GyShellAPI = {
       ) => callback(payload);
       ipcRenderer.on("filesystem:transferProgress", handler);
       return () => ipcRenderer.off("filesystem:transferProgress", handler);
+    },
+    onTransferTaskUpdated: (callback) => {
+      const handler = (_: IpcRendererEvent, payload: FileTransferTaskSnapshot) =>
+        callback(payload);
+      ipcRenderer.on("filesystem:transferTaskUpdated", handler);
+      return () =>
+        ipcRenderer.off("filesystem:transferTaskUpdated", handler);
+    },
+    onTransferTaskRemoved: (callback) => {
+      const handler = (
+        _: IpcRendererEvent,
+        payload: { transferId: string },
+      ) => callback(payload);
+      ipcRenderer.on("filesystem:transferTaskRemoved", handler);
+      return () =>
+        ipcRenderer.off("filesystem:transferTaskRemoved", handler);
     },
   },
 

@@ -25,6 +25,8 @@ import {
   type QueuedAgentInsertionInput,
   type RunBackgroundExecCommand,
   type RunBackgroundExecCommandInput,
+  type RunBackgroundFileTransfer,
+  type RunBackgroundFileTransferInput,
 } from "../AgentHelper/queuedInsertions";
 import { TransportHub } from "./TransportHub";
 
@@ -56,6 +58,10 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
   private backgroundExecCommandsByAgentRun: Map<
     string,
     Map<string, RunBackgroundExecCommand>
+  > = new Map();
+  private backgroundFileTransfersByAgentRun: Map<
+    string,
+    Map<string, RunBackgroundFileTransfer>
   > = new Map();
   private runStateListeners: Set<GatewayRunStateListener> = new Set();
   private lastRunStateKey = "";
@@ -108,6 +114,18 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     this.agentService.setUnfinishedBackgroundExecCommandProvider?.(
       (sessionId, agentRunId) =>
         this.consumeUnfinishedBackgroundExecCommands(sessionId, agentRunId),
+    );
+    this.agentService.setBackgroundFileTransferRegistrar?.(
+      (sessionId, transfer) =>
+        this.registerBackgroundFileTransfer(sessionId, transfer),
+    );
+    this.agentService.setBackgroundFileTransferCompleter?.(
+      (sessionId, transfer) =>
+        this.completeBackgroundFileTransfer(sessionId, transfer),
+    );
+    this.agentService.setUnfinishedBackgroundFileTransferProvider?.(
+      (sessionId, agentRunId) =>
+        this.consumeUnfinishedBackgroundFileTransfers(sessionId, agentRunId),
     );
     this.commandPolicyService.setFeedbackWaiter((messageId, timeoutMs) =>
       this.waitForFeedback(messageId, timeoutMs),
@@ -692,6 +710,81 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     return unfinished;
   }
 
+  private registerBackgroundFileTransfer(
+    sessionId: string,
+    transfer: RunBackgroundFileTransferInput,
+  ): void {
+    const agentRunId = transfer.originAgentRunId;
+    if (!agentRunId || !this.isAgentRunAcceptingEvents(sessionId, agentRunId)) {
+      return;
+    }
+    const current =
+      this.backgroundFileTransfersByAgentRun.get(agentRunId) ||
+      new Map<string, RunBackgroundFileTransfer>();
+    const existing = current.get(transfer.transferId);
+    current.set(transfer.transferId, {
+      ...existing,
+      ...transfer,
+      id: transfer.transferId,
+      sessionId,
+      agentRunId,
+      createdAt: existing?.createdAt || Date.now(),
+      completedAt: existing?.completedAt,
+      status: existing?.status,
+      error: existing?.error,
+      guardNotifiedAt: existing?.guardNotifiedAt,
+    });
+    this.backgroundFileTransfersByAgentRun.set(agentRunId, current);
+  }
+
+  private completeBackgroundFileTransfer(
+    sessionId: string,
+    transfer: RunBackgroundFileTransferInput & {
+      status?: string;
+      error?: string;
+    },
+  ): void {
+    const agentRunId = transfer.originAgentRunId;
+    if (!agentRunId || !this.isAgentRunAcceptingEvents(sessionId, agentRunId)) {
+      return;
+    }
+    const current =
+      this.backgroundFileTransfersByAgentRun.get(agentRunId) ||
+      new Map<string, RunBackgroundFileTransfer>();
+    const existing = current.get(transfer.transferId);
+    current.set(transfer.transferId, {
+      ...existing,
+      ...transfer,
+      id: transfer.transferId,
+      sessionId,
+      agentRunId,
+      createdAt: existing?.createdAt || Date.now(),
+      completedAt: Date.now(),
+      status: transfer.status,
+      error: transfer.error,
+      guardNotifiedAt: existing?.guardNotifiedAt,
+    });
+    this.backgroundFileTransfersByAgentRun.set(agentRunId, current);
+  }
+
+  private consumeUnfinishedBackgroundFileTransfers(
+    sessionId: string,
+    agentRunId: string,
+  ): RunBackgroundFileTransfer[] {
+    if (!this.isAgentRunAcceptingEvents(sessionId, agentRunId)) return [];
+    const current = this.backgroundFileTransfersByAgentRun.get(agentRunId);
+    if (!current) return [];
+    const now = Date.now();
+    const unfinished = Array.from(current.values()).filter(
+      (transfer) => !transfer.completedAt && !transfer.guardNotifiedAt,
+    );
+    unfinished.forEach((transfer) => {
+      transfer.guardNotifiedAt = now;
+      current.set(transfer.transferId, transfer);
+    });
+    return unfinished;
+  }
+
   private isAgentRunAcceptingEvents(
     sessionId: string,
     agentRunId: string,
@@ -716,6 +809,7 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
     this.resolveQueuedInsertionWaiters("", agentRunId, false);
     this.queuedInsertionWaitersByAgentRun.delete(agentRunId);
     this.backgroundExecCommandsByAgentRun.delete(agentRunId);
+    this.backgroundFileTransfersByAgentRun.delete(agentRunId);
   }
 
   private cleanupSessionAgentRuns(sessionId: string): void {
@@ -732,6 +826,16 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
         )
       ) {
         this.backgroundExecCommandsByAgentRun.delete(agentRunId);
+      }
+    }
+    for (const [agentRunId, transfers] of this
+      .backgroundFileTransfersByAgentRun) {
+      if (
+        Array.from(transfers.values()).some(
+          (item) => item.sessionId === sessionId,
+        )
+      ) {
+        this.backgroundFileTransfersByAgentRun.delete(agentRunId);
       }
     }
   }

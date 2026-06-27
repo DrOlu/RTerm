@@ -443,6 +443,14 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
       persistedWsGatewayCidrs,
     );
     const versionInfo = store.versionInfo;
+    const builtInTools = useMemo(
+      () => store.builtInTools.filter((tool) => tool.experimental !== true),
+      [store.builtInTools],
+    );
+    const experimentalBuiltInTools = useMemo(
+      () => store.builtInTools.filter((tool) => tool.experimental === true),
+      [store.builtInTools],
+    );
   const formattedCheckedAt =
     versionInfo?.checkedAt && versionInfo.checkedAt > 0
       ? new Date(versionInfo.checkedAt).toLocaleString()
@@ -1755,7 +1763,7 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                 <i />
               </div>
               <div className="tools-list">
-                {store.builtInTools.map((tool) => (
+                {builtInTools.map((tool) => (
                   <div key={tool.name} className="tool-item">
                     <div className="tool-info">
                       <div className="tool-name">{tool.name}</div>
@@ -1783,12 +1791,51 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                     </div>
                   </div>
                 ))}
-                  {store.builtInTools.length === 0 ? (
+                  {builtInTools.length === 0 ? (
                     <div className="tool-empty">
                       {t.settings.noBuiltInTools}
                     </div>
                   ) : null}
               </div>
+
+              {experimentalBuiltInTools.length > 0 ? (
+                <>
+                  <div className="settings-divider settings-divider-spaced">
+                    <span>{t.settings.experimentalTools}</span>
+                    <i />
+                  </div>
+                  <div className="tools-list">
+                    {experimentalBuiltInTools.map((tool) => (
+                      <div key={tool.name} className="tool-item">
+                        <div className="tool-info">
+                          <div className="tool-name">{tool.name}</div>
+                          <div className="tool-meta">
+                            {tool.description || ""}
+                          </div>
+                        </div>
+                        <div className="tool-actions">
+                          <span
+                            className={`status-dot ${tool.enabled ? "is-ok" : "is-disabled"}`}
+                          />
+                          <label className="switch">
+                            <input
+                              type="checkbox"
+                              checked={tool.enabled}
+                              onChange={(e) =>
+                                store.setBuiltInToolEnabled(
+                                  tool.name,
+                                  e.target.checked,
+                                )
+                              }
+                            />
+                            <span className="switch-slider" />
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </>
           ) : null}
 

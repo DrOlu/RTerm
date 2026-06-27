@@ -12,6 +12,7 @@ import { SettingsService } from "../../../backend/src/services/SettingsService";
 import { UiSettingsStore } from "../settings/UiSettingsStore";
 import { TerminalService } from "../../../backend/src/services/TerminalService";
 import { FileSystemService } from "../../../backend/src/services/FileSystemService";
+import { FileTransferService } from "../../../backend/src/services/FileTransferService";
 import { AgentService_v2 } from "../../../backend/src/services/AgentService_v2";
 import { CommandPolicyService } from "../../../backend/src/services/CommandPolicy/CommandPolicyService";
 import { ModelCapabilityService } from "../../../backend/src/services/ModelCapabilityService";
@@ -62,6 +63,7 @@ let settingsService: SettingsService;
 let uiSettingsStore: UiSettingsStore;
 let terminalService: TerminalService;
 let fileSystemService: FileSystemService;
+let fileTransferService: FileTransferService;
 let agentService: AgentService_v2;
 let commandPolicyService: CommandPolicyService;
 let modelCapabilityService: ModelCapabilityService;
@@ -332,6 +334,10 @@ export async function startElectronMain(): Promise<void> {
           terminalStateStore,
         });
         fileSystemService = new FileSystemService(terminalService);
+        fileTransferService = new FileTransferService(
+          fileSystemService,
+          terminalService,
+        );
         resourceMonitorService = new ResourceMonitorService(terminalService);
         commandPolicyService = new CommandPolicyService();
         mcpToolService = new McpToolService();
@@ -363,6 +369,7 @@ export async function startElectronMain(): Promise<void> {
           uiHistoryService,
           chatHistoryService,
           imageAttachmentService,
+          fileTransferService,
         );
         const gatewayService = new GatewayService(
           terminalService,
@@ -371,6 +378,9 @@ export async function startElectronMain(): Promise<void> {
           commandPolicyService,
           settingsService,
           mcpToolService,
+        );
+        fileTransferService.setRawEventPublisher((channel, data) =>
+          gatewayService.broadcastRaw(channel, data),
         );
         sleepBlockerService = new SleepBlockerService(powerSaveBlocker);
         const syncSleepBlockerSetting = (
@@ -536,6 +546,21 @@ export async function startElectronMain(): Promise<void> {
                     targetDirPath,
                     options,
                   );
+                },
+                startTransfer: async (input) => {
+                  return fileTransferService.startTransfer(input);
+                },
+                getTransfer: async (transferId) => {
+                  return fileTransferService.getTransfer(transferId);
+                },
+                listTransfers: async (options) => {
+                  return fileTransferService.listTransfers(options);
+                },
+                cancelTransfer: async (transferId) => {
+                  return fileTransferService.cancelTransfer(transferId);
+                },
+                cancelTransferTask: async (transferId) => {
+                  return fileTransferService.cancelTransfer(transferId);
                 },
                 createDirectory: async (terminalId, dirPath) => {
                   await fileSystemService.createDirectory(terminalId, dirPath);
@@ -830,6 +855,7 @@ export async function startElectronMain(): Promise<void> {
           webSocketGatewayControlService,
           accessTokenService,
           fileSystemService,
+          fileTransferService,
           mobileWebServerService,
         );
         ipcAdapter.registerHandlers();

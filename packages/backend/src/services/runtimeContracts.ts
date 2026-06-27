@@ -19,10 +19,13 @@ import type { ChatSessionSummaryRecord } from "./history/historyTypes";
 import type {
   RunBackgroundExecCommandCompleter,
   RunBackgroundExecCommandRegistrar,
+  RunBackgroundFileTransferCompleter,
+  RunBackgroundFileTransferRegistrar,
   QueuedAgentInsertionAvailabilityWaiter,
   QueuedAgentInsertionAcknowledger,
   QueuedAgentInsertionEnqueuer,
   QueuedAgentInsertionProvider,
+  UnfinishedRunBackgroundFileTransferProvider,
   UnfinishedRunBackgroundExecCommandProvider,
 } from "./AgentHelper/queuedInsertions";
 
@@ -143,6 +146,15 @@ export interface IAgentRuntime {
   ): void;
   setUnfinishedBackgroundExecCommandProvider?(
     provider: UnfinishedRunBackgroundExecCommandProvider,
+  ): void;
+  setBackgroundFileTransferRegistrar?(
+    registrar: RunBackgroundFileTransferRegistrar,
+  ): void;
+  setBackgroundFileTransferCompleter?(
+    completer: RunBackgroundFileTransferCompleter,
+  ): void;
+  setUnfinishedBackgroundFileTransferProvider?(
+    provider: UnfinishedRunBackgroundFileTransferProvider,
   ): void;
   run(
     context: any,

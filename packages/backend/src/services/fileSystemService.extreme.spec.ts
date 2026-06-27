@@ -427,10 +427,11 @@ const run = async (): Promise<void> => {
     if (!sourceDeleted) throw new Error(`expected /src/a.txt in deletedPaths but got: ${JSON.stringify(calls.deletedPaths)}`)
   })
 
-  // --- Rollback: created target entries are cleaned up on copy failure ---
-  await runCase('transferEntries rollback removes created target entries when copy fails', async () => {
+  // --- Failed copies leave target-side partial output for the caller to inspect ---
+  await runCase('transferEntries leaves target-side partial output when copy fails', async () => {
     const calls = {
-      deletedPaths: [] as string[]
+      deletedPaths: [] as string[],
+      writtenPaths: [] as string[]
     }
     const terminalService = {
       statFile: async (_terminalId: string, filePath: string) => {
@@ -444,6 +445,7 @@ const run = async (): Promise<void> => {
       getFileSystemIdentity: () => 'local://x',
       resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
       uploadFileFromLocalPath: async () => {
+        calls.writtenPaths.push('/dst/a.txt')
         throw new Error('Simulated copy failure')
       },
       deletePath: async (_terminalId: string, targetPath: string) => {
@@ -460,11 +462,12 @@ const run = async (): Promise<void> => {
     }
 
     if (!threw) throw new Error('transferEntries should throw on copy failure')
-    // The target path was never-existed so it was added to createdTargetRoots.
-    // On rollback it should be deleted even though the copy never wrote any bytes.
-    const targetRolledBack = calls.deletedPaths.includes('/dst/a.txt')
-    if (!targetRolledBack) {
-      throw new Error(`expected /dst/a.txt in rollback deletedPaths but got: ${JSON.stringify(calls.deletedPaths)}`)
+    if (!calls.writtenPaths.includes('/dst/a.txt')) {
+      throw new Error(`expected simulated partial write to /dst/a.txt but got: ${JSON.stringify(calls.writtenPaths)}`)
+    }
+    const targetDeleted = calls.deletedPaths.includes('/dst/a.txt')
+    if (targetDeleted) {
+      throw new Error(`expected /dst/a.txt to remain after failed copy but got deletedPaths: ${JSON.stringify(calls.deletedPaths)}`)
     }
   })
 
@@ -499,6 +502,96 @@ const run = async (): Promise<void> => {
       /Transfer cancelled/i,
       'pre-aborted signal should cause a cancellation error'
     )
+  })
+
+  await runCase('transferEntries cancels while scanning a source stat call', async () => {
+    let resolveSourceStatStarted: (() => void) | null = null
+    const sourceStatStarted = new Promise<void>((resolve) => {
+      resolveSourceStatStarted = resolve
+    })
+    let uploadStarted = false
+    const terminalService = {
+      statFile: async (_terminalId: string, filePath: string) => {
+        if (filePath === '/dst') return { exists: true, isDirectory: true }
+        if (filePath === '/src/a.txt') {
+          resolveSourceStatStarted?.()
+          await new Promise(() => undefined)
+        }
+        return { exists: false, isDirectory: false }
+      },
+      getRemoteOs: () => 'unix' as const,
+      getTerminalType: () => 'local' as const,
+      getFileSystemIdentity: (_terminalId: string) => `local://${_terminalId}`,
+      resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
+      uploadFileFromLocalPath: async () => {
+        uploadStarted = true
+        return { totalBytes: 10 }
+      },
+      deletePath: async () => {}
+    }
+    const service = new FileSystemService(terminalService as unknown as TerminalService)
+    const controller = new AbortController()
+    const transfer = service.transferEntries('local-a', ['/src/a.txt'], 'local-b', '/dst', {
+      signal: controller.signal
+    })
+
+    await sourceStatStarted
+    controller.abort()
+
+    await assertRejects(
+      async () => {
+        await transfer
+      },
+      /Transfer cancelled/i,
+      'abort during source stat scanning should cancel transferEntries'
+    )
+    assertEqual(uploadStarted, false, 'cancelled scan should not enter copy phase')
+  })
+
+  await runCase('transferEntries cancels while scanning a directory listing', async () => {
+    let resolveListStarted: (() => void) | null = null
+    const listStarted = new Promise<void>((resolve) => {
+      resolveListStarted = resolve
+    })
+    let uploadStarted = false
+    const terminalService = {
+      statFile: async (_terminalId: string, filePath: string) => {
+        if (filePath === '/dst') return { exists: true, isDirectory: true }
+        if (filePath === '/src') return { exists: true, isDirectory: true }
+        return { exists: false, isDirectory: false }
+      },
+      listDirectory: async () => {
+        resolveListStarted?.()
+        await new Promise(() => undefined)
+        return { path: '/src', entries: [] }
+      },
+      getRemoteOs: () => 'unix' as const,
+      getTerminalType: () => 'local' as const,
+      getFileSystemIdentity: (_terminalId: string) => `local://${_terminalId}`,
+      resolvePathForFileSystem: async (_terminalId: string, filePath: string) => filePath,
+      uploadFileFromLocalPath: async () => {
+        uploadStarted = true
+        return { totalBytes: 10 }
+      },
+      deletePath: async () => {}
+    }
+    const service = new FileSystemService(terminalService as unknown as TerminalService)
+    const controller = new AbortController()
+    const transfer = service.transferEntries('local-a', ['/src'], 'local-b', '/dst', {
+      signal: controller.signal
+    })
+
+    await listStarted
+    controller.abort()
+
+    await assertRejects(
+      async () => {
+        await transfer
+      },
+      /Transfer cancelled/i,
+      'abort during directory listing should cancel transferEntries'
+    )
+    assertEqual(uploadStarted, false, 'cancelled directory scan should not enter copy phase')
   })
 
   // --- Different filesystem identities: same-path guard does not apply ---

@@ -18,6 +18,7 @@ import type {
   AppLanguage,
   ModelDefinition,
   MonitorSnapshot,
+  FileTransferTaskSnapshot,
   ProxyEntry,
   TunnelEntry,
 } from "../lib/ipcTypes";
@@ -66,6 +67,35 @@ const upsertById = <T extends { id: string }>(list: T[], entry: T): T[] => {
 
 const removeById = <T extends { id: string }>(list: T[], id: string): T[] =>
   list.filter((x) => x.id !== id);
+
+const FILE_TRANSFER_STATUS_RANK: Record<string, number> = {
+  queued: 0,
+  scanning: 1,
+  running: 2,
+  success: 3,
+  error: 3,
+  cancelled: 3,
+};
+
+const shouldApplyFileTransferTaskSnapshot = (
+  existing: FileTransferTaskSnapshot | undefined,
+  incoming: FileTransferTaskSnapshot,
+): boolean => {
+  if (!existing) return true;
+  const existingUpdatedAt = Number(existing.updatedAt) || 0;
+  const incomingUpdatedAt = Number(incoming.updatedAt) || 0;
+  if (incomingUpdatedAt > existingUpdatedAt) return true;
+  if (incomingUpdatedAt < existingUpdatedAt) return false;
+
+  const existingRank = FILE_TRANSFER_STATUS_RANK[existing.status] ?? 0;
+  const incomingRank = FILE_TRANSFER_STATUS_RANK[incoming.status] ?? 0;
+  if (incomingRank > existingRank) return true;
+  if (incomingRank < existingRank) return false;
+
+  const existingBytesDone = Number(existing.bytesDone) || 0;
+  const incomingBytesDone = Number(incoming.bytesDone) || 0;
+  return incomingBytesDone >= existingBytesDone;
+};
 
 type WindowScopedTabKind = "chat" | "terminal" | "filesystem" | "monitor";
 const MONITOR_HISTORY_LIMIT = 64;
@@ -261,6 +291,7 @@ export class AppStore {
   monitorEnabledSources: string[] = [];
   terminalSelections: Record<string, string> = {};
   fileSystemClipboard: FileSystemClipboardState | null = null;
+  fileTransferTasks: Record<string, FileTransferTaskSnapshot> = {};
 
   xtermTheme: ITheme = {};
   customThemes: TerminalColorScheme[] = [];
@@ -317,6 +348,7 @@ export class AppStore {
       monitorEnabledSources: observable,
       terminalSelections: observable,
       fileSystemClipboard: observable.ref,
+      fileTransferTasks: observable,
       xtermTheme: observable,
       customThemes: observable,
       i18n: observable,
@@ -360,6 +392,11 @@ export class AppStore {
       setTerminalSelection: action,
       setFileSystemClipboard: action,
       clearFileSystemClipboard: action,
+      applyFileTransferTasks: action,
+      applyFileTransferTaskUpdate: action,
+      removeFileTransferTask: action,
+      startFileTransfer: action,
+      cancelFileTransferTask: action,
       setSettingsSection: action,
       setThemeId: action,
       setLanguage: action,
@@ -2349,6 +2386,25 @@ export class AppStore {
         });
       });
 
+      window.gyshell.filesystem.onTransferTaskUpdated((task) => {
+        runInAction(() => {
+          this.applyFileTransferTaskUpdate(task);
+        });
+      });
+
+      window.gyshell.filesystem.onTransferTaskRemoved(({ transferId }) => {
+        runInAction(() => {
+          this.removeFileTransferTask(transferId);
+        });
+      });
+
+      const transferTasks = await window.gyshell.filesystem.listTransfers({
+        includeCompleted: true,
+      });
+      runInAction(() => {
+        this.applyFileTransferTasks(transferTasks);
+      });
+
       const terminalSnapshot = await window.gyshell.terminal.list();
       if (terminalSnapshot.terminals.length > 0) {
         runInAction(() => {
@@ -3064,6 +3120,57 @@ export class AppStore {
 
   clearFileSystemClipboard(): void {
     this.fileSystemClipboard = null;
+  }
+
+  applyFileTransferTasks(tasks: FileTransferTaskSnapshot[]): void {
+    const next: Record<string, FileTransferTaskSnapshot> = {
+      ...this.fileTransferTasks,
+    };
+    tasks.forEach((task) => {
+      if (shouldApplyFileTransferTaskSnapshot(next[task.id], task)) {
+        next[task.id] = task;
+      }
+    });
+    this.fileTransferTasks = next;
+  }
+
+  applyFileTransferTaskUpdate(task: FileTransferTaskSnapshot): void {
+    if (!shouldApplyFileTransferTaskSnapshot(this.fileTransferTasks[task.id], task)) {
+      return;
+    }
+    this.fileTransferTasks = {
+      ...this.fileTransferTasks,
+      [task.id]: task,
+    };
+  }
+
+  removeFileTransferTask(transferId: string): void {
+    if (!this.fileTransferTasks[transferId]) return;
+    const next = { ...this.fileTransferTasks };
+    delete next[transferId];
+    this.fileTransferTasks = next;
+  }
+
+  async startFileTransfer(
+    input: Parameters<Window["gyshell"]["filesystem"]["startTransfer"]>[0],
+  ): Promise<FileTransferTaskSnapshot> {
+    const task = await window.gyshell.filesystem.startTransfer(input);
+    runInAction(() => {
+      this.applyFileTransferTaskUpdate(task);
+    });
+    return task;
+  }
+
+  async cancelFileTransferTask(
+    transferId: string,
+  ): Promise<FileTransferTaskSnapshot | null> {
+    const task = await window.gyshell.filesystem.cancelTransferTask(transferId);
+    if (task) {
+      runInAction(() => {
+        this.applyFileTransferTaskUpdate(task);
+      });
+    }
+    return task;
   }
 
   setTerminalSelection(terminalId: string, selectionText: string): void {

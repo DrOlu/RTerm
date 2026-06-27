@@ -4,6 +4,7 @@ export type AppSettings = BackendSettings & UiSettings
 export type TerminalConfig = Parameters<Window['gyshell']['terminal']['createTab']>[0]
 export type FileSystemListResult = Awaited<ReturnType<Window['gyshell']['filesystem']['list']>>
 export type FileSystemEntry = FileSystemListResult['entries'][number]
+export type FileTransferTaskSnapshot = Awaited<ReturnType<Window['gyshell']['filesystem']['startTransfer']>>
 export type MonitorSnapshot = Awaited<ReturnType<Window['gyshell']['monitor']['snapshot']>>
 
 export type TerminalId = string

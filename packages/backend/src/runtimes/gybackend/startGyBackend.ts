@@ -2,6 +2,7 @@ import path from "node:path";
 import process from "node:process";
 import { TerminalService } from "../../services/TerminalService";
 import { FileSystemService } from "../../services/FileSystemService";
+import { FileTransferService } from "../../services/FileTransferService";
 import { AgentService_v2 } from "../../services/AgentService_v2";
 import { UIHistoryService } from "../../services/UIHistoryService";
 import { ChatHistoryService } from "../../services/ChatHistoryService";
@@ -92,6 +93,10 @@ export async function startGyBackend(): Promise<void> {
     terminalStateStore,
   });
   const fileSystemService = new FileSystemService(terminalService);
+  const fileTransferService = new FileTransferService(
+    fileSystemService,
+    terminalService,
+  );
   const historyStore = new HistorySqliteStore();
   process.once("exit", () => {
     terminalService.flushPersistedState();
@@ -108,6 +113,7 @@ export async function startGyBackend(): Promise<void> {
     uiHistoryService,
     chatHistoryService,
     imageAttachmentService,
+    fileTransferService,
   );
 
   const gatewayService = new GatewayService(
@@ -117,6 +123,9 @@ export async function startGyBackend(): Promise<void> {
     commandPolicyService,
     settingsService,
     mcpToolService,
+  );
+  fileTransferService.setRawEventPublisher((channel, data) =>
+    gatewayService.broadcastRaw(channel, data),
   );
   const terminalCommandDraftService = new TerminalCommandDraftService(
     terminalService,
@@ -281,6 +290,21 @@ export async function startGyBackend(): Promise<void> {
               targetDirPath,
               options,
             );
+          },
+          startTransfer: async (input) => {
+            return fileTransferService.startTransfer(input);
+          },
+          getTransfer: async (transferId) => {
+            return fileTransferService.getTransfer(transferId);
+          },
+          listTransfers: async (options) => {
+            return fileTransferService.listTransfers(options);
+          },
+          cancelTransfer: async (transferId) => {
+            return fileTransferService.cancelTransfer(transferId);
+          },
+          cancelTransferTask: async (transferId) => {
+            return fileTransferService.cancelTransfer(transferId);
           },
           createDirectory: async (terminalId, dirPath) => {
             await fileSystemService.createDirectory(terminalId, dirPath);
