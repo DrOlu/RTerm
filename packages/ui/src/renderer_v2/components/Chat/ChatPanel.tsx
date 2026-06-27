@@ -133,6 +133,13 @@ const CHAT_PANEL_FOCUS_BYPASS_SELECTOR = [
 const shouldFocusChatPanelRoot = (target: HTMLElement | null): boolean =>
   !target?.closest(CHAT_PANEL_FOCUS_BYPASS_SELECTOR);
 
+const renderChatSessionStatusDot = (
+  isSessionBusy: boolean,
+): React.ReactNode =>
+  isSessionBusy ? (
+    <span className="chat-tab-runtime-state" title="running" />
+  ) : null;
+
 interface ChatPanelProps {
   store: AppStore;
   panelId: string;
@@ -779,6 +786,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
                 .map((session) => ({
                   value: session.id,
                   label: formatChatPanelSessionTitle(session.title),
+                  trailing: renderChatSessionStatusDot(session.isSessionBusy),
+                  trailingMeasureKey: session.isSessionBusy ? "running" : "",
                   onClose: () => {
                     if (onRequestCloseTabs) {
                       onRequestCloseTabs([session.id]);
@@ -803,7 +812,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
                     }}
                     title={t.common.close}
                   >
-                    <X size={12} />
+                    <X size={12} strokeWidth={2.2} />
                   </button>
                 ) : null
               }
@@ -836,6 +845,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
                     <span className="chat-tab-title">
                       {formatChatPanelSessionTitle(session.title)}
                     </span>
+                    {renderChatSessionStatusDot(session.isSessionBusy)}
                     <button
                       className="chat-tab-close"
                       onClick={(event) => {
@@ -847,7 +857,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
                         store.chat.closeSession(session.id);
                       }}
                     >
-                      <X size={12} />
+                      <X size={12} strokeWidth={2.2} />
                     </button>
                   </div>
                 );

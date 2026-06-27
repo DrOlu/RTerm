@@ -223,8 +223,9 @@
   color: inherit;
   font-family: var(--font-mono);
   font-size: var(--panel-tab-font-size);
-  font-weight: 600;
-  letter-spacing: 0.42px;
+  font-weight: var(--panel-tab-font-weight);
+  letter-spacing: var(--panel-tab-letter-spacing);
+  line-height: var(--panel-tab-line-height);
   text-transform: uppercase;
   display: inline-flex;
   align-items: center;
@@ -259,8 +260,8 @@
 }
 
 .gyshell-compact-tab-action-rail-placeholder {
-  width: 18px;
-  height: 18px;
+  width: var(--panel-tab-close-size);
+  height: var(--panel-tab-close-size);
   flex: 0 0 auto;
   display: inline-flex;
 }
@@ -294,8 +295,8 @@
 }
 
 .gyshell-compact-tab-select-action {
-  width: 18px;
-  height: 18px;
+  width: var(--panel-tab-close-size);
+  height: var(--panel-tab-close-size);
   border: 1px solid transparent;
   border-radius: 2px;
   background: transparent;
@@ -353,8 +354,9 @@
   text-align: left;
   font-family: var(--font-mono);
   font-size: var(--panel-tab-font-size);
-  font-weight: 600;
-  letter-spacing: 0.42px;
+  font-weight: var(--panel-tab-font-weight);
+  letter-spacing: var(--panel-tab-letter-spacing);
+  line-height: var(--panel-tab-line-height);
   text-transform: uppercase;
   outline: none;
 }
@@ -395,8 +397,8 @@
 }
 
 .gyshell-compact-tab-option-close {
-  height: 18px;
-  width: 18px;
+  height: var(--panel-tab-close-size);
+  width: var(--panel-tab-close-size);
   border-radius: 2px;
   border: 1px solid transparent;
   background: transparent;
@@ -443,8 +445,9 @@
   border-right: 1px solid transparent;
   font-family: var(--font-mono);
   font-size: var(--panel-tab-font-size);
-  font-weight: 600;
-  letter-spacing: 0.42px;
+  font-weight: var(--panel-tab-font-weight);
+  letter-spacing: var(--panel-tab-letter-spacing);
+  line-height: var(--panel-tab-line-height);
   text-transform: uppercase;
 }
 

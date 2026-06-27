@@ -25,6 +25,14 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   --panel-tab-header-height: 28px;
   --panel-tab-font-size: 10px;
+  --panel-tab-font-weight: 600;
+  --panel-tab-letter-spacing: 0.42px;
+  --panel-tab-line-height: 1;
+  --panel-tab-item-gap: 4px;
+  --panel-tab-close-size: 18px;
+  --panel-tab-close-visual-margin-left: -3px;
+  --panel-tab-status-size: 7px;
+  --panel-tab-status-active: #3ccf6f;
   --panel-tab-drag-handle-width: 12px;
 
   /* Typography */
@@ -208,4 +216,3 @@ textarea {
 @import './components/select.scss';
 @import './platforms/windows.scss';
 @import './platforms/linux.scss';
-
