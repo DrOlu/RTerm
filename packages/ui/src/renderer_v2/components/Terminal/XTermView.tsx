@@ -6,7 +6,7 @@ import React, {
   useState,
 } from "react";
 import { Terminal } from "@xterm/xterm";
-import type { ITheme } from "@xterm/xterm";
+import type { FontWeight, ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -56,6 +56,8 @@ const SCROLLBAR_HIDE_DELAY = 2000; // ms
 const RUNTIME_RELEASE_DELAY = 4000; // ms
 const COMMAND_DRAFT_SPINNER_FRAMES = ["|", "/", "-", "\\"];
 const COMMAND_DRAFT_FAILURE_VISIBILITY_MS = 1000;
+const TERMINAL_FONT_WEIGHT: FontWeight = 500;
+const TERMINAL_FONT_WEIGHT_BOLD: FontWeight = "bold";
 const TERMINAL_SEARCH_OPTIONS = {
   caseSensitive: false,
   decorations: {
@@ -305,6 +307,8 @@ const createRuntime = (
     cursorBlink: settings?.cursorBlink ?? true,
     cursorStyle: settings?.cursorStyle ?? "block",
     fontSize: settings?.fontSize ?? 14,
+    fontWeight: TERMINAL_FONT_WEIGHT,
+    fontWeightBold: TERMINAL_FONT_WEIGHT_BOLD,
     lineHeight: Math.max(1, settings?.lineHeight ?? 1.2),
     scrollback: settings?.scrollback ?? 5000,
     theme,
@@ -1130,6 +1134,8 @@ export const XTermView = React.forwardRef<XTermSearchHandle, XTermViewProps>(
         options.fontSize = props.terminalSettings.fontSize;
       if (props.terminalSettings?.lineHeight)
         options.lineHeight = Math.max(1, props.terminalSettings.lineHeight);
+      options.fontWeight = TERMINAL_FONT_WEIGHT;
+      options.fontWeightBold = TERMINAL_FONT_WEIGHT_BOLD;
       if (props.terminalSettings?.scrollback)
         options.scrollback = props.terminalSettings.scrollback;
       if (props.terminalSettings?.cursorStyle)
