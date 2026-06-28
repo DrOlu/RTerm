@@ -45,6 +45,8 @@ export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
   layout: {
     panelSizes: [50, 50],
     panelOrder: ["chat", "terminal"],
+    savedLayouts: [],
+    activeSavedLayoutId: null,
   },
   recursionLimit: 200,
   memory: {

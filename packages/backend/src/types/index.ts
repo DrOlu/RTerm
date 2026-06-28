@@ -163,6 +163,12 @@ export interface BackendSettings {
      * Kept as unknown at backend boundary to avoid coupling renderer internals.
      */
     v2?: unknown
+    /**
+     * Renderer-owned saved workspace layout slots.
+     * Kept as unknown at backend boundary to avoid coupling renderer internals.
+     */
+    savedLayouts?: unknown
+    activeSavedLayoutId?: string | null
   }
   /** Agent recursion limit */
   recursionLimit?: number

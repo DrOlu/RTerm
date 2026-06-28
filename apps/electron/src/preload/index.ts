@@ -95,6 +95,8 @@ interface BackendSettings {
     panelSizes?: number[];
     panelOrder?: string[];
     v2?: unknown;
+    savedLayouts?: unknown;
+    activeSavedLayoutId?: string | null;
   };
   recursionLimit?: number;
   debugMode?: boolean;

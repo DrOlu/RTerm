@@ -1,5 +1,12 @@
 import { LayoutStore } from './LayoutStore'
-import { computeLayoutGeometry, getPanelMinHeightPx, validateLayoutTree, type LayoutTree } from '../layout'
+import {
+  computeLayoutGeometry,
+  createSavedLayoutSnapshot,
+  getPanelMinHeightPx,
+  getSavedLayoutSlotId,
+  validateLayoutTree,
+  type LayoutTree
+} from '../layout'
 
 const assertCondition = (condition: unknown, message: string): void => {
   if (!condition) {
@@ -23,6 +30,8 @@ interface SettingsSetPayload {
     panelOrder?: string[]
     panelSizes?: number[]
     v2?: unknown
+    savedLayouts?: unknown
+    activeSavedLayoutId?: string | null
   }
 }
 
@@ -56,10 +65,11 @@ const createStore = (options?: {
   terminalInventoryHydrated?: boolean
   chatInventoryHydrated?: boolean
   activeTerminalId?: string | null
+  shouldPersistLayout?: boolean
 }): LayoutStore => {
   const terminalIds = options?.terminalIds || ['term-1']
   const chatIds = options?.chatIds || ['chat-1']
-  const activeTerminalId = options?.activeTerminalId === undefined ? (terminalIds[0] || null) : options.activeTerminalId
+  const activeTerminalId = options?.activeTerminalId === undefined ? terminalIds[0] || null : options.activeTerminalId
   const appStore = {
     settings: options?.settings ? (options.settings as any) : null,
     terminalTabs: terminalIds.map((id) => ({
@@ -73,10 +83,15 @@ const createStore = (options?: {
         rows: 24
       }
     })),
+    fileSystemTabs: [],
+    monitorTabs: [],
     terminalTabsHydrated: options?.terminalInventoryHydrated ?? true,
     activeTerminalId,
     setActiveTerminal(id: string) {
       this.activeTerminalId = id
+    },
+    shouldPersistLayout() {
+      return options?.shouldPersistLayout !== false
     },
     onPanelRemoved(_kind: string) {},
     chat: {
@@ -218,16 +233,31 @@ const run = async (): Promise<void> => {
         id: 'root',
         direction: 'horizontal',
         children: [
-          { type: 'panel', id: 'node-chat', panel: { id: 'panel-chat', kind: 'chat' } },
-          { type: 'panel', id: 'node-term-a', panel: { id: 'panel-term-a', kind: 'terminal' } },
-          { type: 'panel', id: 'node-term-b', panel: { id: 'panel-term-b', kind: 'terminal' } }
+          {
+            type: 'panel',
+            id: 'node-chat',
+            panel: { id: 'panel-chat', kind: 'chat' }
+          },
+          {
+            type: 'panel',
+            id: 'node-term-a',
+            panel: { id: 'panel-term-a', kind: 'terminal' }
+          },
+          {
+            type: 'panel',
+            id: 'node-term-b',
+            panel: { id: 'panel-term-b', kind: 'terminal' }
+          }
         ],
         sizes: [34, 33, 33]
       },
       panelTabs: {
         'panel-chat': { tabIds: ['chat-1'], activeTabId: 'chat-1' },
         'panel-term-a': { tabIds: ['term-a'], activeTabId: 'term-a' },
-        'panel-term-b': { tabIds: ['term-missing'], activeTabId: 'term-missing' }
+        'panel-term-b': {
+          tabIds: ['term-missing'],
+          activeTabId: 'term-missing'
+        }
       }
     }
 
@@ -355,7 +385,11 @@ const run = async (): Promise<void> => {
 
     store.splitPanel(fileEditorPanels[0].panel.id, 'fileEditor', 'horizontal', 'after')
     fileEditorPanels = store.panelNodes.filter((node) => node.panel.kind === 'fileEditor')
-    assertEqual(fileEditorPanels.length, 1, 'file editor panel should remain singleton after repeated creation attempts')
+    assertEqual(
+      fileEditorPanels.length,
+      1,
+      'file editor panel should remain singleton after repeated creation attempts'
+    )
   })
 
   await runCase('chat bindings are preserved while chat inventory is not hydrated', async () => {
@@ -366,9 +400,21 @@ const run = async (): Promise<void> => {
         id: 'root-chat',
         direction: 'horizontal',
         children: [
-          { type: 'panel', id: 'node-chat-a', panel: { id: 'panel-chat-a', kind: 'chat' } },
-          { type: 'panel', id: 'node-chat-b', panel: { id: 'panel-chat-b', kind: 'chat' } },
-          { type: 'panel', id: 'node-terminal', panel: { id: 'panel-terminal', kind: 'terminal' } }
+          {
+            type: 'panel',
+            id: 'node-chat-a',
+            panel: { id: 'panel-chat-a', kind: 'chat' }
+          },
+          {
+            type: 'panel',
+            id: 'node-chat-b',
+            panel: { id: 'panel-chat-b', kind: 'chat' }
+          },
+          {
+            type: 'panel',
+            id: 'node-terminal',
+            panel: { id: 'panel-terminal', kind: 'terminal' }
+          }
         ],
         sizes: [33, 33, 34]
       },
@@ -427,7 +473,11 @@ const run = async (): Promise<void> => {
 
     const chatPanelsAfterHydration = store.panelNodes.filter((node) => node.panel.kind === 'chat')
     assertEqual(chatPanelsAfterHydration.length, 2, 'hydrated inventory should keep the two persisted chat panels')
-    assertEqual(store.getPanelActiveTabId('panel-chat-a'), 'old-chat-1', 'chat panel active tab should align after hydration')
+    assertEqual(
+      store.getPanelActiveTabId('panel-chat-a'),
+      'old-chat-1',
+      'chat panel active tab should align after hydration'
+    )
   })
 
   await runCase('splitPanel persists v2 tree and legacy projection', async () => {
@@ -472,6 +522,338 @@ const run = async (): Promise<void> => {
     assertEqual(spy.calls.length, 1, 'pending async save should not run after sync flush')
   })
 
+  await runCase('saveCurrentLayoutSlot persists current layout and caps saved slots at three', async () => {
+    const spy: SettingsSetSpy = { calls: [] }
+    installWindowMock(spy)
+
+    const store = createStore({
+      terminalIds: ['term-a', 'term-b'],
+      chatIds: ['chat-a']
+    })
+    store.bootstrap()
+    store.setViewport(1440, 900)
+
+    const first = await store.saveCurrentLayoutSlot()
+    const second = await store.saveCurrentLayoutSlot()
+    const third = await store.saveCurrentLayoutSlot()
+    const fourth = await store.saveCurrentLayoutSlot()
+
+    assertEqual(first?.slotNumber, 1, 'first saved layout should use slot 1')
+    assertEqual(second?.slotNumber, 2, 'second saved layout should use slot 2')
+    assertEqual(third?.slotNumber, 3, 'third saved layout should use slot 3')
+    assertEqual(fourth, null, 'fourth saved layout should be rejected')
+    assertEqual(store.savedLayoutSlots.length, 3, 'store should expose exactly three saved slots')
+    assertEqual(store.canSaveCurrentLayoutSlot, false, 'plus affordance should hide after three slots')
+
+    const lastPayload = spy.calls[spy.calls.length - 1]
+    assertEqual(lastPayload.layout?.activeSavedLayoutId, getSavedLayoutSlotId(3), 'latest saved slot should be active')
+    assertEqual(
+      Array.isArray(lastPayload.layout?.savedLayouts) ? lastPayload.layout?.savedLayouts.length : 0,
+      3,
+      'persisted payload should include all saved slots'
+    )
+  })
+
+  await runCase('stale async layout save completion does not restore older saved layout payload', async () => {
+    const spy: SettingsSetSpy = { calls: [] }
+    const pendingSaves: Array<() => void> = []
+    ;(globalThis as unknown as { window: unknown }).window = {
+      gyshell: {
+        settings: {
+          set: async (payload: SettingsSetPayload) => {
+            spy.calls.push(payload)
+            await new Promise<void>((resolve) => {
+              pendingSaves.push(resolve)
+            })
+          }
+        }
+      }
+    }
+
+    const store = createStore({
+      terminalIds: ['term-a', 'term-b'],
+      chatIds: ['chat-a']
+    })
+    store.bootstrap()
+    store.setViewport(1440, 900)
+
+    const firstSave = store.saveCurrentLayoutSlot()
+    const secondSave = store.saveCurrentLayoutSlot()
+    assertEqual(pendingSaves.length, 2, 'two async layout saves should be in flight')
+
+    pendingSaves[1]()
+    const secondSlot = await secondSave
+    assertEqual(secondSlot?.id, getSavedLayoutSlotId(2), 'second save should create slot 2')
+    assertEqual(store.savedLayoutSlots.length, 2, 'newer payload should expose both saved slots')
+    assertEqual(store.activeSavedLayoutId, getSavedLayoutSlotId(2), 'newer payload should be active')
+
+    pendingSaves[0]()
+    const firstSlot = await firstSave
+    assertEqual(firstSlot?.id, getSavedLayoutSlotId(1), 'first save should still resolve with slot 1')
+    assertEqual(store.savedLayoutSlots.length, 2, 'stale payload should not remove newer saved slots')
+    assertEqual(store.activeSavedLayoutId, getSavedLayoutSlotId(2), 'stale payload should not replace active slot')
+  })
+
+  await runCase('non-persistent layouts expose no saved layout slot controls', async () => {
+    const tree: LayoutTree = {
+      schemaVersion: 2,
+      root: {
+        type: 'panel',
+        id: 'node-terminal',
+        panel: {
+          id: 'panel-terminal',
+          kind: 'terminal'
+        }
+      },
+      focusedPanelId: 'panel-terminal'
+    }
+    const store = createStore({
+      shouldPersistLayout: false,
+      settings: {
+        layout: {
+          v2: tree,
+          savedLayouts: [
+            {
+              slotNumber: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              snapshot: createSavedLayoutSnapshot(tree)
+            }
+          ],
+          activeSavedLayoutId: getSavedLayoutSlotId(1)
+        }
+      }
+    })
+    store.bootstrap()
+
+    assertEqual(store.savedLayoutSlots.length, 1, 'persisted saved slot should still normalize into store state')
+    assertEqual(store.canUseSavedLayoutSlots, false, 'non-persistent layout should hide saved slot controls')
+    assertEqual(store.canSaveCurrentLayoutSlot, false, 'non-persistent layout should hide the save affordance')
+    assertEqual(await store.saveCurrentLayoutSlot(), null, 'non-persistent layout should not save a new slot')
+    assertEqual(
+      await store.applySavedLayoutSlot(getSavedLayoutSlotId(1)),
+      false,
+      'non-persistent layout should not apply saved slots'
+    )
+  })
+
+  await runCase('user layout mutation clears active saved layout marker', async () => {
+    const spy: SettingsSetSpy = { calls: [] }
+    installWindowMock(spy)
+
+    const store = createStore()
+    store.bootstrap()
+    store.setViewport(1440, 900)
+    const saved = await store.saveCurrentLayoutSlot()
+    assertCondition(Boolean(saved), 'saved slot should be created')
+    assertEqual(store.activeSavedLayoutId, saved?.id || null, 'newly saved layout should be active')
+
+    const terminalPanelId = store.getPrimaryPanelId('terminal')
+    assertCondition(Boolean(terminalPanelId), 'terminal panel should exist')
+    store.splitPanel(terminalPanelId!, 'terminal', 'horizontal', 'after')
+    assertEqual(store.activeSavedLayoutId, null, 'mutating layout should clear active saved layout marker')
+
+    await sleep(220)
+    const lastPayload = spy.calls[spy.calls.length - 1]
+    assertEqual(lastPayload.layout?.activeSavedLayoutId, null, 'persisted active saved layout should be cleared')
+  })
+
+  await runCase('overwriteSavedLayoutSlot replaces a slot with the current layout without adding a slot', async () => {
+    const spy: SettingsSetSpy = { calls: [] }
+    installWindowMock(spy)
+
+    const store = createStore({
+      terminalIds: ['term-a', 'term-b'],
+      chatIds: ['chat-a']
+    })
+    store.bootstrap()
+    store.setViewport(1440, 900)
+
+    const saved = await store.saveCurrentLayoutSlot()
+    assertCondition(Boolean(saved), 'saved slot should be created before overwrite')
+    const originalCreatedAt = store.savedLayoutSlots[0].createdAt
+
+    const beforeSplitPanelIds = new Set(store.panelNodes.map((node) => node.panel.id))
+    const terminalPanelId = store.getPrimaryPanelId('terminal')
+    assertCondition(Boolean(terminalPanelId), 'terminal panel should exist')
+    store.splitPanel(terminalPanelId!, 'terminal', 'horizontal', 'after')
+    const newPanelId = store.panelNodes.map((node) => node.panel.id).find((panelId) => !beforeSplitPanelIds.has(panelId))
+    assertCondition(Boolean(newPanelId), 'split should create a new panel')
+    const overwrittenPanelCount = store.panelCount
+
+    const overwritten = await store.overwriteSavedLayoutSlot(saved!.id)
+    assertCondition(Boolean(overwritten), 'existing saved slot should be overwritten')
+    assertEqual(store.savedLayoutSlots.length, 1, 'overwrite should not create another saved slot')
+    assertEqual(overwritten?.id, saved!.id, 'overwrite should keep the same slot id')
+    assertEqual(overwritten?.createdAt, originalCreatedAt, 'overwrite should preserve createdAt')
+    assertEqual(store.activeSavedLayoutId, saved!.id, 'overwritten slot should become active')
+
+    store.removePanel(newPanelId!)
+    assertEqual(store.panelCount, overwrittenPanelCount - 1, 'current layout should move away from overwritten snapshot')
+
+    const applied = await store.applySavedLayoutSlot(saved!.id)
+    assertEqual(applied, true, 'overwritten saved layout should apply successfully')
+    assertEqual(store.panelCount, overwrittenPanelCount, 'applied layout should use the overwritten snapshot')
+
+    const lastPayload = spy.calls[spy.calls.length - 1]
+    assertEqual(
+      Array.isArray(lastPayload.layout?.savedLayouts) ? lastPayload.layout?.savedLayouts.length : -1,
+      1,
+      'persisted saved layout list should still contain one slot'
+    )
+    assertEqual(
+      lastPayload.layout?.activeSavedLayoutId,
+      saved!.id,
+      'persisted active saved layout should remain the overwritten slot'
+    )
+  })
+
+  await runCase(
+    'applying a saved layout clears pending mutation save and preserves missing terminal panel placeholders',
+    async () => {
+      const spy: SettingsSetSpy = { calls: [] }
+      installWindowMock(spy)
+
+      const store = createStore({
+        terminalIds: ['term-a', 'term-b'],
+        chatIds: ['chat-a'],
+        activeTerminalId: 'term-b'
+      })
+      store.bootstrap()
+      store.setViewport(1600, 900)
+
+      const sourcePanelId = store.getPrimaryPanelId('terminal')
+      assertCondition(Boolean(sourcePanelId), 'terminal source panel should exist')
+      store.startTabDragging(
+        {
+          tabId: 'term-b',
+          kind: 'terminal',
+          sourcePanelId: sourcePanelId!
+        },
+        200,
+        200
+      )
+      store.setDropTarget(sourcePanelId!, 'right')
+      store.commitDragging()
+
+      const saved = await store.saveCurrentLayoutSlot()
+      assertCondition(Boolean(saved), 'saved two-terminal-panel layout should be created')
+      const savedTerminalPanelCount = store.panelNodes.filter((node) => node.panel.kind === 'terminal').length
+      assertEqual(savedTerminalPanelCount, 2, 'saved layout should have two terminal panels')
+
+      const secondTerminalPanelId = store.panelNodes
+        .filter((node) => node.panel.kind === 'terminal')
+        .map((node) => node.panel.id)
+        .find((panelId) => panelId !== sourcePanelId)
+      assertCondition(Boolean(secondTerminalPanelId), 'second terminal panel should exist')
+
+      store.removePanel(secondTerminalPanelId!)
+      assertEqual(store.activeSavedLayoutId, null, 'intermediate mutation should clear active slot')
+
+      const internal = store as any
+      internal.appStore.terminalTabs = [{ id: 'term-a' }]
+      internal.appStore.activeTerminalId = 'term-a'
+      internal.appStore.terminalTabsHydrated = true
+
+      const applied = await store.applySavedLayoutSlot(saved!.id)
+      assertEqual(applied, true, 'saved layout should apply successfully')
+      assertEqual(store.activeSavedLayoutId, saved!.id, 'applied saved layout should become active again')
+
+      const terminalPanels = store.panelNodes.filter((node) => node.panel.kind === 'terminal')
+      assertEqual(terminalPanels.length, 2, 'missing terminal tab panel should be preserved as a placeholder')
+      assertCondition(
+        terminalPanels.some((node) => store.getPanelTabIds(node.panel.id).length === 0),
+        'one restored terminal panel should be empty after missing tab binding is removed'
+      )
+
+      await sleep(220)
+      const activePayloadCalls = spy.calls.filter((call) => call.layout?.activeSavedLayoutId === saved!.id)
+      assertCondition(activePayloadCalls.length > 0, 'applying saved layout should persist active slot id')
+      assertEqual(
+        store.panelNodes.filter((node) => node.panel.kind === 'terminal').length,
+        2,
+        'pending mutation save should not undo restored layout'
+      )
+    }
+  )
+
+  await runCase('applySavedLayoutSlot preserves saved active tab instead of stale global active tab', async () => {
+    const spy: SettingsSetSpy = { calls: [] }
+    installWindowMock(spy)
+
+    const store = createStore({
+      terminalIds: ['term-a', 'term-b'],
+      chatIds: ['chat-a'],
+      activeTerminalId: 'term-b'
+    })
+    store.bootstrap()
+    store.setViewport(1440, 900)
+
+    const terminalPanelId = store.getPrimaryPanelId('terminal')
+    assertCondition(Boolean(terminalPanelId), 'terminal panel should exist')
+    assertEqual(store.getPanelActiveTabId(terminalPanelId!), 'term-b', 'saved source layout should have term-b active')
+
+    const saved = await store.saveCurrentLayoutSlot()
+    assertCondition(Boolean(saved), 'saved slot should be created with term-b active')
+
+    store.setPanelActiveTab(terminalPanelId!, 'term-a')
+    assertEqual(store.getPanelActiveTabId(terminalPanelId!), 'term-a', 'current layout should move to term-a')
+
+    const applied = await store.applySavedLayoutSlot(saved!.id)
+    assertEqual(applied, true, 'saved layout should apply successfully')
+    assertEqual(store.activeSavedLayoutId, saved!.id, 'applied saved layout should become active')
+    const internal = store as any
+    assertEqual(
+      internal.appStore.activeTerminalId,
+      'term-b',
+      'app global active terminal should be restored from the saved layout'
+    )
+    assertEqual(
+      store.getPanelActiveTabId(terminalPanelId!),
+      'term-b',
+      'applying saved layout should restore the saved active tab'
+    )
+
+    store.syncPanelBindings({ persist: false })
+    assertEqual(
+      store.getPanelActiveTabId(terminalPanelId!),
+      'term-b',
+      'a later layout sync should not overwrite the restored active tab with stale global state'
+    )
+  })
+
+  await runCase('deleteSavedLayoutSlot clears active slot without changing current tree', async () => {
+    const spy: SettingsSetSpy = { calls: [] }
+    installWindowMock(spy)
+
+    const store = createStore()
+    store.bootstrap()
+    store.setViewport(1440, 900)
+    const saved = await store.saveCurrentLayoutSlot()
+    assertCondition(Boolean(saved), 'saved layout slot should exist before delete')
+
+    const beforeTree = JSON.stringify(store.tree)
+    const deleted = await store.deleteSavedLayoutSlot(saved!.id)
+    const afterTree = JSON.stringify(store.tree)
+
+    assertEqual(deleted, true, 'saved layout slot should be deleted')
+    assertEqual(store.savedLayoutSlots.length, 0, 'slot list should be empty after delete')
+    assertEqual(store.activeSavedLayoutId, null, 'deleting active slot should clear active marker')
+    assertEqual(afterTree, beforeTree, 'deleting saved slot should not change current layout tree')
+
+    const lastPayload = spy.calls[spy.calls.length - 1]
+    assertEqual(
+      lastPayload.layout?.activeSavedLayoutId,
+      null,
+      'deleted active slot should be cleared in persisted payload'
+    )
+    assertEqual(
+      Array.isArray(lastPayload.layout?.savedLayouts) ? lastPayload.layout?.savedLayouts.length : -1,
+      0,
+      'persisted saved layout list should be empty after delete'
+    )
+  })
+
   await runCase('setSplitSizes clamps invalid chat height changes', async () => {
     const spy: SettingsSetSpy = { calls: [] }
     installWindowMock(spy)
@@ -509,7 +891,10 @@ const run = async (): Promise<void> => {
     const after = afterRoot.sizes.join(',')
 
     assertCondition(after !== before, 'invalid chat-min-height resize should be clamped instead of reverted')
-    assertCondition(afterRoot.sizes[0] >= (getPanelMinHeightPx('chat', 1200) / 1200) * 100 - 0.001, 'chat resize should land at or above its minimum percentage')
+    assertCondition(
+      afterRoot.sizes[0] >= (getPanelMinHeightPx('chat', 1200) / 1200) * 100 - 0.001,
+      'chat resize should land at or above its minimum percentage'
+    )
 
     const validation = validateLayoutTree(store.tree, store.viewport)
     assertEqual(validation.valid, true, 'clamped resize should keep the layout valid')
@@ -519,7 +904,10 @@ const run = async (): Promise<void> => {
     const geometry = computeLayoutGeometry(store.tree, store.viewport)
     const chatRect = geometry.panelRects[chatPanelId!]
     assertCondition(Boolean(chatRect), 'chat panel rect should be computed')
-    assertCondition(chatRect.height >= getPanelMinHeightPx('chat', 1200) - 0.5, 'chat panel height should not fall below the minimum')
+    assertCondition(
+      chatRect.height >= getPanelMinHeightPx('chat', 1200) - 0.5,
+      'chat panel height should not fall below the minimum'
+    )
   })
 
   await runCase('commitDragging center swaps panel payloads', async () => {
@@ -644,8 +1032,7 @@ const run = async (): Promise<void> => {
     store.commitDragging()
     assertEqual(store.panelCount, 3, 'should create an extra terminal panel after edge split')
 
-    const detachedPanelId = store
-      .panelNodes
+    const detachedPanelId = store.panelNodes
       .filter((node) => node.panel.kind === 'terminal')
       .map((node) => node.panel.id)
       .find((id) => id !== primaryPanelId)
@@ -701,7 +1088,9 @@ const run = async (): Promise<void> => {
     store.commitDragging()
     assertEqual(store.panelCount, 3, 'layout should include chat plus two terminal panels before cleanup')
 
-    const terminalPanels = store.panelNodes.filter((node) => node.panel.kind === 'terminal').map((node) => node.panel.id)
+    const terminalPanels = store.panelNodes
+      .filter((node) => node.panel.kind === 'terminal')
+      .map((node) => node.panel.id)
     assertEqual(terminalPanels.length, 2, 'should have two terminal panels after tab split')
     const detachedPanelId = terminalPanels.find((id) => id !== primaryPanelId)
     assertCondition(Boolean(detachedPanelId), 'detached terminal panel should exist')
@@ -722,7 +1111,11 @@ const run = async (): Promise<void> => {
     const remainingTerminalPanels = store.panelNodes.filter((node) => node.panel.kind === 'terminal')
     assertEqual(remainingTerminalPanels.length, 1, 'only one terminal panel should remain after cleanup')
     const remainingTabIds = store.getPanelTabIds(remainingTerminalPanels[0].panel.id)
-    assertEqual(JSON.stringify(remainingTabIds), JSON.stringify(['term-a']), 'remaining terminal panel should keep valid tab ids')
+    assertEqual(
+      JSON.stringify(remainingTabIds),
+      JSON.stringify(['term-a']),
+      'remaining terminal panel should keep valid tab ids'
+    )
   })
 
   await runCase('removing primary panel keeps terminal tab bindings valid', async () => {
@@ -745,7 +1138,9 @@ const run = async (): Promise<void> => {
     )
     store.setDropTarget(originalPrimary!, 'right')
     store.commitDragging()
-    const terminalPanels = store.panelNodes.filter((node) => node.panel.kind === 'terminal').map((node) => node.panel.id)
+    const terminalPanels = store.panelNodes
+      .filter((node) => node.panel.kind === 'terminal')
+      .map((node) => node.panel.id)
     assertEqual(terminalPanels.length, 2, 'should have two terminal panels after tab split')
     assertCondition(store.canRemovePanel(originalPrimary!), 'original primary panel should be removable after split')
 
@@ -753,12 +1148,15 @@ const run = async (): Promise<void> => {
     const nextPrimary = store.getPrimaryPanelId('terminal')
     assertCondition(Boolean(nextPrimary), 'next primary panel should exist')
     assertCondition(nextPrimary !== originalPrimary, 'primary panel should switch after removing original panel')
-    const assigned = store
-      .panelNodes
+    const assigned = store.panelNodes
       .filter((node) => node.panel.kind === 'terminal')
       .flatMap((node) => store.getPanelTabIds(node.panel.id))
       .sort()
-    assertEqual(JSON.stringify(assigned), JSON.stringify(['term-a', 'term-b']), 'all terminal tabs should remain assigned')
+    assertEqual(
+      JSON.stringify(assigned),
+      JSON.stringify(['term-a', 'term-b']),
+      'all terminal tabs should remain assigned'
+    )
   })
 
   await runCase('tab center drop supports in-panel visual reorder before target tab', async () => {
@@ -820,8 +1218,7 @@ const run = async (): Promise<void> => {
     store.setDropTarget(primaryPanelId!, 'right')
     store.commitDragging()
 
-    const targetPanelId = store
-      .panelNodes
+    const targetPanelId = store.panelNodes
       .filter((node) => node.panel.kind === 'terminal')
       .map((node) => node.panel.id)
       .find((id) => id !== primaryPanelId)
@@ -897,7 +1294,11 @@ const run = async (): Promise<void> => {
     store.splitPanel(primaryPanelId!, 'terminal', 'horizontal', 'after')
     const destinationPanelId = store.tree.focusedPanelId
     assertCondition(Boolean(destinationPanelId), 'split should create a focused empty destination panel')
-    assertEqual(store.getPanelTabIds(destinationPanelId!).length, 0, 'destination panel should be empty before insertion')
+    assertEqual(
+      store.getPanelTabIds(destinationPanelId!).length,
+      0,
+      'destination panel should be empty before insertion'
+    )
 
     store.startTabDragging(
       {
@@ -955,11 +1356,7 @@ const run = async (): Promise<void> => {
       JSON.stringify(['term-b', 'term-c']),
       'imported panel should own the transferred tabs'
     )
-    assertEqual(
-      store.getPanelActiveTabId(importedPanelId!),
-      'term-c',
-      'imported panel should preserve its active tab'
-    )
+    assertEqual(store.getPanelActiveTabId(importedPanelId!), 'term-c', 'imported panel should preserve its active tab')
   })
 
   await runCase('can remove the last panel of a kind when other kinds still exist', async () => {

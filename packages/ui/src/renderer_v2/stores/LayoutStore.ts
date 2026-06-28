@@ -3,13 +3,19 @@ import type { AppStore } from './AppStore'
 import { PANEL_KIND_LIST, getPanelKindAdapter } from './panelKindAdapters'
 import {
   MAX_LAYOUT_PANELS,
+  MAX_SAVED_LAYOUT_SLOTS,
+  addSavedLayoutSlot,
   buildLayoutTree,
+  deleteSavedLayoutSlot,
   deriveLegacyLayoutSnapshot,
+  findSavedLayoutSlot,
   getFirstPanelId,
   getPanelCount,
   listPanels,
   makeLayoutId,
+  normalizeSavedLayoutState,
   movePanel,
+  overwriteSavedLayoutSlot,
   removePanel,
   setSplitSizes,
   splitPanel,
@@ -23,6 +29,7 @@ import {
   type LayoutTree,
   type LayoutViewport,
   type PanelKind,
+  type SavedLayoutSlot,
   type SplitDirection,
   type TabDragPayload
 } from '../layout'
@@ -79,6 +86,13 @@ const getViewportRect = (viewport: LayoutViewport): LayoutRect => ({
 })
 
 type DragType = 'panel' | 'tab' | null
+type LayoutSaveOptions = {
+  preserveActiveSavedLayout?: boolean
+}
+type SyncPanelBindingOptions = LayoutSaveOptions & {
+  persist?: boolean
+  preservePanelActiveTabs?: boolean
+}
 type TabReorderTarget = {
   panelId: string
   anchorTabId: string | null
@@ -88,6 +102,8 @@ type TabReorderTarget = {
 export class LayoutStore {
   tree: LayoutTree = buildLayoutTree(undefined)
   isReady = false
+  savedLayoutSlots: SavedLayoutSlot[] = []
+  activeSavedLayoutId: string | null = null
 
   viewport: LayoutViewport = { ...DEFAULT_VIEWPORT }
 
@@ -107,12 +123,15 @@ export class LayoutStore {
   private appStore: AppStore
   private persistTimer: ReturnType<typeof setTimeout> | null = null
   private pinnedEmptyPanelIds = new Set<string>()
+  private layoutSaveRequestId = 0
 
   constructor(appStore: AppStore) {
     this.appStore = appStore
     makeObservable(this, {
       tree: observable,
       isReady: observable,
+      savedLayoutSlots: observable,
+      activeSavedLayoutId: observable,
       viewport: observable,
       isDragging: observable,
       dragType: observable,
@@ -130,7 +149,13 @@ export class LayoutStore {
       panelNodes: computed,
       panelCount: computed,
       geometry: computed,
+      canUseSavedLayoutSlots: computed,
+      canSaveCurrentLayoutSlot: computed,
       bootstrap: action,
+      saveCurrentLayoutSlot: action,
+      applySavedLayoutSlot: action,
+      deleteSavedLayoutSlot: action,
+      overwriteSavedLayoutSlot: action,
       pinPanelsAsRestorePlaceholder: action,
       syncPanelBindings: action,
       setViewport: action,
@@ -190,16 +215,113 @@ export class LayoutStore {
     return this.tree.panelTabs || {}
   }
 
+  get canSaveCurrentLayoutSlot(): boolean {
+    return this.savedLayoutSlots.length < MAX_SAVED_LAYOUT_SLOTS && this.shouldPersistLayout()
+  }
+
+  get canUseSavedLayoutSlots(): boolean {
+    return this.shouldPersistLayout()
+  }
+
   bootstrap() {
     const settings = this.appStore.settings
+    const savedLayoutState = normalizeSavedLayoutState(settings?.layout)
     const tree = buildLayoutTree(settings?.layout)
     this.tree = tree
+    this.savedLayoutSlots = savedLayoutState.slots
+    this.activeSavedLayoutId = savedLayoutState.activeSavedLayoutId
+    this.pinnedEmptyPanelIds.clear()
+    this.pinRestoredEmptyTabPanels(this.tree)
 
     if (!this.tree.focusedPanelId) {
       this.tree.focusedPanelId = getFirstPanelId(this.tree) ?? undefined
     }
     this.syncPanelBindings({ persist: false })
     this.isReady = true
+  }
+
+  async saveCurrentLayoutSlot(): Promise<SavedLayoutSlot | null> {
+    if (!this.canSaveCurrentLayoutSlot) {
+      return null
+    }
+
+    this.clearPersistTimer()
+    const result = addSavedLayoutSlot(this.savedLayoutSlots, toJS(this.tree))
+    if (!result.slot) {
+      return null
+    }
+
+    this.savedLayoutSlots = result.slots
+    this.activeSavedLayoutId = result.slot.id
+    await this.saveLayout({ preserveActiveSavedLayout: true })
+    return result.slot
+  }
+
+  async applySavedLayoutSlot(slotId: string): Promise<boolean> {
+    const slot = findSavedLayoutSlot(this.savedLayoutSlots, slotId)
+    if (!slot || !this.shouldPersistLayout()) {
+      return false
+    }
+
+    const nextTree = buildLayoutTree({
+      panelOrder: slot.snapshot.panelOrder,
+      panelSizes: slot.snapshot.panelSizes,
+      v2: slot.snapshot.v2
+    })
+    if (!this.canApplyRestoredTree(nextTree)) {
+      return false
+    }
+
+    this.clearPersistTimer()
+    this.materializeRestoredTabs(nextTree)
+    this.pinnedEmptyPanelIds.clear()
+    this.tree = nextTree
+    this.pinRestoredEmptyTabPanels(this.tree)
+    if (!this.tree.focusedPanelId) {
+      this.tree.focusedPanelId = getFirstPanelId(this.tree) ?? undefined
+    }
+    this.activeSavedLayoutId = slot.id
+    this.pinMissingRestoredTabPanels()
+    this.syncGlobalActiveFromRestoredPanelTabs(this.tree)
+    this.syncPanelBindings({
+      persist: false,
+      preservePanelActiveTabs: true
+    })
+    await this.saveLayout({ preserveActiveSavedLayout: true })
+    return true
+  }
+
+  async deleteSavedLayoutSlot(slotId: string): Promise<boolean> {
+    const previousLength = this.savedLayoutSlots.length
+    const nextSlots = deleteSavedLayoutSlot(this.savedLayoutSlots, slotId)
+    if (nextSlots.length === previousLength) {
+      return false
+    }
+
+    this.clearPersistTimer()
+    this.savedLayoutSlots = nextSlots
+    if (this.activeSavedLayoutId === slotId) {
+      this.activeSavedLayoutId = null
+    }
+    await this.saveLayout({ preserveActiveSavedLayout: true })
+    return true
+  }
+
+  async overwriteSavedLayoutSlot(slotId: string): Promise<SavedLayoutSlot | null> {
+    if (!this.shouldPersistLayout()) {
+      return null
+    }
+
+    const result = overwriteSavedLayoutSlot(this.savedLayoutSlots, slotId, toJS(this.tree))
+    if (!result.slot) {
+      return null
+    }
+
+    this.clearPersistTimer()
+    this.savedLayoutSlots = result.slots
+    this.activeSavedLayoutId = result.slot.id
+    await this.saveLayout({ preserveActiveSavedLayout: true })
+    return result.slot
   }
 
   getPanelsWithMissingTabBindings(kind: PanelKind, ownerTabIds: Iterable<string>): string[] {
@@ -231,7 +353,7 @@ export class LayoutStore {
     })
   }
 
-  syncPanelBindings(options?: { persist?: boolean }) {
+  syncPanelBindings(options?: SyncPanelBindingOptions) {
     const persist = options?.persist !== false
     const currentPanelIds = new Set(this.panelNodes.map((node) => node.panel.id))
     Array.from(this.pinnedEmptyPanelIds).forEach((panelId) => {
@@ -245,7 +367,9 @@ export class LayoutStore {
     while (pass < MAX_LAYOUT_PANELS + 2) {
       pass += 1
       nextTree = this.enforcePanelKindLimits(nextTree)
-      const panelTabs = this.computeBindingsForTree(nextTree)
+      const panelTabs = this.computeBindingsForTree(nextTree, {
+        preservePanelActiveTabs: options?.preservePanelActiveTabs
+      })
       const { managerPanels: _legacyManagerPanels, ...treeWithoutManager } = nextTree as LayoutTree & {
         managerPanels?: Partial<Record<PanelKind, string>>
       }
@@ -281,7 +405,9 @@ export class LayoutStore {
     }
 
     if (persist) {
-      this.saveLayoutDebounced()
+      this.saveLayoutDebounced({
+        preserveActiveSavedLayout: options?.preserveActiveSavedLayout
+      })
     }
   }
 
@@ -307,7 +433,12 @@ export class LayoutStore {
     this.applyTree(nextTree)
   }
 
-  splitPanel(targetPanelId: string, kind: PanelKind, direction: 'horizontal' | 'vertical', position: 'before' | 'after') {
+  splitPanel(
+    targetPanelId: string,
+    kind: PanelKind,
+    direction: 'horizontal' | 'vertical',
+    position: 'before' | 'after'
+  ) {
     if (!this.canSplitPanel(targetPanelId, kind, direction, position)) {
       return
     }
@@ -480,11 +611,7 @@ export class LayoutStore {
     this.moveTabBinding(kind, tabId, panelId)
   }
 
-  splitTabToDirection(
-    payload: TabDragPayload,
-    targetPanelId: string,
-    direction: Exclude<DropDirection, 'center'>
-  ) {
+  splitTabToDirection(payload: TabDragPayload, targetPanelId: string, direction: Exclude<DropDirection, 'center'>) {
     if (!getPanelKindAdapter(payload.kind).supportsTabs) {
       return
     }
@@ -496,16 +623,10 @@ export class LayoutStore {
       return
     }
     if (!Array.isArray(tabIds) || tabIds.length === 0) return
-    const detachSet = new Set(
-      tabIds
-        .map((tabId) => String(tabId || '').trim())
-        .filter((tabId) => tabId.length > 0)
-    )
+    const detachSet = new Set(tabIds.map((tabId) => String(tabId || '').trim()).filter((tabId) => tabId.length > 0))
     if (detachSet.size === 0) return
 
-    const panelIds = this.panelNodes
-      .filter((node) => node.panel.kind === kind)
-      .map((node) => node.panel.id)
+    const panelIds = this.panelNodes.filter((node) => node.panel.kind === kind).map((node) => node.panel.id)
     if (panelIds.length === 0) return
 
     const nextPanelTabs: Record<string, LayoutPanelTabBinding> = {
@@ -522,10 +643,7 @@ export class LayoutStore {
       if (tabIds.length === current.tabIds.length) {
         return
       }
-      const activeTabId =
-        current.activeTabId && tabIds.includes(current.activeTabId)
-          ? current.activeTabId
-          : tabIds[0]
+      const activeTabId = current.activeTabId && tabIds.includes(current.activeTabId) ? current.activeTabId : tabIds[0]
       nextPanelTabs[panelId] = {
         tabIds,
         ...(activeTabId ? { activeTabId } : {})
@@ -841,7 +959,9 @@ export class LayoutStore {
     }
 
     if (this.dragType === 'panel' && this.draggingExternalPanelKind) {
-      if (!this.canAcceptExternalPanelDrop(this.draggingExternalPanelKind, this.dropTargetPanelId, this.dropDirection)) {
+      if (
+        !this.canAcceptExternalPanelDrop(this.draggingExternalPanelKind, this.dropTargetPanelId, this.dropDirection)
+      ) {
         return null
       }
       const splitPlacement = toSplitPlacement(this.dropDirection)
@@ -866,10 +986,7 @@ export class LayoutStore {
         return null
       }
       if (this.dropDirection === 'center') {
-        if (
-          this.tabReorderTarget &&
-          this.tabReorderTarget.panelId === this.dropTargetPanelId
-        ) {
+        if (this.tabReorderTarget && this.tabReorderTarget.panelId === this.dropTargetPanelId) {
           return null
         }
         return this.geometry.panelRects[this.dropTargetPanelId] || null
@@ -914,12 +1031,7 @@ export class LayoutStore {
       return false
     }
 
-    return this.canSplitPanel(
-      targetPanelId,
-      payload.kind,
-      splitPlacement.direction,
-      splitPlacement.position
-    )
+    return this.canSplitPanel(targetPanelId, payload.kind, splitPlacement.direction, splitPlacement.position)
   }
 
   private canAcceptExternalPanelDrop(kind: PanelKind, targetPanelId: string, direction: DropDirection): boolean {
@@ -933,7 +1045,7 @@ export class LayoutStore {
 
     const adapter = getPanelKindAdapter(kind)
     const maxPanels = adapter.maxPanels
-    if (Number.isFinite(maxPanels) && (this.getPanelIdsByKind(kind).length >= maxPanels!)) {
+    if (Number.isFinite(maxPanels) && this.getPanelIdsByKind(kind).length >= maxPanels!) {
       return false
     }
 
@@ -942,19 +1054,17 @@ export class LayoutStore {
       return false
     }
 
-    return this.canSplitPanel(
-      targetPanelId,
-      kind,
-      splitPlacement.direction,
-      splitPlacement.position
-    )
+    return this.canSplitPanel(targetPanelId, kind, splitPlacement.direction, splitPlacement.position)
   }
 
   getPanelKindById(panelId: string): PanelKind | null {
     return this.panelNodes.find((node) => node.panel.id === panelId)?.panel.kind || null
   }
 
-  private computeBindingsForTree(tree: LayoutTree): Record<string, LayoutPanelTabBinding> {
+  private computeBindingsForTree(
+    tree: LayoutTree,
+    options?: { preservePanelActiveTabs?: boolean }
+  ): Record<string, LayoutPanelTabBinding> {
     const panelNodes = listPanels(tree)
     const panelTabs: Record<string, LayoutPanelTabBinding> = {}
 
@@ -974,7 +1084,8 @@ export class LayoutStore {
         panelIds.forEach((panelId) => {
           const existing = tree.panelTabs?.[panelId]
           const tabIds = unique(existing?.tabIds || [])
-          const activeTabId = existing?.activeTabId && tabIds.includes(existing.activeTabId) ? existing.activeTabId : tabIds[0]
+          const activeTabId =
+            existing?.activeTabId && tabIds.includes(existing.activeTabId) ? existing.activeTabId : tabIds[0]
           panelTabs[panelId] = {
             tabIds,
             ...(activeTabId ? { activeTabId } : {})
@@ -1021,7 +1132,7 @@ export class LayoutStore {
         }
       })
 
-      const globalActiveTabId = adapter.getGlobalActiveTabId(this.appStore)
+      const globalActiveTabId = options?.preservePanelActiveTabs ? null : adapter.getGlobalActiveTabId(this.appStore)
       if (globalActiveTabId) {
         const activeOwnerPanelId = panelIds.find((panelId) => panelTabs[panelId]?.tabIds.includes(globalActiveTabId))
         if (activeOwnerPanelId) {
@@ -1082,18 +1193,12 @@ export class LayoutStore {
     this.syncGlobalActiveFromPanel(kind, tabId)
   }
 
-  private createTreeWithoutTabs(
-    tree: LayoutTree,
-    kind: PanelKind,
-    tabIdsToRemove: string[]
-  ): LayoutTree {
+  private createTreeWithoutTabs(tree: LayoutTree, kind: PanelKind, tabIdsToRemove: string[]): LayoutTree {
     if (!getPanelKindAdapter(kind).supportsTabs) {
       return tree
     }
     const removalSet = new Set(
-      tabIdsToRemove
-        .map((tabId) => String(tabId || '').trim())
-        .filter((tabId) => tabId.length > 0)
+      tabIdsToRemove.map((tabId) => String(tabId || '').trim()).filter((tabId) => tabId.length > 0)
     )
     if (removalSet.size === 0) {
       return tree
@@ -1121,9 +1226,7 @@ export class LayoutStore {
         return
       }
       const activeTabId =
-        current.activeTabId && nextTabIds.includes(current.activeTabId)
-          ? current.activeTabId
-          : nextTabIds[0]
+        current.activeTabId && nextTabIds.includes(current.activeTabId) ? current.activeTabId : nextTabIds[0]
       nextPanelTabs[panelId] = {
         tabIds: nextTabIds,
         ...(activeTabId ? { activeTabId } : {})
@@ -1211,6 +1314,29 @@ export class LayoutStore {
     adapter.setGlobalActiveTab(this.appStore, tabId)
   }
 
+  private syncGlobalActiveFromRestoredPanelTabs(tree: LayoutTree): void {
+    const panels = listPanels(tree)
+    const syncPanel = (panelId: string): void => {
+      const panel = panels.find((node) => node.panel.id === panelId)
+      if (!panel) return
+      const adapter = getPanelKindAdapter(panel.panel.kind)
+      if (!adapter.supportsTabs) return
+      const binding = tree.panelTabs?.[panelId]
+      const activeTabId = binding?.activeTabId
+      if (!activeTabId || !binding.tabIds.includes(activeTabId)) return
+      if (adapter.isOwnerInventoryHydrated(this.appStore)) {
+        const ownerIds = new Set(adapter.getOwnerTabIds(this.appStore))
+        if (!ownerIds.has(activeTabId)) return
+      }
+      this.syncGlobalActiveFromPanel(panel.panel.kind, activeTabId)
+    }
+
+    panels.forEach((panel) => syncPanel(panel.panel.id))
+    if (tree.focusedPanelId) {
+      syncPanel(tree.focusedPanelId)
+    }
+  }
+
   private enforcePanelKindLimits(tree: LayoutTree): LayoutTree {
     let nextTree = tree
     PANEL_KIND_LIST.forEach((kind) => {
@@ -1262,29 +1388,120 @@ export class LayoutStore {
     this.saveLayoutDebounced()
   }
 
-  private saveLayoutDebounced() {
+  private collectTabIdsByKind(tree: LayoutTree): Partial<Record<PanelKind, string[]>> {
+    const panelKindById = new Map(listPanels(tree).map((panel) => [panel.panel.id, panel.panel.kind] as const))
+    const result: Partial<Record<PanelKind, string[]>> = {}
+
+    Object.entries(tree.panelTabs || {}).forEach(([panelId, binding]) => {
+      const kind = panelKindById.get(panelId)
+      if (!kind || !getPanelKindAdapter(kind).supportsTabs) {
+        return
+      }
+      const ids = Array.isArray(binding.tabIds)
+        ? binding.tabIds.filter((tabId): tabId is string => typeof tabId === 'string' && tabId.length > 0)
+        : []
+      if (ids.length === 0) {
+        return
+      }
+      result[kind] = unique([...(result[kind] || []), ...ids])
+    })
+
+    return result
+  }
+
+  private materializeRestoredTabs(tree: LayoutTree): void {
+    const tabIdsByKind = this.collectTabIdsByKind(tree)
+    const runtime = this.appStore as AppStore & {
+      materializeTransferredTabs?: (kind: PanelKind, tabIds: string[]) => string[]
+      hydrateTransferredTabs?: (kind: PanelKind, tabIds: string[]) => string[]
+    }
+
+    const chatTabIds = tabIdsByKind.chat || []
+    if (chatTabIds.length === 0 || typeof runtime.materializeTransferredTabs !== 'function') {
+      return
+    }
+
+    const materialized = runtime.materializeTransferredTabs('chat', chatTabIds)
+    if (typeof runtime.hydrateTransferredTabs === 'function') {
+      runtime.hydrateTransferredTabs('chat', materialized)
+    }
+  }
+
+  private pinMissingRestoredTabPanels(): void {
+    PANEL_KIND_LIST.forEach((kind) => {
+      const adapter = getPanelKindAdapter(kind)
+      if (!adapter.supportsTabs || !adapter.isOwnerInventoryHydrated(this.appStore)) {
+        return
+      }
+      const missingPanelIds = this.getPanelsWithMissingTabBindings(kind, adapter.getOwnerTabIds(this.appStore))
+      this.pinPanelsAsRestorePlaceholder(missingPanelIds)
+    })
+  }
+
+  private pinRestoredEmptyTabPanels(tree: LayoutTree): void {
+    listPanels(tree).forEach((panel) => {
+      if (!getPanelKindAdapter(panel.panel.kind).supportsTabs) {
+        return
+      }
+      const tabIds = tree.panelTabs?.[panel.panel.id]?.tabIds || []
+      if (tabIds.length > 0) {
+        return
+      }
+      this.pinnedEmptyPanelIds.add(panel.panel.id)
+    })
+  }
+
+  private canApplyRestoredTree(tree: LayoutTree): boolean {
+    if (getPanelCount(tree) <= 0) {
+      return false
+    }
+    const validation = validateLayoutTree(tree, this.viewport)
+    if (validation.valid) {
+      return true
+    }
+    const reason = validation.reason || ''
+    return (
+      reason.startsWith('panel-width-limit:') ||
+      reason.startsWith('panel-height-limit:') ||
+      reason.startsWith('chat-height-limit:')
+    )
+  }
+
+  private clearPersistTimer(): void {
     if (this.persistTimer) {
       clearTimeout(this.persistTimer)
       this.persistTimer = null
     }
+  }
+
+  private markLayoutModified(options?: LayoutSaveOptions): void {
+    if (options?.preserveActiveSavedLayout) {
+      return
+    }
+    if (this.activeSavedLayoutId) {
+      this.activeSavedLayoutId = null
+    }
+  }
+
+  private saveLayoutDebounced(options?: LayoutSaveOptions) {
+    this.markLayoutModified(options)
+    this.clearPersistTimer()
 
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null
-      void this.saveLayout()
+      void this.saveLayout({ preserveActiveSavedLayout: true })
     }, 120)
   }
 
   flushPendingSaveSync(): void {
-    if (this.persistTimer) {
-      clearTimeout(this.persistTimer)
-      this.persistTimer = null
-    }
+    this.clearPersistTimer()
 
     if (!this.shouldPersistLayout()) {
       return
     }
 
     const payload = this.buildLayoutSettingsPayload()
+    this.layoutSaveRequestId += 1
     try {
       const setSync = window.gyshell.settings.setSync
       if (typeof setSync === 'function') {
@@ -1298,13 +1515,18 @@ export class LayoutStore {
     }
   }
 
-  private async saveLayout() {
+  private async saveLayout(options?: LayoutSaveOptions) {
+    this.markLayoutModified(options)
     if (!this.shouldPersistLayout()) {
       return
     }
 
     const payload = this.buildLayoutSettingsPayload()
+    const requestId = ++this.layoutSaveRequestId
     await window.gyshell.settings.set(payload)
+    if (requestId !== this.layoutSaveRequestId) {
+      return
+    }
     this.applyLayoutSettingsPayload(payload.layout)
   }
 
@@ -1318,12 +1540,15 @@ export class LayoutStore {
   private buildLayoutSettingsPayload() {
     const legacy = deriveLegacyLayoutSnapshot(this.tree)
     const treeSnapshot = toJS(this.tree)
+    const savedLayoutSlots = toJS(this.savedLayoutSlots)
 
     return {
       layout: {
         panelOrder: legacy.panelOrder,
         panelSizes: legacy.panelSizes,
-        v2: treeSnapshot
+        v2: treeSnapshot,
+        savedLayouts: savedLayoutSlots,
+        activeSavedLayoutId: this.activeSavedLayoutId
       }
     }
   }
@@ -1332,8 +1557,11 @@ export class LayoutStore {
     panelOrder?: string[]
     panelSizes?: number[]
     v2?: unknown
+    savedLayouts?: unknown
+    activeSavedLayoutId?: unknown
   }) {
     runInAction(() => {
+      const savedLayoutState = normalizeSavedLayoutState(payload)
       if (this.appStore.settings) {
         this.appStore.settings = {
           ...this.appStore.settings,
@@ -1341,10 +1569,14 @@ export class LayoutStore {
             ...this.appStore.settings.layout,
             panelOrder: payload.panelOrder,
             panelSizes: payload.panelSizes,
-            v2: payload.v2
+            v2: payload.v2,
+            savedLayouts: savedLayoutState.slots,
+            activeSavedLayoutId: savedLayoutState.activeSavedLayoutId
           }
         }
       }
+      this.savedLayoutSlots = savedLayoutState.slots
+      this.activeSavedLayoutId = savedLayoutState.activeSavedLayoutId
     })
   }
 }
