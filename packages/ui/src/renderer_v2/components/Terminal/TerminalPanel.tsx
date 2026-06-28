@@ -359,7 +359,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                       void store.closeTab(activeTab.id);
                     }}
                   >
-                    <X size={14} strokeWidth={2} />
+                    <X size={12} strokeWidth={2.2} />
                   </button>
                 ) : null
               }
@@ -416,7 +416,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                         void store.closeTab(tab.id);
                       }}
                     >
-                      <X size={14} strokeWidth={2} />
+                      <X size={12} strokeWidth={2.2} />
                     </button>
                   </div>
                 );

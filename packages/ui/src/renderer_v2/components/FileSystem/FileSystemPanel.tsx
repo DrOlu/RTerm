@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
-import type { FileSystemEntry } from "../../lib/ipcTypes";
+import type { FileSystemEntry, FileTransferTaskSnapshot } from "../../lib/ipcTypes";
 import type {
   AppStore,
   FileSystemClipboardMode,
@@ -100,24 +100,16 @@ const createInitialTabState = (): BrowserTabState => ({
   statusMessage: null,
 });
 
-const STATUS_UPDATE_MIN_INTERVAL_MS = 120;
-const STATUS_UPDATE_MIN_PERCENT_STEP = 2;
-const TRANSFER_CONCURRENCY_LIMIT = 2;
-const TRANSFER_CANCELLED_ERROR_CODE = "GYSHELL_FS_TRANSFER_CANCELLED";
-const TERMINAL_TRANSFER_STATUSES = new Set<TransferTaskStatus>([
+const TRANSFER_TERMINAL_DISPLAY_MS = 7000;
+const TERMINAL_TRANSFER_STATUSES = new Set<
+  FileTransferTaskSnapshot["status"]
+>([
   "success",
   "error",
   "cancelled",
 ]);
 
-type TransferTaskKind = FileSystemClipboardMode;
 type FileSystemTransferConflictStrategy = "error" | "overwrite" | "rename";
-type TransferTaskStatus =
-  | "queued"
-  | "running"
-  | "success"
-  | "error"
-  | "cancelled";
 type InlinePathActionType = "createDirectory" | "createFile" | "renamePath";
 
 interface InlinePathActionState {
@@ -130,31 +122,6 @@ interface FileContextMenuState {
   anchorX: number;
   anchorY: number;
   entries: FileSystemEntry[];
-}
-
-interface TransferTaskState {
-  id: string;
-  kind: TransferTaskKind;
-  sourceTerminalId: string;
-  targetTerminalId: string;
-  targetPath: string;
-  itemNames: string[];
-  status: TransferTaskStatus;
-  bytesDone: number;
-  totalBytes: number;
-  transferredFiles: number;
-  totalFiles: number;
-  percent: number;
-  message: string | null;
-  errorMessage: string | null;
-  cancelRequested: boolean;
-  createdAt: number;
-  updatedAt: number;
-}
-
-interface QueuedTransferTask {
-  taskId: string;
-  run: () => Promise<void>;
 }
 
 const toErrorMessage = (error: unknown): string => {
@@ -187,27 +154,6 @@ const isPathMissingError = (error: unknown): boolean => {
         ? error.message
         : String(error || "");
   return /no such file|not found|cannot find/i.test(message);
-};
-
-const isTransferCancelledError = (error: unknown): boolean => {
-  const maybeError = error as {
-    code?: unknown;
-    name?: unknown;
-    message?: unknown;
-  } | null;
-  if (maybeError?.code === TRANSFER_CANCELLED_ERROR_CODE) {
-    return true;
-  }
-  if (maybeError?.name === "AbortError") {
-    return true;
-  }
-  const message =
-    typeof maybeError?.message === "string"
-      ? maybeError.message
-      : error instanceof Error
-        ? error.message
-        : String(error || "");
-  return /cancelled|canceled/i.test(message);
 };
 
 const formatFileSize = (size: number): string => {
@@ -336,25 +282,16 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       targetPath: string;
       conflictNames: string[];
     } | null>(null);
-    const [transferTasks, setTransferTasks] = React.useState<
-      Record<string, TransferTaskState>
-    >({});
+    const [transferDisplayNow, setTransferDisplayNow] = React.useState(
+      () => Date.now(),
+    );
     const requestVersionRef = React.useRef<Record<string, number>>({});
-    const transferTasksRef = React.useRef<Record<string, TransferTaskState>>(
-      {},
-    );
-    const transferQueueRef = React.useRef<QueuedTransferTask[]>([]);
-    const runningTransferCountRef = React.useRef(0);
-    const transferCancelHandlersRef = React.useRef<Record<string, () => void>>(
-      {},
-    );
-    const transferCleanupTimersRef = React.useRef<
-      Record<string, ReturnType<typeof setTimeout>>
+    const handledTransferTerminalStatusesRef = React.useRef<
+      Record<string, FileTransferTaskSnapshot["status"]>
     >({});
     const reloadDirectoryTimersRef = React.useRef<
       Record<string, ReturnType<typeof setTimeout>>
     >({});
-    const transferPumpRef = React.useRef<() => void>(() => {});
     const inlineActionInputRef = React.useRef<HTMLInputElement | null>(null);
     const sortMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const moreMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
@@ -366,10 +303,6 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
     );
     const sortModeRef = React.useRef<FileSystemSortMode>(sortMode);
     const searchQueryRef = React.useRef(searchQuery);
-
-    React.useEffect(() => {
-      transferTasksRef.current = transferTasks;
-    }, [transferTasks]);
 
     React.useEffect(() => {
       sortModeRef.current = sortMode;
@@ -423,69 +356,14 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       [],
     );
 
-    const updateTransferTask = React.useCallback(
-      (
-        taskId: string,
-        updater: (current: TransferTaskState) => TransferTaskState,
-      ): void => {
-        setTransferTasks((previous) => {
-          const current = previous[taskId];
-          if (!current) return previous;
-          const next = updater(current);
-          if (next === current) return previous;
-          const nextState = {
-            ...previous,
-            [taskId]: next,
-          };
-          transferTasksRef.current = nextState;
-          return nextState;
-        });
-      },
-      [],
-    );
-
-    const removeTransferTask = React.useCallback((taskId: string): void => {
-      const timer = transferCleanupTimersRef.current[taskId];
-      if (timer) {
-        clearTimeout(timer);
-        delete transferCleanupTimersRef.current[taskId];
-      }
-      setTransferTasks((previous) => {
-        if (!previous[taskId]) return previous;
-        const next = { ...previous };
-        delete next[taskId];
-        transferTasksRef.current = next;
-        return next;
-      });
-    }, []);
-
-    const scheduleTransferCleanup = React.useCallback(
-      (taskId: string, delayMs = 7000): void => {
-        const prevTimer = transferCleanupTimersRef.current[taskId];
-        if (prevTimer) {
-          clearTimeout(prevTimer);
-        }
-        transferCleanupTimersRef.current[taskId] = setTimeout(() => {
-          removeTransferTask(taskId);
-        }, delayMs);
-      },
-      [removeTransferTask],
-    );
-
     React.useEffect(() => {
+      const timer = window.setInterval(() => {
+        setTransferDisplayNow(Date.now());
+      }, 1000);
       return () => {
-        Object.values(transferCleanupTimersRef.current).forEach((timer) => {
-          clearTimeout(timer);
-        });
+        window.clearInterval(timer);
         Object.values(reloadDirectoryTimersRef.current).forEach((timer) => {
           clearTimeout(timer);
-        });
-        Object.values(transferCancelHandlersRef.current).forEach((cancel) => {
-          try {
-            cancel();
-          } catch {
-            // ignore
-          }
         });
       };
     }, []);
@@ -558,6 +436,60 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       },
       [loadDirectory],
     );
+
+    React.useEffect(() => {
+      Object.values(store.fileTransferTasks).forEach((task) => {
+        if (!TERMINAL_TRANSFER_STATUSES.has(task.status)) {
+          return;
+        }
+        if (handledTransferTerminalStatusesRef.current[task.id] === task.status) {
+          return;
+        }
+        handledTransferTerminalStatusesRef.current[task.id] = task.status;
+
+        if (task.status === "success") {
+          const successMessage =
+            task.mode === "move"
+              ? t.filesystem.filesMoved(task.transferredFiles)
+              : t.filesystem.filesCopied(task.transferredFiles);
+          updateTabState(task.targetTerminalId, (current) => ({
+            ...current,
+            statusMessage: successMessage,
+            errorMessage: null,
+          }));
+          scheduleDirectoryReload(task.targetTerminalId, task.targetDirPath);
+          if (task.mode === "move") {
+            scheduleDirectoryReload(
+              task.sourceTerminalId,
+              parentPath(task.sourcePaths[0] || "") || ".",
+            );
+            store.clearFileSystemClipboard();
+          }
+          return;
+        }
+
+        if (task.status === "cancelled") {
+          updateTabState(task.targetTerminalId, (current) => ({
+            ...current,
+            statusMessage: t.filesystem.transferCancelled,
+          }));
+          return;
+        }
+
+        const message = task.errorMessage || task.message || t.filesystem.transferFailed;
+        updateTabState(task.targetTerminalId, (current) => ({
+          ...current,
+          errorMessage: message,
+          statusMessage: null,
+        }));
+      });
+    }, [
+      scheduleDirectoryReload,
+      store,
+      store.fileTransferTasks,
+      t.filesystem,
+      updateTabState,
+    ]);
 
     const activeTabStateForBootstrap = activeTabId
       ? stateByTabId[activeTabId]
@@ -871,8 +803,9 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
     }, [inlineActionSessionKey]);
 
     const getTransferStatusLabel = React.useCallback(
-      (status: TransferTaskStatus): string => {
+      (status: FileTransferTaskSnapshot["status"]): string => {
         if (status === "queued") return t.filesystem.transferQueued;
+        if (status === "scanning") return t.filesystem.transferScanning;
         if (status === "running") return t.filesystem.transferRunning;
         if (status === "success") return t.filesystem.transferCompleted;
         if (status === "cancelled") return t.filesystem.transferCancelled;
@@ -881,158 +814,15 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       [t.filesystem],
     );
 
-    transferPumpRef.current = () => {
-      while (
-        runningTransferCountRef.current < TRANSFER_CONCURRENCY_LIMIT &&
-        transferQueueRef.current.length > 0
-      ) {
-        const nextTask = transferQueueRef.current.shift();
-        if (!nextTask) break;
-        const taskSnapshot = transferTasksRef.current[nextTask.taskId];
-        if (!taskSnapshot || taskSnapshot.status !== "queued") {
-          continue;
-        }
-        runningTransferCountRef.current += 1;
-        updateTransferTask(nextTask.taskId, (current) => ({
-          ...current,
-          status: "running",
-          message: current.cancelRequested
-            ? t.filesystem.transferCancelling
-            : current.message,
-          updatedAt: Date.now(),
-        }));
-        void nextTask
-          .run()
-          .catch((error) => {
-            const cancelled = isTransferCancelledError(error);
-            const fallbackMessage = cancelled
-              ? t.filesystem.transferCancelled
-              : toErrorMessage(error);
-            updateTransferTask(nextTask.taskId, (current) => {
-              if (!current || TERMINAL_TRANSFER_STATUSES.has(current.status)) {
-                return current;
-              }
-              return {
-                ...current,
-                status: cancelled ? "cancelled" : "error",
-                message: fallbackMessage,
-                errorMessage: cancelled ? null : fallbackMessage,
-                cancelRequested: cancelled || current.cancelRequested,
-                updatedAt: Date.now(),
-              };
-            });
-            scheduleTransferCleanup(nextTask.taskId);
-          })
-          .finally(() => {
-            delete transferCancelHandlersRef.current[nextTask.taskId];
-            runningTransferCountRef.current = Math.max(
-              0,
-              runningTransferCountRef.current - 1,
-            );
-            transferPumpRef.current();
-          });
-      }
-    };
-
-    const enqueueTransferTask = React.useCallback(
-      (
-        task: Omit<
-          TransferTaskState,
-          | "id"
-          | "status"
-          | "bytesDone"
-          | "percent"
-          | "transferredFiles"
-          | "totalFiles"
-          | "createdAt"
-          | "updatedAt"
-          | "errorMessage"
-          | "cancelRequested"
-        >,
-        runner: (taskId: string) => Promise<void>,
-      ): string => {
-        const taskId = `fs-transfer:${task.kind}:${Date.now()}:${Math.random().toString(16).slice(2, 8)}`;
-        const now = Date.now();
-        const nextTask: TransferTaskState = {
-          id: taskId,
-          kind: task.kind,
-          sourceTerminalId: task.sourceTerminalId,
-          targetTerminalId: task.targetTerminalId,
-          targetPath: task.targetPath,
-          itemNames: task.itemNames,
-          status: "queued",
-          bytesDone: 0,
-          totalBytes: 0,
-          transferredFiles: 0,
-          totalFiles: 0,
-          percent: 0,
-          message: task.message,
-          errorMessage: null,
-          cancelRequested: false,
-          createdAt: now,
-          updatedAt: now,
-        };
-        transferTasksRef.current = {
-          ...transferTasksRef.current,
-          [taskId]: nextTask,
-        };
-        setTransferTasks((previous) => ({
-          ...previous,
-          [taskId]: nextTask,
-        }));
-        transferQueueRef.current.push({
-          taskId,
-          run: () => runner(taskId),
-        });
-        transferPumpRef.current();
-        return taskId;
-      },
-      [],
-    );
-
     const cancelTransferTask = React.useCallback(
       (taskId: string): void => {
-        const current = transferTasksRef.current[taskId];
+        const current = store.fileTransferTasks[taskId];
         if (!current || TERMINAL_TRANSFER_STATUSES.has(current.status)) {
           return;
         }
-
-        if (current.status === "queued") {
-          transferQueueRef.current = transferQueueRef.current.filter(
-            (item) => item.taskId !== taskId,
-          );
-          updateTransferTask(taskId, (task) => ({
-            ...task,
-            status: "cancelled",
-            message: t.filesystem.transferCancelled,
-            cancelRequested: true,
-            updatedAt: Date.now(),
-          }));
-          scheduleTransferCleanup(taskId);
-          return;
-        }
-
-        updateTransferTask(taskId, (task) => ({
-          ...task,
-          cancelRequested: true,
-          message: t.filesystem.transferCancelling,
-          updatedAt: Date.now(),
-        }));
-        const cancel = transferCancelHandlersRef.current[taskId];
-        if (cancel) {
-          try {
-            cancel();
-          } catch {
-            // ignore cancellation errors
-          }
-        }
+        void store.cancelFileTransferTask(taskId);
       },
-      [
-        scheduleTransferCleanup,
-        t.filesystem.transferCancelled,
-        t.filesystem.transferCancelling,
-        updateTransferTask,
-      ],
+      [store, store.fileTransferTasks],
     );
 
     const runBusyOperation = React.useCallback(
@@ -1533,7 +1323,6 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
         const mode = clipboardPayload.mode;
         const sourcePaths = Array.from(clipboardPayload.sourcePaths || []);
         const itemNames = Array.from(clipboardPayload.itemNames || []);
-        const kind: TransferTaskKind = mode;
         const statusMessage =
           mode === "move"
             ? t.filesystem.movingItems(itemNames.length)
@@ -1545,154 +1334,27 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
           errorMessage: null,
         }));
 
-        enqueueTransferTask(
-          {
-            kind,
+        void store
+          .startFileTransfer({
+            origin: "user",
+            mode,
             sourceTerminalId: clipboardPayload.sourceTerminalId,
+            sourcePaths,
             targetTerminalId,
-            targetPath,
-            itemNames,
-            totalBytes: 0,
-            message: t.filesystem.transferQueued,
-          },
-          async (taskId) => {
-            const transferId = `filesystem-transfer:${taskId}`;
-            let lastReportedPercent = -1;
-            let lastStatusUpdateAt = 0;
-            transferCancelHandlersRef.current[taskId] = () => {
-              void window.gyshell.filesystem
-                .cancelTransfer(transferId)
-                .catch(() => {
-                  // ignore cancellation ipc errors
-                });
-            };
-            if (transferTasksRef.current[taskId]?.cancelRequested) {
-              transferCancelHandlersRef.current[taskId]?.();
-            }
-            const removeProgressListener =
-              window.gyshell.filesystem.onTransferProgress((payload) => {
-                if (payload.transferId !== transferId) return;
-                const percent =
-                  payload.totalBytes > 0
-                    ? Math.min(
-                        100,
-                        Math.round(
-                          (payload.bytesTransferred / payload.totalBytes) * 100,
-                        ),
-                      )
-                    : payload.eof
-                      ? 100
-                      : 0;
-                const now = Date.now();
-                const shouldReportProgress =
-                  percent >= 100 ||
-                  percent - lastReportedPercent >=
-                    STATUS_UPDATE_MIN_PERCENT_STEP ||
-                  now - lastStatusUpdateAt >= STATUS_UPDATE_MIN_INTERVAL_MS;
-                if (!shouldReportProgress) return;
-                lastReportedPercent = percent;
-                lastStatusUpdateAt = now;
-                updateTransferTask(taskId, (current) => ({
-                  ...current,
-                  bytesDone: payload.bytesTransferred,
-                  totalBytes: payload.totalBytes,
-                  transferredFiles: payload.transferredFiles,
-                  totalFiles: payload.totalFiles,
-                  percent,
-                  message:
-                    current.status === "running"
-                      ? t.filesystem.transferringItemsProgress(percent)
-                      : current.message,
-                  updatedAt:
-                    current.status === "running" ? now : current.updatedAt,
-                }));
-              });
-
-            try {
-              const result = await window.gyshell.filesystem.transferEntries(
-                clipboardPayload.sourceTerminalId,
-                sourcePaths,
-                targetTerminalId,
-                targetPath,
-                {
-                  mode,
-                  transferId,
-                  overwrite: conflictStrategy === "overwrite",
-                  conflictStrategy,
-                },
-              );
-              const successMessage =
-                mode === "move"
-                  ? t.filesystem.filesMoved(result.transferredFiles)
-                  : t.filesystem.filesCopied(result.transferredFiles);
-              updateTransferTask(taskId, (current) => ({
-                ...current,
-                status: "success",
-                bytesDone: result.totalBytes,
-                totalBytes: result.totalBytes,
-                transferredFiles: result.transferredFiles,
-                totalFiles: result.totalFiles,
-                percent: 100,
-                message: successMessage,
-                updatedAt: Date.now(),
-              }));
-              updateTabState(targetTerminalId, (current) => ({
-                ...current,
-                statusMessage: successMessage,
-              }));
-              scheduleDirectoryReload(targetTerminalId, targetPath);
-              if (mode === "move") {
-                scheduleDirectoryReload(
-                  clipboardPayload.sourceTerminalId,
-                  clipboardPayload.sourceBasePath,
-                );
-                store.clearFileSystemClipboard();
-              }
-              scheduleTransferCleanup(taskId);
-            } catch (error) {
-              if (isTransferCancelledError(error)) {
-                updateTransferTask(taskId, (current) => ({
-                  ...current,
-                  status: "cancelled",
-                  cancelRequested: true,
-                  message: t.filesystem.transferCancelled,
-                  errorMessage: null,
-                  updatedAt: Date.now(),
-                }));
-                updateTabState(targetTerminalId, (current) => ({
-                  ...current,
-                  statusMessage: t.filesystem.transferCancelled,
-                }));
-              } else {
-                const message = toErrorMessage(error);
-                updateTransferTask(taskId, (current) => ({
-                  ...current,
-                  status: "error",
-                  message,
-                  errorMessage: message,
-                  updatedAt: Date.now(),
-                }));
-                updateTabState(targetTerminalId, (current) => ({
-                  ...current,
-                  errorMessage: message,
-                }));
-              }
-              scheduleTransferCleanup(taskId);
-            } finally {
-              removeProgressListener();
-            }
-          },
-        );
+            targetDirPath: targetPath,
+            overwrite: conflictStrategy === "overwrite",
+            conflictStrategy,
+          })
+          .catch((error) => {
+            const message = toErrorMessage(error);
+            updateTabState(targetTerminalId, (current) => ({
+              ...current,
+              errorMessage: message,
+              statusMessage: null,
+            }));
+          });
       },
-      [
-        enqueueTransferTask,
-        scheduleDirectoryReload,
-        scheduleTransferCleanup,
-        store,
-        t.filesystem,
-        updateTabState,
-        updateTransferTask,
-      ],
+      [store, t.filesystem, updateTabState],
     );
 
     const requestClipboardTransfer = React.useCallback(
@@ -2090,14 +1752,33 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       [terminalFontSize],
     );
     const transferTaskList = React.useMemo(() => {
-      return Object.values(transferTasks)
-        .filter(
-          (task) =>
+      return Object.values(store.fileTransferTasks)
+        .filter((task) => {
+          const relatesToActiveTab =
             task.targetTerminalId === activeTerminalId ||
-            task.sourceTerminalId === activeTerminalId,
-        )
+            task.sourceTerminalId === activeTerminalId;
+          if (
+            task.origin === "agent" &&
+            !TERMINAL_TRANSFER_STATUSES.has(task.status)
+          ) {
+            return true;
+          }
+          if (!TERMINAL_TRANSFER_STATUSES.has(task.status)) {
+            return relatesToActiveTab;
+          }
+          if (task.origin === "agent") {
+            return (
+              transferDisplayNow - task.updatedAt <=
+              TRANSFER_TERMINAL_DISPLAY_MS
+            );
+          }
+          return (
+            relatesToActiveTab &&
+            transferDisplayNow - task.updatedAt <= TRANSFER_TERMINAL_DISPLAY_MS
+          );
+        })
         .sort((left, right) => right.updatedAt - left.updatedAt);
-    }, [activeTerminalId, transferTasks]);
+    }, [activeTerminalId, store.fileTransferTasks, transferDisplayNow]);
     const inlineActionLabel = React.useMemo(() => {
       if (!inlinePathAction) return "";
       if (inlinePathAction.type === "createDirectory")
@@ -2866,7 +2547,7 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
                 {transferTaskList.map((task) => {
                   const percent = Math.max(0, Math.min(100, task.percent));
                   const taskKindLabel =
-                    task.kind === "move"
+                    task.mode === "move"
                       ? t.filesystem.transferMoveKind
                       : t.filesystem.transferCopyKind;
                   const progressLabel =
@@ -2878,8 +2559,14 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
                       ? task.itemNames[0]
                       : `${task.itemNames[0]} +${task.itemNames.length - 1}`;
                   const canCancel =
-                    (task.status === "queued" || task.status === "running") &&
+                    (task.status === "queued" ||
+                      task.status === "scanning" ||
+                      task.status === "running") &&
                     !task.cancelRequested;
+                  const originLabel =
+                    task.origin === "agent"
+                      ? t.filesystem.transferAgentOrigin
+                      : t.filesystem.transferUserOrigin;
 
                   return (
                     <div
@@ -2889,6 +2576,9 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
                       <div className="filesystem-transfer-main">
                         <span className="filesystem-transfer-kind">
                           {taskKindLabel}
+                        </span>
+                        <span className="filesystem-transfer-origin">
+                          {originLabel}
                         </span>
                         <span
                           className="filesystem-transfer-name"

@@ -71,6 +71,8 @@ interface ResolveTransferTargetPathResult {
   removeExistingTarget: boolean
 }
 
+type ReadFileChunkResult = Awaited<ReturnType<TerminalService['readFileChunk']>>
+
 const createTransferCancelledError = (): Error & { code: string } => {
   const error = new Error('Transfer cancelled by user.') as Error & { code: string }
   error.code = FILESYSTEM_TRANSFER_CANCELLED_CODE
@@ -237,7 +239,18 @@ export class FileSystemService {
       throw new Error('sourcePaths must contain at least one path.')
     }
 
-    const targetDirStat = await this.terminalService.statFile(targetTerminalId, targetDirPath)
+    const signal = options?.signal
+    const ensureNotCancelled = (): void => {
+      if (signal?.aborted) {
+        throw createTransferCancelledError()
+      }
+    }
+
+    ensureNotCancelled()
+    const targetDirStat = await this.awaitWithCancellation(
+      () => this.terminalService.statFile(targetTerminalId, targetDirPath),
+      signal
+    )
     if (!targetDirStat.exists || !targetDirStat.isDirectory) {
       throw new Error(`Target directory does not exist: ${targetDirPath}`)
     }
@@ -257,14 +270,24 @@ export class FileSystemService {
     const targetPathSet = new Set<string>()
     const seenSources = new Set<string>()
     for (const sourcePath of sourceList) {
-      const resolvedSourcePath = await this.terminalService.resolvePathForFileSystem(sourceTerminalId, sourcePath)
+      ensureNotCancelled()
+      const resolvedSourcePath = await this.awaitWithCancellation(
+        () => this.terminalService.resolvePathForFileSystem(sourceTerminalId, sourcePath),
+        signal
+      )
       const sourceKey = this.normalizePathForCompare(resolvedSourcePath, sourceOs)
       if (seenSources.has(sourceKey)) continue
       seenSources.add(sourceKey)
 
-      const node = await this.buildTransferNode(sourceTerminalId, resolvedSourcePath)
+      const node = await this.buildTransferNode(sourceTerminalId, resolvedSourcePath, {
+        ensureNotCancelled,
+        signal
+      })
       const targetPath = this.joinPathForOs(targetDirPath, node.name, targetOs)
-      const resolvedTargetPath = await this.terminalService.resolvePathForFileSystem(targetTerminalId, targetPath)
+      const resolvedTargetPath = await this.awaitWithCancellation(
+        () => this.terminalService.resolvePathForFileSystem(targetTerminalId, targetPath),
+        signal
+      )
 
       if (sameFileSystem && this.pathsEqual(resolvedSourcePath, resolvedTargetPath, compareOs)) {
         if (mode === 'move') {
@@ -292,7 +315,9 @@ export class FileSystemService {
         node,
         initialResolvedTargetPath: resolvedTargetPath,
         conflictStrategy,
-        reservedTargetKeys: targetPathSet
+        reservedTargetKeys: targetPathSet,
+        ensureNotCancelled,
+        signal
       })
 
       if (
@@ -356,13 +381,6 @@ export class FileSystemService {
         eof
       })
     }
-    const ensureNotCancelled = (): void => {
-      if (options?.signal?.aborted) {
-        throw createTransferCancelledError()
-      }
-    }
-    const createdTargetRoots: string[] = []
-    let copyPhaseCompleted = false
 
     try {
       notifyProgress(false)
@@ -370,9 +388,6 @@ export class FileSystemService {
         ensureNotCancelled()
         if (plan.removeExistingTarget) {
           await this.terminalService.deletePath(targetTerminalId, plan.targetPath, { recursive: true })
-        }
-        if (!plan.targetAlreadyExisted || plan.removeExistingTarget) {
-          createdTargetRoots.push(plan.targetPath)
         }
         await this.copyTransferNode({
           sourceTerminalId,
@@ -385,13 +400,11 @@ export class FileSystemService {
           targetPath: plan.targetPath,
           progressState,
           ensureNotCancelled,
-          signal: options?.signal,
+          signal,
           overwrite,
-          notifyProgress,
-          createdTargetPaths: createdTargetRoots
+          notifyProgress
         })
       }
-      copyPhaseCompleted = true
 
       if (mode === 'move') {
         ensureNotCancelled()
@@ -408,14 +421,7 @@ export class FileSystemService {
         totalFiles
       }
     } catch (error) {
-      if (!copyPhaseCompleted) {
-        for (const targetRoot of createdTargetRoots.reverse()) {
-          await this.terminalService.deletePath(targetTerminalId, targetRoot, { recursive: true }).catch((rollbackErr) => {
-            console.warn(`[FileSystemService] Rollback: failed to delete ${targetRoot}:`, rollbackErr)
-          })
-        }
-      }
-      if (options?.signal?.aborted || isAbortLikeError(error) || isFileSystemTransferCancelledError(error)) {
+      if (signal?.aborted || isAbortLikeError(error) || isFileSystemTransferCancelledError(error)) {
         throw createTransferCancelledError()
       }
       throw error
@@ -440,6 +446,8 @@ export class FileSystemService {
     initialResolvedTargetPath: string
     conflictStrategy: FileTransferConflictStrategy
     reservedTargetKeys: Set<string>
+    ensureNotCancelled: () => void
+    signal?: AbortSignal
   }): Promise<ResolveTransferTargetPathResult> {
     const {
       targetTerminalId,
@@ -448,9 +456,15 @@ export class FileSystemService {
       node,
       initialResolvedTargetPath,
       conflictStrategy,
-      reservedTargetKeys
+      reservedTargetKeys,
+      ensureNotCancelled,
+      signal
     } = params
-    const initialTargetStat = await this.terminalService.statFile(targetTerminalId, initialResolvedTargetPath)
+    ensureNotCancelled()
+    const initialTargetStat = await this.awaitWithCancellation(
+      () => this.terminalService.statFile(targetTerminalId, initialResolvedTargetPath),
+      signal
+    )
     const initialTargetKey = this.normalizePathForCompare(initialResolvedTargetPath, targetOs)
     const initialTargetReserved = reservedTargetKeys.has(initialTargetKey)
 
@@ -481,14 +495,21 @@ export class FileSystemService {
 
     const duplicateName = this.parseDuplicateName(node.name)
     for (let index = duplicateName.nextIndex; index < duplicateName.nextIndex + DUPLICATE_NAME_SEARCH_LIMIT; index += 1) {
+      ensureNotCancelled()
       const candidateName = `${duplicateName.baseName} (${index})${duplicateName.extension}`
       const candidatePath = this.joinPathForOs(targetDirPath, candidateName, targetOs)
-      const resolvedCandidatePath = await this.terminalService.resolvePathForFileSystem(targetTerminalId, candidatePath)
+      const resolvedCandidatePath = await this.awaitWithCancellation(
+        () => this.terminalService.resolvePathForFileSystem(targetTerminalId, candidatePath),
+        signal
+      )
       const candidateKey = this.normalizePathForCompare(resolvedCandidatePath, targetOs)
       if (reservedTargetKeys.has(candidateKey)) {
         continue
       }
-      const candidateStat = await this.terminalService.statFile(targetTerminalId, resolvedCandidatePath)
+      const candidateStat = await this.awaitWithCancellation(
+        () => this.terminalService.statFile(targetTerminalId, resolvedCandidatePath),
+        signal
+      )
       if (!candidateStat.exists) {
         return {
           targetPath: resolvedCandidatePath,
@@ -540,7 +561,6 @@ export class FileSystemService {
     signal?: AbortSignal
     overwrite: boolean
     notifyProgress: (eof: boolean) => void
-    createdTargetPaths: string[]
   }): Promise<void> {
     const {
       sourceTerminalId,
@@ -555,8 +575,7 @@ export class FileSystemService {
       ensureNotCancelled,
       signal,
       overwrite,
-      notifyProgress,
-      createdTargetPaths
+      notifyProgress
     } = params
 
     ensureNotCancelled()
@@ -567,14 +586,11 @@ export class FileSystemService {
         if (targetStat.exists && !targetStat.isDirectory) {
           await this.terminalService.deletePath(targetTerminalId, targetPath, { recursive: true })
           await this.terminalService.createDirectory(targetTerminalId, targetPath)
-          createdTargetPaths.push(targetPath)
         } else if (!targetStat.exists) {
           await this.terminalService.createDirectory(targetTerminalId, targetPath)
-          createdTargetPaths.push(targetPath)
         }
       } else {
         await this.terminalService.createDirectory(targetTerminalId, targetPath)
-        createdTargetPaths.push(targetPath)
       }
       for (const child of node.children) {
         const childTargetPath = this.joinPathForOs(targetPath, child.name, targetOs)
@@ -591,8 +607,7 @@ export class FileSystemService {
           ensureNotCancelled,
           signal,
           overwrite,
-          notifyProgress,
-          createdTargetPaths
+          notifyProgress
         })
       }
       return
@@ -654,30 +669,36 @@ export class FileSystemService {
     } = params
 
     if (fileSize <= 0) {
-      await this.terminalService.writeFileChunk(targetTerminalId, targetPath, 0, Buffer.alloc(0), {
-        truncate: true,
-        close: true
-      })
+      await this.awaitWithCancellation(
+        () => this.terminalService.writeFileChunk(targetTerminalId, targetPath, 0, Buffer.alloc(0), {
+          truncate: true,
+          close: true
+        }),
+        signal
+      )
       return
     }
 
     if (sourceType === 'local' && (targetType === 'ssh' || targetType === 'local')) {
       let lastTransferred = 0
-      const uploaded = await this.terminalService.uploadFileFromLocalPath(
-        targetTerminalId,
-        sourcePath,
-        targetPath,
-        {
-          signal,
-          onProgress: (progress) => {
-            const current = Math.max(0, Number(progress.bytesTransferred) || 0)
-            const delta = Math.max(0, current - lastTransferred)
-            lastTransferred = current
-            if (delta > 0) {
-              onChunkWritten(delta)
+      const uploaded = await this.awaitWithCancellation(
+        () => this.terminalService.uploadFileFromLocalPath(
+          targetTerminalId,
+          sourcePath,
+          targetPath,
+          {
+            signal,
+            onProgress: (progress) => {
+              const current = Math.max(0, Number(progress.bytesTransferred) || 0)
+              const delta = Math.max(0, current - lastTransferred)
+              lastTransferred = current
+              if (delta > 0) {
+                onChunkWritten(delta)
+              }
             }
           }
-        }
+        ),
+        signal
       )
       if (uploaded) {
         if (uploaded.totalBytes > lastTransferred) {
@@ -689,21 +710,24 @@ export class FileSystemService {
 
     if (sourceType === 'ssh' && targetType === 'local') {
       let lastTransferred = 0
-      const downloaded = await this.terminalService.downloadFileToLocalPath(
-        sourceTerminalId,
-        sourcePath,
-        targetPath,
-        {
-          signal,
-          onProgress: (progress) => {
-            const current = Math.max(0, Number(progress.bytesTransferred) || 0)
-            const delta = Math.max(0, current - lastTransferred)
-            lastTransferred = current
-            if (delta > 0) {
-              onChunkWritten(delta)
+      const downloaded = await this.awaitWithCancellation(
+        () => this.terminalService.downloadFileToLocalPath(
+          sourceTerminalId,
+          sourcePath,
+          targetPath,
+          {
+            signal,
+            onProgress: (progress) => {
+              const current = Math.max(0, Number(progress.bytesTransferred) || 0)
+              const delta = Math.max(0, current - lastTransferred)
+              lastTransferred = current
+              if (delta > 0) {
+                onChunkWritten(delta)
+              }
             }
           }
-        }
+        ),
+        signal
       )
       if (downloaded) {
         if (downloaded.totalBytes > lastTransferred) {
@@ -717,25 +741,31 @@ export class FileSystemService {
     let totalSizeHint: number | undefined = fileSize
     while (true) {
       ensureNotCancelled()
-      const chunk = await this.terminalService.readFileChunk(
-        sourceTerminalId,
-        sourcePath,
-        offset,
-        chunkSize,
-        totalSizeHint !== undefined ? { totalSizeHint } : undefined
+      const chunk: ReadFileChunkResult = await this.awaitWithCancellation(
+        () => this.terminalService.readFileChunk(
+          sourceTerminalId,
+          sourcePath,
+          offset,
+          chunkSize,
+          totalSizeHint !== undefined ? { totalSizeHint } : undefined
+        ),
+        signal
       )
       totalSizeHint = chunk.totalSize
 
       if (chunk.bytesRead > 0) {
-        await this.terminalService.writeFileChunk(
-          targetTerminalId,
-          targetPath,
-          offset,
-          chunk.chunk,
-          {
-            truncate: offset === 0,
-            close: chunk.eof
-          }
+        await this.awaitWithCancellation(
+          () => this.terminalService.writeFileChunk(
+            targetTerminalId,
+            targetPath,
+            offset,
+            chunk.chunk,
+            {
+              truncate: offset === 0,
+              close: chunk.eof
+            }
+          ),
+          signal
         )
         onChunkWritten(chunk.bytesRead)
       }
@@ -750,15 +780,56 @@ export class FileSystemService {
     }
   }
 
-  private async buildTransferNode(terminalId: string, sourcePath: string): Promise<TransferNode> {
+  private async awaitWithCancellation<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted) {
+      throw createTransferCancelledError()
+    }
+    const promise = operation()
+    if (!signal) {
+      return await promise
+    }
+
+    return await new Promise<T>((resolve, reject) => {
+      let settled = false
+      const settle = (callback: () => void): void => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener('abort', onAbort)
+        callback()
+      }
+      const onAbort = (): void => {
+        settle(() => reject(createTransferCancelledError()))
+      }
+
+      signal.addEventListener('abort', onAbort, { once: true })
+      promise.then(
+        (value) => settle(() => resolve(value)),
+        (error) => settle(() => reject(error))
+      )
+    })
+  }
+
+  private async buildTransferNode(
+    terminalId: string,
+    sourcePath: string,
+    options: {
+      ensureNotCancelled: () => void
+      signal?: AbortSignal
+    }
+  ): Promise<TransferNode> {
     // NOTE: This method recursively scans the full directory tree into memory before
     // any bytes are transferred. This trade-off allows totalFiles/totalBytes to be known
     // upfront for accurate progress reporting. For very large directories the discovery
     // phase may take noticeable time before transfer begins.
-    const stat = await this.terminalService.statFile(terminalId, sourcePath)
+    options.ensureNotCancelled()
+    const stat = await this.awaitWithCancellation(
+      () => this.terminalService.statFile(terminalId, sourcePath),
+      options.signal
+    )
     if (!stat.exists) {
       throw new Error(`Source path not found: ${sourcePath}`)
     }
+    options.ensureNotCancelled()
 
     const osType = this.terminalService.getRemoteOs(terminalId)
     const name = this.basenamePathForOs(sourcePath, osType)
@@ -770,7 +841,7 @@ export class FileSystemService {
       // Prefer the size from stat to avoid a redundant readFileChunk round-trip.
       const size = stat.size !== undefined
         ? Math.max(0, Number(stat.size) || 0)
-        : await this.resolveFileSize(terminalId, sourcePath)
+        : await this.resolveFileSize(terminalId, sourcePath, options)
       return {
         sourcePath,
         name,
@@ -781,11 +852,16 @@ export class FileSystemService {
       }
     }
 
-    const listed = await this.terminalService.listDirectory(terminalId, sourcePath)
+    const listed = await this.awaitWithCancellation(
+      () => this.terminalService.listDirectory(terminalId, sourcePath),
+      options.signal
+    )
+    options.ensureNotCancelled()
     const children: TransferNode[] = []
     for (const entry of listed.entries) {
+      options.ensureNotCancelled()
       if (entry.isDirectory) {
-        children.push(await this.buildTransferNode(terminalId, entry.path))
+        children.push(await this.buildTransferNode(terminalId, entry.path, options))
         continue
       }
       children.push({
@@ -809,8 +885,20 @@ export class FileSystemService {
     }
   }
 
-  private async resolveFileSize(terminalId: string, filePath: string): Promise<number> {
-    const probe = await this.terminalService.readFileChunk(terminalId, filePath, 0, 1)
+  private async resolveFileSize(
+    terminalId: string,
+    filePath: string,
+    options?: {
+      ensureNotCancelled?: () => void
+      signal?: AbortSignal
+    }
+  ): Promise<number> {
+    options?.ensureNotCancelled?.()
+    const probe = await this.awaitWithCancellation(
+      () => this.terminalService.readFileChunk(terminalId, filePath, 0, 1),
+      options?.signal
+    )
+    options?.ensureNotCancelled?.()
     return Math.max(0, Number(probe.totalSize) || 0)
   }
 

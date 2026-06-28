@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#key-capabilities)
 
 English README | [中文 README](./README.zh-CN.md)  
-Latest release notes: [`changelogs/v1.5.0.md`](./changelogs/v1.5.0.md)
+Latest release notes: [`changelogs/v1.5.2.md`](./changelogs/v1.5.2.md)
 
 If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/RTerm/discussions).
 
@@ -60,24 +60,20 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - **For multi-device flow**: desktop + TUI + mobile-web with shared gateway semantics.
 - **For multimodal workflows**: text and image inputs can be combined in one execution turn.
 
-## v1.4.3 Key Highlights
+## v1.5.2 Key Highlights
 
-- **Image and PDF preview in the file editor**
-  - the built-in editor now opens images (`png`, `jpg`, `gif`, `webp`, `bmp`, `ico`, `svg`, `avif`) and PDFs inline — page navigation, zoom, and page indicator included
-  - the editor panel is now called **File Editor** rather than Text Editor, since it is no longer text-only
-- **"Keep Both" when pasting into a folder with name conflicts**
-  - the paste conflict dialog now offers **Keep Both** alongside Overwrite — conflicting items are pasted in with auto-numbered suffixes (e.g. `report.pdf` → `report (2).pdf`) so existing files stay untouched
-  - conflict handling is unified across local and SSH transfers via an end-to-end `conflictStrategy` (`error` / `overwrite` / `rename`)
-- **Copy Full Path(s) from the file row right-click menu**
-  - right-click a file or folder to copy its absolute path (or multiple paths if multi-selected) to the system clipboard, ready to paste into a terminal, chat, or editor
-- **More reliable SSH SFTP writes**
-  - the chunked write API now closes the SFTP handle on the final chunk and on empty-file writes, so handles release cleanly instead of being held until session GC
-- **Seamless tool groups are visibly expandable**
-  - the chevron is visible at rest (no longer hover-only) and applies to single-step groups too, so it's always clear that a group can be expanded
-  - expanding a group reveals the full, untruncated call info for each step — full command, full tool args, full file path. Tool *output* is still not exposed
-  - the `N steps` count now has correct spacing instead of hugging the title
-- **Compact horizontal monitor: correct bar heights**
-  - DISK / LOAD / RX bars used to collapse to a thin sliver in the compact horizontal layout while CPU / MEM / TX rendered correctly — all bars now resolve their percentage heights consistently, and 0% bars are intentionally hidden so "no signal" is visually distinct from "low signal"
+- **Prevent sleep while a session is running**
+  - a new **Prevent Sleep While Running** setting keeps the computer awake whenever any chat session is actively running, so long autonomous tasks don't stall when you step away — the screen may still turn off, and the block releases automatically once all runs finish
+- **Local terminals stay alive when their shell exits**
+  - if a **local** terminal's shell process exits (you type `exit`, or it crashes), GyShell respawns a fresh shell in the same tab — preserving the tab, its title, and its size — instead of leaving a dead "exited" tab behind
+- **Reconnect disconnected SSH terminals**
+  - a disconnected (exited) **SSH** tab now offers a **Reconnect** action in its right-click menu that re-establishes the connection from the tab's saved SSH config, reusing the same tab
+- **Experimental agent file transfer between terminal tabs**
+  - two new **experimental, off-by-default** agent tools (`copy_between_tabs` / `read_file_transfer_status`) let the agent run **asynchronous, copy-only** file transfers between tabs on **different machines** and poll their progress; tasks appear in the **Transfer Tasks** panel with an **AGENT / USER** origin badge and a new **Scanning** phase
+- **Clearer chat & terminal tab indicators**
+  - chat tabs now show a green **"running" dot** while that session is busy (matching terminal tabs), and tab styling / close buttons were unified for a cleaner, subtler look across chat, terminal, and the compact tab selector
+- **More resilient agent stream loop**
+  - providers that finish with `tool_calls` but emit no actual tool-call payload (e.g. some GLM-compatible endpoints) no longer dead-end a turn — GyShell detects the malformed finish and retries once with a non-streaming request before giving up
 
 ---
 
@@ -95,7 +91,8 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - Classic or Seamless chat activity display, depending on how much inline tool detail you want.
 - Persistent global memory injection via `memory.md`.
 - Multimodal user input pipeline (text + images) for compatible models.
-- OpenAI-compatible model endpoint support.
+- OpenAI-compatible model endpoint support, with automatic recovery from malformed empty tool-call stream finishes.
+- Optional experimental agent tools, including asynchronous cross-machine file transfer between terminal tabs with progress polling.
 
 ### Terminal + SSH + File Management
 
@@ -108,6 +105,8 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - Draft a command for the current terminal tab from recent visible output, then paste it back without auto-running it.
 - Search within the active terminal buffer without leaving the panel.
 - Terminal tab restoration after backend restart, plus lossless output catch-up for renderer remount/reconnect within the same backend runtime.
+- Local terminal tabs auto-respawn their shell if it exits, so a local tab stays usable instead of going dead.
+- Disconnected SSH tabs can be reconnected in place from the tab right-click menu using their saved connection config.
 - **Integrated file browser panel**: browse, create, rename, delete, preview, sort, filter, and search files across local and SSH sessions.
 - **Cross-session file transfer** (copy/move) with real-time progress, cancellation, and adaptive SFTP tuning.
 - **Built-in file editor panel** for editing text files, plus inline preview of images (`png/jpg/gif/webp/bmp/ico/svg/avif`) and PDFs (with page navigation and zoom), all directly in the workspace.
@@ -117,6 +116,8 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 ### Workspace + Monitoring
 
 - Detach panels into dedicated sub-windows and move tabs or whole panels across windows.
+- Optionally keep the computer awake while any chat session is running, with the system-sleep block released automatically when runs finish.
+- Chat tabs show a running indicator while a session is busy, mirroring terminal tab runtime-state dots.
 - Choose `Auto`, `Expanded`, or `Select` panel tab display modes based on how much header space your workspace has.
 - `Ctrl/Cmd+F` opens a panel-local find bar in terminal, current chat, file browser, and file editor.
 - Open a resource monitor panel for local and SSH terminals from the workspace rail.
@@ -283,7 +284,7 @@ See:
 
 ## Read More
 
-- Release notes: `changelogs/v1.4.3.md`
+- Release notes: `changelogs/v1.5.2.md`
 - Build matrix and packaging: `docs/build-commands.md`
 - Monorepo boundaries and runtime flow: `docs/monorepo-architecture.md`
 

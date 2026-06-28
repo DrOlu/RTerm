@@ -59,6 +59,7 @@ interface LayoutWorkspaceProps {
 type LayoutMenuMode = "tab" | "bar";
 
 type LayoutMenuAction =
+  | "reconnect-terminal"
   | "close-tab"
   | "close-other-tabs"
   | "close-all-tabs"
@@ -69,6 +70,7 @@ type LayoutMenuAction =
   | "close-panel";
 
 type LayoutMenuLabelKey =
+  | "reconnectTab"
   | "closeTab"
   | "closeOtherTabs"
   | "closeAllTabs"
@@ -2671,6 +2673,28 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
 
       const hasTargetTab =
         !!layoutMenu.targetTabId && menuTabIds.includes(layoutMenu.targetTabId);
+      const targetTerminalTab =
+        layoutMenu.panelKind === "terminal" && layoutMenu.targetTabId
+          ? store.terminalTabs.find(
+              (tab) => tab.id === layoutMenu.targetTabId,
+            ) || null
+          : null;
+      const reconnectItems: Array<{
+        action: LayoutMenuAction;
+        labelKey: LayoutMenuLabelKey;
+        danger?: boolean;
+        disabled?: boolean;
+      }> =
+        targetTerminalTab?.config.type === "ssh" &&
+        targetTerminalTab.runtimeState === "exited"
+          ? [
+              {
+                action: "reconnect-terminal",
+                labelKey: "reconnectTab",
+                disabled: !hasTargetTab,
+              },
+            ]
+          : [];
       const closeItems: Array<{
         action: LayoutMenuAction;
         labelKey: LayoutMenuLabelKey;
@@ -2712,6 +2736,7 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
       }));
 
       return [
+        ...reconnectItems,
         ...closeItems,
         ...splitItems,
         {
@@ -2727,6 +2752,16 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
       (action: LayoutMenuAction) => {
         if (!layoutMenu) return;
         const panelTabIds = store.layout.getPanelTabIds(layoutMenu.panelId);
+
+        if (
+          action === "reconnect-terminal" &&
+          layoutMenu.panelKind === "terminal" &&
+          layoutMenu.targetTabId
+        ) {
+          void store.reconnectTerminal(layoutMenu.targetTabId);
+          setLayoutMenu(null);
+          return;
+        }
 
         if (action === "close-tab" && layoutMenu.targetTabId) {
           requestCloseTabsByKind(layoutMenu.panelKind, [
@@ -2784,7 +2819,7 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
           setLayoutMenu(null);
         }
       },
-      [layoutMenu, requestClosePanel, requestCloseTabsByKind, store.layout],
+      [layoutMenu, requestClosePanel, requestCloseTabsByKind, store],
     );
 
     const targetRect = store.layout.dropTargetPanelId

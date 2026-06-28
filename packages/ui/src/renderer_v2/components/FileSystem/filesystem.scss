@@ -206,7 +206,7 @@
   letter-spacing: 0;
   font-size: 11px;
   font-weight: 600;
-  padding: 6px 8px;
+  padding: 4px 8px;
 }
 
 .filesystem-context-menu-item {
@@ -503,6 +503,14 @@
 
 .filesystem-transfer-kind {
   color: var(--fg-faint);
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.25px;
+}
+
+.filesystem-transfer-origin {
+  color: var(--accent);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
   text-transform: uppercase;

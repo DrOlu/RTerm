@@ -8,6 +8,11 @@ import {
   type IWebSocketConnectionLike,
 } from "./WebSocketClientTransport";
 import { WebSocketServer } from "ws";
+import type {
+  FileTransferTaskSnapshot,
+  ListFileTransfersOptions,
+  StartFileTransferInput,
+} from "../FileTransferService";
 
 type WebSocketRpcMethod =
   | "gateway:ping"
@@ -34,6 +39,11 @@ type WebSocketRpcMethod =
   | "filesystem:writeTextFile"
   | "filesystem:writeFileBase64"
   | "filesystem:transferEntries"
+  | "filesystem:startTransfer"
+  | "filesystem:getTransfer"
+  | "filesystem:listTransfers"
+  | "filesystem:cancelTransfer"
+  | "filesystem:cancelTransferTask"
   | "filesystem:createDirectory"
   | "filesystem:createFile"
   | "filesystem:deletePath"
@@ -221,6 +231,21 @@ export interface WebSocketGatewayAdapterOptions {
           transferredFiles: number;
           totalFiles: number;
         };
+    startTransfer?: (
+      input: StartFileTransferInput,
+    ) => FileTransferTaskSnapshot | Promise<FileTransferTaskSnapshot>;
+    getTransfer?: (
+      transferId: string,
+    ) => FileTransferTaskSnapshot | null | Promise<FileTransferTaskSnapshot | null>;
+    listTransfers?: (
+      options?: ListFileTransfersOptions,
+    ) => FileTransferTaskSnapshot[] | Promise<FileTransferTaskSnapshot[]>;
+    cancelTransfer?: (
+      transferId: string,
+    ) => FileTransferTaskSnapshot | null | Promise<FileTransferTaskSnapshot | null>;
+    cancelTransferTask?: (
+      transferId: string,
+    ) => FileTransferTaskSnapshot | null | Promise<FileTransferTaskSnapshot | null>;
     createDirectory?: (
       terminalId: string,
       dirPath: string,
@@ -1161,6 +1186,213 @@ export class WebSocketGatewayAdapter {
             ...(chunkSize !== undefined ? { chunkSize } : {}),
           },
         );
+      }
+      case "filesystem:startTransfer": {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.startTransfer) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "filesystem:startTransfer is not available on this websocket gateway.",
+          );
+        }
+        const sourceTerminalId = this.readStringParam(
+          params,
+          "sourceTerminalId",
+        );
+        const targetTerminalId = this.readStringParam(
+          params,
+          "targetTerminalId",
+        );
+        const targetDirPath = this.readStringParam(params, "targetDirPath");
+        const rawSourcePaths = params.sourcePaths;
+        if (
+          !Array.isArray(rawSourcePaths) ||
+          rawSourcePaths.some((item) => typeof item !== "string")
+        ) {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "sourcePaths must be string[].",
+          );
+        }
+        const origin = params.origin === undefined ? "user" : params.origin;
+        if (origin !== "user" && origin !== "agent") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            'origin must be "user" or "agent" when provided.',
+          );
+        }
+        const mode = params.mode;
+        if (mode !== undefined && mode !== "copy" && mode !== "move") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            'mode must be "copy" or "move" when provided.',
+          );
+        }
+        const transferId = params.transferId;
+        if (transferId !== undefined && typeof transferId !== "string") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "transferId must be string when provided.",
+          );
+        }
+        const overwrite = params.overwrite;
+        if (overwrite !== undefined && typeof overwrite !== "boolean") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "overwrite must be boolean when provided.",
+          );
+        }
+        const requireDistinctMachine = params.requireDistinctMachine;
+        if (
+          requireDistinctMachine !== undefined &&
+          typeof requireDistinctMachine !== "boolean"
+        ) {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "requireDistinctMachine must be boolean when provided.",
+          );
+        }
+        const conflictStrategy = params.conflictStrategy;
+        if (
+          conflictStrategy !== undefined &&
+          conflictStrategy !== "error" &&
+          conflictStrategy !== "overwrite" &&
+          conflictStrategy !== "rename"
+        ) {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            'conflictStrategy must be "error", "overwrite", or "rename" when provided.',
+          );
+        }
+        const chunkSize = this.readOptionalPositiveIntegerParam(
+          params,
+          "chunkSize",
+        );
+        const sessionId =
+          params.sessionId === undefined ? undefined : params.sessionId;
+        if (sessionId !== undefined && typeof sessionId !== "string") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "sessionId must be string when provided.",
+          );
+        }
+        const agentRunId =
+          params.agentRunId === undefined ? undefined : params.agentRunId;
+        if (agentRunId !== undefined && typeof agentRunId !== "string") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "agentRunId must be string when provided.",
+          );
+        }
+        const toolMessageId =
+          params.toolMessageId === undefined ? undefined : params.toolMessageId;
+        if (toolMessageId !== undefined && typeof toolMessageId !== "string") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "toolMessageId must be string when provided.",
+          );
+        }
+        return await bridge.startTransfer({
+          origin,
+          sourceTerminalId,
+          sourcePaths: rawSourcePaths,
+          targetTerminalId,
+          targetDirPath,
+          ...(mode !== undefined ? { mode } : {}),
+          ...(transferId !== undefined ? { transferId } : {}),
+          ...(overwrite !== undefined ? { overwrite } : {}),
+          ...(requireDistinctMachine !== undefined
+            ? { requireDistinctMachine }
+            : {}),
+          ...(conflictStrategy !== undefined ? { conflictStrategy } : {}),
+          ...(chunkSize !== undefined ? { chunkSize } : {}),
+          ...(sessionId !== undefined ? { sessionId } : {}),
+          ...(agentRunId !== undefined ? { agentRunId } : {}),
+          ...(toolMessageId !== undefined ? { toolMessageId } : {}),
+        });
+      }
+      case "filesystem:getTransfer": {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.getTransfer) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "filesystem:getTransfer is not available on this websocket gateway.",
+          );
+        }
+        const transferId = this.readStringParam(params, "transferId");
+        return await bridge.getTransfer(transferId);
+      }
+      case "filesystem:listTransfers": {
+        const bridge = this.options.filesystemBridge;
+        if (!bridge?.listTransfers) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "filesystem:listTransfers is not available on this websocket gateway.",
+          );
+        }
+        const includeCompleted = params.includeCompleted;
+        if (
+          includeCompleted !== undefined &&
+          typeof includeCompleted !== "boolean"
+        ) {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "includeCompleted must be boolean when provided.",
+          );
+        }
+        const origin = params.origin;
+        if (
+          origin !== undefined &&
+          origin !== "user" &&
+          origin !== "agent"
+        ) {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            'origin must be "user" or "agent" when provided.',
+          );
+        }
+        const terminalId = params.terminalId;
+        if (terminalId !== undefined && typeof terminalId !== "string") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "terminalId must be string when provided.",
+          );
+        }
+        const sessionId = params.sessionId;
+        if (sessionId !== undefined && typeof sessionId !== "string") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "sessionId must be string when provided.",
+          );
+        }
+        const agentRunId = params.agentRunId;
+        if (agentRunId !== undefined && typeof agentRunId !== "string") {
+          throw new WebSocketRpcError(
+            "BAD_REQUEST",
+            "agentRunId must be string when provided.",
+          );
+        }
+        return await bridge.listTransfers({
+          ...(includeCompleted !== undefined ? { includeCompleted } : {}),
+          ...(origin !== undefined ? { origin } : {}),
+          ...(terminalId !== undefined ? { terminalId } : {}),
+          ...(sessionId !== undefined ? { sessionId } : {}),
+          ...(agentRunId !== undefined ? { agentRunId } : {}),
+        });
+      }
+      case "filesystem:cancelTransfer":
+      case "filesystem:cancelTransferTask": {
+        const bridge = this.options.filesystemBridge;
+        const cancelTransferTask =
+          bridge?.cancelTransferTask || bridge?.cancelTransfer;
+        if (!cancelTransferTask) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            `${request.method} is not available on this websocket gateway.`,
+          );
+        }
+        const transferId = this.readStringParam(params, "transferId");
+        return await cancelTransferTask(transferId);
       }
       case "filesystem:createDirectory": {
         const bridge = this.options.filesystemBridge;

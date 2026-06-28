@@ -19,6 +19,12 @@ import {
 } from './prompts'
 import type { ReadFileSupport } from './types'
 import { waitSchema, waitTerminalIdleSchema, wait, waitTerminalIdle } from './tools/wait_tools'
+import {
+  copyBetweenTabsSchema,
+  readFileTransferStatusSchema,
+  copyBetweenTabs,
+  readFileTransferStatus
+} from './tools/file_transfer_tools'
 import { 
   skillToolSchema, 
   buildSkillToolDescription,
@@ -41,6 +47,7 @@ export {
 
 export { readFileSchema } from './tools/read_tools'
 export { waitSchema, waitTerminalIdleSchema } from './tools/wait_tools'
+export { copyBetweenTabsSchema, readFileTransferStatusSchema } from './tools/file_transfer_tools'
 export { skillToolSchema, createSkillSchema, buildSkillToolDescription } from './tools/skill_tools'
 
 export { BUILTIN_TOOL_INFO } from './prompts'
@@ -99,6 +106,16 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'wait_terminal_idle',
       description: WAIT_TERMINAL_IDLE_DESCRIPTION,
       schema: waitTerminalIdleSchema
+    },
+    {
+      name: 'copy_between_tabs',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'copy_between_tabs')?.description ?? '',
+      schema: copyBetweenTabsSchema
+    },
+    {
+      name: 'read_file_transfer_status',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'read_file_transfer_status')?.description ?? '',
+      schema: readFileTransferStatusSchema
     }
   ].map((tool) => convertToOpenAITool(tool))
 }
@@ -114,6 +131,8 @@ export const toolImplementations = {
   writeStdin,
   wait,
   waitTerminalIdle,
+  copyBetweenTabs,
+  readFileTransferStatus,
   writeAndEdit,
   runReadFile,
   runCreateSkillTool

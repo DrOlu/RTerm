@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   ipcMain,
+  powerSaveBlocker,
   powerMonitor,
   screen,
   shell,
@@ -11,6 +12,7 @@ import { SettingsService } from "../../../backend/src/services/SettingsService";
 import { UiSettingsStore } from "../settings/UiSettingsStore";
 import { TerminalService } from "../../../backend/src/services/TerminalService";
 import { FileSystemService } from "../../../backend/src/services/FileSystemService";
+import { FileTransferService } from "../../../backend/src/services/FileTransferService";
 import { AgentService_v2 } from "../../../backend/src/services/AgentService_v2";
 import { CommandPolicyService } from "../../../backend/src/services/CommandPolicy/CommandPolicyService";
 import { ModelCapabilityService } from "../../../backend/src/services/ModelCapabilityService";
@@ -54,12 +56,14 @@ import {
 import { HistoryMigrationCoordinator } from "./HistoryMigrationCoordinator";
 import { HistorySqliteStore } from "../../../backend/src/services/history/HistorySqliteStore";
 import { HistoryStorageMigration } from "../../../backend/src/services/history/HistoryStorageMigration";
+import { SleepBlockerService } from "./SleepBlockerService";
 
 let mainWindow: BrowserWindow | null = null;
 let settingsService: SettingsService;
 let uiSettingsStore: UiSettingsStore;
 let terminalService: TerminalService;
 let fileSystemService: FileSystemService;
+let fileTransferService: FileTransferService;
 let agentService: AgentService_v2;
 let commandPolicyService: CommandPolicyService;
 let modelCapabilityService: ModelCapabilityService;
@@ -78,6 +82,7 @@ let mobileWebServerService: MobileWebServerService | null = null;
 let resourceMonitorService: ResourceMonitorService;
 let monitorWindowRegistry: MonitorWindowRegistry;
 let historyStore: HistorySqliteStore | null = null;
+let sleepBlockerService: SleepBlockerService | null = null;
 
 type AppWindowRole = "main" | "detached";
 
@@ -329,6 +334,10 @@ export async function startElectronMain(): Promise<void> {
           terminalStateStore,
         });
         fileSystemService = new FileSystemService(terminalService);
+        fileTransferService = new FileTransferService(
+          fileSystemService,
+          terminalService,
+        );
         resourceMonitorService = new ResourceMonitorService(terminalService);
         commandPolicyService = new CommandPolicyService();
         mcpToolService = new McpToolService();
@@ -360,6 +369,7 @@ export async function startElectronMain(): Promise<void> {
           uiHistoryService,
           chatHistoryService,
           imageAttachmentService,
+          fileTransferService,
         );
         const gatewayService = new GatewayService(
           terminalService,
@@ -369,6 +379,34 @@ export async function startElectronMain(): Promise<void> {
           settingsService,
           mcpToolService,
         );
+        fileTransferService.setRawEventPublisher((channel, data) =>
+          gatewayService.broadcastRaw(channel, data),
+        );
+        sleepBlockerService = new SleepBlockerService(powerSaveBlocker);
+        const syncSleepBlockerSetting = (
+          settings = uiSettingsStore.getSettings(),
+        ) => {
+          sleepBlockerService?.setEnabled(
+            settings.runtime?.preventSleepWhileRunning !== false,
+          );
+        };
+        syncSleepBlockerSetting();
+        const unsubscribeSleepBlockerSettings =
+          uiSettingsStore.onChange(syncSleepBlockerSetting);
+        const unsubscribeRunState = gatewayService.onRunStateChanged(
+          (snapshot) => {
+            sleepBlockerService?.setReasonActive(
+              "agent-running",
+              snapshot.activeCount > 0,
+            );
+          },
+        );
+        app.once("before-quit", () => {
+          unsubscribeRunState();
+          unsubscribeSleepBlockerSettings();
+          sleepBlockerService?.dispose();
+          sleepBlockerService = null;
+        });
         const terminalRestoreResult =
           await terminalService.restorePersistedTerminals();
         if (
@@ -508,6 +546,21 @@ export async function startElectronMain(): Promise<void> {
                     targetDirPath,
                     options,
                   );
+                },
+                startTransfer: async (input) => {
+                  return fileTransferService.startTransfer(input);
+                },
+                getTransfer: async (transferId) => {
+                  return fileTransferService.getTransfer(transferId);
+                },
+                listTransfers: async (options) => {
+                  return fileTransferService.listTransfers(options);
+                },
+                cancelTransfer: async (transferId) => {
+                  return fileTransferService.cancelTransfer(transferId);
+                },
+                cancelTransferTask: async (transferId) => {
+                  return fileTransferService.cancelTransfer(transferId);
                 },
                 createDirectory: async (terminalId, dirPath) => {
                   await fileSystemService.createDirectory(terminalId, dirPath);
@@ -802,6 +855,7 @@ export async function startElectronMain(): Promise<void> {
           webSocketGatewayControlService,
           accessTokenService,
           fileSystemService,
+          fileTransferService,
           mobileWebServerService,
         );
         ipcAdapter.registerHandlers();

@@ -7,6 +7,7 @@ import {
   readDetachedWindowState,
   stashDetachedWindowState,
 } from "../lib/windowing";
+import type { FileTransferTaskSnapshot } from "../lib/ipcTypes";
 
 const assertCondition = (condition: unknown, message: string): void => {
   if (!condition) {
@@ -84,6 +85,40 @@ const buildPersistedTree = (options?: {
       activeTabId: "term-a",
     },
   },
+});
+
+const buildFileTransferTask = (
+  overrides: Partial<FileTransferTaskSnapshot> & { id: string },
+): FileTransferTaskSnapshot => ({
+  id: overrides.id,
+  origin: overrides.origin || "user",
+  mode: overrides.mode || "copy",
+  sourceTerminalId: overrides.sourceTerminalId || "source-terminal",
+  sourceTerminalName: overrides.sourceTerminalName || "Source",
+  sourceMachineIdentity: overrides.sourceMachineIdentity || "local://source",
+  sourcePaths: overrides.sourcePaths || ["/src/report.txt"],
+  targetTerminalId: overrides.targetTerminalId || "target-terminal",
+  targetTerminalName: overrides.targetTerminalName || "Target",
+  targetMachineIdentity: overrides.targetMachineIdentity || "ssh://target:22",
+  targetDirPath: overrides.targetDirPath || "/dst",
+  itemNames: overrides.itemNames || ["report.txt"],
+  conflictStrategy: overrides.conflictStrategy || "rename",
+  status: overrides.status || "queued",
+  bytesDone: overrides.bytesDone || 0,
+  totalBytes: overrides.totalBytes || 10,
+  transferredFiles: overrides.transferredFiles || 0,
+  totalFiles: overrides.totalFiles || 1,
+  percent: overrides.percent || 0,
+  message: overrides.message ?? null,
+  errorMessage: overrides.errorMessage ?? null,
+  cancelRequested: overrides.cancelRequested || false,
+  createdAt: overrides.createdAt || 1,
+  updatedAt: overrides.updatedAt || 1,
+  startedAt: overrides.startedAt,
+  completedAt: overrides.completedAt,
+  sessionId: overrides.sessionId,
+  agentRunId: overrides.agentRunId,
+  toolMessageId: overrides.toolMessageId,
 });
 
 const installBootstrapWindowMock = (
@@ -218,6 +253,38 @@ const installBootstrapWindowMock = (
           ],
         }),
       },
+      filesystem: {
+        listTransfers: async () => [],
+        onTransferTaskUpdated: () => () => {},
+        onTransferTaskRemoved: () => () => {},
+        startTransfer: async (input: any) => ({
+          id: input.transferId || "transfer-test",
+          origin: input.origin || "user",
+          mode: input.mode || "copy",
+          sourceTerminalId: input.sourceTerminalId,
+          sourceTerminalName: "Source",
+          sourceMachineIdentity: "local://source",
+          sourcePaths: input.sourcePaths || [],
+          targetTerminalId: input.targetTerminalId,
+          targetTerminalName: "Target",
+          targetMachineIdentity: "ssh://target:22",
+          targetDirPath: input.targetDirPath,
+          itemNames: [],
+          conflictStrategy: input.conflictStrategy || "rename",
+          status: "queued",
+          bytesDone: 0,
+          totalBytes: 0,
+          transferredFiles: 0,
+          totalFiles: 0,
+          percent: 0,
+          message: null,
+          errorMessage: null,
+          cancelRequested: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        }),
+        cancelTransferTask: async () => null,
+      },
       monitor: {
         start: async () => ({ ok: true }),
         stop: async () => ({ ok: true }),
@@ -297,6 +364,130 @@ const run = async (): Promise<void> => {
           createdAt: 123,
         }),
         "clipboard snapshot should survive structured cloning",
+      );
+    },
+  );
+
+  await runCase(
+    "file transfer updates ignore older snapshots and same-timestamp regressions",
+    () => {
+      const store = new AppStore();
+      store.applyFileTransferTaskUpdate(
+        buildFileTransferTask({
+          id: "transfer-a",
+          status: "running",
+          bytesDone: 5,
+          percent: 50,
+          updatedAt: 20,
+        }),
+      );
+
+      store.applyFileTransferTaskUpdate(
+        buildFileTransferTask({
+          id: "transfer-a",
+          status: "queued",
+          bytesDone: 0,
+          percent: 0,
+          updatedAt: 10,
+        }),
+      );
+      assertEqual(
+        store.fileTransferTasks["transfer-a"].status,
+        "running",
+        "older startTransfer response should not regress a running task",
+      );
+
+      store.applyFileTransferTaskUpdate(
+        buildFileTransferTask({
+          id: "transfer-a",
+          status: "success",
+          bytesDone: 10,
+          percent: 100,
+          updatedAt: 20,
+        }),
+      );
+      store.applyFileTransferTaskUpdate(
+        buildFileTransferTask({
+          id: "transfer-a",
+          status: "running",
+          bytesDone: 5,
+          percent: 50,
+          updatedAt: 20,
+        }),
+      );
+      assertEqual(
+        store.fileTransferTasks["transfer-a"].status,
+        "success",
+        "same-timestamp non-terminal snapshot should not overwrite a terminal state",
+      );
+    },
+  );
+
+  await runCase(
+    "file transfer bootstrap list merges without overwriting newer task events",
+    () => {
+      const store = new AppStore();
+      store.applyFileTransferTaskUpdate(
+        buildFileTransferTask({
+          id: "transfer-a",
+          status: "running",
+          bytesDone: 5,
+          percent: 50,
+          updatedAt: 20,
+        }),
+      );
+
+      store.applyFileTransferTasks([
+        buildFileTransferTask({
+          id: "transfer-a",
+          status: "queued",
+          bytesDone: 0,
+          percent: 0,
+          updatedAt: 10,
+        }),
+        buildFileTransferTask({
+          id: "transfer-b",
+          status: "queued",
+          updatedAt: 12,
+        }),
+      ]);
+
+      assertEqual(
+        store.fileTransferTasks["transfer-a"].status,
+        "running",
+        "older bootstrap list item should not regress a newer event",
+      );
+      assertEqual(
+        store.fileTransferTasks["transfer-b"].status,
+        "queued",
+        "bootstrap list should still add unseen transfer tasks",
+      );
+    },
+  );
+
+  await runCase(
+    "createLocalTab marks non-Windows local tabs ready immediately",
+    () => {
+      (globalThis as unknown as { window: unknown }).window = {
+        gyshell: {
+          system: {
+            platform: "darwin",
+          },
+        },
+      };
+      const store = new AppStore();
+      (store.layout as any).getPrimaryPanelId = () => null;
+      (store.layout as any).ensurePrimaryPanelForKind = () => null;
+      (store.layout as any).attachTabToPanel = () => {};
+      (store.layout as any).syncPanelBindings = () => {};
+
+      const tabId = store.createLocalTab();
+      const tab = store.terminalTabs.find((entry) => entry.id === tabId);
+
+      assertEqual(
+        tab?.runtimeState,
+        "ready",
+        "non-Windows local tabs should not render as disconnected while backend hydration catches up",
       );
     },
   );

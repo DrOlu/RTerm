@@ -468,7 +468,7 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
                             option.onClose?.();
                           }}
                         >
-                          <X size={12} strokeWidth={2} />
+                          <X size={12} strokeWidth={2.2} />
                         </button>
                       ) : (
                         <span

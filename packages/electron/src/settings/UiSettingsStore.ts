@@ -4,8 +4,11 @@ import { migrateUiSettings, DEFAULT_UI_SETTINGS } from './migrations'
 import { deepMerge } from './objectMerge'
 import { UI_SETTINGS_STORE_NAME } from './storeNames'
 
+type UiSettingsChangeListener = (settings: UiSettings) => void
+
 export class UiSettingsStore {
   private store: Store<UiSettings>
+  private listeners = new Set<UiSettingsChangeListener>()
 
   constructor() {
     this.store = new Store<UiSettings>({
@@ -33,5 +36,15 @@ export class UiSettingsStore {
     const merged = deepMerge(current, settings)
     const migrated = migrateUiSettings(merged)
     this.store.store = migrated as any
+    this.emitChange(migrated)
+  }
+
+  onChange(listener: UiSettingsChangeListener): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  private emitChange(settings: UiSettings): void {
+    this.listeners.forEach((listener) => listener(settings))
   }
 }

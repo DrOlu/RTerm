@@ -60,6 +60,7 @@ export const zh = {
     recursionLimitInf: "无限制",
     debugMode: "调试模式",
     chatDisplayMode: "对话显示模式",
+    preventSleepWhileRunning: "运行时阻止系统睡眠",
     wsGatewayAccess: "WebSocket 网关暴露范围",
     wsGatewayPort: "WebSocket 网关端口",
     experimentalFeatures: "试验性功能",
@@ -113,6 +114,7 @@ export const zh = {
     themeSectionCustom: "自定义主题",
     themeSectionBuiltIn: "内置主题",
     builtInTools: "内置工具",
+    experimentalTools: "试验性工具",
     toolsCount: "个工具",
     toolsUnknown: "未知工具数量",
     noMcpTools: "暂无 MCP 工具配置",
@@ -214,6 +216,8 @@ export const zh = {
         "开启调试相关的持久化与诊断能力。目前会在后端导出消息中保留 additional_kwargs.__raw_response；但发送给模型前仍会自动剥离这些原始字段。",
       chatDisplayMode:
         "控制 Agent 工具调用在对话面板中的显示方式。\n- 传统模式：每个工具调用、文件编辑、命令都以可折叠横幅单独展示。\n- 无感 Agent 模式：连续的工具调用合并为单个紧凑横幅；审批请求与警告以浮动卡片显示在输入区域上方。",
+      preventSleepWhileRunning:
+        "当任意对话会话正在运行时保持电脑唤醒。屏幕仍可熄灭，但系统空闲睡眠会被阻止，直到运行结束或关闭此设置。",
       wsGatewayAccess:
         "控制 websocket RPC 对外暴露方式。\n- 仅本机：绑定 127.0.0.1，只允许本地连接。\n- 开放网络：绑定 0.0.0.0，允许局域网/公网网卡接入（仍受系统防火墙影响）。\n- 关闭：不启动 websocket 监听。",
       wsGatewayPort:
@@ -346,7 +350,10 @@ export const zh = {
     transferPanelTitle: "传输任务",
     transferCopyKind: "复制",
     transferMoveKind: "剪切",
+    transferAgentOrigin: "AGENT",
+    transferUserOrigin: "用户",
     transferQueued: "排队中",
+    transferScanning: "扫描中",
     transferRunning: "进行中",
     transferCompleted: "已完成",
     transferCancelled: "已取消",
@@ -438,6 +445,7 @@ export const zh = {
     splitRight: "向右拆分",
     splitUp: "向上拆分",
     splitDown: "向下拆分",
+    reconnectTab: "重新连接",
     closePanel: "关闭面板",
     closeTab: "关闭",
     closeOtherTabs: "关闭其他",

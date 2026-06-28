@@ -1,4 +1,11 @@
-import { ipcMain, shell, Menu, BrowserWindow, app, nativeImage } from "electron";
+import {
+  ipcMain,
+  shell,
+  Menu,
+  BrowserWindow,
+  app,
+  nativeImage,
+} from "electron";
 import type { NativeImage } from "electron";
 import type {
   StartTaskOptions,
@@ -11,6 +18,7 @@ import {
   FILESYSTEM_TRANSFER_CANCELLED_CODE,
   isFileSystemTransferCancelledError,
 } from "../../../backend/src/services/FileSystemService";
+import type { FileTransferService } from "../../../backend/src/services/FileTransferService";
 import type { AgentService_v2 } from "../../../backend/src/services/AgentService_v2";
 import type {
   UIHistoryService,
@@ -101,6 +109,7 @@ export class ElectronGatewayIpcAdapter {
       deleteToken: async () => false,
     },
     private fileSystemService?: FileSystemService,
+    private fileTransferService?: FileTransferService,
     private mobileWebServerService?: import("../services/MobileWebServerService").MobileWebServerService,
   ) {}
 
@@ -652,6 +661,11 @@ export class ElectronGatewayIpcAdapter {
       return { id: tab.id };
     });
 
+    ipcMain.handle("terminal:reconnect", async (_: any, terminalId: string) => {
+      const tab = await this.terminalService.reconnectTerminal(terminalId);
+      return { id: tab.id };
+    });
+
     ipcMain.handle(
       "terminal:write",
       async (_: any, terminalId: string, data: string) => {
@@ -717,6 +731,14 @@ export class ElectronGatewayIpcAdapter {
       }
       return this.fileSystemService;
     };
+    const requireFileTransferService = (): FileTransferService => {
+      if (!this.fileTransferService) {
+        throw new Error("File transfer APIs are not configured.");
+      }
+      return this.fileTransferService;
+    };
+    // Legacy direct-transfer IPC used by older renderer/web clients. New filesystem
+    // panel flows use filesystem:startTransfer + filesystem:cancelTransferTask.
     const activeTransferAbortControllers = new Map<string, AbortController>();
     ipcMain.handle(
       "filesystem:list",
@@ -895,6 +917,31 @@ export class ElectronGatewayIpcAdapter {
         }
         controller.abort();
         return { ok: true };
+      },
+    );
+
+    ipcMain.handle("filesystem:startTransfer", async (_: any, input: any) => {
+      return requireFileTransferService().startTransfer(input);
+    });
+
+    ipcMain.handle(
+      "filesystem:getTransfer",
+      async (_: any, transferId: string) => {
+        return requireFileTransferService().getTransfer(transferId);
+      },
+    );
+
+    ipcMain.handle(
+      "filesystem:listTransfers",
+      async (_: any, options?: any) => {
+        return requireFileTransferService().listTransfers(options);
+      },
+    );
+
+    ipcMain.handle(
+      "filesystem:cancelTransferTask",
+      async (_: any, transferId: string) => {
+        return requireFileTransferService().cancelTransfer(transferId);
       },
     );
 

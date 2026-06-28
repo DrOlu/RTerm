@@ -11,6 +11,7 @@ export interface BuiltInToolStatusSummary {
   name: string
   description: string
   enabled: boolean
+  experimental?: boolean
 }
 
 export function buildSkillStatusSummary(
@@ -32,6 +33,7 @@ export function buildBuiltInToolStatusSummary(
   return BUILTIN_TOOL_INFO.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    enabled: state[tool.name] ?? true
+    enabled: state[tool.name] ?? tool.defaultEnabled ?? true,
+    ...(tool.experimental ? { experimental: true } : {})
   }))
 }

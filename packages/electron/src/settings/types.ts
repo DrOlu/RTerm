@@ -27,6 +27,10 @@ export interface ChatUiSettings {
   displayMode: ChatDisplayMode
 }
 
+export interface RuntimeUiSettings {
+  preventSleepWhileRunning?: boolean
+}
+
 export interface UiSettings {
   uiSchemaVersion: 1
   language: AppLanguage
@@ -35,5 +39,6 @@ export interface UiSettings {
   panelTabs: PanelTabsUiSettings
   commandDraft: CommandDraftUiSettings
   chat: ChatUiSettings
+  runtime?: RuntimeUiSettings
   monitorEnabledSources?: string[]
 }
