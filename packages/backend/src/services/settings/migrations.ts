@@ -1,8 +1,9 @@
 import type { BackendSettings, WsGatewayAccess } from "../../types";
 import { BUILTIN_TOOL_INFO } from "../AgentHelper/tools";
+import { normalizeAgentSettingState } from "./agentSettings";
 import { deepMerge, isObject } from "./objectMerge";
 
-export const BACKEND_SETTINGS_SCHEMA_VERSION = 3;
+export const BACKEND_SETTINGS_SCHEMA_VERSION = 4;
 
 const DEFAULT_BUILTIN_TOOLS = BUILTIN_TOOL_INFO.reduce(
   (acc: Record<string, boolean>, tool) => {
@@ -52,6 +53,10 @@ export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
   memory: {
     enabled: true,
   },
+  agentSettings: {
+    profiles: [],
+    activeProfileId: null,
+  },
   debugMode: false,
   experimental: {
     runtimeThinkingCorrectionEnabled: true,
@@ -77,6 +82,7 @@ function pickBackendSnapshot(raw: unknown): Partial<BackendSettings> {
     layout: raw.layout,
     recursionLimit: raw.recursionLimit,
     memory: raw.memory,
+    agentSettings: raw.agentSettings,
     debugMode: raw.debugMode,
     experimental: raw.experimental,
   } as Partial<BackendSettings>;
@@ -141,6 +147,11 @@ function normalizeBackendSettings(settings: BackendSettings): BackendSettings {
     enabled: next.memory?.enabled !== false,
   };
 
+  next.agentSettings = normalizeAgentSettingState(next.agentSettings, {
+    recursionLimit: next.recursionLimit,
+    experimental: next.experimental ?? DEFAULT_BACKEND_SETTINGS.experimental!,
+  });
+
   next.debugMode = next.debugMode === true;
 
   next.experimental = {
@@ -202,7 +213,18 @@ function migrateBackendToV3(
   delete (next as any).language;
   delete (next as any).themeId;
   delete (next as any).terminal;
-  next.schemaVersion = BACKEND_SETTINGS_SCHEMA_VERSION;
+  next.schemaVersion = 3;
+  return next;
+}
+
+function migrateBackendToV4(
+  settings: Partial<BackendSettings>,
+): Partial<BackendSettings> {
+  const next = { ...(settings as any) };
+  next.agentSettings = isObject(next.agentSettings)
+    ? next.agentSettings
+    : { profiles: [], activeProfileId: null };
+  next.schemaVersion = 4;
   return next;
 }
 
@@ -226,8 +248,11 @@ export function migrateBackendSettings(
   merged = deepMerge(merged, rawSnapshot);
 
   const fromVersion = Math.max(rawVersion, legacyVersion);
-  if (fromVersion < BACKEND_SETTINGS_SCHEMA_VERSION) {
+  if (fromVersion < 3) {
     merged = deepMerge(merged, migrateBackendToV3(merged as any) as any);
+  }
+  if (fromVersion < 4) {
+    merged = deepMerge(merged, migrateBackendToV4(merged as any) as any);
   }
 
   return normalizeBackendSettings(merged);

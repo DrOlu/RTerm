@@ -40,7 +40,10 @@ interface McpServerState {
   error?: string
   config: McpServerConfig
   client?: Client
-  transport?: StdioClientTransport | SSEClientTransport | StreamableHTTPClientTransport
+  transport?:
+    | StdioClientTransport
+    | SSEClientTransport
+    | StreamableHTTPClientTransport
   tools: StructuredTool[]
 }
 
@@ -100,7 +103,10 @@ export class McpRuntimeCore extends EventEmitter {
     return names.map((name) => this.toSummary(name))
   }
 
-  async setServerEnabled(name: string, enabled: boolean): Promise<McpServerSummary[]> {
+  async setServerEnabled(
+    name: string,
+    enabled: boolean,
+  ): Promise<McpServerSummary[]> {
     const config = await this.loadConfig()
     if (!config.mcpServers[name]) {
       throw new Error(`MCP server "${name}" not found in config`)
@@ -114,6 +120,45 @@ export class McpRuntimeCore extends EventEmitter {
       await this.startServer(name, config.mcpServers[name])
     } else {
       await this.stopServer(name)
+    }
+
+    const summaries = this.getSummaries()
+    this.emit('updated', summaries)
+    return summaries
+  }
+
+  async setServerEnabledBatch(
+    enabledByName: Record<string, boolean>,
+  ): Promise<McpServerSummary[]> {
+    const config = await this.loadConfig()
+    const changed: Array<{ name: string; enabled: boolean }> = []
+
+    for (const [name, enabled] of Object.entries(enabledByName || {})) {
+      const server = config.mcpServers[name]
+      if (
+        !server ||
+        typeof enabled !== 'boolean' ||
+        server.enable === enabled
+      ) {
+        continue
+      }
+      server.enable = enabled
+      changed.push({ name, enabled })
+    }
+
+    if (changed.length === 0) {
+      return this.getSummaries()
+    }
+
+    await this.writeConfig(config)
+    this.config = config
+
+    for (const entry of changed) {
+      if (entry.enabled) {
+        await this.startServer(entry.name, config.mcpServers[entry.name])
+      } else {
+        await this.stopServer(entry.name)
+      }
     }
 
     const summaries = this.getSummaries()
@@ -135,7 +180,11 @@ export class McpRuntimeCore extends EventEmitter {
     return tools
   }
 
-  async invokeTool(toolName: string, args: unknown, signal?: AbortSignal): Promise<unknown> {
+  async invokeTool(
+    toolName: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     const tool = this.toolByName.get(toolName)
     if (!tool) {
       throw new Error(`MCP tool "${toolName}" not found`)
@@ -152,7 +201,8 @@ export class McpRuntimeCore extends EventEmitter {
     if (exists) return
 
     await fs.mkdir(path.dirname(filePath), { recursive: true })
-    const template = (await this.options.readTemplateConfig?.()) ?? defaultConfig()
+    const template =
+      (await this.options.readTemplateConfig?.()) ?? defaultConfig()
     await fs.writeFile(filePath, JSON.stringify(template, null, 2), 'utf8')
   }
 
@@ -173,7 +223,10 @@ export class McpRuntimeCore extends EventEmitter {
     }
   }
 
-  private normalizeConfig(raw: unknown): { config: McpConfigFile; didChange: boolean } {
+  private normalizeConfig(raw: unknown): {
+    config: McpConfigFile
+    didChange: boolean
+  } {
     const next: McpConfigFile = defaultConfig()
     let didChange = false
 
@@ -182,9 +235,14 @@ export class McpRuntimeCore extends EventEmitter {
     }
 
     const root = raw as Record<string, unknown>
-    const servers = root.mcpServers && typeof root.mcpServers === 'object' ? root.mcpServers : {}
+    const servers =
+      root.mcpServers && typeof root.mcpServers === 'object'
+        ? root.mcpServers
+        : {}
 
-    for (const [name, cfg] of Object.entries(servers as Record<string, unknown>)) {
+    for (const [name, cfg] of Object.entries(
+      servers as Record<string, unknown>,
+    )) {
       if (!cfg || typeof cfg !== 'object') continue
       const record = cfg as Record<string, unknown>
       const enable = typeof record.enable === 'boolean' ? record.enable : false
@@ -193,15 +251,22 @@ export class McpRuntimeCore extends EventEmitter {
       }
 
       next.mcpServers[name] = {
-        command: typeof record.command === 'string' ? record.command : undefined,
+        command:
+          typeof record.command === 'string' ? record.command : undefined,
         args: Array.isArray(record.args) ? record.args.map(String) : undefined,
-        env: record.env && typeof record.env === 'object' ? (record.env as Record<string, string>) : undefined,
+        env:
+          record.env && typeof record.env === 'object'
+            ? (record.env as Record<string, string>)
+            : undefined,
         cwd: typeof record.cwd === 'string' ? record.cwd : undefined,
         url: typeof record.url === 'string' ? record.url : undefined,
-        serverUrl: typeof record.serverUrl === 'string' ? record.serverUrl : undefined,
+        serverUrl:
+          typeof record.serverUrl === 'string' ? record.serverUrl : undefined,
         headers:
-          record.headers && typeof record.headers === 'object' ? (record.headers as Record<string, string>) : undefined,
-        enable
+          record.headers && typeof record.headers === 'object'
+            ? (record.headers as Record<string, string>)
+            : undefined,
+        enable,
       }
     }
 
@@ -239,17 +304,20 @@ export class McpRuntimeCore extends EventEmitter {
       enabled: false,
       status: 'disabled',
       config,
-      tools: []
+      tools: [],
     })
   }
 
-  private async startServer(name: string, config: McpServerConfig): Promise<void> {
+  private async startServer(
+    name: string,
+    config: McpServerConfig,
+  ): Promise<void> {
     const state: McpServerState = {
       name,
       enabled: true,
       status: 'connecting',
       config,
-      tools: []
+      tools: [],
     }
     this.servers.set(name, state)
     let stdioStderrTail = ''
@@ -258,44 +326,49 @@ export class McpRuntimeCore extends EventEmitter {
       const transport = config.serverUrl
         ? new SSEClientTransport(new URL(config.serverUrl), {
             requestInit: {
-              headers: config.headers || {}
-            }
+              headers: config.headers || {},
+            },
           })
         : config.url
-        ? new StreamableHTTPClientTransport(new URL(config.url), {
-            requestInit: {
-              headers: config.headers || {}
-            }
-          })
-        : (() => {
-            const stdioTransport = new StdioClientTransport({
-              command: config.command || '',
-              args: config.args || [],
-              env: this.buildEnv(config.command, config.env),
-              cwd: this.resolveServerCwd(config),
-              stderr: 'pipe'
+          ? new StreamableHTTPClientTransport(new URL(config.url), {
+              requestInit: {
+                headers: config.headers || {},
+              },
             })
-            const stderrStream = stdioTransport.stderr
-            if (stderrStream) {
-              stderrStream.on('data', (chunk: unknown) => {
-                stdioStderrTail += String(chunk)
-                if (stdioStderrTail.length > 4000) {
-                  stdioStderrTail = stdioStderrTail.slice(-4000)
-                }
+          : (() => {
+              const stdioTransport = new StdioClientTransport({
+                command: config.command || '',
+                args: config.args || [],
+                env: this.buildEnv(config.command, config.env),
+                cwd: this.resolveServerCwd(config),
+                stderr: 'pipe',
               })
-            }
-            return stdioTransport
-          })()
+              const stderrStream = stdioTransport.stderr
+              if (stderrStream) {
+                stderrStream.on('data', (chunk: unknown) => {
+                  stdioStderrTail += String(chunk)
+                  if (stdioStderrTail.length > 4000) {
+                    stdioStderrTail = stdioStderrTail.slice(-4000)
+                  }
+                })
+              }
+              return stdioTransport
+            })()
 
-      const client = new Client({ name: `gyshell-mcp-${name}`, version: '1.0.0' }, { capabilities: {} })
+      const client = new Client(
+        { name: `gyshell-mcp-${name}`, version: '1.0.0' },
+        { capabilities: {} },
+      )
       await client.connect(transport)
 
       const tools = await loadMcpTools(name, client, {
         throwOnLoadError: true,
-        prefixToolNameWithServerName: false
+        prefixToolNameWithServerName: false,
       })
 
-      const renamed = tools.map((tool) => this.renameTool(name, tool as StructuredTool))
+      const renamed = tools.map((tool) =>
+        this.renameTool(name, tool as StructuredTool),
+      )
       state.client = client
       state.transport = transport
       state.tools = renamed
@@ -308,11 +381,17 @@ export class McpRuntimeCore extends EventEmitter {
       state.error = stderr ? `${baseError}\n[stderr] ${stderr}` : baseError
       state.tools = []
       await this.cleanupServer(name)
-      this.logger.warn(`[McpRuntimeCore] Failed to start MCP server ${name}.`, error)
+      this.logger.warn(
+        `[McpRuntimeCore] Failed to start MCP server ${name}.`,
+        error,
+      )
     }
   }
 
-  private buildEnv(command?: string, extra?: Record<string, string>): Record<string, string> {
+  private buildEnv(
+    command?: string,
+    extra?: Record<string, string>,
+  ): Record<string, string> {
     const env: Record<string, string> = {}
     for (const [key, value] of Object.entries(process.env)) {
       if (typeof value === 'string') {
@@ -335,11 +414,22 @@ export class McpRuntimeCore extends EventEmitter {
       requiredPathEntries.push(path.dirname(normalizedCommand))
     }
     if (process.platform !== 'win32') {
-      requiredPathEntries.push('/usr/local/bin', '/opt/homebrew/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin')
+      requiredPathEntries.push(
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        '/usr/bin',
+        '/bin',
+        '/usr/sbin',
+        '/sbin',
+      )
     }
 
     const currentPath = (env.PATH || env.Path || '').trim()
-    const mergedPath = this.mergePathEntries(currentPath, requiredPathEntries, delimiter)
+    const mergedPath = this.mergePathEntries(
+      currentPath,
+      requiredPathEntries,
+      delimiter,
+    )
     env.PATH = mergedPath
     if (typeof env.Path === 'string') {
       env.Path = mergedPath
@@ -348,14 +438,19 @@ export class McpRuntimeCore extends EventEmitter {
     return env
   }
 
-  private mergePathEntries(currentPath: string, requiredEntries: string[], delimiter: string): string {
+  private mergePathEntries(
+    currentPath: string,
+    requiredEntries: string[],
+    delimiter: string,
+  ): string {
     const result: string[] = []
     const seen = new Set<string>()
 
     const append = (entry: string): void => {
       const normalized = entry.trim()
       if (!normalized) return
-      const dedupeKey = process.platform === 'win32' ? normalized.toLowerCase() : normalized
+      const dedupeKey =
+        process.platform === 'win32' ? normalized.toLowerCase() : normalized
       if (seen.has(dedupeKey)) return
       seen.add(dedupeKey)
       result.push(normalized)
@@ -390,7 +485,8 @@ export class McpRuntimeCore extends EventEmitter {
     const renamed = `${serverName}__${original}`
     ;(tool as any).name = renamed
     if (typeof (tool as any).description === 'string') {
-      ;(tool as any).description = `[${serverName}] ${(tool as any).description}`
+      ;(tool as any).description =
+        `[${serverName}] ${(tool as any).description}`
     }
     this.toolByName.set(renamed, tool)
     return tool
@@ -455,7 +551,7 @@ export class McpRuntimeCore extends EventEmitter {
       return {
         name,
         enabled,
-        status: enabled ? 'connecting' : 'disabled'
+        status: enabled ? 'connecting' : 'disabled',
       }
     }
 
@@ -464,7 +560,7 @@ export class McpRuntimeCore extends EventEmitter {
       enabled,
       status: state.status,
       error: state.error,
-      toolCount: state.tools.length
+      toolCount: state.tools.length,
     }
   }
 }

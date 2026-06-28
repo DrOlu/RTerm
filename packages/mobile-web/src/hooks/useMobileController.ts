@@ -50,13 +50,18 @@ import {
   normalizeMemorySnapshot,
   normalizeMcpServer,
   normalizeSkillItem,
+  normalizeCommandPolicyLists,
+  readCommandPolicyModeFromSettings,
   readMemoryEnabledFromSettings,
+  readProfilesFromSettings,
   safeError,
   toSshConfig,
 } from "./mobileControllerHelpers";
 import type {
   BuiltInToolSummary,
   ChatMessage,
+  CommandPolicyLists,
+  CommandPolicyMode,
   CreateTerminalTarget,
   GatewayConnectionsSnapshot,
   GatewayMemorySnapshot,
@@ -84,6 +89,8 @@ interface ViewState {
   profiles: GatewayProfileSummary[];
   activeProfileId: string;
   memoryEnabled: boolean;
+  commandPolicyMode: CommandPolicyMode;
+  commandPolicyLists: CommandPolicyLists;
   memory: GatewayMemorySnapshot;
   sessions: Record<string, SessionState>;
   sessionMeta: Record<string, SessionMeta>;
@@ -102,6 +109,12 @@ const INITIAL_VIEW_STATE: ViewState = {
   profiles: [],
   activeProfileId: "",
   memoryEnabled: true,
+  commandPolicyMode: "standard",
+  commandPolicyLists: {
+    allowlist: [],
+    denylist: [],
+    asklist: [],
+  },
   memory: { filePath: "", content: "" },
   sessions: {},
   sessionMeta: {},
@@ -162,6 +175,8 @@ export interface MobileControllerState {
   profiles: GatewayProfileSummary[];
   activeProfileId: string;
   memoryEnabled: boolean;
+  commandPolicyMode: CommandPolicyMode;
+  commandPolicyLists: CommandPolicyLists;
   memoryFilePath: string;
   memoryContent: string;
   activeSession: SessionState | null;
@@ -419,9 +434,15 @@ export function useMobileController(): {
         tunnels: [],
       };
       let memoryEnabled = true;
+      let commandPolicyMode: CommandPolicyMode = "standard";
       let memory: GatewayMemorySnapshot = {
         filePath: "",
         content: "",
+      };
+      let commandPolicyLists: CommandPolicyLists = {
+        allowlist: [],
+        denylist: [],
+        asklist: [],
       };
       try {
         const profilePayload = await client.request<{
@@ -459,8 +480,28 @@ export function useMobileController(): {
         );
         connections = normalizeConnectionsSnapshot(settingsPayload);
         memoryEnabled = readMemoryEnabledFromSettings(settingsPayload);
+        commandPolicyMode = readCommandPolicyModeFromSettings(settingsPayload);
+        const profileSnapshot = readProfilesFromSettings(settingsPayload);
+        if (profileSnapshot.profiles.length > 0) {
+          profiles = profileSnapshot.profiles;
+          activeProfileId = profileSnapshot.activeProfileId;
+        }
       } catch {
         connections = { ssh: [], proxies: [], tunnels: [] };
+      }
+
+      try {
+        const policyListsPayload = await client.request<unknown>(
+          "settings:getCommandPolicyLists",
+          {},
+        );
+        commandPolicyLists = normalizeCommandPolicyLists(policyListsPayload);
+      } catch {
+        commandPolicyLists = {
+          allowlist: [],
+          denylist: [],
+          asklist: [],
+        };
       }
 
       try {
@@ -579,6 +620,8 @@ export function useMobileController(): {
         profiles,
         activeProfileId,
         memoryEnabled,
+        commandPolicyMode,
+        commandPolicyLists,
         memory,
         sessions,
         sessionMeta,
@@ -871,6 +914,34 @@ export function useMobileController(): {
             ...previous,
             memory: nextMemory,
             statusLine: "Memory updated",
+          }));
+          return;
+        }
+
+        if (channel === "settings:updated") {
+          const profileSnapshot = readProfilesFromSettings(payload);
+          const nextConnections = normalizeConnectionsSnapshot(payload);
+          const nextMemoryEnabled = readMemoryEnabledFromSettings(payload);
+          const nextPolicyMode = readCommandPolicyModeFromSettings(payload);
+          setView((previous) => ({
+            ...previous,
+            connections: nextConnections,
+            sshConnections: buildSshConnectionSummaries(nextConnections),
+            profiles: profileSnapshot.profiles,
+            activeProfileId: profileSnapshot.activeProfileId,
+            memoryEnabled: nextMemoryEnabled,
+            commandPolicyMode: nextPolicyMode,
+            statusLine: "Settings updated",
+          }));
+          return;
+        }
+
+        if (channel === "settings:commandPolicyListsUpdated") {
+          const nextLists = normalizeCommandPolicyLists(payload);
+          setView((previous) => ({
+            ...previous,
+            commandPolicyLists: nextLists,
+            statusLine: `Command policy updated (${nextLists.allowlist.length}/${nextLists.denylist.length}/${nextLists.asklist.length})`,
           }));
         }
       }),
@@ -1794,6 +1865,8 @@ export function useMobileController(): {
     profiles: view.profiles,
     activeProfileId: view.activeProfileId,
     memoryEnabled: view.memoryEnabled,
+    commandPolicyMode: view.commandPolicyMode,
+    commandPolicyLists: view.commandPolicyLists,
     memoryFilePath: view.memory.filePath,
     memoryContent: view.memory.content,
     activeSession,

@@ -130,6 +130,11 @@ const installBootstrapWindowMock = (
     getSessionSnapshot?: (sessionId: string) => Promise<any>;
     runtimeSnapshotsBySessionId?: Record<string, any>;
     onUiUpdateRegister?: (callback: (action: any) => void) => void;
+    onSettingsUpdatedRegister?: (callback: (settings: any) => void) => void;
+    onCommandPolicyListsUpdatedRegister?: (
+      callback: (lists: any) => void,
+    ) => void;
+    onMemoryUpdatedRegister?: (callback: (snapshot: any) => void) => void;
     loadChatSessionCalls?: string[];
   },
 ): void => {
@@ -191,6 +196,14 @@ const installBootstrapWindowMock = (
           denylist: [],
           asklist: [],
         }),
+        onUpdated: (callback: (settings: any) => void) => {
+          options?.onSettingsUpdatedRegister?.(callback);
+          return () => {};
+        },
+        onCommandPolicyListsUpdated: (callback: (lists: any) => void) => {
+          options?.onCommandPolicyListsUpdatedRegister?.(callback);
+          return () => {};
+        },
         setWsGatewayConfig: async (ws: {
           access: string;
           port: number;
@@ -310,6 +323,10 @@ const installBootstrapWindowMock = (
           filePath: "",
           content: "",
         }),
+        onUpdated: (callback: (snapshot: any) => void) => {
+          options?.onMemoryUpdatedRegister?.(callback);
+          return () => {};
+        },
       },
       accessTokens: {
         list: async () => [],
@@ -323,6 +340,360 @@ const installBootstrapWindowMock = (
 };
 
 const run = async (): Promise<void> => {
+  await runCase(
+    "agent setting operation result refreshes visible settings slices together",
+    async () => {
+      const originalWindow = (globalThis as any).window;
+      try {
+        const store = new AppStore();
+        store.settings = {
+          schemaVersion: 4,
+          themeId: "gyshell-dark",
+          language: "en",
+          commandPolicyMode: "safe",
+          commandPolicyRules: [],
+          layout: {},
+          models: {
+            items: [],
+            profiles: [],
+            activeProfileId: null,
+          },
+          tools: {
+            builtIn: {
+              exec_command: false,
+            },
+            skills: {
+              docs: false,
+            },
+          },
+          memory: {
+            enabled: true,
+          },
+          agentSettings: {
+            profiles: [],
+            activeProfileId: null,
+          },
+        } as any;
+        store.mcpTools = [
+          {
+            name: "search",
+            enabled: false,
+            status: "disabled",
+          } as any,
+        ];
+        store.builtInTools = [
+          {
+            name: "exec_command",
+            enabled: false,
+          } as any,
+        ];
+        store.skills = [
+          {
+            name: "docs",
+            description: "Docs",
+            enabled: false,
+          } as any,
+        ];
+        store.memoryFilePath = "/tmp/default/memory.md";
+        store.memoryContent = "default";
+
+        (globalThis as any).window = {
+          gyshell: {
+            agentSettings: {
+              saveCurrent: async () => ({
+                settings: {
+                  schemaVersion: 4,
+                  commandPolicyMode: "standard",
+                  models: {
+                    items: [],
+                    profiles: [],
+                    activeProfileId: null,
+                  },
+                  tools: {
+                    builtIn: {
+                      exec_command: true,
+                    },
+                    skills: {
+                      docs: true,
+                    },
+                  },
+                  memory: {
+                    enabled: false,
+                  },
+                  agentSettings: {
+                    profiles: [
+                      {
+                        id: "agent-setting-slot-1",
+                        slotNumber: 1,
+                        name: "Agent 1",
+                        createdAt: 1,
+                        updatedAt: 2,
+                        snapshot: {
+                          version: 1,
+                          commandPolicyMode: "standard",
+                          commandPolicyLists: {
+                            allowlist: [],
+                            denylist: [],
+                            asklist: [],
+                          },
+                          mcpTools: {},
+                          builtInTools: {
+                            exec_command: true,
+                          },
+                          skills: {
+                            docs: true,
+                          },
+                          memory: {
+                            enabled: false,
+                          },
+                          workflow: {
+                            recursionLimit: 500,
+                            experimental: {},
+                          },
+                          model: {
+                            activeProfileId: null,
+                            activeProfileName: null,
+                          },
+                        },
+                      },
+                    ],
+                    activeProfileId: "agent-setting-slot-1",
+                  },
+                },
+                commandPolicyLists: {
+                  allowlist: ["ls"],
+                  denylist: ["rm -rf /"],
+                  asklist: [],
+                },
+                mcpTools: [
+                  {
+                    name: "search",
+                    enabled: true,
+                    status: "connected",
+                  },
+                ],
+                builtInTools: [
+                  {
+                    name: "exec_command",
+                    enabled: true,
+                  },
+                ],
+                skills: [
+                  {
+                    name: "docs",
+                    enabled: true,
+                  },
+                ],
+                memory: {
+                  filePath: "/tmp/agent-setting-slot-1/memory.md",
+                  content: "slot memory",
+                },
+                warnings: [
+                  'Saved model profile "Deep" no longer exists. Current model profile was preserved.',
+                ],
+              }),
+            },
+          },
+        };
+
+        await store.saveCurrentAgentSetting();
+
+        assertEqual(
+          store.agentSettingState.activeProfileId,
+          "agent-setting-slot-1",
+          "agent setting profile state should update from operation result",
+        );
+        assertEqual(
+          store.commandPolicyLists.allowlist[0],
+          "ls",
+          "command policy lists should refresh from operation result",
+        );
+        assertEqual(
+          store.mcpTools[0]?.enabled,
+          true,
+          "mcp tool states should refresh from operation result",
+        );
+        assertEqual(
+          store.settings?.tools.builtIn.exec_command,
+          true,
+          "built-in tool settings should refresh from operation result",
+        );
+        assertEqual(
+          store.settings?.tools.skills?.docs,
+          true,
+          "skill settings should refresh from operation result",
+        );
+        assertEqual(
+          store.memoryContent,
+          "slot memory",
+          "active memory content should refresh from operation result",
+        );
+        assertEqual(
+          store.agentSettingWarnings[0],
+          'Saved model profile "Deep" no longer exists. Current model profile was preserved.',
+          "agent setting warnings should surface from operation result",
+        );
+
+        store.clearAgentSettingWarnings();
+        assertEqual(
+          store.agentSettingWarnings.length,
+          0,
+          "agent setting warnings should be dismissible",
+        );
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+    },
+  );
+
+  await runCase(
+    "AppStore bootstrap consumes cross-window agent setting broadcasts",
+    async () => {
+      let settingsUpdatedHandler: ((settings: any) => void) | null = null;
+      let policyListsUpdatedHandler: ((lists: any) => void) | null = null;
+      let memoryUpdatedHandler: ((snapshot: any) => void) | null = null;
+      installBootstrapWindowMock(buildPersistedTree(), {
+        onSettingsUpdatedRegister: (callback) => {
+          settingsUpdatedHandler = callback;
+        },
+        onCommandPolicyListsUpdatedRegister: (callback) => {
+          policyListsUpdatedHandler = callback;
+        },
+        onMemoryUpdatedRegister: (callback) => {
+          memoryUpdatedHandler = callback;
+        },
+      });
+
+      const store = new AppStore();
+      (store.layout as any).bootstrap = () => {};
+      (store.layout as any).syncPanelBindings = () => {};
+      (store as any).loadTools = async () => {};
+      (store as any).loadSkills = async () => {};
+      (store as any).loadMemory = async () => {};
+      (store as any).loadCommandPolicyLists = async () => {};
+      (store as any).loadAccessTokens = async () => {};
+      (store as any).loadVersionState = async () => {};
+      (store as any).checkVersion = async () => {};
+
+      await store.bootstrap();
+
+      assertCondition(
+        !!settingsUpdatedHandler,
+        "bootstrap should subscribe to backend settings broadcasts",
+      );
+      assertCondition(
+        !!policyListsUpdatedHandler,
+        "bootstrap should subscribe to command policy list broadcasts",
+      );
+      assertCondition(
+        !!memoryUpdatedHandler,
+        "bootstrap should subscribe to memory broadcasts",
+      );
+
+      settingsUpdatedHandler!({
+        schemaVersion: 4,
+        commandPolicyMode: "smart",
+        recursionLimit: 640,
+        models: {
+          items: [],
+          profiles: [
+            {
+              id: "profile-deep",
+              name: "Deep",
+              globalModelId: "model-deep",
+            },
+          ],
+          activeProfileId: "profile-deep",
+        },
+        tools: {
+          builtIn: {},
+          skills: {},
+        },
+        memory: {
+          enabled: false,
+        },
+        agentSettings: {
+          profiles: [
+            {
+              id: "agent-setting-slot-1",
+              slotNumber: 1,
+              createdAt: 1,
+              updatedAt: 2,
+              snapshot: {
+                version: 1,
+                security: {
+                  commandPolicyMode: "smart",
+                  commandPolicyLists: {
+                    allowlist: [],
+                    denylist: [],
+                    asklist: [],
+                  },
+                },
+                tools: {
+                  builtIn: {},
+                  mcp: {},
+                },
+                skills: {},
+                memory: {
+                  enabled: false,
+                },
+                workflow: {
+                  recursionLimit: 640,
+                  experimental: {},
+                },
+                model: {
+                  activeProfileId: "profile-deep",
+                  activeProfileName: "Deep",
+                },
+              },
+            },
+          ],
+          activeProfileId: "agent-setting-slot-1",
+        },
+      });
+      policyListsUpdatedHandler!({
+        allowlist: ["ls *"],
+        denylist: ["rm -rf /"],
+        asklist: ["git push"],
+      });
+      memoryUpdatedHandler!({
+        filePath: "/tmp/agent-setting-slot-1/memory.md",
+        content: "slot memory",
+      });
+
+      assertEqual(
+        store.settings?.commandPolicyMode,
+        "smart",
+        "settings broadcast should update policy mode",
+      );
+      assertEqual(
+        store.settings?.models.activeProfileId,
+        "profile-deep",
+        "settings broadcast should update active model profile",
+      );
+      assertEqual(
+        store.settings?.recursionLimit,
+        640,
+        "settings broadcast should update workflow recursion limit",
+      );
+      assertEqual(
+        store.agentSettingState.activeProfileId,
+        "agent-setting-slot-1",
+        "settings broadcast should update active agent setting slot",
+      );
+      assertEqual(
+        store.commandPolicyLists.denylist[0],
+        "rm -rf /",
+        "policy list broadcast should update command policy lists",
+      );
+      assertEqual(
+        store.memoryContent,
+        "slot memory",
+        "memory broadcast should update active memory content",
+      );
+    },
+  );
+
   await runCase(
     "filesystem clipboard snapshots remain plain structured-cloneable data",
     () => {

@@ -59,6 +59,7 @@ export interface ICommandPolicyRuntime {
     listName: CommandPolicyListName,
     rule: string,
   ): Promise<CommandPolicyLists>;
+  setLists?(lists: CommandPolicyLists): Promise<CommandPolicyLists>;
   evaluate(
     command: string,
     mode: CommandPolicyMode,
@@ -98,6 +99,9 @@ export interface IMcpRuntime {
   reloadAll(): Promise<McpServerSummary[]>;
   getSummaries(): McpServerSummary[];
   setServerEnabled(name: string, enabled: boolean): Promise<McpServerSummary[]>;
+  setServerEnabledBatch?(
+    enabledByName: Record<string, boolean>,
+  ): Promise<McpServerSummary[]>;
   isMcpToolName(toolName: string): boolean;
   getActiveTools(): StructuredTool[];
   invokeTool(
@@ -109,11 +113,18 @@ export interface IMcpRuntime {
 }
 
 export interface IMemoryRuntime {
-  ensureMemoryFile(): Promise<string>;
-  getMemoryFilePath(): Promise<string>;
-  getMemorySnapshot(): Promise<MemorySnapshot>;
-  readMemory(): Promise<string>;
-  writeMemory(content: string): Promise<MemorySnapshot>;
+  ensureMemoryFile(profileId?: string | null): Promise<string>;
+  getMemoryFilePath(profileId?: string | null): Promise<string>;
+  getMemorySnapshot(profileId?: string | null): Promise<MemorySnapshot>;
+  readMemory(profileId?: string | null): Promise<string>;
+  writeMemory(
+    content: string,
+    profileId?: string | null,
+  ): Promise<MemorySnapshot>;
+  copyMemory?(
+    sourceProfileId: string | null | undefined,
+    targetProfileId: string | null | undefined,
+  ): Promise<MemorySnapshot>;
 }
 
 export interface IGatewayTerminalRuntime {

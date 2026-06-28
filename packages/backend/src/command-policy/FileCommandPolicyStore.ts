@@ -15,7 +15,9 @@ export interface CommandPatternEntry {
   patterns: string[]
 }
 
-export type CommandPatternResolver = (command: string) => Promise<CommandPatternEntry[]>
+export type CommandPatternResolver = (
+  command: string,
+) => Promise<CommandPatternEntry[]>
 
 export interface FileCommandPolicyStoreOptions {
   filePath: string
@@ -26,25 +28,31 @@ export interface FileCommandPolicyStoreOptions {
 const DEFAULT_LISTS: CommandPolicyLists = {
   allowlist: [],
   denylist: [],
-  asklist: []
+  asklist: [],
 }
 
 function normalizeLists(raw: unknown): CommandPolicyLists {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_LISTS }
   const value = raw as Record<string, unknown>
   return {
-    allowlist: Array.isArray(value.allowlist) ? value.allowlist.map(String) : [],
+    allowlist: Array.isArray(value.allowlist)
+      ? value.allowlist.map(String)
+      : [],
     denylist: Array.isArray(value.denylist) ? value.denylist.map(String) : [],
-    asklist: Array.isArray(value.asklist) ? value.asklist.map(String) : []
+    asklist: Array.isArray(value.asklist) ? value.asklist.map(String) : [],
   }
 }
 
 export class FileCommandPolicyStore {
-  private feedbackWaiter: ((messageId: string, timeoutMs?: number) => Promise<any | null>) | null = null
+  private feedbackWaiter:
+    | ((messageId: string, timeoutMs?: number) => Promise<any | null>)
+    | null = null
 
   constructor(private readonly options: FileCommandPolicyStoreOptions) {}
 
-  setFeedbackWaiter(waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>): void {
+  setFeedbackWaiter(
+    waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>,
+  ): void {
     this.feedbackWaiter = waiter
   }
 
@@ -62,16 +70,23 @@ export class FileCommandPolicyStore {
 
     const defaultFile = {
       ...this.options.defaultFileContent,
-      ...DEFAULT_LISTS
+      ...DEFAULT_LISTS,
     }
-    await fs.writeFile(this.options.filePath, JSON.stringify(defaultFile, null, 2), 'utf8')
+    await fs.writeFile(
+      this.options.filePath,
+      JSON.stringify(defaultFile, null, 2),
+      'utf8',
+    )
   }
 
   async getLists(): Promise<CommandPolicyLists> {
     return this.loadLists()
   }
 
-  async addRule(listName: CommandPolicyListName, rule: string): Promise<CommandPolicyLists> {
+  async addRule(
+    listName: CommandPolicyListName,
+    rule: string,
+  ): Promise<CommandPolicyLists> {
     const trimmed = String(rule || '').trim()
     if (!trimmed) return this.loadLists()
 
@@ -85,13 +100,16 @@ export class FileCommandPolicyStore {
     await this.writeRawObject({
       ...this.options.defaultFileContent,
       ...existingRaw,
-      ...lists
+      ...lists,
     })
 
     return lists
   }
 
-  async deleteRule(listName: CommandPolicyListName, rule: string): Promise<CommandPolicyLists> {
+  async deleteRule(
+    listName: CommandPolicyListName,
+    rule: string,
+  ): Promise<CommandPolicyLists> {
     const trimmed = String(rule || '').trim()
     if (!trimmed) return this.loadLists()
 
@@ -103,13 +121,30 @@ export class FileCommandPolicyStore {
     await this.writeRawObject({
       ...this.options.defaultFileContent,
       ...existingRaw,
-      ...lists
+      ...lists,
     })
 
     return lists
   }
 
-  async evaluate(command: string, mode: CommandPolicyMode): Promise<'allow' | 'deny' | 'ask'> {
+  async setLists(nextLists: CommandPolicyLists): Promise<CommandPolicyLists> {
+    await this.ensurePolicyFile()
+    const existingRaw = await this.readRawObject()
+    const normalizedLists = normalizeLists(nextLists)
+
+    await this.writeRawObject({
+      ...this.options.defaultFileContent,
+      ...existingRaw,
+      ...normalizedLists,
+    })
+
+    return normalizedLists
+  }
+
+  async evaluate(
+    command: string,
+    mode: CommandPolicyMode,
+  ): Promise<'allow' | 'deny' | 'ask'> {
     const lists = await this.loadLists()
     const entries = await this.resolveEntries(command)
 
@@ -173,7 +208,7 @@ export class FileCommandPolicyStore {
         command: params.command,
         toolName: params.toolName,
         messageId: params.messageId,
-        decision: undefined
+        decision: undefined,
       })
 
       feedbackWaiter(params.messageId)
@@ -187,12 +222,16 @@ export class FileCommandPolicyStore {
     })
   }
 
-  private async resolveEntries(command: string): Promise<CommandPatternEntry[]> {
+  private async resolveEntries(
+    command: string,
+  ): Promise<CommandPatternEntry[]> {
     const resolver = this.options.resolveEntries
     if (resolver) {
       try {
         const entries = await resolver(command)
-        return Array.isArray(entries) ? entries.filter((entry) => entry.patterns.length > 0) : []
+        return Array.isArray(entries)
+          ? entries.filter((entry) => entry.patterns.length > 0)
+          : []
       } catch {
         return this.defaultResolveEntries(command)
       }
@@ -237,7 +276,11 @@ export class FileCommandPolicyStore {
 
   private async writeRawObject(value: Record<string, unknown>): Promise<void> {
     await this.ensurePolicyFile()
-    await fs.writeFile(this.options.filePath, JSON.stringify(value, null, 2), 'utf8')
+    await fs.writeFile(
+      this.options.filePath,
+      JSON.stringify(value, null, 2),
+      'utf8',
+    )
   }
 
   private matchesList(patterns: string[], rules: string[]): boolean {

@@ -36,6 +36,9 @@ export const zh = {
     title: "设置",
     general: "通用",
     theme: "外观",
+    agentSetting: "Agent Setting",
+    workflow: "Workflow",
+    model: "模型",
     models: "模型",
     security: "安全",
     terminal: "终端",
@@ -130,6 +133,22 @@ export const zh = {
     openMemoryFile: "打开文件",
     reloadMemory: "刷新记忆",
     saveMemory: "保存记忆",
+    saveCurrentAgentSetting: "保存当前 Agent Setting",
+    saveCurrentAgentSettingDescription:
+      "将当前 Agent 设置保存为一个可快速切换的配置。",
+    saveCurrentAgentSettingTitle: "保存 Agent Setting",
+    saveCurrentAgentSettingMessage:
+      "确定保存当前安全、工具、技能、记忆、Workflow 和当前模型配置选择吗？",
+    agentSettingSlot: (slotNumber: number) => `Agent Setting ${slotNumber}`,
+    overwriteWithCurrentAgentSetting: "用当前 Agent Setting 覆盖",
+    overwriteAgentSettingTitle: "覆盖 Agent Setting",
+    overwriteAgentSettingMessage: (slotNumber: number) =>
+      `确定用当前 Agent 设置覆盖 Agent Setting ${slotNumber} 吗？`,
+    overwriteAgentSettingConfirm: "覆盖",
+    deleteAgentSettingTitle: "删除 Agent Setting",
+    deleteAgentSettingMessage: (slotNumber: number) =>
+      `确定删除 Agent Setting ${slotNumber} 吗？其记忆文件会保留在磁盘上以防误删。`,
+    agentSettingPartialApplyWarning: "部分已保存设置未恢复",
     accessTokenNamePlaceholder: "令牌名称（例如：mobile-web）",
     accessTokenNameRequired: "请先输入令牌名称。",
     accessTokenCopyFailed: "复制失败，请手动复制令牌内容。",
@@ -252,7 +271,7 @@ export const zh = {
       skills:
         '技能是预定义的复杂任务指令模板。AI 会加载这些指令来更好地完成特定领域的工作。\n\nGyShell 会扫描以下目录中的技能：\n1. 【GyShell Custom】：用户自定义技能（存储在 GyShell 数据目录中）。\n2. 【Claude/Goose 兼容】：~/.claude/skills、~/.agents/skills 以及平台特定的配置路径。\n\n注意：对于不在 "GyShell Custom" 文件夹中的技能，请在文件管理器中手动进行编辑或删除管理。',
       memory:
-        "记忆是全局唯一的 markdown 文件（memory.md），跨会话共享。启用后，后端会把该文件完整内容连同绝对路径和 create_or_edit/read_file 使用说明注入到会话 system prompt。",
+        "未激活任何 Agent Setting 时会使用默认 memory.md。保存的 Agent Setting 会使用各自独立的记忆文件；启用记忆后，后端会把当前激活的记忆文件注入到会话 system prompt。",
       accessTokens:
         "配置 websocket 网关暴露范围与端口，并管理远程访问令牌。令牌只在创建时显示一次明文，磁盘上仅保存加盐哈希。",
     },

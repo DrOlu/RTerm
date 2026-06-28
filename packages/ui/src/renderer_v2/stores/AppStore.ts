@@ -156,6 +156,7 @@ export type SettingsSection =
   | "tools"
   | "skills"
   | "memory"
+  | "workflow"
   | "accessTokens"
   | "version";
 
@@ -173,6 +174,12 @@ export type SkillStatusSummary = Awaited<
 >[number];
 export type MemorySnapshot = Awaited<
   ReturnType<Window["gyshell"]["memory"]["get"]>
+>;
+export type AgentSettingState = Awaited<
+  ReturnType<Window["gyshell"]["agentSettings"]["get"]>
+>;
+export type AgentSettingOperationResult = Awaited<
+  ReturnType<Window["gyshell"]["agentSettings"]["saveCurrent"]>
 >;
 export type AccessTokenSummary = Awaited<
   ReturnType<Window["gyshell"]["accessTokens"]["list"]>
@@ -304,6 +311,7 @@ export class AppStore {
   skills: SkillSummary[] = [];
   memoryFilePath = "";
   memoryContent = "";
+  agentSettingWarnings: string[] = [];
   accessTokens: AccessTokenSummary[] = [];
   commandPolicyLists: CommandPolicyLists = {
     allowlist: [],
@@ -360,6 +368,7 @@ export class AppStore {
       skills: observable,
       memoryFilePath: observable,
       memoryContent: observable,
+      agentSettingWarnings: observable,
       accessTokens: observable,
       commandPolicyLists: observable,
       versionInfo: observable,
@@ -375,6 +384,7 @@ export class AppStore {
       panelTabDisplayMode: computed,
       chatDisplayMode: computed,
       preventSleepWhileRunning: computed,
+      agentSettingState: computed,
       commandDraftProfileId: computed,
       openSettings: action,
       closeSettings: action,
@@ -456,6 +466,11 @@ export class AppStore {
       setFirstTurnThinkingModelEnabled: action,
       setExecCommandActionModelEnabled: action,
       setWriteStdinActionModelEnabled: action,
+      saveCurrentAgentSetting: action,
+      applyAgentSetting: action,
+      overwriteAgentSetting: action,
+      deleteAgentSetting: action,
+      clearAgentSettingWarnings: action,
       sendChatMessage: action,
       materializeTransferredTabs: action,
       ensureTabInventoryEntry: action,
@@ -1238,6 +1253,15 @@ export class AppStore {
     return this.settings?.runtime?.preventSleepWhileRunning !== false;
   }
 
+  get agentSettingState(): AgentSettingState {
+    return (
+      this.settings?.agentSettings ?? {
+        profiles: [],
+        activeProfileId: null,
+      }
+    );
+  }
+
   get commandDraftProfileId(): string {
     const profiles = this.settings?.models?.profiles ?? [];
     const storedId = String(
@@ -1497,6 +1521,73 @@ export class AppStore {
         skills: this.settings.tools?.skills ?? {},
       },
     };
+  }
+
+  private applyAgentSettingOperationResult(
+    result: AgentSettingOperationResult,
+  ): void {
+    runInAction(() => {
+      this.applyBackendSettingsUpdate(result.settings);
+      this.commandPolicyLists = result.commandPolicyLists;
+      this.mcpTools = result.mcpTools;
+      this.memoryFilePath = result.memory.filePath;
+      this.memoryContent = result.memory.content;
+      this.agentSettingWarnings = Array.isArray(result.warnings)
+        ? [...result.warnings]
+        : [];
+      this.applyBuiltInToolStatusUpdate(result.builtInTools);
+      this.applySkillStatusUpdate(result.skills);
+    });
+  }
+
+  private applyBackendSettingsUpdate(settings: Partial<AppSettings>): void {
+    this.settings = {
+      ...(this.settings || ({} as AppSettings)),
+      ...settings,
+    };
+  }
+
+  private applyCommandPolicyListsUpdate(lists: CommandPolicyLists): void {
+    this.commandPolicyLists = lists;
+  }
+
+  private applyMemorySnapshotUpdate(snapshot: MemorySnapshot): void {
+    this.memoryFilePath = snapshot.filePath;
+    this.memoryContent = snapshot.content;
+  }
+
+  clearAgentSettingWarnings(): void {
+    this.agentSettingWarnings = [];
+  }
+
+  async saveCurrentAgentSetting(): Promise<AgentSettingOperationResult> {
+    const result = await window.gyshell.agentSettings.saveCurrent();
+    this.applyAgentSettingOperationResult(result);
+    return result;
+  }
+
+  async applyAgentSetting(
+    profileId: string,
+  ): Promise<AgentSettingOperationResult> {
+    const result = await window.gyshell.agentSettings.apply(profileId);
+    this.applyAgentSettingOperationResult(result);
+    return result;
+  }
+
+  async overwriteAgentSetting(
+    profileId: string,
+  ): Promise<AgentSettingOperationResult> {
+    const result = await window.gyshell.agentSettings.overwrite(profileId);
+    this.applyAgentSettingOperationResult(result);
+    return result;
+  }
+
+  async deleteAgentSetting(
+    profileId: string,
+  ): Promise<AgentSettingOperationResult> {
+    const result = await window.gyshell.agentSettings.delete(profileId);
+    this.applyAgentSettingOperationResult(result);
+    return result;
   }
 
   openSettings(): void {
@@ -2366,6 +2457,18 @@ export class AppStore {
       });
       this.ensureMonitorListener();
 
+      window.gyshell.settings.onUpdated?.((settings) => {
+        runInAction(() => {
+          this.applyBackendSettingsUpdate(settings);
+        });
+      });
+
+      window.gyshell.settings.onCommandPolicyListsUpdated?.((lists) => {
+        runInAction(() => {
+          this.applyCommandPolicyListsUpdate(lists);
+        });
+      });
+
       // MCP tool status updates
       window.gyshell.tools.onMcpUpdated((mcpTools) => {
         runInAction(() => {
@@ -2383,6 +2486,12 @@ export class AppStore {
       window.gyshell.skills.onUpdated((skills) => {
         runInAction(() => {
           this.applySkillStatusUpdate(skills);
+        });
+      });
+
+      window.gyshell.memory.onUpdated?.((snapshot) => {
+        runInAction(() => {
+          this.applyMemorySnapshotUpdate(snapshot);
         });
       });
 
@@ -3135,7 +3244,12 @@ export class AppStore {
   }
 
   applyFileTransferTaskUpdate(task: FileTransferTaskSnapshot): void {
-    if (!shouldApplyFileTransferTaskSnapshot(this.fileTransferTasks[task.id], task)) {
+    if (
+      !shouldApplyFileTransferTaskSnapshot(
+        this.fileTransferTasks[task.id],
+        task,
+      )
+    ) {
       return;
     }
     this.fileTransferTasks = {

@@ -1,34 +1,65 @@
 import path from 'node:path'
-import { FileMemoryStore, type MemorySnapshot } from '../../memory/FileMemoryStore'
+import {
+  FileMemoryStore,
+  type MemorySnapshot,
+} from '../../memory/FileMemoryStore'
+import { normalizeAgentSettingProfileId } from '../../services/settings/agentSettings'
 
 export type { MemorySnapshot }
+export type MemoryProfileId = string | null | undefined
 
 export class NodeMemoryService {
-  private readonly core: FileMemoryStore
+  constructor(private readonly dataDir: string) {}
 
-  constructor(private readonly dataDir: string) {
-    this.core = new FileMemoryStore({
-      getMemoryFilePath: () => path.join(this.dataDir, 'memory.md')
+  private resolveMemoryFilePath(profileId?: MemoryProfileId): string {
+    const normalizedProfileId = normalizeAgentSettingProfileId(profileId)
+    if (!normalizedProfileId) {
+      return path.join(this.dataDir, 'memory.md')
+    }
+    return path.join(
+      this.dataDir,
+      'agent-settings',
+      normalizedProfileId,
+      'memory.md',
+    )
+  }
+
+  private createStore(profileId?: MemoryProfileId): FileMemoryStore {
+    return new FileMemoryStore({
+      getMemoryFilePath: () => this.resolveMemoryFilePath(profileId),
     })
   }
 
-  async ensureMemoryFile(): Promise<string> {
-    return await this.core.ensureMemoryFile()
+  async ensureMemoryFile(profileId?: MemoryProfileId): Promise<string> {
+    return await this.createStore(profileId).ensureMemoryFile()
   }
 
-  async getMemoryFilePath(): Promise<string> {
-    return await this.core.getMemoryFilePath()
+  async getMemoryFilePath(profileId?: MemoryProfileId): Promise<string> {
+    return await this.createStore(profileId).getMemoryFilePath()
   }
 
-  async getMemorySnapshot(): Promise<MemorySnapshot> {
-    return await this.core.getMemorySnapshot()
+  async getMemorySnapshot(
+    profileId?: MemoryProfileId,
+  ): Promise<MemorySnapshot> {
+    return await this.createStore(profileId).getMemorySnapshot()
   }
 
-  async readMemory(): Promise<string> {
-    return await this.core.readMemory()
+  async readMemory(profileId?: MemoryProfileId): Promise<string> {
+    return await this.createStore(profileId).readMemory()
   }
 
-  async writeMemory(content: string): Promise<MemorySnapshot> {
-    return await this.core.writeMemory(content)
+  async writeMemory(
+    content: string,
+    profileId?: MemoryProfileId,
+  ): Promise<MemorySnapshot> {
+    return await this.createStore(profileId).writeMemory(content)
+  }
+
+  async copyMemory(
+    sourceProfileId: MemoryProfileId,
+    targetProfileId: MemoryProfileId,
+  ): Promise<MemorySnapshot> {
+    const content = await this.readMemory(sourceProfileId)
+    return await this.writeMemory(content, targetProfileId)
   }
 }

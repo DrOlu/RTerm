@@ -459,6 +459,31 @@ function TuiApp(props: { client: GatewayClient; data: TuiBootstrapData; onExit: 
 
     if (channel === 'tools:builtInUpdated') {
       setState('statusLine', 'Built-in tools updated')
+      return
+    }
+
+    if (channel === 'settings:updated') {
+      const profilesPayload = readProfilesFromSettings(payload)
+      setState('profiles', profilesPayload.profiles)
+      setState('activeProfileId', profilesPayload.activeProfileId)
+      setState(
+        'statusLine',
+        `Settings updated (${lookupProfileName(
+          profilesPayload.activeProfileId,
+          profilesPayload.profiles,
+        )})`,
+      )
+      return
+    }
+
+    if (channel === 'settings:commandPolicyListsUpdated') {
+      const counts = countCommandPolicyRules(payload)
+      setState('statusLine', `Command policy updated (${counts.allow}/${counts.deny}/${counts.ask})`)
+      return
+    }
+
+    if (channel === 'memory:updated') {
+      setState('statusLine', 'Memory updated')
     }
   })
 
@@ -1552,6 +1577,52 @@ function lookupProfileName(activeId: string, profiles: GatewayProfileSummary[]):
   const match = profiles.find((item) => item.id === activeId)
   if (!match) return activeId || 'No profile'
   return match.modelName ? `${match.name} (${match.modelName})` : match.name
+}
+
+function readProfilesFromSettings(raw: unknown): {
+  profiles: GatewayProfileSummary[]
+  activeProfileId: string
+} {
+  if (!raw || typeof raw !== 'object') {
+    return { profiles: [], activeProfileId: '' }
+  }
+  const models = (raw as Record<string, unknown>).models
+  if (!models || typeof models !== 'object') {
+    return { profiles: [], activeProfileId: '' }
+  }
+  const modelRecord = models as Record<string, unknown>
+  const profiles = Array.isArray(modelRecord.profiles)
+    ? modelRecord.profiles.flatMap((profile) => {
+        if (!profile || typeof profile !== 'object') return []
+        const record = profile as Record<string, unknown>
+        if (typeof record.id !== 'string' || !record.id) return []
+        if (typeof record.name !== 'string') return []
+        return [
+          {
+            id: record.id,
+            name: record.name,
+            globalModelId: typeof record.globalModelId === 'string' ? record.globalModelId : '',
+          },
+        ]
+      })
+    : []
+  return {
+    profiles,
+    activeProfileId: typeof modelRecord.activeProfileId === 'string' ? modelRecord.activeProfileId : '',
+  }
+}
+
+function countCommandPolicyRules(raw: unknown): {
+  allow: number
+  deny: number
+  ask: number
+} {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  return {
+    allow: Array.isArray(source.allowlist) ? source.allowlist.length : 0,
+    deny: Array.isArray(source.denylist) ? source.denylist.length : 0,
+    ask: Array.isArray(source.asklist) ? source.asklist.length : 0,
+  }
 }
 
 function composeSessionSubtitle(meta: SessionMeta | undefined): string {

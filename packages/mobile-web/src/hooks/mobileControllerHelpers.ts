@@ -7,8 +7,11 @@ import {
 } from "../session-store";
 import type {
   BuiltInToolSummary,
+  CommandPolicyLists,
+  CommandPolicyMode,
   GatewayConnectionsSnapshot,
   GatewayMemorySnapshot,
+  GatewayProfileSummary,
   GatewaySshConnectionEntry,
   GatewaySshConnectionSummary,
   McpServerSummary,
@@ -161,6 +164,84 @@ export function readMemoryEnabledFromSettings(raw: unknown): boolean {
   const memory = settings.memory;
   if (!memory || typeof memory !== "object") return true;
   return (memory as Record<string, unknown>).enabled !== false;
+}
+
+export function readCommandPolicyModeFromSettings(
+  raw: unknown,
+): CommandPolicyMode {
+  if (!raw || typeof raw !== "object") return "standard";
+  const mode = (raw as Record<string, unknown>).commandPolicyMode;
+  return mode === "safe" || mode === "smart" || mode === "standard"
+    ? mode
+    : "standard";
+}
+
+export function normalizeCommandPolicyLists(
+  raw: unknown,
+): CommandPolicyLists {
+  const source =
+    raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const normalizeList = (value: unknown): string[] =>
+    Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : [];
+  return {
+    allowlist: normalizeList(source.allowlist),
+    denylist: normalizeList(source.denylist),
+    asklist: normalizeList(source.asklist),
+  };
+}
+
+export function readProfilesFromSettings(raw: unknown): {
+  profiles: GatewayProfileSummary[];
+  activeProfileId: string;
+} {
+  if (!raw || typeof raw !== "object") {
+    return { profiles: [], activeProfileId: "" };
+  }
+  const settings = raw as Record<string, unknown>;
+  const models = settings.models;
+  if (!models || typeof models !== "object") {
+    return { profiles: [], activeProfileId: "" };
+  }
+  const modelRecord = models as Record<string, unknown>;
+  const modelItems = Array.isArray(modelRecord.items)
+    ? modelRecord.items
+    : [];
+  const modelNameById = new Map(
+    modelItems.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const record = item as Record<string, unknown>;
+      return typeof record.id === "string"
+        ? [[record.id, typeof record.name === "string" ? record.name : ""]]
+        : [];
+    }),
+  );
+  const profiles = Array.isArray(modelRecord.profiles)
+    ? modelRecord.profiles.flatMap((profile) => {
+        if (!profile || typeof profile !== "object") return [];
+        const record = profile as Record<string, unknown>;
+        if (typeof record.id !== "string" || !record.id) return [];
+        if (typeof record.name !== "string") return [];
+        const globalModelId =
+          typeof record.globalModelId === "string" ? record.globalModelId : "";
+        return [
+          {
+            id: record.id,
+            name: record.name,
+            globalModelId,
+            modelName: modelNameById.get(globalModelId) || undefined,
+          },
+        ];
+      })
+    : [];
+  return {
+    profiles,
+    activeProfileId:
+      typeof modelRecord.activeProfileId === "string"
+        ? modelRecord.activeProfileId
+        : "",
+  };
 }
 
 export function normalizeMcpServer(raw: unknown): McpServerSummary | null {

@@ -36,6 +36,9 @@ export const en = {
     title: "Settings",
     general: "General",
     theme: "Theme",
+    agentSetting: "Agent Setting",
+    workflow: "Workflow",
+    model: "Model",
     models: "Models",
     security: "Security",
     terminal: "Terminal",
@@ -130,6 +133,22 @@ export const en = {
     openMemoryFile: "Open File",
     reloadMemory: "Reload Memory",
     saveMemory: "Save Memory",
+    saveCurrentAgentSetting: "Save Current Agent Setting",
+    saveCurrentAgentSettingDescription:
+      "Save the current Agent settings as a quick-switch profile.",
+    saveCurrentAgentSettingTitle: "Save Agent Setting",
+    saveCurrentAgentSettingMessage:
+      "Save the current security, tool, skill, memory, workflow, and active model profile settings?",
+    agentSettingSlot: (slotNumber: number) => `Agent Setting ${slotNumber}`,
+    overwriteWithCurrentAgentSetting: "Overwrite with Current Agent Setting",
+    overwriteAgentSettingTitle: "Overwrite Agent Setting",
+    overwriteAgentSettingMessage: (slotNumber: number) =>
+      `Overwrite Agent Setting ${slotNumber} with the current Agent settings?`,
+    overwriteAgentSettingConfirm: "Overwrite",
+    deleteAgentSettingTitle: "Delete Agent Setting",
+    deleteAgentSettingMessage: (slotNumber: number) =>
+      `Delete Agent Setting ${slotNumber}? Its memory file is kept on disk for safety.`,
+    agentSettingPartialApplyWarning: "Some saved settings were not restored",
     accessTokenNamePlaceholder: "Token name (e.g. mobile-web)",
     accessTokenNameRequired: "Token name is required.",
     accessTokenCopyFailed:
@@ -258,7 +277,7 @@ export const en = {
       skills:
         'Skills are predefined instruction templates for complex tasks. AI loads them to perform better in specific domains.\n\nGyShell scans the following directories for skills:\n1. [GyShell Custom]: User-created skills (stored in GyShell data directory).\n2. [Claude/Goose Compatible]: ~/.claude/skills, ~/.agents/skills, and platform-specific config paths.\n\nNote: For skills outside the "GyShell Custom" folder, please manage (edit/delete) them manually in your file explorer.',
       memory:
-        "Memory is a single global markdown file (memory.md) shared across sessions. When enabled, the backend injects its full content into each session system prompt with the absolute file path and instructions for using create_or_edit/read_file on that exact file.",
+        "Memory uses the default memory.md when no Agent Setting is active. Saved Agent Settings use their own memory file, and the active file is injected into each session system prompt when memory is enabled.",
       accessTokens:
         "Configure websocket gateway exposure and port, and manage access tokens for remote clients. Tokens are shown in plaintext only once when created, and only salted hashes are stored on disk.",
     },
@@ -479,9 +498,10 @@ export const en = {
     openMonitorPanel: "Open Resource Monitor",
     saveCurrentLayout: "Save Current Layout",
     saveCurrentLayoutTitle: "Save Current Layout",
-    saveCurrentLayoutMessage: "Save the current workspace layout as a new saved layout?",
+    saveCurrentLayoutMessage:
+      "Save the current workspace layout as a new saved layout?",
     savedLayoutSlot: (slotNumber: number) => `Saved Layout ${slotNumber}`,
-    overwriteWithCurrentLayout: "Overwrite Layout",
+    overwriteWithCurrentLayout: "Overwrite with Current Layout",
     overwriteSavedLayoutTitle: "Overwrite Saved Layout",
     overwriteSavedLayoutMessage: (slotNumber: number) =>
       `Overwrite saved layout ${slotNumber} with the current workspace layout? The previous saved layout cannot be restored.`,

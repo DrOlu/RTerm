@@ -57,6 +57,7 @@ import { HistoryMigrationCoordinator } from "./HistoryMigrationCoordinator";
 import { HistorySqliteStore } from "../../../backend/src/services/history/HistorySqliteStore";
 import { HistoryStorageMigration } from "../../../backend/src/services/history/HistoryStorageMigration";
 import { SleepBlockerService } from "./SleepBlockerService";
+import { AgentSettingProfileService } from "../../../backend/src/services/AgentSettingProfileService";
 
 let mainWindow: BrowserWindow | null = null;
 let settingsService: SettingsService;
@@ -83,6 +84,7 @@ let resourceMonitorService: ResourceMonitorService;
 let monitorWindowRegistry: MonitorWindowRegistry;
 let historyStore: HistorySqliteStore | null = null;
 let sleepBlockerService: SleepBlockerService | null = null;
+let agentSettingProfileService: AgentSettingProfileService;
 
 type AppWindowRole = "main" | "detached";
 
@@ -355,6 +357,15 @@ export async function startElectronMain(): Promise<void> {
         void skillService.reload();
         memoryService = new MemoryService();
         void memoryService.ensureMemoryFile();
+        agentSettingProfileService = new AgentSettingProfileService({
+          settingsService,
+          commandPolicyService,
+          mcpToolService,
+          skillService,
+          memoryService,
+          onSettingsChanged: (settings) =>
+            agentService.updateSettings(settings),
+        });
 
         modelCapabilityService = new ModelCapabilityService();
         const chatHistoryService = new ChatHistoryService({
@@ -391,8 +402,9 @@ export async function startElectronMain(): Promise<void> {
           );
         };
         syncSleepBlockerSetting();
-        const unsubscribeSleepBlockerSettings =
-          uiSettingsStore.onChange(syncSleepBlockerSetting);
+        const unsubscribeSleepBlockerSettings = uiSettingsStore.onChange(
+          syncSleepBlockerSetting,
+        );
         const unsubscribeRunState = gatewayService.onRunStateChanged(
           (snapshot) => {
             sleepBlockerService?.setReasonActive(
@@ -425,6 +437,27 @@ export async function startElectronMain(): Promise<void> {
           }
         }
         gatewayService.registerTransport(new ElectronWindowTransport());
+        const broadcastAgentSettingResult = (result: {
+          settings: unknown;
+          commandPolicyLists: unknown;
+          mcpTools: unknown;
+          builtInTools: unknown;
+          skills: unknown;
+          memory: unknown;
+        }) => {
+          gatewayService.broadcastRaw("settings:updated", result.settings);
+          gatewayService.broadcastRaw(
+            "settings:commandPolicyListsUpdated",
+            result.commandPolicyLists,
+          );
+          gatewayService.broadcastRaw("tools:mcpUpdated", result.mcpTools);
+          gatewayService.broadcastRaw(
+            "tools:builtInUpdated",
+            result.builtInTools,
+          );
+          gatewayService.broadcastRaw("skills:updated", result.skills);
+          gatewayService.broadcastRaw("memory:updated", result.memory);
+        };
         webSocketGatewayControlService = new WebSocketGatewayControlService({
           createAdapter: (host, port, ipFilter) =>
             new WebSocketGatewayAdapter(gatewayService, {
@@ -751,12 +784,45 @@ export async function startElectronMain(): Promise<void> {
               },
               memoryBridge: {
                 get: async () => {
-                  return await memoryService.getMemorySnapshot();
+                  return await memoryService.getMemorySnapshot(
+                    settingsService.getSettings().agentSettings
+                      ?.activeProfileId || null,
+                  );
                 },
                 setContent: async (content: string) => {
-                  const snapshot = await memoryService.writeMemory(content);
+                  const snapshot = await memoryService.writeMemory(
+                    content,
+                    settingsService.getSettings().agentSettings
+                      ?.activeProfileId || null,
+                  );
                   gatewayService.broadcastRaw("memory:updated", snapshot);
                   return snapshot;
+                },
+              },
+              agentSettingsBridge: {
+                get: () => agentSettingProfileService.getState(),
+                saveCurrent: async () => {
+                  const result = await agentSettingProfileService.saveCurrent();
+                  broadcastAgentSettingResult(result);
+                  return result;
+                },
+                apply: async (profileId: string) => {
+                  const result =
+                    await agentSettingProfileService.apply(profileId);
+                  broadcastAgentSettingResult(result);
+                  return result;
+                },
+                overwrite: async (profileId: string) => {
+                  const result =
+                    await agentSettingProfileService.overwrite(profileId);
+                  broadcastAgentSettingResult(result);
+                  return result;
+                },
+                delete: async (profileId: string) => {
+                  const result =
+                    await agentSettingProfileService.delete(profileId);
+                  broadcastAgentSettingResult(result);
+                  return result;
                 },
               },
               settingsBridge: {
@@ -853,6 +919,7 @@ export async function startElectronMain(): Promise<void> {
           themeStore,
           versionService,
           webSocketGatewayControlService,
+          agentSettingProfileService,
           accessTokenService,
           fileSystemService,
           fileTransferService,

@@ -208,6 +208,14 @@ export interface GatewayProfileSummary {
   modelName?: string
 }
 
+export type CommandPolicyMode = 'safe' | 'standard' | 'smart'
+
+export interface CommandPolicyLists {
+  allowlist: string[]
+  denylist: string[]
+  asklist: string[]
+}
+
 export interface RpcRequest {
   id?: string
   method: string

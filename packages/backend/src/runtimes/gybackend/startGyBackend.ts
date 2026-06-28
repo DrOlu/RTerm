@@ -30,6 +30,7 @@ import { createAutoTerminalConfig } from "../../services/terminal/terminalConnec
 import { TerminalCommandDraftService } from "../../services/TerminalCommandDraftService";
 import { HistoryStorageMigration } from "../../services/history/HistoryStorageMigration";
 import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
+import { AgentSettingProfileService } from "../../services/AgentSettingProfileService";
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
@@ -115,6 +116,14 @@ export async function startGyBackend(): Promise<void> {
     imageAttachmentService,
     fileTransferService,
   );
+  const agentSettingProfileService = new AgentSettingProfileService({
+    settingsService,
+    commandPolicyService,
+    mcpToolService,
+    skillService,
+    memoryService,
+    onSettingsChanged: (settings) => agentService.updateSettings(settings),
+  });
 
   const gatewayService = new GatewayService(
     terminalService,
@@ -179,6 +188,25 @@ export async function startGyBackend(): Promise<void> {
     }
   }
 
+  const broadcastAgentSettingResult = (result: {
+    settings: unknown;
+    commandPolicyLists: unknown;
+    mcpTools: unknown;
+    builtInTools: unknown;
+    skills: unknown;
+    memory: unknown;
+  }) => {
+    gatewayService.broadcastRaw("settings:updated", result.settings);
+    gatewayService.broadcastRaw(
+      "settings:commandPolicyListsUpdated",
+      result.commandPolicyLists,
+    );
+    gatewayService.broadcastRaw("tools:mcpUpdated", result.mcpTools);
+    gatewayService.broadcastRaw("tools:builtInUpdated", result.builtInTools);
+    gatewayService.broadcastRaw("skills:updated", result.skills);
+    gatewayService.broadcastRaw("memory:updated", result.memory);
+  };
+
   const wsGatewayControlService = new WebSocketGatewayControlService({
     createAdapter: (host, port, ipFilter) =>
       new WebSocketGatewayAdapter(gatewayService, {
@@ -199,7 +227,8 @@ export async function startGyBackend(): Promise<void> {
               rows: terminal.rows,
               runtimeState: terminal.runtimeState,
               lastExitCode: terminal.lastExitCode,
-              monitorIdentity: terminalService.getMonitorIdentity(terminal.id) ?? undefined,
+              monitorIdentity:
+                terminalService.getMonitorIdentity(terminal.id) ?? undefined,
             })),
           createTab: async (config) => {
             const snapshot = terminalService.getDisplayTerminals();
@@ -475,12 +504,43 @@ export async function startGyBackend(): Promise<void> {
         },
         memoryBridge: {
           get: async () => {
-            return await memoryService.getMemorySnapshot();
+            return await memoryService.getMemorySnapshot(
+              settingsService.getSettings().agentSettings?.activeProfileId ||
+                null,
+            );
           },
           setContent: async (content: string) => {
-            const snapshot = await memoryService.writeMemory(content);
+            const snapshot = await memoryService.writeMemory(
+              content,
+              settingsService.getSettings().agentSettings?.activeProfileId ||
+                null,
+            );
             gatewayService.broadcastRaw("memory:updated", snapshot);
             return snapshot;
+          },
+        },
+        agentSettingsBridge: {
+          get: () => agentSettingProfileService.getState(),
+          saveCurrent: async () => {
+            const result = await agentSettingProfileService.saveCurrent();
+            broadcastAgentSettingResult(result);
+            return result;
+          },
+          apply: async (profileId: string) => {
+            const result = await agentSettingProfileService.apply(profileId);
+            broadcastAgentSettingResult(result);
+            return result;
+          },
+          overwrite: async (profileId: string) => {
+            const result =
+              await agentSettingProfileService.overwrite(profileId);
+            broadcastAgentSettingResult(result);
+            return result;
+          },
+          delete: async (profileId: string) => {
+            const result = await agentSettingProfileService.delete(profileId);
+            broadcastAgentSettingResult(result);
+            return result;
           },
         },
         settingsBridge: {
