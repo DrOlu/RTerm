@@ -216,6 +216,28 @@ export interface CommandPolicyLists {
   asklist: string[]
 }
 
+export interface TerminalBufferSnapshot {
+  data: string
+  offset: number
+}
+
+export type AgentSettingProfileSlot = 1 | 2 | 3 | 4 | 5 | 6
+
+export interface AgentSettingProfileSummary {
+  id: string
+  slotNumber: AgentSettingProfileSlot
+  createdAt: number
+  updatedAt: number
+  modelName?: string
+  modelProfileId?: string
+  commandPolicyMode?: CommandPolicyMode
+}
+
+export interface AgentSettingStateSummary {
+  profiles: AgentSettingProfileSummary[]
+  activeProfileId: string | null
+}
+
 export interface RpcRequest {
   id?: string
   method: string

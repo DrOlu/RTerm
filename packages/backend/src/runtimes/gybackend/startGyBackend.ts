@@ -251,6 +251,10 @@ export async function startGyBackend(): Promise<void> {
             }
             terminalService.kill(terminalId);
           },
+          reconnect: async (terminalId) => {
+            const tab = await terminalService.reconnectTerminal(terminalId);
+            return { id: tab.id };
+          },
           setSelection: async (terminalId, selectionText) => {
             terminalService.setSelection(terminalId, selectionText);
           },

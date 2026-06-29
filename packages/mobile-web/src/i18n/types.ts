@@ -3,11 +3,14 @@ export type MobileLocale = "en" | "zh-CN";
 export interface MobileTranslations {
   appName: string;
   tabs: {
+    sessions: string;
+    terminals: string;
+    settings: string;
+    /** Legacy chat/skills/tools labels kept for Settings sub-pages and helpers. */
     chat: string;
     terminal: string;
     skills: string;
     tools: string;
-    settings: string;
     navLabel: string;
   };
   topBar: {
@@ -15,6 +18,7 @@ export interface MobileTranslations {
     sessions: string;
     sessionLabel: (id: string) => string;
     noActiveSession: string;
+    desktopActive: string;
   };
   app: {
     chats: string;
@@ -24,6 +28,10 @@ export interface MobileTranslations {
     rollbackConfirmMessage: string;
     noSession: string;
     untitled: string;
+    branching: string;
+    branch: string;
+    branchFailed: string;
+    taskCompleted: (title: string) => string;
   };
   common: {
     connect: string;
@@ -41,6 +49,14 @@ export interface MobileTranslations {
     expand: string;
     collapse: string;
     notConnected: string;
+    save: string;
+    delete: string;
+    overwrite: string;
+    apply: string;
+    close: string;
+    refresh: string;
+    reconnect: string;
+    empty: string;
   };
   composer: {
     placeholder: string;
@@ -52,6 +68,8 @@ export interface MobileTranslations {
     clearImages: string;
     mentionSkill: string;
     mentionTerminal: string;
+    steerHint: string;
+    selectProfile: string;
   };
   sessionBrowser: {
     searchPlaceholder: string;
@@ -59,13 +77,34 @@ export interface MobileTranslations {
     deleteChat: (title: string) => string;
     deleteConfirm: (title: string) => string;
     empty: string;
+    emptyHint: string;
     noUpdates: string;
+    approvalBadge: (count: number) => string;
+    approvalJump: string;
+    statusApproval: string;
+    statusApprovalWithTool: (toolName: string) => string;
+    statusError: string;
+    statusThinking: string;
+    statusReplying: string;
+    statusTool: string;
+    statusToolWithName: (toolName: string) => string;
+    statusFileEdit: string;
+    statusSubTool: string;
+    statusCommand: string;
+    statusCommandAsync: string;
+    statusCompacting: string;
+    statusRunning: string;
+    statusDone: string;
+    tokensProgress: (used: number, max: number) => string;
   };
   messageList: {
     rollbackAndEdit: string;
     rollback: string;
+    branchFromHere: string;
     emptyTitle: string;
     emptyHint: string;
+    insertedBadge: string;
+    nowaitBadge: string;
   };
   detail: {
     closeDetail: string;
@@ -77,6 +116,7 @@ export interface MobileTranslations {
   };
   settings: {
     title: string;
+    connectionSection: string;
     gateway: string;
     memory: string;
     language: string;
@@ -93,6 +133,25 @@ export interface MobileTranslations {
     memoryReadOnlyHint: string;
     english: string;
     chinese: string;
+    skillsSection: string;
+    toolsSection: string;
+    agentProfilesSection: string;
+    agentProfilesHint: string;
+    agentProfilesEmpty: string;
+    agentProfileActive: string;
+    agentProfileSlot: (slot: number) => string;
+    agentProfileModel: string;
+    agentProfilePolicy: string;
+    agentProfileUnknownPolicy: string;
+    agentProfileSaveCurrent: string;
+    agentProfileSaveCurrentConfirm: string;
+    agentProfileOverwriteConfirm: string;
+    agentProfileDeleteConfirm: (slot: number) => string;
+    agentProfileApplyFailed: string;
+    agentProfileSaveFailed: string;
+    agentProfileNoSlots: string;
+    agentProfileUnsaved: string;
+    backToSettings: string;
   };
   skills: {
     enabledCount: (enabled: number, total: number) => string;
@@ -133,9 +192,19 @@ export interface MobileTranslations {
     selectTerminalType: string;
     noSavedSsh: string;
     noActiveTerminals: string;
+    noActiveTerminalsHint: string;
     state: (value: string) => string;
     close: (title: string) => string;
     newTerminal: string;
+    outputLabel: string;
+    outputEmpty: string;
+    outputUnsupported: string;
+    refresh: string;
+    reconnect: string;
+    reconnecting: string;
+    reconnectFailed: string;
+    sshExited: string;
+    newItem: string;
   };
   format: {
     justNow: string;

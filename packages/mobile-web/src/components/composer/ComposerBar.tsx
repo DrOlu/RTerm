@@ -89,6 +89,11 @@ export const ComposerBar: React.FC<ComposerBarProps> = ({
 
   return (
     <footer className="composer-modern">
+      {isRunning ? (
+        <div className="composer-steer-hint" role="status">
+          {t.composer.steerHint}
+        </div>
+      ) : null}
       <MentionSuggestions options={mentionOptions} onPick={onPickMention} />
 
       {images.length > 0 ? (

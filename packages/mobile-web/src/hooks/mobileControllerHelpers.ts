@@ -6,6 +6,8 @@ import {
   type SessionState,
 } from "../session-store";
 import type {
+  AgentSettingProfileSummary,
+  AgentSettingStateSummary,
   BuiltInToolSummary,
   CommandPolicyLists,
   CommandPolicyMode,
@@ -496,5 +498,223 @@ export function toSshConfig(
     proxy,
     tunnels,
     jumpHost,
+  };
+}
+
+/**
+ * Derive a compact, human-readable status label for a session in the SessionBrowser.
+ *
+ * This powers the "task status card" design (Phase 1): mobile-web users open the app
+ * to see "what is happening right now". The label is the single most important signal
+ * and must surface the approval-waiting state above all else, because approvals are the
+ * case where the user MUST intervene or the task stalls.
+ */
+export type SessionStatusKind =
+  | "approval"
+  | "error"
+  | "thinking"
+  | "tool"
+  | "running"
+  | "done";
+
+/**
+ * Structural descriptor of a session's current state. The helper layer stays
+ * locale-free: it only reports WHAT the session is doing (kind + an optional
+ * sub-detail and a dynamic name like a tool name). The presentation layer is
+ * responsible for turning this into a localized label via i18n.
+ */
+export type SessionStatusDetail =
+  | "approval"
+  | "error"
+  | "thinking"
+  | "replying"
+  | "tool"
+  | "file_edit"
+  | "sub_tool"
+  | "command"
+  | "command_async"
+  | "compacting"
+  | "running"
+  | "done";
+
+export interface SessionStatusInfo {
+  kind: SessionStatusKind;
+  /** Locale-free sub-classification; the i18n layer maps this to a label. */
+  detail: SessionStatusDetail;
+  /** Dynamic context (e.g. tool name) to interpolate into the label, if any. */
+  contextName?: string;
+}
+
+export function deriveSessionStatus(
+  session: SessionState,
+): SessionStatusInfo {
+  const messages = session.messages;
+  if (messages.length === 0) {
+    return { kind: "done", detail: "done" };
+  }
+
+  // Scan from latest backwards for the first "meaningful" message.
+  let lastMeaningfulIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message) continue;
+    if (message.type === "tokens_count") continue;
+    lastMeaningfulIndex = i;
+    break;
+  }
+  if (lastMeaningfulIndex < 0) {
+    return { kind: "done", detail: "done" };
+  }
+  const last = messages[lastMeaningfulIndex];
+
+  // Approval pending: an `ask` message without a decision always wins priority,
+  // even if later inserted user messages were queued while the run was blocked.
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.type !== "ask") continue;
+    if (
+      message.metadata?.decision === "allow" ||
+      message.metadata?.decision === "deny"
+    ) {
+      continue;
+    }
+    const toolName = message.metadata?.toolName || "";
+    return {
+      kind: "approval",
+      detail: "approval",
+      ...(toolName ? { contextName: toolName } : {}),
+    };
+  }
+
+  if (last.type === "error") {
+    return { kind: "error", detail: "error" };
+  }
+
+  // Busy state: use last activity type to describe current phase.
+  if (session.isBusy) {
+    if (last.type === "tool_call") {
+      const toolName = last.metadata?.toolName || "";
+      return {
+        kind: "tool",
+        detail: "tool",
+        ...(toolName ? { contextName: toolName } : {}),
+      };
+    }
+    if (last.type === "command") {
+      return {
+        kind: "running",
+        detail: last.metadata?.isNowait ? "command_async" : "command",
+      };
+    }
+    if (last.type === "reasoning") {
+      return { kind: "thinking", detail: "thinking" };
+    }
+    if (last.type === "compaction") {
+      return { kind: "running", detail: "compacting" };
+    }
+    if (last.type === "file_edit") {
+      return { kind: "tool", detail: "file_edit" };
+    }
+    if (last.type === "sub_tool") {
+      return { kind: "tool", detail: "sub_tool" };
+    }
+    if (last.streaming) {
+      return { kind: "thinking", detail: "replying" };
+    }
+    return { kind: "running", detail: "running" };
+  }
+
+  return { kind: "done", detail: "done" };
+}
+
+/**
+ * Count sessions that currently block on an unanswered approval. Used by the global
+ * Approval Badge so users don't have to dig into each session to discover pending work.
+ */
+export function countPendingApprovals(sessions: Record<string, SessionState>): number {
+  let count = 0;
+  for (const session of Object.values(sessions)) {
+    if (!session) continue;
+    const info = deriveSessionStatus(session);
+    if (info.kind === "approval") count += 1;
+  }
+  return count;
+}
+
+/**
+ * Find the first session (most recently updated) that is waiting for an approval.
+ * Used by the Approval Badge's tap-to-jump interaction.
+ */
+export function findFirstApprovalSession(
+  sessionOrder: string[],
+  sessionMeta: Record<string, SessionMeta>,
+  sessions: Record<string, SessionState>,
+): string | null {
+  for (const sessionId of sessionOrder) {
+    const session = sessions[sessionId];
+    if (!session) continue;
+    if (deriveSessionStatus(session).kind === "approval") {
+      return sessionId;
+    }
+  }
+  // sessionOrder is already sorted by updatedAt desc via reorderSessionIds.
+  void sessionMeta;
+  return null;
+}
+
+export function normalizeAgentSettingState(raw: unknown): AgentSettingStateSummary {
+  if (!raw || typeof raw !== "object") {
+    return { profiles: [], activeProfileId: null };
+  }
+  const item = raw as Record<string, unknown>;
+  const rawProfiles = Array.isArray(item.profiles) ? item.profiles : [];
+  const profiles: AgentSettingProfileSummary[] = [];
+  for (const entry of rawProfiles) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id : "";
+    if (!id) continue;
+    const slotNumber = Number(record.slotNumber);
+    if (!Number.isInteger(slotNumber) || slotNumber < 1 || slotNumber > 6) continue;
+    const snapshot =
+      record.snapshot && typeof record.snapshot === "object"
+        ? (record.snapshot as Record<string, unknown>)
+        : null;
+    const modelSnapshot =
+      snapshot && snapshot.model && typeof snapshot.model === "object"
+        ? (snapshot.model as Record<string, unknown>)
+        : null;
+    const securitySnapshot =
+      snapshot && snapshot.security && typeof snapshot.security === "object"
+        ? (snapshot.security as Record<string, unknown>)
+        : null;
+    const commandPolicyModeRaw = securitySnapshot?.commandPolicyMode;
+    const commandPolicyMode: CommandPolicyMode | undefined =
+      commandPolicyModeRaw === "safe" ||
+      commandPolicyModeRaw === "standard" ||
+      commandPolicyModeRaw === "smart"
+        ? commandPolicyModeRaw
+        : undefined;
+    profiles.push({
+      id,
+      slotNumber: slotNumber as AgentSettingProfileSummary["slotNumber"],
+      createdAt: typeof record.createdAt === "number" ? record.createdAt : 0,
+      updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
+      modelName:
+        typeof modelSnapshot?.activeProfileName === "string"
+          ? modelSnapshot.activeProfileName
+          : undefined,
+      modelProfileId:
+        typeof modelSnapshot?.activeProfileId === "string"
+          ? modelSnapshot.activeProfileId
+          : undefined,
+      commandPolicyMode,
+    });
+  }
+  profiles.sort((left, right) => left.slotNumber - right.slotNumber);
+  return {
+    profiles,
+    activeProfileId:
+      typeof item.activeProfileId === "string" ? item.activeProfileId : null,
   };
 }
