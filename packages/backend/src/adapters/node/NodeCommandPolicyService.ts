@@ -3,13 +3,13 @@ import {
   FileCommandPolicyStore,
   type CommandPolicyMode,
   type CommandPolicyLists,
-  type CommandPolicyListName
+  type CommandPolicyListName,
 } from '../../command-policy/FileCommandPolicyStore'
 
 const DEFAULT_POLICY_FILE_CONTENT = {
   allowlist: [],
   denylist: [],
-  asklist: []
+  asklist: [],
 }
 
 export type { CommandPolicyMode, CommandPolicyLists, CommandPolicyListName }
@@ -20,11 +20,13 @@ export class NodeCommandPolicyService {
   constructor(private readonly dataDir: string) {
     this.store = new FileCommandPolicyStore({
       filePath: path.join(this.dataDir, 'command-policy.json'),
-      defaultFileContent: DEFAULT_POLICY_FILE_CONTENT
+      defaultFileContent: DEFAULT_POLICY_FILE_CONTENT,
     })
   }
 
-  setFeedbackWaiter(waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>): void {
+  setFeedbackWaiter(
+    waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>,
+  ): void {
     this.store.setFeedbackWaiter(waiter)
   }
 
@@ -36,15 +38,28 @@ export class NodeCommandPolicyService {
     return this.store.getLists()
   }
 
-  async addRule(listName: CommandPolicyListName, rule: string): Promise<CommandPolicyLists> {
+  async addRule(
+    listName: CommandPolicyListName,
+    rule: string,
+  ): Promise<CommandPolicyLists> {
     return this.store.addRule(listName, rule)
   }
 
-  async deleteRule(listName: CommandPolicyListName, rule: string): Promise<CommandPolicyLists> {
+  async deleteRule(
+    listName: CommandPolicyListName,
+    rule: string,
+  ): Promise<CommandPolicyLists> {
     return this.store.deleteRule(listName, rule)
   }
 
-  async evaluate(command: string, mode: CommandPolicyMode): Promise<'allow' | 'deny' | 'ask'> {
+  async setLists(lists: CommandPolicyLists): Promise<CommandPolicyLists> {
+    return this.store.setLists(lists)
+  }
+
+  async evaluate(
+    command: string,
+    mode: CommandPolicyMode,
+  ): Promise<'allow' | 'deny' | 'ask'> {
     return this.store.evaluate(command, mode)
   }
 

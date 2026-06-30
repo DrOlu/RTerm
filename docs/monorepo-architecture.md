@@ -11,7 +11,7 @@ Frontend implementation must not be placed under `packages/backend`.
 
 1. Electron desktop app (`apps/electron`)
 2. Standalone backend process (`apps/gybackend`)
-3. TUI runtime (`apps/tui` wrapper + `packages/tui` core)
+3. Deprecated TUI runtime (`apps/tui` wrapper + `packages/tui` core)
 4. Mobile-web runtime (`apps/mobile-web` wrapper + `packages/mobile-web` core)
 
 ## Workspace Layout
@@ -22,12 +22,12 @@ GyShell/
 │   ├── electron/           # thin wrapper: entry/preload/build/package config
 │   ├── gybackend/          # thin wrapper: backend process entry
 │   ├── mobile-web/         # thin wrapper: vite host + mount entry
-│   └── tui/                # thin wrapper: CLI entry + binary build scripts
+│   └── tui/                # deprecated historical CLI wrapper
 ├── packages/
 │   ├── backend/            # core backend runtime (agent/gateway/terminal/services)
 │   ├── electron/           # electron-only implementation (main/gateway/settings/theme)
 │   ├── mobile-web/         # mobile-web UI implementation
-│   ├── tui/                # tui UI implementation
+│   ├── tui/                # deprecated historical tui UI implementation
 │   ├── ui/                 # desktop renderer UI implementation
 │   └── shared/             # shared cross-surface models/utilities
 ├── docs/
@@ -74,7 +74,7 @@ GyShell/
 
 ### `packages/tui`
 
-- TUI runtime core:
+- Deprecated and unsupported TUI runtime core:
   - session state
   - composer/input workflows
   - gateway client integration
@@ -109,7 +109,7 @@ The desktop runtime chain is intentionally layered:
 5. Create `WebSocketGatewayControlService` and apply websocket policy
 6. Create `MobileWebServerService` for bundled mobile-web hosting
 7. Create `ResourceMonitorService` + `MonitorWindowRegistry`
-8. Desktop renderer windows, TUI, and mobile-web connect through the shared gateway semantics
+8. Desktop renderer windows and mobile-web connect through the shared gateway semantics
 
 ## Gateway and Session Invariants
 
@@ -168,4 +168,4 @@ Linux desktop packaging is driven by `apps/electron/electron-builder.yml` and de
 - `apps/electron/scripts/postinstall-linux.sh`
 - icon resources under `apps/electron/materials/icons`
 
-Desktop Linux packages also carry the bundled CLI runtime and bundled mobile-web frontend as extra resources.
+Desktop Linux packages carry bundled mobile-web frontend assets as extra resources. `gyll` / CLI TUI is deprecated and must not be bundled in desktop packages.

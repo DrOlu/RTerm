@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import { observer } from 'mobx-react-lite'
 import type { AppStore } from '../../stores/AppStore'
 import { getPanelKindUiItem, PANEL_KIND_UI_ORDER } from './panelKindUiRegistry'
+import { LayoutSlotRailControls } from './LayoutSlotRailControls'
 import './panelTypeRail.scss'
 
 interface PanelTypeRailProps {
@@ -47,27 +48,30 @@ export const PanelTypeRail: React.FC<PanelTypeRailProps> = observer(({
 
   return (
     <div className="gyshell-panel-type-rail">
-      {PANEL_KIND_UI_ORDER.map((kind) => {
-        const item = getPanelKindUiItem(kind)
-        const Icon = item.icon
-        const ownerTabCount = item.getOwnerTabCount(store)
-        const panelCount = store.layout.getPanelIdsByKind(kind).length
-        const isDetached = panelCount === 0
-        const tooltip = railTooltipByKind[kind]
-        return (
-          <button
-            key={kind}
-            className={clsx('gyshell-panel-type-rail-btn', {
-              'is-detached': isDetached
-            })}
-            title={`${t.layout[item.labelKey]} · ${tooltip}`}
-            onClick={() => handleCreate(kind)}
-          >
-            <Icon size={14} strokeWidth={2.2} />
-            <span className="gyshell-panel-type-rail-count">{ownerTabCount}</span>
-          </button>
-        )
-      })}
+      <div className="gyshell-panel-type-rail-main">
+        {PANEL_KIND_UI_ORDER.map((kind) => {
+          const item = getPanelKindUiItem(kind)
+          const Icon = item.icon
+          const ownerTabCount = item.getOwnerTabCount(store)
+          const panelCount = store.layout.getPanelIdsByKind(kind).length
+          const isDetached = panelCount === 0
+          const tooltip = railTooltipByKind[kind]
+          return (
+            <button
+              key={kind}
+              className={clsx('gyshell-panel-type-rail-btn', {
+                'is-detached': isDetached
+              })}
+              title={`${t.layout[item.labelKey]} · ${tooltip}`}
+              onClick={() => handleCreate(kind)}
+            >
+              <Icon size={14} strokeWidth={2.2} />
+              <span className="gyshell-panel-type-rail-count">{ownerTabCount}</span>
+            </button>
+          )
+        })}
+      </div>
+      <LayoutSlotRailControls store={store} />
     </div>
   )
 })

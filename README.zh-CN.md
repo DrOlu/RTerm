@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#核心能力)
 
 [English README](./README.md) | 中文 README  
-最新发布说明：[`changelogs/v1.5.2.md`](./changelogs/v1.5.2.md)
+最新发布说明：[`changelogs/v1.5.3.md`](./changelogs/v1.5.3.md)
 
 如果有任何建议或者问题，欢迎在 [GitHub Discussions](https://github.com/MrOrangeJJ/RTerm/discussions) 中提交。
 
@@ -40,9 +40,10 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 - **持续执行闭环**：读取输出 -> 判断状态 -> 继续推进。
 - **天然可干预**：你可以随时接管，不打断工作流。
 - **多标签并行调度**：编译、看日志、修复可跨标签协同。
-- **工作区可恢复**：terminal tab 与面板布局可跨重启恢复，快速续作。
+- **工作区可恢复**：terminal tab、面板布局和已保存布局槽位可跨重启恢复，快速续作。
 - **可拆分的多窗口工作区**：面板可独立成子窗口，标签和整块面板都能跨窗口移动。
 - **自适应的面板标签显示**：窄 header 下可切成紧凑选择器，宽空间下保留完整标签栏。
+- **可复用的 Agent Setting 配置档**：保存并重新应用模型、工具、策略、memory 和 workflow flags 组成的完整运行配置。
 - **集成文件管理**：可视化文件浏览、编辑、跨本地/SSH 会话传输，无需离开工作区。
 - **实时资源可视化**：本地与 SSH 会话都可直接查看 CPU、内存、磁盘、网络、进程、套接字、GPU 等信息。
 - **OpenClawd 风格远程对话控制**：核心运行在你自己的电脑上，你可以在任何地方通过对话持续控制。
@@ -60,20 +61,20 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 - **面向多设备协作**：桌面端 + TUI + Mobile Web 共用网关语义。
 - **面向多模态执行**：单轮里可组合文字与图片输入，直接推进真实任务。
 
-## v1.5.2 关键亮点
+## v1.5.3 关键亮点
 
-- **运行期间阻止系统睡眠**
-  - 新增 **运行时阻止系统睡眠** 设置：只要有任意对话会话正在运行就保持电脑唤醒，这样你离开时长时间的自主任务也不会卡住——屏幕仍可熄灭，且所有运行结束后阻止会自动解除
-- **本地终端在 shell 退出时保持存活**
-  - 如果 **本地** 终端的 shell 进程退出（你输入 `exit`，或它崩溃），GyShell 会在同一个 tab 内重新拉起一个全新的 shell——保留该 tab 的标题与尺寸——而不是留下一个"已退出"的死 tab
-- **重新连接已断开的 SSH 终端**
-  - 已断开（已退出）的 **SSH** tab 现在会在右键菜单中提供 **重新连接** 操作，用该 tab 保存的 SSH 配置在原地重建连接，复用同一个 tab
-- **试验性的 Agent 跨 tab 文件传输**
-  - 两个 **试验性、默认关闭** 的 Agent 工具（`copy_between_tabs` / `read_file_transfer_status`）让 Agent 可以在 **不同机器** 的 tab 之间执行 **异步、仅复制** 的文件传输并轮询进度；任务会出现在「传输任务」面板中，带 **AGENT / 用户** 来源徽标和新的 **扫描中** 阶段
-- **更清晰的聊天与终端标签指示器**
-  - 聊天 tab 现在会在会话繁忙时显示绿色 **"运行中"圆点**（与终端 tab 一致），标签样式 / 关闭按钮也做了统一，让聊天、终端与紧凑标签选择器三处更清爽克制
-- **更有韧性的 Agent 流式循环**
-  - 那些以 `tool_calls` 结束、却不下发任何真正工具调用内容的提供方（例如某些 GLM 兼容接口）不会再让一轮对话走入死胡同——GyShell 会识别这种畸形结束，并在放弃前以非流式请求重试一次
+- **已保存工作区布局槽位**
+  - 可从 Rail 保存最多 3 个编号工作区布局，点击即可恢复，右键可覆盖或删除；已保存布局会保留 v2 分屏树、panel tab 绑定、活跃 tab，以及兼容用的旧布局投影
+- **Agent Setting 配置档**
+  - 可保存最多 5 套完整 Agent 运行配置，覆盖模型 Profile、命令策略、内置工具、MCP servers、Skills、memory、递归限制和 workflow experimental flags；应用配置档后也会切到对应的 profile-scoped `memory.md`
+- **更完整的 Mobile Web 远程操控**
+  - Mobile Web 现在有更清晰的会话状态、待审批跳转 badge、分支与回滚操作、任务完成 toast、更稳的重连逻辑，以及 Skills、Tools、Agent Setting Profiles 等设置子页面
+- **移动端只读终端控制**
+  - Mobile Web 可轮询终端输出尾部、显示未读输出提示、创建本地或已保存 SSH terminal tab、关闭 tab（保护最后一个）、刷新输出，并重连已退出的 SSH tab
+- **桌面 `gyll` CLI/TUI 已废弃**
+  - 桌面安装包不再内置或安装 `gyll` / `gyll-tui`；启动时只会清理包含旧版 `GYLL_BIN` 标记的桌面端 launcher，保留无关文件和 shell profile PATH block
+- **字体与可读性打磨**
+  - 渲染层改回原生字体平滑，xterm 显式设置普通/粗体字重，让终端和小字号 UI 的显示更稳定
 
 ---
 
@@ -84,12 +85,13 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 - 面向复杂任务的思考式执行流程。
 - 基于终端上下文和选中资源的上下文感知。
 - 支持按 Profile 分配 `Global`、`Thinking`、`Action`、`Compaction` 四类模型角色。
+- 支持可复用 Agent Setting 配置档，保存模型 Profile、安全策略、工具、Skills、memory、递归和实验 workflow flags。
 - 长会话智能压缩与独立压缩模型链路。
 - 会话与 UI 历史改为基于 SQLite 持久化，并支持从旧 JSON 存储自动做一次迁移。
 - 支持基于当前 tab 最近上下文生成命令草稿，并保留”先粘贴、再由你决定是否执行”的控制权。
 - 后台（nowait）命令完成后会自动通知 Agent，无需轮询即可形成异步闭环。
 - 对话面板支持 `传统模式` 与 `无感模式` 两种 Agent 活动呈现方式。
-- 支持通过 `memory.md` 注入全局持久记忆。
+- 支持通过 `memory.md` 注入持久记忆；当应用 Agent Setting 配置档时，memory 会按活跃配置档隔离。
 - 支持多模态输入链路（文字 + 图片）。
 - 支持 OpenAI 兼容接口模型，并能在遇到"空的畸形工具调用结束"流时自动恢复。
 - 提供可选的试验性 Agent 工具，包括在终端 tab 之间进行异步跨机器文件传输并轮询进度。
@@ -116,6 +118,7 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 ### 工作区与监控
 
 - 面板可拆到独立子窗口，标签和整块面板都能跨窗口移动。
+- 可保存最多 3 个工作区布局槽位，并从 Rail 快速恢复。
 - 可选在任意对话会话运行期间保持电脑唤醒，运行结束后自动解除系统睡眠阻止。
 - 聊天 tab 会在会话繁忙时显示运行中指示器，与终端 tab 的运行状态圆点一致。
 - 可按空间在 `自动`、`展开`、`Select` 三种 panel tab 显示模式之间切换。
@@ -139,9 +142,12 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 - 桌面端可直接托管 Mobile Web，并在设置中复制访问链接。
 - 支持 OpenClawd 风格的对话式远程操控（核心运行在你的电脑上）。
 - 会话列表支持搜索和运行状态提示。
+- 支持待审批 badge 与跳转到阻塞会话，并在任务完成时显示 toast。
+- 支持在移动端执行对话回滚与从消息分支。
 - 会话列表支持左滑删除，移动端清理更高效。
+- 支持只读终端输出尾部、未读输出提示、本地/已保存 SSH terminal 创建，以及 SSH 重连。
 - 可在移动端查看单轮详细事件链路。
-- 通过网关 RPC 统一访问工具、技能、终端、设置能力。
+- 通过网关 RPC 统一访问工具、技能、Agent Setting Profiles、终端和设置能力。
 - 网关暴露范围支持仅本机、仅局域网、自定义 CIDR 范围和全部网卡。
 
 ---
@@ -150,13 +156,13 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 
 1. **Electron 桌面端**（`apps/electron`）
 2. **独立后端运行时**（`apps/gybackend`）
-3. **TUI 运行时**（`apps/tui` + `packages/tui`）
+3. **已废弃的 TUI 运行时**（`apps/tui` + `packages/tui`）
 4. **Mobile Web 运行时**（`apps/mobile-web` + `packages/mobile-web`）
 
 ### 怎么选入口？
 
 - **桌面端**：主力全功能体验，适合日常开发。
-- **TUI（`gyll`）**：键盘优先、终端原生、自动化友好，并可做多标签并行调度。
+- **TUI（`gyll`）**：已废弃且不再提供支持。桌面安装包不再内置或安装 `gyll`。
 - **Mobile Web**：OpenClawd 风格远程对话控制，适合随时随地接管活跃会话。
 
 ---
@@ -196,62 +202,13 @@ gyll "规划并执行：运行测试、修复失败并总结改动"
 npm run dev:mobile-web
 ```
 
-### TUI 开发
-
-```bash
-npm run dev:tui
-```
-
 ---
 
-## 桌面版内置 CLI（`gyll`）
+## 已废弃 CLI（`gyll`）
 
 安装并启动一次 RTerm 桌面版后，可使用 `gyll`。
 
-不传 `--url` 时，CLI 会尝试连接本机桌面后端（默认 `127.0.0.1:17888`）。
-
-```bash
-gyll --help
-gyll --url ip:port
-gyll --url ip:port --token <access_token>
-gyll --url ip:port "你好"
-gyll --url ip:port --token <access_token> "你好"
-gyll run --url ip:port "执行任务"
-gyll hook --url ip:port "发送后退出"
-```
-
-本机快速模式：
-
-```bash
-gyll
-gyll "你好"
-gyll run "执行任务"
-gyll hook "发送后退出"
-```
-
-模式区别：
-
-- `gyll`：进入交互式 TUI。
-- `gyll "消息"`：新建会话并发送首条消息，然后进入 TUI。
-- `gyll run "消息"`：新建会话并在终端流式输出，不进入 TUI。
-- `gyll hook "消息"`：新建会话，发送一次后立即退出。
-
-连接到非本机 websocket 网关时，请附带 `--token <access_token>`。
-
-恢复指定会话：
-
-```bash
-gyll --sessionid "your-session-id"
-```
-
-`hook` 模式适合长流程任务中的回调唤醒场景。
-
-### `gyll` 常见使用模式
-
-- **交互协作**：`gyll`
-- **先发一条再进入 TUI**：`gyll "消息"`
-- **偏自动化流式输出**：`gyll run "消息"`
-- **回调信号 / 自唤醒**：`gyll hook "消息"`
+从旧版本升级的用户，启动新版 app 时会清理旧版桌面端自动生成的 `gyll` launcher，但保留 shell profile 中已有的 PATH block。
 
 ---
 
@@ -284,7 +241,7 @@ RTerm 采用严格分层：
 
 ## 延伸阅读
 
-- 发布说明：`changelogs/v1.5.2.md`
+- 发布说明：`changelogs/v1.5.3.md`
 - 构建与打包命令矩阵：`docs/build-commands.md`
 - Monorepo 边界与运行链路：`docs/monorepo-architecture.md`
 

@@ -7,11 +7,12 @@ import {
 
 // Types (duplicated to avoid cross-project imports)
 interface BackendSettings {
-  schemaVersion: 3;
+  schemaVersion: 4;
   commandPolicyMode: "safe" | "standard" | "smart";
   memory?: {
     enabled: boolean;
   };
+  agentSettings?: AgentSettingState;
   tools: {
     builtIn: Record<string, boolean>;
     skills?: Record<string, boolean>;
@@ -95,6 +96,8 @@ interface BackendSettings {
     panelSizes?: number[];
     panelOrder?: string[];
     v2?: unknown;
+    savedLayouts?: unknown;
+    activeSavedLayoutId?: string | null;
   };
   recursionLimit?: number;
   debugMode?: boolean;
@@ -161,6 +164,45 @@ interface CommandPolicyLists {
   allowlist: string[];
   denylist: string[];
   asklist: string[];
+}
+
+type AgentSettingSlotNumber = 1 | 2 | 3 | 4 | 5;
+
+interface AgentSettingSnapshot {
+  version: 1;
+  security: {
+    commandPolicyMode: BackendSettings["commandPolicyMode"];
+    commandPolicyLists: CommandPolicyLists;
+  };
+  tools: {
+    builtIn: Record<string, boolean>;
+    mcp: Record<string, boolean>;
+  };
+  skills: Record<string, boolean>;
+  memory: {
+    enabled: boolean;
+  };
+  workflow: {
+    recursionLimit: number;
+    experimental: NonNullable<BackendSettings["experimental"]>;
+  };
+  model: {
+    activeProfileId: string;
+    activeProfileName?: string;
+  };
+}
+
+interface AgentSettingProfile {
+  id: string;
+  slotNumber: AgentSettingSlotNumber;
+  createdAt: number;
+  updatedAt: number;
+  snapshot: AgentSettingSnapshot;
+}
+
+interface AgentSettingState {
+  profiles: AgentSettingProfile[];
+  activeProfileId: string | null;
 }
 
 type AgentEventType =
@@ -267,6 +309,17 @@ interface SkillStatusSummary {
 interface MemorySnapshot {
   filePath: string;
   content: string;
+}
+
+interface AgentSettingOperationResult {
+  settings: BackendSettings;
+  agentSettings: AgentSettingState;
+  commandPolicyLists: CommandPolicyLists;
+  mcpTools: McpToolSummary[];
+  builtInTools: BuiltInToolSummary[];
+  skills: SkillStatusSummary[];
+  memory: MemorySnapshot;
+  warnings: string[];
 }
 
 interface AccessTokenSummary {
@@ -482,6 +535,10 @@ export interface GyShellAPI {
     ) => Promise<BackendSettings["gateway"]["ws"]>;
     openCommandPolicyFile: () => Promise<void>;
     getCommandPolicyLists: () => Promise<CommandPolicyLists>;
+    onUpdated: (callback: (settings: BackendSettings) => void) => () => void;
+    onCommandPolicyListsUpdated: (
+      callback: (lists: CommandPolicyLists) => void,
+    ) => () => void;
     addCommandPolicyRule: (
       listName: "allowlist" | "denylist" | "asklist",
       rule: string,
@@ -776,6 +833,15 @@ export interface GyShellAPI {
     get: () => Promise<MemorySnapshot>;
     setContent: (content: string) => Promise<MemorySnapshot>;
     openFile: () => Promise<void>;
+    onUpdated: (callback: (snapshot: MemorySnapshot) => void) => () => void;
+  };
+
+  agentSettings: {
+    get: () => Promise<AgentSettingState>;
+    saveCurrent: () => Promise<AgentSettingOperationResult>;
+    apply: (profileId: string) => Promise<AgentSettingOperationResult>;
+    overwrite: (profileId: string) => Promise<AgentSettingOperationResult>;
+    delete: (profileId: string) => Promise<AgentSettingOperationResult>;
   };
 
   version: {
@@ -888,6 +954,21 @@ const api: GyShellAPI = {
       ipcRenderer.invoke("settings:openCommandPolicyFile"),
     getCommandPolicyLists: () =>
       ipcRenderer.invoke("settings:getCommandPolicyLists"),
+    onUpdated: (callback: (settings: BackendSettings) => void) => {
+      const handler = (_: IpcRendererEvent, settings: BackendSettings) =>
+        callback(settings);
+      ipcRenderer.on("settings:updated", handler);
+      return () => ipcRenderer.off("settings:updated", handler);
+    },
+    onCommandPolicyListsUpdated: (
+      callback: (lists: CommandPolicyLists) => void,
+    ) => {
+      const handler = (_: IpcRendererEvent, lists: CommandPolicyLists) =>
+        callback(lists);
+      ipcRenderer.on("settings:commandPolicyListsUpdated", handler);
+      return () =>
+        ipcRenderer.off("settings:commandPolicyListsUpdated", handler);
+    },
     addCommandPolicyRule: (listName, rule) =>
       ipcRenderer.invoke("settings:addCommandPolicyRule", listName, rule),
     deleteCommandPolicyRule: (listName, rule) =>
@@ -1056,20 +1137,18 @@ const api: GyShellAPI = {
       return () => ipcRenderer.off("filesystem:transferProgress", handler);
     },
     onTransferTaskUpdated: (callback) => {
-      const handler = (_: IpcRendererEvent, payload: FileTransferTaskSnapshot) =>
-        callback(payload);
-      ipcRenderer.on("filesystem:transferTaskUpdated", handler);
-      return () =>
-        ipcRenderer.off("filesystem:transferTaskUpdated", handler);
-    },
-    onTransferTaskRemoved: (callback) => {
       const handler = (
         _: IpcRendererEvent,
-        payload: { transferId: string },
+        payload: FileTransferTaskSnapshot,
       ) => callback(payload);
+      ipcRenderer.on("filesystem:transferTaskUpdated", handler);
+      return () => ipcRenderer.off("filesystem:transferTaskUpdated", handler);
+    },
+    onTransferTaskRemoved: (callback) => {
+      const handler = (_: IpcRendererEvent, payload: { transferId: string }) =>
+        callback(payload);
       ipcRenderer.on("filesystem:transferTaskRemoved", handler);
-      return () =>
-        ipcRenderer.off("filesystem:transferTaskRemoved", handler);
+      return () => ipcRenderer.off("filesystem:transferTaskRemoved", handler);
     },
   },
 
@@ -1205,6 +1284,22 @@ const api: GyShellAPI = {
     setContent: (content: string) =>
       ipcRenderer.invoke("memory:setContent", content),
     openFile: () => ipcRenderer.invoke("memory:openFile"),
+    onUpdated: (callback: (snapshot: MemorySnapshot) => void) => {
+      const handler = (_: IpcRendererEvent, snapshot: MemorySnapshot) =>
+        callback(snapshot);
+      ipcRenderer.on("memory:updated", handler);
+      return () => ipcRenderer.off("memory:updated", handler);
+    },
+  },
+  agentSettings: {
+    get: () => ipcRenderer.invoke("agentSettings:get"),
+    saveCurrent: () => ipcRenderer.invoke("agentSettings:saveCurrent"),
+    apply: (profileId: string) =>
+      ipcRenderer.invoke("agentSettings:apply", profileId),
+    overwrite: (profileId: string) =>
+      ipcRenderer.invoke("agentSettings:overwrite", profileId),
+    delete: (profileId: string) =>
+      ipcRenderer.invoke("agentSettings:delete", profileId),
   },
   version: {
     getState: () => ipcRenderer.invoke("version:getState"),

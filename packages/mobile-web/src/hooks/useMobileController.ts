@@ -42,21 +42,36 @@ import {
   buildSshConnectionSummaries,
   collectEnabledSkillNames,
   compactStatusLabel,
+  countPendingApprovals,
+  deriveSessionStatus,
   fetchSkillsSnapshot,
   fetchToolsSnapshot,
+  findFirstApprovalSession,
   mergeSkillsByName,
+  normalizeAgentSettingState,
   normalizeBuiltInTool,
   normalizeConnectionsSnapshot,
   normalizeMemorySnapshot,
   normalizeMcpServer,
   normalizeSkillItem,
+  normalizeCommandPolicyLists,
+  readCommandPolicyModeFromSettings,
   readMemoryEnabledFromSettings,
+  readProfilesFromSettings,
   safeError,
   toSshConfig,
+  type SessionStatusInfo,
 } from "./mobileControllerHelpers";
+import {
+  useTerminalBuffer,
+  type TerminalBufferEntry,
+} from "./useTerminalBuffer";
 import type {
+  AgentSettingStateSummary,
   BuiltInToolSummary,
   ChatMessage,
+  CommandPolicyLists,
+  CommandPolicyMode,
   CreateTerminalTarget,
   GatewayConnectionsSnapshot,
   GatewayMemorySnapshot,
@@ -83,13 +98,19 @@ interface ViewState {
   builtInTools: BuiltInToolSummary[];
   profiles: GatewayProfileSummary[];
   activeProfileId: string;
+  agentSettings: AgentSettingStateSummary | null;
   memoryEnabled: boolean;
+  commandPolicyMode: CommandPolicyMode;
+  commandPolicyLists: CommandPolicyLists;
   memory: GatewayMemorySnapshot;
   sessions: Record<string, SessionState>;
   sessionMeta: Record<string, SessionMeta>;
   sessionOrder: string[];
   activeSessionId: string | null;
   statusLine: string;
+  desktopActive: boolean;
+  reconnectingTerminalId: string | null;
+  reconnectError: string;
 }
 
 const INITIAL_VIEW_STATE: ViewState = {
@@ -101,13 +122,23 @@ const INITIAL_VIEW_STATE: ViewState = {
   builtInTools: [],
   profiles: [],
   activeProfileId: "",
+  agentSettings: null,
   memoryEnabled: true,
+  commandPolicyMode: "standard",
+  commandPolicyLists: {
+    allowlist: [],
+    denylist: [],
+    asklist: [],
+  },
   memory: { filePath: "", content: "" },
   sessions: {},
   sessionMeta: {},
   sessionOrder: [],
   activeSessionId: null,
   statusLine: "Ready",
+  desktopActive: false,
+  reconnectingTerminalId: null,
+  reconnectError: "",
 };
 
 const RECONNECT_BASE_DELAY_MS = 800;
@@ -161,7 +192,13 @@ export interface MobileControllerState {
   builtInTools: BuiltInToolSummary[];
   profiles: GatewayProfileSummary[];
   activeProfileId: string;
+  agentSettings: AgentSettingStateSummary | null;
+  agentSettingsLoading: boolean;
+  agentSettingsError: string;
+  agentSettingsSaving: boolean;
   memoryEnabled: boolean;
+  commandPolicyMode: CommandPolicyMode;
+  commandPolicyLists: CommandPolicyLists;
   memoryFilePath: string;
   memoryContent: string;
   activeSession: SessionState | null;
@@ -175,6 +212,14 @@ export interface MobileControllerState {
   latestTokens: number;
   latestMaxTokens: number;
   tokenUsagePercent: number | null;
+  pendingApprovalCount: number;
+  firstApprovalSessionId: string | null;
+  desktopActive: boolean;
+  reconnectingTerminalId: string | null;
+  reconnectError: string;
+  sessionStatuses: Record<string, SessionStatusInfo>;
+  sessionTokenPercents: Record<string, number | null>;
+  terminalBuffers: Record<string, TerminalBufferEntry>;
 }
 
 export interface MobileControllerActions {
@@ -206,8 +251,21 @@ export interface MobileControllerActions {
   setBuiltInToolEnabled: (name: string, enabled: boolean) => Promise<void>;
   replyAsk: (message: ChatMessage, decision: "allow" | "deny") => Promise<void>;
   rollbackToMessage: (sessionId: string, messageId: string) => Promise<boolean>;
+  branchFromMessage: (
+    sessionId: string,
+    messageId: string,
+  ) => Promise<string | null>;
   createTerminalTab: (target?: CreateTerminalTarget) => Promise<void>;
   closeTerminalTab: (terminalId: string) => Promise<void>;
+  reconnectTerminalTab: (terminalId: string) => Promise<boolean>;
+  clearReconnectError: () => void;
+  refreshTerminalBuffers: () => void;
+  markTerminalBufferSeen: (terminalId: string) => void;
+  reloadAgentSettings: () => Promise<void>;
+  saveCurrentAgentSetting: () => Promise<boolean>;
+  applyAgentSetting: (profileId: string) => Promise<boolean>;
+  overwriteAgentSetting: (profileId: string) => Promise<boolean>;
+  deleteAgentSetting: (profileId: string) => Promise<boolean>;
 }
 
 export function useMobileController(): {
@@ -236,6 +294,11 @@ export function useMobileController(): {
   const [composerImages, setComposerImagesRaw] = React.useState<
     ComposerImageAttachment[]
   >([]);
+
+  const [agentSettingsLoading, setAgentSettingsLoading] =
+    React.useState(false);
+  const [agentSettingsSaving, setAgentSettingsSaving] = React.useState(false);
+  const [agentSettingsError, setAgentSettingsError] = React.useState("");
 
   const [view, setView] = React.useState<ViewState>(INITIAL_VIEW_STATE);
   const viewRef = React.useRef<ViewState>(INITIAL_VIEW_STATE);
@@ -326,6 +389,16 @@ export function useMobileController(): {
   const tokenUsage = React.useMemo(
     () => getLatestTokenUsage(sessionMessages),
     [sessionMessages],
+  );
+
+  const terminalIds = React.useMemo(
+    () => view.terminals.map((terminal) => terminal.id),
+    [view.terminals],
+  );
+  const terminalBuffer = useTerminalBuffer(
+    client,
+    connectionStatus === "connected",
+    terminalIds,
   );
 
   const mentionState = React.useMemo(() => {
@@ -419,9 +492,15 @@ export function useMobileController(): {
         tunnels: [],
       };
       let memoryEnabled = true;
+      let commandPolicyMode: CommandPolicyMode = "standard";
       let memory: GatewayMemorySnapshot = {
         filePath: "",
         content: "",
+      };
+      let commandPolicyLists: CommandPolicyLists = {
+        allowlist: [],
+        denylist: [],
+        asklist: [],
       };
       try {
         const profilePayload = await client.request<{
@@ -459,8 +538,28 @@ export function useMobileController(): {
         );
         connections = normalizeConnectionsSnapshot(settingsPayload);
         memoryEnabled = readMemoryEnabledFromSettings(settingsPayload);
+        commandPolicyMode = readCommandPolicyModeFromSettings(settingsPayload);
+        const profileSnapshot = readProfilesFromSettings(settingsPayload);
+        if (profileSnapshot.profiles.length > 0) {
+          profiles = profileSnapshot.profiles;
+          activeProfileId = profileSnapshot.activeProfileId;
+        }
       } catch {
         connections = { ssh: [], proxies: [], tunnels: [] };
+      }
+
+      try {
+        const policyListsPayload = await client.request<unknown>(
+          "settings:getCommandPolicyLists",
+          {},
+        );
+        commandPolicyLists = normalizeCommandPolicyLists(policyListsPayload);
+      } catch {
+        commandPolicyLists = {
+          allowlist: [],
+          denylist: [],
+          asklist: [],
+        };
       }
 
       try {
@@ -468,6 +567,17 @@ export function useMobileController(): {
         memory = normalizeMemorySnapshot(memoryPayload);
       } catch {
         memory = { filePath: "", content: "" };
+      }
+
+      let agentSettings: AgentSettingStateSummary | null = null;
+      try {
+        const agentSettingsRaw = await client.request<unknown>(
+          "agentSettings:get",
+          {},
+        );
+        agentSettings = normalizeAgentSettingState(agentSettingsRaw);
+      } catch {
+        agentSettings = null;
       }
 
       const sessionPayload = await client.request<{
@@ -578,7 +688,10 @@ export function useMobileController(): {
         builtInTools,
         profiles,
         activeProfileId,
+        agentSettings,
         memoryEnabled,
+        commandPolicyMode,
+        commandPolicyLists,
         memory,
         sessions,
         sessionMeta,
@@ -590,6 +703,9 @@ export function useMobileController(): {
             : skillsUnavailable || toolsUnavailable
               ? `Connected: ${statusLineTarget} (skills unavailable)`
               : `Connected: ${statusLineTarget}`,
+        desktopActive: false,
+        reconnectingTerminalId: null,
+        reconnectError: "",
       });
     },
     [client],
@@ -871,6 +987,42 @@ export function useMobileController(): {
             ...previous,
             memory: nextMemory,
             statusLine: "Memory updated",
+          }));
+          return;
+        }
+
+        if (channel === "settings:updated") {
+          const profileSnapshot = readProfilesFromSettings(payload);
+          const nextConnections = normalizeConnectionsSnapshot(payload);
+          const nextMemoryEnabled = readMemoryEnabledFromSettings(payload);
+          const nextPolicyMode = readCommandPolicyModeFromSettings(payload);
+          const nextAgentSettings = normalizeAgentSettingState(
+            (payload as Record<string, unknown> | undefined)?.agentSettings,
+          );
+          setView((previous) => ({
+            ...previous,
+            connections: nextConnections,
+            sshConnections: buildSshConnectionSummaries(nextConnections),
+            profiles: profileSnapshot.profiles,
+            activeProfileId: profileSnapshot.activeProfileId,
+            memoryEnabled: nextMemoryEnabled,
+            commandPolicyMode: nextPolicyMode,
+            // Always apply the normalized snapshot, including the empty state.
+            // Gating on profiles.length > 0 would hide a legitimate "last
+            // profile deleted from another client" transition and leave stale
+            // profiles visible here.
+            agentSettings: nextAgentSettings,
+            statusLine: "Settings updated",
+          }));
+          return;
+        }
+
+        if (channel === "settings:commandPolicyListsUpdated") {
+          const nextLists = normalizeCommandPolicyLists(payload);
+          setView((previous) => ({
+            ...previous,
+            commandPolicyLists: nextLists,
+            statusLine: `Command policy updated (${nextLists.allowlist.length}/${nextLists.denylist.length}/${nextLists.asklist.length})`,
           }));
         }
       }),
@@ -1776,6 +1928,326 @@ export function useMobileController(): {
     saveGatewayAccessTokenToStorage(value);
   }, []);
 
+  const reloadAgentSettings = React.useCallback(async () => {
+    if (!client.isConnected()) return;
+    setAgentSettingsError("");
+    setAgentSettingsLoading(true);
+    try {
+      const raw = await client.request<unknown>("agentSettings:get", {});
+      const next = normalizeAgentSettingState(raw);
+      setView((previous) => ({
+        ...previous,
+        agentSettings: next,
+        statusLine: `Agent profiles loaded (${next.profiles.length})`,
+      }));
+    } catch (error) {
+      // Set an empty-but-non-null state so the panel stops auto-retrying.
+      // Leaving agentSettings === null would make AgentProfilesPanel's effect
+      // call onReload() again immediately (loading flips to false on failure,
+      // state is still null) → infinite retry loop on persistent failures.
+      setView((previous) => ({
+        ...previous,
+        agentSettings: { profiles: [], activeProfileId: null },
+      }));
+      setAgentSettingsError(safeError(error));
+    } finally {
+      setAgentSettingsLoading(false);
+    }
+  }, [client]);
+
+  const applyAgentSettingResult = React.useCallback(
+    (raw: unknown, statusLine: string) => {
+      const record =
+        raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+      const agentSettingsSource = record?.agentSettings ?? raw;
+      const state = normalizeAgentSettingState(agentSettingsSource);
+      setView((previous) => ({
+        ...previous,
+        agentSettings: state,
+        statusLine,
+        ...(record && "commandPolicyLists" in record
+          ? {
+              commandPolicyLists: normalizeCommandPolicyLists(
+                record.commandPolicyLists,
+              ),
+            }
+          : {}),
+        ...(record && "commandPolicyMode" in record
+          ? (() => {
+              const mode = record.commandPolicyMode;
+              return mode === "safe" || mode === "standard" || mode === "smart"
+                ? { commandPolicyMode: mode }
+                : {};
+            })()
+          : {}),
+      }));
+    },
+    [],
+  );
+
+  const saveCurrentAgentSetting = React.useCallback(async (): Promise<boolean> => {
+    if (!client.isConnected()) {
+      setConnectionError("Gateway is not connected");
+      return false;
+    }
+    setAgentSettingsSaving(true);
+    setAgentSettingsError("");
+    try {
+      const raw = await client.request<unknown>(
+        "agentSettings:saveCurrent",
+        {},
+      );
+      applyAgentSettingResult(raw, "Agent profile saved");
+      return true;
+    } catch (error) {
+      const message = safeError(error);
+      setAgentSettingsError(
+        message.includes("slots")
+          ? message
+          : `Failed to save agent profile: ${message}`,
+      );
+      return false;
+    } finally {
+      setAgentSettingsSaving(false);
+    }
+  }, [applyAgentSettingResult, client]);
+
+  const applyAgentSetting = React.useCallback(
+    async (profileId: string): Promise<boolean> => {
+      if (!profileId || !client.isConnected()) {
+        setConnectionError("Gateway is not connected");
+        return false;
+      }
+      setAgentSettingsSaving(true);
+      setAgentSettingsError("");
+      try {
+        const raw = await client.request<unknown>("agentSettings:apply", {
+          profileId,
+        });
+        applyAgentSettingResult(raw, "Agent profile applied");
+        return true;
+      } catch (error) {
+        setAgentSettingsError(`Failed to apply agent profile: ${safeError(error)}`);
+        return false;
+      } finally {
+        setAgentSettingsSaving(false);
+      }
+    },
+    [applyAgentSettingResult, client],
+  );
+
+  const overwriteAgentSetting = React.useCallback(
+    async (profileId: string): Promise<boolean> => {
+      if (!profileId || !client.isConnected()) {
+        setConnectionError("Gateway is not connected");
+        return false;
+      }
+      setAgentSettingsSaving(true);
+      setAgentSettingsError("");
+      try {
+        const raw = await client.request<unknown>("agentSettings:overwrite", {
+          profileId,
+        });
+        applyAgentSettingResult(raw, "Agent profile overwritten");
+        return true;
+      } catch (error) {
+        setAgentSettingsError(
+          `Failed to overwrite agent profile: ${safeError(error)}`,
+        );
+        return false;
+      } finally {
+        setAgentSettingsSaving(false);
+      }
+    },
+    [applyAgentSettingResult, client],
+  );
+
+  const deleteAgentSetting = React.useCallback(
+    async (profileId: string): Promise<boolean> => {
+      if (!profileId || !client.isConnected()) {
+        setConnectionError("Gateway is not connected");
+        return false;
+      }
+      setAgentSettingsSaving(true);
+      setAgentSettingsError("");
+      try {
+        const raw = await client.request<unknown>("agentSettings:delete", {
+          profileId,
+        });
+        applyAgentSettingResult(raw, "Agent profile deleted");
+        return true;
+      } catch (error) {
+        setAgentSettingsError(
+          `Failed to delete agent profile: ${safeError(error)}`,
+        );
+        return false;
+      } finally {
+        setAgentSettingsSaving(false);
+      }
+    },
+    [applyAgentSettingResult, client],
+  );
+
+  const branchFromMessage = React.useCallback(
+    async (
+      sessionId: string,
+      messageId: string,
+    ): Promise<string | null> => {
+      if (!sessionId || !messageId) return null;
+      if (!client.isConnected()) {
+        setConnectionError("Gateway is not connected");
+        return null;
+      }
+      setActionPending(true);
+      try {
+        const payload = await client.request<{
+          ok: boolean;
+          sessionId?: string;
+          title?: string;
+          messageCount?: number;
+          reason?: string;
+        }>("agent:branchFromMessage", { sessionId, messageId });
+        if (!payload?.ok || !payload.sessionId) {
+          setConnectionError(payload?.reason || "Branch failed");
+          return null;
+        }
+        const branchSessionId = payload.sessionId;
+        // Load the branched session snapshot and surface it as the new active session.
+        try {
+          const snapshotPayload = await client.request<{
+            session: GatewaySessionSnapshot;
+          }>("session:get", { sessionId: branchSessionId });
+          const snapshot = snapshotPayload.session;
+          setView((previous) => {
+            const sessions = { ...previous.sessions };
+            const sessionMeta = { ...previous.sessionMeta };
+            const nextSession = createSessionState(
+              branchSessionId,
+              snapshot.title || payload.title || "Branched Session",
+            );
+            nextSession.messages = (snapshot.messages || []).map(cloneMessage);
+            nextSession.isBusy = snapshot.isBusy === true;
+            nextSession.isThinking = snapshot.isBusy === true;
+            nextSession.lockedProfileId = snapshot.lockedProfileId || null;
+            sessions[branchSessionId] = nextSession;
+            sessionMeta[branchSessionId] = {
+              id: branchSessionId,
+              title: nextSession.title,
+              updatedAt: snapshot.updatedAt || Date.now(),
+              messagesCount: nextSession.messages.length,
+              lastMessagePreview: previewFromSession(nextSession),
+              loaded: true,
+            };
+            const sessionOrder = [
+              branchSessionId,
+              ...previous.sessionOrder.filter((id) => id !== branchSessionId),
+            ];
+            return {
+              ...previous,
+              sessions,
+              sessionMeta,
+              sessionOrder: reorderSessionIds(sessionOrder, sessionMeta),
+              activeSessionId: branchSessionId,
+              statusLine: `Branched session ${branchSessionId.slice(0, 8)}`,
+            };
+          });
+        } catch {
+          // Snapshot load failed; still switch active so user sees the branch attempt.
+          setView((previous) => ({
+            ...previous,
+            activeSessionId: branchSessionId,
+            sessionOrder: [
+              branchSessionId,
+              ...previous.sessionOrder.filter((id) => id !== branchSessionId),
+            ],
+            statusLine: `Branched session ${branchSessionId.slice(0, 8)}`,
+          }));
+        }
+        return branchSessionId;
+      } catch (error) {
+        setConnectionError(`Failed to branch: ${safeError(error)}`);
+        return null;
+      } finally {
+        setActionPending(false);
+      }
+    },
+    [client],
+  );
+
+  const reconnectTerminalTab = React.useCallback(
+    async (terminalId: string): Promise<boolean> => {
+      if (!terminalId || !client.isConnected()) {
+        setConnectionError("Gateway is not connected");
+        return false;
+      }
+      setView((previous) => ({
+        ...previous,
+        reconnectingTerminalId: terminalId,
+        reconnectError: "",
+      }));
+      try {
+        await client.request<{ id: string }>("terminal:reconnect", {
+          terminalId,
+        });
+        const payload = await client.request<{
+          terminals: GatewayTerminalSummary[];
+        }>("terminal:list", {});
+        setView((previous) => ({
+          ...previous,
+          terminals: payload.terminals || [],
+          reconnectingTerminalId: null,
+          statusLine: "SSH terminal reconnected",
+        }));
+        return true;
+      } catch (error) {
+        setView((previous) => ({
+          ...previous,
+          reconnectingTerminalId: null,
+          reconnectError: safeError(error),
+        }));
+        return false;
+      }
+    },
+    [client],
+  );
+
+  const clearReconnectError = React.useCallback(() => {
+    setView((previous) =>
+      previous.reconnectError === "" && previous.reconnectingTerminalId === null
+        ? previous
+        : { ...previous, reconnectError: "", reconnectingTerminalId: null },
+    );
+  }, []);
+
+  const pendingApprovalCount = React.useMemo(
+    () => countPendingApprovals(view.sessions),
+    [view.sessions],
+  );
+  const firstApprovalSessionId = React.useMemo(
+    () =>
+      findFirstApprovalSession(
+        view.sessionOrder,
+        view.sessionMeta,
+        view.sessions,
+      ),
+    [view.sessionOrder, view.sessionMeta, view.sessions],
+  );
+  const sessionStatuses = React.useMemo(() => {
+    const map: Record<string, SessionStatusInfo> = {};
+    for (const [id, session] of Object.entries(view.sessions)) {
+      map[id] = deriveSessionStatus(session);
+    }
+    return map;
+  }, [view.sessions]);
+  const sessionTokenPercents = React.useMemo(() => {
+    const map: Record<string, number | null> = {};
+    for (const [id, session] of Object.entries(view.sessions)) {
+      const usage = getLatestTokenUsage(session.messages);
+      map[id] = usage.percent;
+    }
+    return map;
+  }, [view.sessions]);
+
   const state: MobileControllerState = {
     gatewayInput,
     accessTokenInput,
@@ -1793,7 +2265,13 @@ export function useMobileController(): {
     builtInTools: view.builtInTools,
     profiles: view.profiles,
     activeProfileId: view.activeProfileId,
+    agentSettings: view.agentSettings,
+    agentSettingsLoading,
+    agentSettingsError,
+    agentSettingsSaving,
     memoryEnabled: view.memoryEnabled,
+    commandPolicyMode: view.commandPolicyMode,
+    commandPolicyLists: view.commandPolicyLists,
     memoryFilePath: view.memory.filePath,
     memoryContent: view.memory.content,
     activeSession,
@@ -1807,6 +2285,14 @@ export function useMobileController(): {
     latestTokens: tokenUsage.totalTokens,
     latestMaxTokens: tokenUsage.maxTokens,
     tokenUsagePercent: tokenUsage.percent,
+    pendingApprovalCount,
+    firstApprovalSessionId,
+    desktopActive: view.desktopActive,
+    reconnectingTerminalId: view.reconnectingTerminalId,
+    reconnectError: view.reconnectError,
+    sessionStatuses,
+    sessionTokenPercents,
+    terminalBuffers: terminalBuffer.buffers,
   };
 
   const actions: MobileControllerActions = {
@@ -1835,8 +2321,18 @@ export function useMobileController(): {
     setBuiltInToolEnabled,
     replyAsk,
     rollbackToMessage,
+    branchFromMessage,
     createTerminalTab,
     closeTerminalTab,
+    reconnectTerminalTab,
+    clearReconnectError,
+    refreshTerminalBuffers: terminalBuffer.refresh,
+    markTerminalBufferSeen: terminalBuffer.markSeen,
+    reloadAgentSettings,
+    saveCurrentAgentSetting,
+    applyAgentSetting,
+    overwriteAgentSetting,
+    deleteAgentSetting,
   };
 
   return {

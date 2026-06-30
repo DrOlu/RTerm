@@ -12,10 +12,6 @@ This page maps root scripts, packaging targets, and release helpers to their run
   - Electron dev mode (`apps/electron/electron.vite.config.ts`).
 - `npm run dev:mobile-web`
   - Mobile-web dev server (`apps/mobile-web` wrapper, implementation in `packages/mobile-web`).
-- `npm run dev:tui`
-  - TUI development wrapper (`@gyshell/tui`).
-- `npm run start:tui`
-  - Start TUI runtime without dev watch mode.
 - `npm run start:backend`
   - Start standalone gybackend runtime (`@gyshell/gybackend`).
 - `npm run start:mobile-web`
@@ -29,22 +25,10 @@ This page maps root scripts, packaging targets, and release helpers to their run
   - Alias of `npm run build`.
 - `npm run build:backend`
   - Build `@gyshell/gybackend` wrapper.
-- `npm run build:tui`
-  - Build `@gyshell/tui` wrapper.
 - `npm run build:mobile-web`
   - Build `@gyshell/mobile-web` wrapper.
 - `npm run build:all`
-  - Build Electron + backend + TUI wrappers.
-- `npm run build:cli-binaries`
-  - Build platform CLI binaries for `gyll` (`apps/tui/scripts/build-cli-binaries.ts`).
-- `npm run prepare:cli-runtime`
-  - Prepare desktop-bundled CLI runtime under `apps/electron/cli-runtime`.
-  - Optional target override examples:
-    - `npm run prepare:cli-runtime -- --target darwin-arm64`
-    - `npm run prepare:cli-runtime -- --target darwin-x64`
-    - `npm run prepare:cli-runtime -- --target linux-arm64`
-    - `npm run prepare:cli-runtime -- --target linux-x64`
-    - `npm run prepare:cli-runtime -- --target windows-x64`
+  - Build Electron + backend wrappers.
 - `npm run prepare:mobile-web`
   - Copy built mobile-web assets into `apps/electron/mobile-web-runtime` so the desktop app can serve them as a bundled companion frontend.
 
@@ -53,34 +37,33 @@ This page maps root scripts, packaging targets, and release helpers to their run
 - `npm run typecheck`
   - Combined node/web typecheck (`tsconfig.node.json` + `tsconfig.web.json`).
 - `npm run typecheck:all`
-  - Root typecheck + backend + TUI + mobile-web.
+  - Root typecheck + backend + mobile-web.
 - `npm run typecheck:backend`
-- `npm run typecheck:tui`
 - `npm run typecheck:mobile-web`
 - `npm run test:backend-regression`
 - `npm run test:backend-extreme`
-- `npm run test:tui`
-- `npm run test:tui-input-automation`
 - `npm run test:layout-ui-extreme`
 - `npm run test:backend-unit-extreme`
+- `npm run test:desktop-cli-deprecated`
+  - Verify desktop packages do not bundle `gyll` and legacy launcher cleanup preserves shell profile blocks.
 
 ### Packaging
 
 - `npm run dist`
-  - Build backend + Electron + bundled CLI runtime + bundled mobile-web assets, then package with `electron-builder`.
+  - Build backend + Electron + bundled mobile-web assets, then package with `electron-builder`.
 - `npm run dist:mac`
   - macOS packaging chain:
-    1. Build backend + Electron + mac CLI runtime
+    1. Build backend + Electron
     2. Build/bundle mobile-web assets
     3. `electron-builder --mac --dir`
     4. `apps/electron/scripts/fix-mac-signatures.sh`
     5. `electron-builder --mac --prepackaged ...`
 - `npm run dist:win`
-  - Build backend + Electron + Windows CLI runtime + bundled mobile-web assets, then package Windows targets.
+  - Build backend + Electron + bundled mobile-web assets, then package Windows targets.
 - `npm run dist:linux`
-  - Build backend + Electron + Linux x64 CLI runtime + bundled mobile-web assets, then package Linux x64 targets.
+  - Build backend + Electron + bundled mobile-web assets, then package Linux x64 targets.
 - `npm run dist:linux-arm64`
-  - Build backend + Electron + Linux arm64 CLI runtime + bundled mobile-web assets, then package Linux arm64 targets.
+  - Build backend + Electron + bundled mobile-web assets, then package Linux arm64 targets.
 
 Linux targets configured in `apps/electron/electron-builder.yml`:
 
@@ -97,8 +80,13 @@ Packaging notes:
   - `apps/electron/scripts/normalize-linux-artifact-name.mjs`
   - `apps/electron/scripts/postinstall-linux.sh`
 - Desktop packages also include:
-  - bundled CLI runtime under `apps/electron/cli-runtime`
   - bundled mobile-web frontend under `apps/electron/mobile-web-runtime`
+
+Deprecated CLI note:
+
+- `gyll` / CLI TUI is deprecated and unsupported.
+- Desktop packages must not include `apps/electron/cli-runtime`.
+- Desktop startup only removes legacy desktop-managed `gyll` launchers from older installs; it does not install launchers or edit shell profiles.
 
 ## Release Helper (`build.sh`)
 
@@ -115,21 +103,6 @@ Packaging notes:
 Standalone mobile-web package output:
 
 - `dist/GyShell.MobileWeb.<version>.zip`
-
-## Desktop Bundled CLI (`gyll`)
-
-After desktop runtime setup:
-
-- `gyll --help`
-- `gyll --url 127.0.0.1:17888`
-- `gyll --url 127.0.0.1:17888 "message"`
-- `gyll --url 192.168.1.8:17888 --token <access_token>`
-- `gyll run --url 127.0.0.1:17888 "message"`
-- `gyll hook --url 127.0.0.1:17888 "message"`
-
-If `--url` is omitted, `gyll` attempts local desktop backend on default port `17888`.
-
-Use `--token <access_token>` for non-local websocket gateways.
 
 ## Standalone Backend Runtime (gybackend)
 
@@ -167,7 +140,6 @@ Environment host override still maps through `GYBACKEND_WS_HOST`.
 ## Workspace Scripts (Development/Internal)
 
 - `npm --workspace @gyshell/gybackend run build|start|typecheck`
-- `npm --workspace @gyshell/tui run build|build:cli-binaries|dev|start|typecheck|test:smoke`
 - `npm --workspace @gyshell/mobile-web run dev|build|preview|typecheck`
 - `npm --workspace @gyshell/electron run dev|build|preview`
 - `npm --workspace @gyshell/backend run build|typecheck`

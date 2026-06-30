@@ -1,5 +1,5 @@
 # @gyshell/tui-core
 
-Core TUI runtime implementation for GyShell.
+Deprecated and unsupported core TUI runtime implementation for historical `gyll` source.
 
-`apps/tui` is a thin CLI/package wrapper that composes this implementation.
+Desktop builds no longer bundle or install `gyll`.

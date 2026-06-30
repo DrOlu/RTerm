@@ -8,6 +8,7 @@ import {
   findTextMatches,
   isFindShortcutEvent,
 } from "../../lib/textSearch";
+import { ImagePreview } from "./ImagePreview";
 import { PdfPreview } from "./PdfPreview";
 import "./fileEditor.scss";
 
@@ -325,17 +326,11 @@ export const FileEditorPanel: React.FC<FileEditorPanelProps> = observer(
               {fileEditor.errorMessage || t.fileEditor.previewErrorFallback}
             </div>
           ) : fileEditor.mode === "image" ? (
-            <div
-              className="file-editor-image-preview"
-              data-testid="image-preview"
-            >
-              <img
-                className="file-editor-image"
-                src={fileEditor.previewDataUrl}
-                alt={currentPath}
-                draggable={false}
-              />
-            </div>
+            <ImagePreview
+              src={fileEditor.previewDataUrl}
+              alt={currentPath}
+              errorMessage={t.fileEditor.previewErrorFallback}
+            />
           ) : fileEditor.mode === "pdf" ? (
             <PdfPreview
               contentBase64={fileEditor.contentBase64}

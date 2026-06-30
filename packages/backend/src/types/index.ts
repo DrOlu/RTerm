@@ -52,6 +52,53 @@ export interface ExperimentalFlags {
   writeStdinActionModelEnabled: boolean
 }
 
+export type CommandPolicyMode = 'safe' | 'standard' | 'smart'
+
+export type AgentSettingSlotNumber = 1 | 2 | 3 | 4 | 5
+
+export interface AgentSettingCommandPolicyLists {
+  allowlist: string[]
+  denylist: string[]
+  asklist: string[]
+}
+
+export interface AgentSettingSnapshot {
+  version: 1
+  security: {
+    commandPolicyMode: CommandPolicyMode
+    commandPolicyLists: AgentSettingCommandPolicyLists
+  }
+  tools: {
+    builtIn: Record<string, boolean>
+    mcp: Record<string, boolean>
+  }
+  skills: Record<string, boolean>
+  memory: {
+    enabled: boolean
+  }
+  workflow: {
+    recursionLimit: number
+    experimental: ExperimentalFlags
+  }
+  model: {
+    activeProfileId: string
+    activeProfileName?: string
+  }
+}
+
+export interface AgentSettingProfile {
+  id: string
+  slotNumber: AgentSettingSlotNumber
+  createdAt: number
+  updatedAt: number
+  snapshot: AgentSettingSnapshot
+}
+
+export interface AgentSettingState {
+  profiles: AgentSettingProfile[]
+  activeProfileId: string | null
+}
+
 export interface SSHConnectionEntry {
   id: string
   name: string
@@ -104,7 +151,12 @@ export interface TunnelEntry {
   viaConnectionId?: string
 }
 
-export type WsGatewayAccess = 'disabled' | 'localhost' | 'internet' | 'lan' | 'custom'
+export type WsGatewayAccess =
+  | 'disabled'
+  | 'localhost'
+  | 'internet'
+  | 'lan'
+  | 'custom'
 
 export interface WsGatewaySettings {
   access: WsGatewayAccess
@@ -115,10 +167,10 @@ export interface WsGatewaySettings {
 
 export interface BackendSettings {
   /** Settings schema version, used for migrations */
-  schemaVersion: 3
+  schemaVersion: 4
 
   /** Command policy mode */
-  commandPolicyMode: 'safe' | 'standard' | 'smart'
+  commandPolicyMode: CommandPolicyMode
 
   /**
    * Effective model config for current AgentService (legacy + runtime binding).
@@ -163,6 +215,12 @@ export interface BackendSettings {
      * Kept as unknown at backend boundary to avoid coupling renderer internals.
      */
     v2?: unknown
+    /**
+     * Renderer-owned saved workspace layout slots.
+     * Kept as unknown at backend boundary to avoid coupling renderer internals.
+     */
+    savedLayouts?: unknown
+    activeSavedLayoutId?: string | null
   }
   /** Agent recursion limit */
   recursionLimit?: number
@@ -170,6 +228,8 @@ export interface BackendSettings {
   memory?: {
     enabled: boolean
   }
+  /** Agent-owned saved setting profiles */
+  agentSettings?: AgentSettingState
   /** Debug mode switch for backend debug payload persistence and related diagnostics */
   debugMode?: boolean
   /** Experimental feature switches */
@@ -230,13 +290,13 @@ export type TerminalConfig =
   | SSHConnectionConfig
   | GenericConnectionConfig
 
-export const isLocalConnectionConfig = (
-  config: { type: string },
-): config is LocalConnectionConfig => config.type === 'local'
+export const isLocalConnectionConfig = (config: {
+  type: string
+}): config is LocalConnectionConfig => config.type === 'local'
 
-export const isSshConnectionConfig = (
-  config: { type: string },
-): config is SSHConnectionConfig => config.type === 'ssh'
+export const isSshConnectionConfig = (config: {
+  type: string
+}): config is SSHConnectionConfig => config.type === 'ssh'
 
 export interface TerminalTab {
   id: string
@@ -666,7 +726,7 @@ export interface TerminalSessionBackend {
     ptyId: string,
     command: string,
     timeoutMs?: number,
-    options?: TerminalExecOptions
+    options?: TerminalExecOptions,
   ): Promise<{ stdout: string; stderr: string } | null>
 
   /**
@@ -674,7 +734,7 @@ export interface TerminalSessionBackend {
    * Backends return undefined when the normal shell integration path remains sufficient.
    */
   prepareCommandTracking?(
-    ptyId: string
+    ptyId: string,
   ): Promise<TerminalCommandTrackingToken | undefined>
 
   /**
@@ -683,7 +743,7 @@ export interface TerminalSessionBackend {
    */
   pollCommandTracking?(
     ptyId: string,
-    token: TerminalCommandTrackingToken
+    token: TerminalCommandTrackingToken,
   ): Promise<TerminalCommandTrackingUpdate | undefined>
 
   /**
@@ -701,7 +761,6 @@ export interface TerminalExecOptions {
 }
 
 export interface TerminalFileSystemBackend {
-
   /**
    * Read a file from the backend connection.
    */
@@ -720,7 +779,7 @@ export interface TerminalFileSystemBackend {
     filePath: string,
     offset: number,
     chunkSize: number,
-    options?: { totalSizeHint?: number }
+    options?: { totalSizeHint?: number },
   ): Promise<FileChunkReadResult>
 
   /**
@@ -731,7 +790,7 @@ export interface TerminalFileSystemBackend {
     filePath: string,
     offset: number,
     content: Buffer,
-    options?: { truncate?: boolean; close?: boolean }
+    options?: { truncate?: boolean; close?: boolean },
   ): Promise<FileChunkWriteResult>
 
   /**
@@ -742,9 +801,13 @@ export interface TerminalFileSystemBackend {
     sourcePath: string,
     targetLocalPath: string,
     options?: {
-      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      onProgress?: (progress: {
+        bytesTransferred: number
+        totalBytes: number
+        eof: boolean
+      }) => void
       signal?: AbortSignal
-    }
+    },
   ): Promise<{ totalBytes: number }>
 
   /**
@@ -755,9 +818,13 @@ export interface TerminalFileSystemBackend {
     sourceLocalPath: string,
     targetPath: string,
     options?: {
-      onProgress?: (progress: { bytesTransferred: number; totalBytes: number; eof: boolean }) => void
+      onProgress?: (progress: {
+        bytesTransferred: number
+        totalBytes: number
+        eof: boolean
+      }) => void
       signal?: AbortSignal
-    }
+    },
   ): Promise<{ totalBytes: number }>
 
   /**
@@ -783,17 +850,29 @@ export interface TerminalFileSystemBackend {
   /**
    * Delete a file or directory.
    */
-  deletePath(ptyId: string, targetPath: string, options?: { recursive?: boolean }): Promise<void>
+  deletePath(
+    ptyId: string,
+    targetPath: string,
+    options?: { recursive?: boolean },
+  ): Promise<void>
 
   /**
    * Rename or move a file or directory.
    */
-  renamePath(ptyId: string, sourcePath: string, targetPath: string): Promise<void>
+  renamePath(
+    ptyId: string,
+    sourcePath: string,
+    targetPath: string,
+  ): Promise<void>
 
   /**
    * Write file bytes through the backend connection.
    */
-  writeFileBytes(ptyId: string, filePath: string, content: Buffer): Promise<void>
+  writeFileBytes(
+    ptyId: string,
+    filePath: string,
+    content: Buffer,
+  ): Promise<void>
 
   /**
    * Optional: Hook for custom initialization logic (e.g. SSH injection)

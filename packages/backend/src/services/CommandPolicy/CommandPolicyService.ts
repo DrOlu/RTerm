@@ -7,7 +7,7 @@ import {
   type CommandPolicyMode,
   type CommandPolicyLists,
   type CommandPolicyListName,
-  type CommandPatternEntry
+  type CommandPatternEntry,
 } from '../../command-policy/FileCommandPolicyStore'
 
 const DEFAULT_POLICY_FILE_CONTENT = {
@@ -15,7 +15,7 @@ const DEFAULT_POLICY_FILE_CONTENT = {
   denylist: [],
   asklist: [],
   __syntax_note:
-    "Wildcard rules: '*' matches any characters, '?' matches one character. A trailing ' *' (space + star) matches both the command alone and the command with args. Examples: 'ls *' matches 'ls' and 'ls -la'; 'ls' matches only 'ls'; 'ls -la' matches only that exact command."
+    "Wildcard rules: '*' matches any characters, '?' matches one character. A trailing ' *' (space + star) matches both the command alone and the command with args. Examples: 'ls *' matches 'ls' and 'ls -la'; 'ls' matches only 'ls'; 'ls -la' matches only that exact command.",
 }
 
 export type { CommandPolicyMode, CommandPolicyLists, CommandPolicyListName }
@@ -27,11 +27,13 @@ export class CommandPolicyService {
     this.store = new FileCommandPolicyStore({
       filePath: this.getPolicyFilePath(),
       defaultFileContent: DEFAULT_POLICY_FILE_CONTENT,
-      resolveEntries: (command) => this.parseCommandEntries(command)
+      resolveEntries: (command) => this.parseCommandEntries(command),
     })
   }
 
-  setFeedbackWaiter(waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>): void {
+  setFeedbackWaiter(
+    waiter: (messageId: string, timeoutMs?: number) => Promise<any | null>,
+  ): void {
     this.store.setFeedbackWaiter(waiter)
   }
 
@@ -70,15 +72,28 @@ export class CommandPolicyService {
     return this.store.getLists()
   }
 
-  async addRule(listName: CommandPolicyListName, rule: string): Promise<CommandPolicyLists> {
+  async addRule(
+    listName: CommandPolicyListName,
+    rule: string,
+  ): Promise<CommandPolicyLists> {
     return this.store.addRule(listName, rule)
   }
 
-  async deleteRule(listName: CommandPolicyListName, rule: string): Promise<CommandPolicyLists> {
+  async deleteRule(
+    listName: CommandPolicyListName,
+    rule: string,
+  ): Promise<CommandPolicyLists> {
     return this.store.deleteRule(listName, rule)
   }
 
-  async evaluate(command: string, mode: CommandPolicyMode): Promise<'allow' | 'deny' | 'ask'> {
+  async setLists(lists: CommandPolicyLists): Promise<CommandPolicyLists> {
+    return this.store.setLists(lists)
+  }
+
+  async evaluate(
+    command: string,
+    mode: CommandPolicyMode,
+  ): Promise<'allow' | 'deny' | 'ask'> {
     return this.store.evaluate(command, mode)
   }
 
@@ -93,7 +108,9 @@ export class CommandPolicyService {
     return this.store.requestApproval(params)
   }
 
-  private async parseCommandEntries(command: string): Promise<CommandPatternEntry[]> {
+  private async parseCommandEntries(
+    command: string,
+  ): Promise<CommandPatternEntry[]> {
     const parser = await getBashParser()
     const tree = parser.parse(command)
     if (!tree) {

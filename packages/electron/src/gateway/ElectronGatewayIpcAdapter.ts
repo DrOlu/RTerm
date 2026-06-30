@@ -33,6 +33,7 @@ import type { ModelCapabilityService } from "../../../backend/src/services/Model
 import type { McpToolService } from "../../../backend/src/services/McpToolService";
 import type { VersionService } from "../../../backend/src/services/VersionService";
 import type { TerminalCommandDraftService } from "../../../backend/src/services/TerminalCommandDraftService";
+import type { AgentSettingProfileService } from "../../../backend/src/services/AgentSettingProfileService";
 import type { WsGatewayAccess } from "../../../backend/src/types";
 import {
   buildBuiltInToolStatusSummary,
@@ -101,6 +102,7 @@ export class ElectronGatewayIpcAdapter {
     private themeStore: ThemeConfigStore,
     private versionService: VersionService,
     private wsGatewayControlService: WebSocketGatewayControlService,
+    private agentSettingProfileService: AgentSettingProfileService,
     private accessTokenService: AccessTokenRuntime = {
       listTokens: async () => [],
       createToken: async () => {
@@ -129,6 +131,32 @@ export class ElectronGatewayIpcAdapter {
         win.setBackgroundColor(bg);
       }
     });
+  }
+
+  private getActiveAgentSettingProfileId(): string | null {
+    return (
+      this.settingsService.getSettings().agentSettings?.activeProfileId || null
+    );
+  }
+
+  private broadcastAgentSettingResult(result: {
+    settings: unknown;
+    commandPolicyLists: unknown;
+    mcpTools: unknown;
+    builtInTools: unknown;
+    skills: unknown;
+    memory: unknown;
+  }): void {
+    this.agentService.updateSettings(this.settingsService.getSettings());
+    this.gateway.broadcastRaw("settings:updated", result.settings);
+    this.gateway.broadcastRaw(
+      "settings:commandPolicyListsUpdated",
+      result.commandPolicyLists,
+    );
+    this.gateway.broadcastRaw("tools:mcpUpdated", result.mcpTools);
+    this.gateway.broadcastRaw("tools:builtInUpdated", result.builtInTools);
+    this.gateway.broadcastRaw("skills:updated", result.skills);
+    this.gateway.broadcastRaw("memory:updated", result.memory);
   }
 
   registerHandlers(): void {
@@ -448,21 +476,61 @@ export class ElectronGatewayIpcAdapter {
     });
 
     ipcMain.handle("memory:get", async () => {
-      return await this.memoryService.getMemorySnapshot();
+      return await this.memoryService.getMemorySnapshot(
+        this.getActiveAgentSettingProfileId(),
+      );
     });
 
     ipcMain.handle("memory:setContent", async (_: any, content: string) => {
       const snapshot = await this.memoryService.writeMemory(
         String(content ?? ""),
+        this.getActiveAgentSettingProfileId(),
       );
       this.gateway.broadcastRaw("memory:updated", snapshot);
       return snapshot;
     });
 
     ipcMain.handle("memory:openFile", async () => {
-      const snapshot = await this.memoryService.getMemorySnapshot();
+      const snapshot = await this.memoryService.getMemorySnapshot(
+        this.getActiveAgentSettingProfileId(),
+      );
       await shell.openPath(snapshot.filePath);
     });
+
+    ipcMain.handle("agentSettings:get", async () => {
+      return this.agentSettingProfileService.getState();
+    });
+
+    ipcMain.handle("agentSettings:saveCurrent", async () => {
+      const result = await this.agentSettingProfileService.saveCurrent();
+      this.broadcastAgentSettingResult(result);
+      return result;
+    });
+
+    ipcMain.handle("agentSettings:apply", async (_: any, profileId: string) => {
+      const result = await this.agentSettingProfileService.apply(profileId);
+      this.broadcastAgentSettingResult(result);
+      return result;
+    });
+
+    ipcMain.handle(
+      "agentSettings:overwrite",
+      async (_: any, profileId: string) => {
+        const result =
+          await this.agentSettingProfileService.overwrite(profileId);
+        this.broadcastAgentSettingResult(result);
+        return result;
+      },
+    );
+
+    ipcMain.handle(
+      "agentSettings:delete",
+      async (_: any, profileId: string) => {
+        const result = await this.agentSettingProfileService.delete(profileId);
+        this.broadcastAgentSettingResult(result);
+        return result;
+      },
+    );
 
     // Settings / tools / themes / models
     ipcMain.handle("settings:get", async () => {

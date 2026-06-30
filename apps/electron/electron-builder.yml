@@ -71,10 +71,8 @@ files:
       - "!node_modules/tree-sitter-bash/binding.gyp"
       - "!node_modules/web-tree-sitter/debug/**"
 extraResources:
-  - from: apps/electron/cli-runtime
-    to: cli
-    filter:
-      - "**/*"
+  # gyll/CLI TUI is deprecated and unsupported. Desktop builds must not bundle
+  # the CLI runtime or deploy any gyll launcher into user shells.
   - from: node_modules/better-sqlite3-electron/build/Release
     to: native-modules/better-sqlite3
     filter:

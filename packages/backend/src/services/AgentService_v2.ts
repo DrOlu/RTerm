@@ -637,6 +637,10 @@ export class AgentService_v2 {
     this.selfCorrectionRuntimeManager.clearSession(sessionId);
   }
 
+  private getActiveMemoryProfileId(): string | null {
+    return this.settings?.agentSettings?.activeProfileId || null;
+  }
+
   // --- Graph Nodes ---
 
   private createTokenManagerNode() {
@@ -777,7 +781,9 @@ export class AgentService_v2 {
         | undefined;
       if (memoryEnabled) {
         try {
-          const snapshot = await this.memoryService.getMemorySnapshot();
+          const snapshot = await this.memoryService.getMemorySnapshot(
+            this.getActiveMemoryProfileId(),
+          );
           memoryPrompt = {
             memoryFilePath: snapshot.filePath,
             memoryContent: snapshot.content,

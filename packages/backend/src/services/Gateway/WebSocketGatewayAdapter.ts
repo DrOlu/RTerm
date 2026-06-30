@@ -30,6 +30,7 @@ type WebSocketRpcMethod =
   | "terminal:writePaths"
   | "terminal:resize"
   | "terminal:kill"
+  | "terminal:reconnect"
   | "terminal:setSelection"
   | "terminal:getBufferDelta"
   | "terminal:generateCommandDraft"
@@ -61,6 +62,11 @@ type WebSocketRpcMethod =
   | "skills:setEnabled"
   | "memory:get"
   | "memory:setContent"
+  | "agentSettings:get"
+  | "agentSettings:saveCurrent"
+  | "agentSettings:apply"
+  | "agentSettings:overwrite"
+  | "agentSettings:delete"
   | "settings:get"
   | "settings:set"
   | "settings:getCommandPolicyLists"
@@ -148,6 +154,7 @@ export interface WebSocketGatewayAdapterOptions {
       rows: number,
     ) => void | Promise<void>;
     kill?: (terminalId: string) => void | Promise<void>;
+    reconnect?: (terminalId: string) => Promise<{ id: string }> | { id: string };
     setSelection?: (
       terminalId: string,
       selectionText: string,
@@ -236,16 +243,25 @@ export interface WebSocketGatewayAdapterOptions {
     ) => FileTransferTaskSnapshot | Promise<FileTransferTaskSnapshot>;
     getTransfer?: (
       transferId: string,
-    ) => FileTransferTaskSnapshot | null | Promise<FileTransferTaskSnapshot | null>;
+    ) =>
+      | FileTransferTaskSnapshot
+      | null
+      | Promise<FileTransferTaskSnapshot | null>;
     listTransfers?: (
       options?: ListFileTransfersOptions,
     ) => FileTransferTaskSnapshot[] | Promise<FileTransferTaskSnapshot[]>;
     cancelTransfer?: (
       transferId: string,
-    ) => FileTransferTaskSnapshot | null | Promise<FileTransferTaskSnapshot | null>;
+    ) =>
+      | FileTransferTaskSnapshot
+      | null
+      | Promise<FileTransferTaskSnapshot | null>;
     cancelTransferTask?: (
       transferId: string,
-    ) => FileTransferTaskSnapshot | null | Promise<FileTransferTaskSnapshot | null>;
+    ) =>
+      | FileTransferTaskSnapshot
+      | null
+      | Promise<FileTransferTaskSnapshot | null>;
     createDirectory?: (
       terminalId: string,
       dirPath: string,
@@ -320,6 +336,13 @@ export interface WebSocketGatewayAdapterOptions {
     ) =>
       | { filePath: string; content: string }
       | Promise<{ filePath: string; content: string }>;
+  };
+  agentSettingsBridge?: {
+    get?: () => unknown | Promise<unknown>;
+    saveCurrent?: () => unknown | Promise<unknown>;
+    apply?: (profileId: string) => unknown | Promise<unknown>;
+    overwrite?: (profileId: string) => unknown | Promise<unknown>;
+    delete?: (profileId: string) => unknown | Promise<unknown>;
   };
   settingsBridge?: {
     getSettings?: () => unknown | Promise<unknown>;
@@ -958,6 +981,17 @@ export class WebSocketGatewayAdapter {
         await bridge.kill(terminalId);
         return { ok: true };
       }
+      case "terminal:reconnect": {
+        const bridge = this.options.terminalBridge;
+        if (!bridge?.reconnect) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "terminal:reconnect is not available on this websocket gateway.",
+          );
+        }
+        const terminalId = this.readStringParam(params, "terminalId");
+        return await bridge.reconnect(terminalId);
+      }
       case "terminal:setSelection": {
         const bridge = this.options.terminalBridge;
         if (!bridge?.setSelection) {
@@ -1341,11 +1375,7 @@ export class WebSocketGatewayAdapter {
           );
         }
         const origin = params.origin;
-        if (
-          origin !== undefined &&
-          origin !== "user" &&
-          origin !== "agent"
-        ) {
+        if (origin !== undefined && origin !== "user" && origin !== "agent") {
           throw new WebSocketRpcError(
             "BAD_REQUEST",
             'origin must be "user" or "agent" when provided.',
@@ -1603,6 +1633,54 @@ export class WebSocketGatewayAdapter {
           throw new WebSocketRpcError("BAD_REQUEST", "content must be string.");
         }
         return await this.options.memoryBridge.setContent(content);
+      }
+      case "agentSettings:get": {
+        if (!this.options.agentSettingsBridge?.get) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "agentSettings:get is not available on this websocket gateway.",
+          );
+        }
+        return await this.options.agentSettingsBridge.get();
+      }
+      case "agentSettings:saveCurrent": {
+        if (!this.options.agentSettingsBridge?.saveCurrent) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "agentSettings:saveCurrent is not available on this websocket gateway.",
+          );
+        }
+        return await this.options.agentSettingsBridge.saveCurrent();
+      }
+      case "agentSettings:apply": {
+        if (!this.options.agentSettingsBridge?.apply) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "agentSettings:apply is not available on this websocket gateway.",
+          );
+        }
+        const profileId = this.readStringParam(params, "profileId");
+        return await this.options.agentSettingsBridge.apply(profileId);
+      }
+      case "agentSettings:overwrite": {
+        if (!this.options.agentSettingsBridge?.overwrite) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "agentSettings:overwrite is not available on this websocket gateway.",
+          );
+        }
+        const profileId = this.readStringParam(params, "profileId");
+        return await this.options.agentSettingsBridge.overwrite(profileId);
+      }
+      case "agentSettings:delete": {
+        if (!this.options.agentSettingsBridge?.delete) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "agentSettings:delete is not available on this websocket gateway.",
+          );
+        }
+        const profileId = this.readStringParam(params, "profileId");
+        return await this.options.agentSettingsBridge.delete(profileId);
       }
       case "settings:get": {
         if (!this.options.settingsBridge?.getSettings) {

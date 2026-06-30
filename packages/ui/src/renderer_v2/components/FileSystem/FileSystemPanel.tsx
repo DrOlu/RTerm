@@ -2476,28 +2476,19 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
                         void (async () => {
                           updateTabState(activeTerminalId, (current) => ({
                             ...current,
-                            statusMessage: t.filesystem.openingEditor(
-                              entry.name,
-                            ),
+                            statusMessage: null,
                             errorMessage: null,
                           }));
                           try {
-                            const opened =
-                              await store.openFileEditorFromFileSystem(
-                                activeTerminalId,
-                                entry.path,
-                              );
-                            if (!opened) return;
-                            updateTabState(activeTerminalId, (current) => ({
-                              ...current,
-                              statusMessage: t.filesystem.openedInEditor(
-                                entry.name,
-                              ),
-                            }));
+                            await store.openFileEditorFromFileSystem(
+                              activeTerminalId,
+                              entry.path,
+                            );
                           } catch (error) {
                             updateTabState(activeTerminalId, (current) => ({
                               ...current,
                               errorMessage: toErrorMessage(error),
+                              statusMessage: null,
                             }));
                           }
                         })();

@@ -21,6 +21,7 @@ import {
   Info,
   AlertTriangle,
   Database,
+  GitBranch,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { AppStore } from "../../stores/AppStore";
@@ -34,6 +35,7 @@ import { InfoTooltip } from "../Common/InfoTooltip";
 import { Select } from "../../platform/Select";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 import { getDefaultCommandDraftShortcut } from "../../lib/commandDraftShortcut";
+import { AgentSettingRailControls } from "./AgentSettingRailControls";
 
 function ThemeTile(props: {
   active?: boolean;
@@ -550,6 +552,26 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
   }
     };
 
+  const renderNavItem = (
+    section: AppStore["settingsSection"],
+    icon: React.ReactNode,
+    label: string,
+  ) => (
+    <div
+      className={
+        store.settingsSection === section
+          ? "settings-nav-item is-active"
+          : "settings-nav-item"
+      }
+      onClick={() => store.setSettingsSection(section)}
+      role="button"
+      tabIndex={0}
+    >
+      <span className="icon">{icon}</span>
+      <span>{label}</span>
+    </div>
+  );
+
   return (
     <div className="settings">
       <AccessTokenRevealDialog
@@ -643,140 +665,62 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
         </button>
         
         <div className="settings-nav">
-          <div
-              className={
-                store.settingsSection === "general"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("general")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <Settings size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.general}</span>
+          {renderNavItem(
+            "general",
+            <Settings size={16} strokeWidth={2} />,
+            t.settings.general,
+          )}
+          {renderNavItem(
+            "theme",
+            <Palette size={16} strokeWidth={2} />,
+            t.settings.theme,
+          )}
+          {renderNavItem(
+            "accessTokens",
+            <Key size={16} strokeWidth={2} />,
+            t.settings.accessTokens,
+          )}
+          {renderNavItem(
+            "version",
+            <Info size={16} strokeWidth={2} />,
+            t.settings.version,
+          )}
+          <div className="settings-nav-agent-divider">
+            <span>{t.settings.agentSetting}</span>
+            <i />
           </div>
-          <div
-              className={
-                store.settingsSection === "theme"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("theme")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <Palette size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.theme}</span>
-          </div>
-          <div
-              className={
-                store.settingsSection === "models"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("models")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <Cpu size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.models}</span>
-          </div>
-          <div
-              className={
-                store.settingsSection === "security"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("security")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <Shield size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.security}</span>
-          </div>
-          <div
-              className={
-                store.settingsSection === "tools"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("tools")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <Wrench size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.tools}</span>
-          </div>
-          <div
-              className={
-                store.settingsSection === "skills"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("skills")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <BookOpenText size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.skills}</span>
-          </div>
-          <div
-              className={
-                store.settingsSection === "memory"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("memory")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <Database size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.memory}</span>
-          </div>
-          <div
-              className={
-                store.settingsSection === "accessTokens"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("accessTokens")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <Key size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.accessTokens}</span>
-          </div>
-          <div
-              className={
-                store.settingsSection === "version"
-                  ? "settings-nav-item is-active"
-                  : "settings-nav-item"
-              }
-              onClick={() => store.setSettingsSection("version")}
-            role="button"
-            tabIndex={0}
-          >
-            <span className="icon">
-              <Info size={16} strokeWidth={2} />
-            </span>
-            <span>{t.settings.version}</span>
+          <div className="settings-nav-agent-group">
+            {renderNavItem(
+              "security",
+              <Shield size={16} strokeWidth={2} />,
+              t.settings.security,
+            )}
+            {renderNavItem(
+              "tools",
+              <Wrench size={16} strokeWidth={2} />,
+              t.settings.tools,
+            )}
+            {renderNavItem(
+              "skills",
+              <BookOpenText size={16} strokeWidth={2} />,
+              t.settings.skills,
+            )}
+            {renderNavItem(
+              "memory",
+              <Database size={16} strokeWidth={2} />,
+              t.settings.memory,
+            )}
+            {renderNavItem(
+              "workflow",
+              <GitBranch size={16} strokeWidth={2} />,
+              t.settings.workflow,
+            )}
+            {renderNavItem(
+              "models",
+              <Cpu size={16} strokeWidth={2} />,
+              t.settings.model,
+            )}
+            <AgentSettingRailControls store={store} />
           </div>
         </div>
       </div>
@@ -836,39 +780,6 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                 </div>
                 <div className="settings-row">
                   <div className="settings-row-label-with-info">
-                    <label>{t.settings.recursionLimit}</label>
-                      <InfoTooltip
-                        content={t.settings.tooltips.recursionLimit}
-                      />
-                  </div>
-                  <div className="settings-slider-container">
-                    <input
-                      type="range"
-                      className="settings-slider"
-                      min="100"
-                      max="1010"
-                      step="10"
-                        value={
-                          store.settings?.recursionLimit === 2147483647
-                            ? 1010
-                            : store.settings?.recursionLimit || 200
-                        }
-                      onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          store.setRecursionLimit(
-                            val === 1010 ? 2147483647 : val,
-                          );
-                      }}
-                    />
-                    <span className="settings-slider-value">
-                        {store.settings?.recursionLimit === 2147483647
-                          ? "INF"
-                          : store.settings?.recursionLimit || 200}
-                    </span>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-label-with-info">
                     <label>{t.settings.debugMode}</label>
                     <InfoTooltip content={t.settings.tooltips.debugMode} />
                   </div>
@@ -918,130 +829,6 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                       onChange={(e) =>
                         store.setPreventSleepWhileRunning(e.target.checked)
                       }
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-              </div>
-
-                <div
-                  className="settings-section-header"
-                  style={{ marginTop: 24 }}
-                >
-                <div className="settings-section-title">
-                  {t.settings.experimentalFeatures}
-                </div>
-              </div>
-              <div className="settings-rows">
-                <div className="settings-row">
-                  <div className="settings-row-label-with-info">
-                    <label>{t.settings.runtimeThinkingCorrection}</label>
-                      <InfoTooltip
-                        content={t.settings.tooltips.runtimeThinkingCorrection}
-                      />
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                        checked={
-                          store.settings?.experimental
-                            ?.runtimeThinkingCorrectionEnabled !== false
-                        }
-                        onChange={(e) =>
-                          store.setRuntimeThinkingCorrectionEnabled(
-                            e.target.checked,
-                          )
-                        }
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-label-with-info">
-                    <label>{t.settings.taskFinishGuard}</label>
-                      <InfoTooltip
-                        content={t.settings.tooltips.taskFinishGuard}
-                      />
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                        checked={
-                          store.settings?.experimental
-                            ?.taskFinishGuardEnabled !== false
-                        }
-                        onChange={(e) =>
-                          store.setTaskFinishGuardEnabled(e.target.checked)
-                        }
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-label-with-info">
-                    <label>{t.settings.firstTurnThinkingModel}</label>
-                      <InfoTooltip
-                        content={t.settings.tooltips.firstTurnThinkingModel}
-                      />
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                        checked={
-                          store.settings?.experimental
-                            ?.firstTurnThinkingModelEnabled === true
-                        }
-                        onChange={(e) =>
-                          store.setFirstTurnThinkingModelEnabled(
-                            e.target.checked,
-                          )
-                        }
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-label-with-info">
-                    <label>{t.settings.execCommandActionModel}</label>
-                      <InfoTooltip
-                        content={t.settings.tooltips.execCommandActionModel}
-                      />
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                        checked={
-                          store.settings?.experimental
-                            ?.execCommandActionModelEnabled !== false
-                        }
-                        onChange={(e) =>
-                          store.setExecCommandActionModelEnabled(
-                            e.target.checked,
-                          )
-                        }
-                    />
-                    <span className="switch-slider" />
-                  </label>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-label-with-info">
-                    <label>{t.settings.writeStdinActionModel}</label>
-                      <InfoTooltip
-                        content={t.settings.tooltips.writeStdinActionModel}
-                      />
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                        checked={
-                          store.settings?.experimental
-                            ?.writeStdinActionModelEnabled !== false
-                        }
-                        onChange={(e) =>
-                          store.setWriteStdinActionModelEnabled(
-                            e.target.checked,
-                          )
-                        }
                     />
                     <span className="switch-slider" />
                   </label>
@@ -2100,6 +1887,175 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
               </div>
             </>
           ) : null}
+
+            {store.settingsSection === "workflow" ? (
+              <>
+                <div className="settings-section-header">
+                  <div className="settings-section-title">
+                    {t.settings.workflow}
+                  </div>
+                </div>
+                <div className="settings-rows">
+                  <div className="settings-row">
+                    <div className="settings-row-label-with-info">
+                      <label>{t.settings.recursionLimit}</label>
+                      <InfoTooltip
+                        content={t.settings.tooltips.recursionLimit}
+                      />
+                    </div>
+                    <div className="settings-slider-container">
+                      <input
+                        type="range"
+                        className="settings-slider"
+                        min="100"
+                        max="1010"
+                        step="10"
+                        value={
+                          store.settings?.recursionLimit === 2147483647
+                            ? 1010
+                            : store.settings?.recursionLimit || 200
+                        }
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value);
+                          store.setRecursionLimit(
+                            val === 1010 ? 2147483647 : val,
+                          );
+                        }}
+                      />
+                      <span className="settings-slider-value">
+                        {store.settings?.recursionLimit === 2147483647
+                          ? "INF"
+                          : store.settings?.recursionLimit || 200}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className="settings-section-header"
+                  style={{ marginTop: 24 }}
+                >
+                  <div className="settings-section-title">
+                    {t.settings.experimentalFeatures}
+                  </div>
+                </div>
+                <div className="settings-rows">
+                  <div className="settings-row">
+                    <div className="settings-row-label-with-info">
+                      <label>{t.settings.runtimeThinkingCorrection}</label>
+                      <InfoTooltip
+                        content={t.settings.tooltips.runtimeThinkingCorrection}
+                      />
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={
+                          store.settings?.experimental
+                            ?.runtimeThinkingCorrectionEnabled !== false
+                        }
+                        onChange={(e) =>
+                          store.setRuntimeThinkingCorrectionEnabled(
+                            e.target.checked,
+                          )
+                        }
+                      />
+                      <span className="switch-slider" />
+                    </label>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-label-with-info">
+                      <label>{t.settings.taskFinishGuard}</label>
+                      <InfoTooltip
+                        content={t.settings.tooltips.taskFinishGuard}
+                      />
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={
+                          store.settings?.experimental
+                            ?.taskFinishGuardEnabled !== false
+                        }
+                        onChange={(e) =>
+                          store.setTaskFinishGuardEnabled(e.target.checked)
+                        }
+                      />
+                      <span className="switch-slider" />
+                    </label>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-label-with-info">
+                      <label>{t.settings.firstTurnThinkingModel}</label>
+                      <InfoTooltip
+                        content={t.settings.tooltips.firstTurnThinkingModel}
+                      />
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={
+                          store.settings?.experimental
+                            ?.firstTurnThinkingModelEnabled === true
+                        }
+                        onChange={(e) =>
+                          store.setFirstTurnThinkingModelEnabled(
+                            e.target.checked,
+                          )
+                        }
+                      />
+                      <span className="switch-slider" />
+                    </label>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-label-with-info">
+                      <label>{t.settings.execCommandActionModel}</label>
+                      <InfoTooltip
+                        content={t.settings.tooltips.execCommandActionModel}
+                      />
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={
+                          store.settings?.experimental
+                            ?.execCommandActionModelEnabled !== false
+                        }
+                        onChange={(e) =>
+                          store.setExecCommandActionModelEnabled(
+                            e.target.checked,
+                          )
+                        }
+                      />
+                      <span className="switch-slider" />
+                    </label>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row-label-with-info">
+                      <label>{t.settings.writeStdinActionModel}</label>
+                      <InfoTooltip
+                        content={t.settings.tooltips.writeStdinActionModel}
+                      />
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={
+                          store.settings?.experimental
+                            ?.writeStdinActionModelEnabled !== false
+                        }
+                        onChange={(e) =>
+                          store.setWriteStdinActionModelEnabled(
+                            e.target.checked,
+                          )
+                        }
+                      />
+                      <span className="switch-slider" />
+                    </label>
+                  </div>
+                </div>
+              </>
+            ) : null}
 
             {store.settingsSection === "accessTokens" ? (
             <>

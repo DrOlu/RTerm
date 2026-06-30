@@ -39,7 +39,7 @@ import { VersionService } from "../../../backend/src/services/VersionService";
 import { AccessTokenService } from "../../../backend/src/services/AccessToken/AccessTokenService";
 import { TerminalCommandDraftService } from "../../../backend/src/services/TerminalCommandDraftService";
 import { ElectronAppSettingsMigration } from "../settings/ElectronAppSettingsMigration";
-import { installCliLaunchers } from "./CliInstallService";
+import { cleanupDeprecatedCliLaunchers } from "./DeprecatedCliCleanupService";
 import {
   buildBuiltInToolStatusSummary,
   buildSkillStatusSummary,
@@ -57,6 +57,7 @@ import { HistoryMigrationCoordinator } from "./HistoryMigrationCoordinator";
 import { HistorySqliteStore } from "../../../backend/src/services/history/HistorySqliteStore";
 import { HistoryStorageMigration } from "../../../backend/src/services/history/HistoryStorageMigration";
 import { SleepBlockerService } from "./SleepBlockerService";
+import { AgentSettingProfileService } from "../../../backend/src/services/AgentSettingProfileService";
 
 let mainWindow: BrowserWindow | null = null;
 let settingsService: SettingsService;
@@ -83,6 +84,7 @@ let resourceMonitorService: ResourceMonitorService;
 let monitorWindowRegistry: MonitorWindowRegistry;
 let historyStore: HistorySqliteStore | null = null;
 let sleepBlockerService: SleepBlockerService | null = null;
+let agentSettingProfileService: AgentSettingProfileService;
 
 type AppWindowRole = "main" | "detached";
 
@@ -160,6 +162,8 @@ function createWindow(options?: CreateWindowOptions): BrowserWindow {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
+      // Chromium's built-in PDF viewer is exposed as a plugin in Electron.
+      plugins: true,
       // Prevent Electron from using the sandboxed renderer bundle in dev.
       // This avoids a known class of startup console errors where the sandbox bundle fails early.
       sandbox: false,
@@ -289,17 +293,14 @@ function createWindow(options?: CreateWindowOptions): BrowserWindow {
 
 export async function startElectronMain(): Promise<void> {
   await app.whenReady();
-  const projectRoot = resolve(__dirname, "../..");
 
   try {
-    installCliLaunchers({
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      projectRoot,
-    });
+    cleanupDeprecatedCliLaunchers();
   } catch (error) {
-    console.warn("[Main] Failed to install CLI launchers:", error);
+    console.warn("[Main] Failed to clean up deprecated gyll launchers:", error);
   }
+
+  const projectRoot = resolve(__dirname, "../..");
 
   const userDataDir = app.getPath("userData");
   if (!(process.env.GYSHELL_STORE_DIR || "").trim()) {
@@ -355,6 +356,15 @@ export async function startElectronMain(): Promise<void> {
         void skillService.reload();
         memoryService = new MemoryService();
         void memoryService.ensureMemoryFile();
+        agentSettingProfileService = new AgentSettingProfileService({
+          settingsService,
+          commandPolicyService,
+          mcpToolService,
+          skillService,
+          memoryService,
+          onSettingsChanged: (settings) =>
+            agentService.updateSettings(settings),
+        });
 
         modelCapabilityService = new ModelCapabilityService();
         const chatHistoryService = new ChatHistoryService({
@@ -391,8 +401,9 @@ export async function startElectronMain(): Promise<void> {
           );
         };
         syncSleepBlockerSetting();
-        const unsubscribeSleepBlockerSettings =
-          uiSettingsStore.onChange(syncSleepBlockerSetting);
+        const unsubscribeSleepBlockerSettings = uiSettingsStore.onChange(
+          syncSleepBlockerSetting,
+        );
         const unsubscribeRunState = gatewayService.onRunStateChanged(
           (snapshot) => {
             sleepBlockerService?.setReasonActive(
@@ -425,6 +436,27 @@ export async function startElectronMain(): Promise<void> {
           }
         }
         gatewayService.registerTransport(new ElectronWindowTransport());
+        const broadcastAgentSettingResult = (result: {
+          settings: unknown;
+          commandPolicyLists: unknown;
+          mcpTools: unknown;
+          builtInTools: unknown;
+          skills: unknown;
+          memory: unknown;
+        }) => {
+          gatewayService.broadcastRaw("settings:updated", result.settings);
+          gatewayService.broadcastRaw(
+            "settings:commandPolicyListsUpdated",
+            result.commandPolicyLists,
+          );
+          gatewayService.broadcastRaw("tools:mcpUpdated", result.mcpTools);
+          gatewayService.broadcastRaw(
+            "tools:builtInUpdated",
+            result.builtInTools,
+          );
+          gatewayService.broadcastRaw("skills:updated", result.skills);
+          gatewayService.broadcastRaw("memory:updated", result.memory);
+        };
         webSocketGatewayControlService = new WebSocketGatewayControlService({
           createAdapter: (host, port, ipFilter) =>
             new WebSocketGatewayAdapter(gatewayService, {
@@ -469,6 +501,10 @@ export async function startElectronMain(): Promise<void> {
                     throw new Error("Cannot close the last terminal tab.");
                   }
                   terminalService.kill(terminalId);
+                },
+                reconnect: async (terminalId) => {
+                  const tab = await terminalService.reconnectTerminal(terminalId);
+                  return { id: tab.id };
                 },
                 setSelection: async (terminalId, selectionText) => {
                   terminalService.setSelection(terminalId, selectionText);
@@ -751,12 +787,45 @@ export async function startElectronMain(): Promise<void> {
               },
               memoryBridge: {
                 get: async () => {
-                  return await memoryService.getMemorySnapshot();
+                  return await memoryService.getMemorySnapshot(
+                    settingsService.getSettings().agentSettings
+                      ?.activeProfileId || null,
+                  );
                 },
                 setContent: async (content: string) => {
-                  const snapshot = await memoryService.writeMemory(content);
+                  const snapshot = await memoryService.writeMemory(
+                    content,
+                    settingsService.getSettings().agentSettings
+                      ?.activeProfileId || null,
+                  );
                   gatewayService.broadcastRaw("memory:updated", snapshot);
                   return snapshot;
+                },
+              },
+              agentSettingsBridge: {
+                get: () => agentSettingProfileService.getState(),
+                saveCurrent: async () => {
+                  const result = await agentSettingProfileService.saveCurrent();
+                  broadcastAgentSettingResult(result);
+                  return result;
+                },
+                apply: async (profileId: string) => {
+                  const result =
+                    await agentSettingProfileService.apply(profileId);
+                  broadcastAgentSettingResult(result);
+                  return result;
+                },
+                overwrite: async (profileId: string) => {
+                  const result =
+                    await agentSettingProfileService.overwrite(profileId);
+                  broadcastAgentSettingResult(result);
+                  return result;
+                },
+                delete: async (profileId: string) => {
+                  const result =
+                    await agentSettingProfileService.delete(profileId);
+                  broadcastAgentSettingResult(result);
+                  return result;
                 },
               },
               settingsBridge: {
@@ -853,6 +922,7 @@ export async function startElectronMain(): Promise<void> {
           themeStore,
           versionService,
           webSocketGatewayControlService,
+          agentSettingProfileService,
           accessTokenService,
           fileSystemService,
           fileTransferService,

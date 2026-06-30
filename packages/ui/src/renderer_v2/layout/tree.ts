@@ -107,7 +107,7 @@ const ensureNodeShape = (node: LayoutNode | null | undefined): LayoutNode | null
   return splitNode
 }
 
-const parsePersistedV2 = (raw: unknown): LayoutTree | null => {
+export const parsePersistedLayoutV2 = (raw: unknown): LayoutTree | null => {
   if (!raw || typeof raw !== 'object') return null
   const payload = raw as Partial<LayoutTree>
   const root = ensureNodeShape(cloneValue(payload.root as LayoutNode))
@@ -187,7 +187,7 @@ const createLegacyRoot = (order: string[] | undefined, sizes: number[] | undefin
 }
 
 export const buildLayoutTree = (layout: LegacyLayoutSnapshot | undefined): LayoutTree => {
-  const parsedV2 = parsePersistedV2(layout?.v2)
+  const parsedV2 = parsePersistedLayoutV2(layout?.v2)
   if (parsedV2) {
     return parsedV2
   }

@@ -10,6 +10,8 @@ interface TopBarProps {
   onBack?: () => void;
   showSessionMeta?: boolean;
   showSessionAction?: boolean;
+  /** When true, the host desktop client is also connected (presence indicator). */
+  desktopActive?: boolean;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -20,6 +22,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onBack,
   showSessionMeta,
   showSessionAction,
+  desktopActive = false,
 }) => {
   const { t } = useMobileI18n();
 
@@ -47,6 +50,14 @@ export const TopBar: React.FC<TopBarProps> = ({
                   ? t.topBar.sessionLabel(sessionId)
                   : t.topBar.noActiveSession}
               </span>
+              {desktopActive ? (
+                <span
+                  className="desktop-active-chip"
+                  title={t.topBar.desktopActive}
+                >
+                  {t.topBar.desktopActive}
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>

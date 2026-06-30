@@ -1,5 +1,5 @@
 import React from "react";
-import { CornerUpLeft } from "lucide-react";
+import { CornerUpLeft, CornerUpRight } from "lucide-react";
 import { formatClock, messageDetail, messageTypeTitle } from "../../format";
 import { useMobileI18n } from "../../i18n/provider";
 import {
@@ -16,15 +16,19 @@ interface MessageListProps {
   onAskDecision: (message: ChatMessage, decision: "allow" | "deny") => void;
   onOpenDetail: (turnId: string) => void;
   onRollback: (message: ChatMessage) => void;
+  onBranch: (message: ChatMessage) => void;
   rollbackDisabled: boolean;
+  branchDisabled: boolean;
   listRef: React.RefObject<HTMLDivElement>;
 }
 
 const UserBubble: React.FC<{
   message: ChatMessage;
   onRollback: (message: ChatMessage) => void;
+  onBranch: (message: ChatMessage) => void;
   rollbackDisabled: boolean;
-}> = ({ message, onRollback, rollbackDisabled }) => {
+  branchDisabled: boolean;
+}> = ({ message, onRollback, onBranch, rollbackDisabled, branchDisabled }) => {
   const { t } = useMobileI18n();
   const displayText = trimOuterBlankLines(
     normalizeDisplayText(String(message.content || "")),
@@ -33,10 +37,19 @@ const UserBubble: React.FC<{
   if (!displayText.trim() && inputImages.length === 0) return null;
   const canRollback =
     !!message.backendMessageId && !message.streaming && !rollbackDisabled;
+  const isInserted = message.metadata?.inputKind === "inserted";
+  const canBranch =
+    !!message.backendMessageId && !message.streaming && !branchDisabled;
 
   return (
-    <article className="bubble-row user">
+    <article className={`bubble-row user ${isInserted ? "inserted" : ""}`}>
       <div className="bubble user">
+        {isInserted ? (
+          <div className="bubble-inserted-badge" title={t.messageList.insertedBadge}>
+            <CornerUpRight size={12} />
+            <span>{t.messageList.insertedBadge}</span>
+          </div>
+        ) : null}
         {displayText.trim() ? (
           <p>
             <MentionContent text={displayText} />
@@ -64,6 +77,18 @@ const UserBubble: React.FC<{
           <span>{formatClock(message.timestamp)}</span>
           {message.streaming ? (
             <span className="streaming">{t.common.streaming}</span>
+          ) : null}
+          {canBranch ? (
+            <button
+              type="button"
+              className="bubble-branch-btn"
+              onClick={() => onBranch(message)}
+              disabled={!canBranch}
+              title={t.messageList.branchFromHere}
+            >
+              <CornerUpRight size={14} />
+              <span>{t.app.branch}</span>
+            </button>
           ) : null}
           <button
             type="button"
@@ -112,6 +137,8 @@ const AgentTurnBubble: React.FC<{
   const textPreview = markdownPreview || (item.streaming ? "..." : "");
   const eventPreview = isCompaction ? preview : preview || (item.streaming ? "..." : "");
   const shouldClampTextPreview = item.streaming;
+  const isNowaitCommand =
+    message.type === "command" && message.metadata?.isNowait === true;
 
   return (
     <article className="bubble-row assistant">
@@ -125,7 +152,14 @@ const AgentTurnBubble: React.FC<{
           />
         ) : (
           <div className="agent-event-preview">
-            <div className={titleClassName}>{messageTitle}</div>
+            <div className={titleClassName}>
+              {messageTitle}
+              {isNowaitCommand ? (
+                <span className="nowait-chip" title={t.messageList.nowaitBadge}>
+                  {t.messageList.nowaitBadge}
+                </span>
+              ) : null}
+            </div>
             {eventPreview ? (
               <pre
                 className={`agent-event-body ${isToolLike ? "tool-fixed" : ""}${isCompaction ? " compaction" : ""}`}
@@ -182,7 +216,9 @@ export const MessageList: React.FC<MessageListProps> = ({
   onAskDecision,
   onOpenDetail,
   onRollback,
+  onBranch,
   rollbackDisabled,
+  branchDisabled,
   listRef,
 }) => {
   const { t } = useMobileI18n();
@@ -191,8 +227,8 @@ export const MessageList: React.FC<MessageListProps> = ({
     <main className="message-list" ref={listRef}>
       {items.length === 0 ? (
         <div className="empty-state">
-          <p>{t.messageList.emptyTitle}</p>
-          <p>{t.messageList.emptyHint}</p>
+          <p className="empty-state-title">{t.messageList.emptyTitle}</p>
+          <p className="empty-state-hint">{t.messageList.emptyHint}</p>
         </div>
       ) : (
         items.map((item) => {
@@ -202,7 +238,9 @@ export const MessageList: React.FC<MessageListProps> = ({
                 key={item.id}
                 message={item.message}
                 onRollback={onRollback}
+                onBranch={onBranch}
                 rollbackDisabled={rollbackDisabled}
+                branchDisabled={branchDisabled}
               />
             );
           }

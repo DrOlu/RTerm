@@ -6,6 +6,12 @@ import type {
   RenderTask,
 } from "pdfjs-dist";
 import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.js?url";
+import {
+  clampPreviewValue,
+  resolveAnchoredPreviewScrollOffset,
+  resolvePreviewWheelZoomMultiplier,
+  shouldHandlePreviewWheelZoom,
+} from "./previewInteractions";
 
 type PdfJsRuntime = Pick<
   typeof import("pdfjs-dist"),
@@ -54,9 +60,27 @@ interface PdfPreviewProps {
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 const ZOOM_STEP = 0.2;
+const NATIVE_PDF_VIEWER_OPEN_PARAMETERS = "pagemode=none&navpanes=0";
 
 const clamp = (value: number, min: number, max: number): number =>
-  Math.max(min, Math.min(max, value));
+  clampPreviewValue(value, min, max);
+
+interface PendingPdfZoomAnchor {
+  localX: number;
+  localY: number;
+  oldZoom: number;
+  newZoom: number;
+  scrollLeft: number;
+  scrollTop: number;
+}
+
+interface PdfPanState {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  scrollLeft: number;
+  scrollTop: number;
+}
 
 const base64ToUint8Array = (base64: string): Uint8Array => {
   const binary = window.atob(base64);
@@ -67,6 +91,9 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
   return bytes;
 };
 
+const buildNativePdfViewerUrl = (objectUrl: string): string =>
+  `${objectUrl}#${NATIVE_PDF_VIEWER_OPEN_PARAMETERS}`;
+
 export const PdfPreview: React.FC<PdfPreviewProps> = ({
   contentBase64,
   filePath,
@@ -74,18 +101,75 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
 }) => {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const pendingPdfZoomAnchorRef = React.useRef<PendingPdfZoomAnchor | null>(
+    null,
+  );
+  const pdfPanStateRef = React.useRef<PdfPanState | null>(null);
   const [pdfDocument, setPdfDocument] = React.useState<PDFDocumentProxy | null>(
     null,
   );
   const [pageNumber, setPageNumber] = React.useState(1);
   const [pageCount, setPageCount] = React.useState(0);
   const [zoom, setZoom] = React.useState(1);
+  const zoomRef = React.useRef(zoom);
   const [containerWidth, setContainerWidth] = React.useState(0);
+  const [nativePdfUrl, setNativePdfUrl] = React.useState("");
+  const [usePdfJsFallback, setUsePdfJsFallback] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [rendering, setRendering] = React.useState(false);
+  const [isPdfPanning, setPdfPanning] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+
+  React.useEffect(() => {
+    setUsePdfJsFallback(false);
+    setNativePdfUrl("");
+    setPdfDocument(null);
+    setPageNumber(1);
+    setPageCount(0);
+    setZoom(1);
+    setLoading(true);
+    setRendering(false);
+    setErrorMessage(null);
+    pendingPdfZoomAnchorRef.current = null;
+    pdfPanStateRef.current = null;
+
+    let objectUrl = "";
+    try {
+      const pdfBytes = base64ToUint8Array(contentBase64);
+      const pdfBuffer = new ArrayBuffer(pdfBytes.byteLength);
+      new Uint8Array(pdfBuffer).set(pdfBytes);
+      const blob = new Blob([pdfBuffer], {
+        type: "application/pdf",
+      });
+      objectUrl = URL.createObjectURL(blob);
+      setNativePdfUrl(buildNativePdfViewerUrl(objectUrl));
+      setLoading(false);
+    } catch (error) {
+      setUsePdfJsFallback(true);
+      setLoading(false);
+      setErrorMessage(
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : labels.renderError,
+      );
+    }
+
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [contentBase64, labels.renderError]);
+
+  React.useEffect(() => {
+    if (!usePdfJsFallback) {
+      return;
+    }
+
     const container = containerRef.current;
     if (!container) return;
 
@@ -102,9 +186,13 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
     const observer = new ResizeObserver(updateWidth);
     observer.observe(container);
     return () => observer.disconnect();
-  }, []);
+  }, [usePdfJsFallback]);
 
   React.useEffect(() => {
+    if (!usePdfJsFallback) {
+      return;
+    }
+
     let cancelled = false;
     let loadingTask: PDFDocumentLoadingTask | null = null;
 
@@ -149,7 +237,7 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
         void loadingTask.destroy();
       }
     };
-  }, [contentBase64, labels.renderError]);
+  }, [contentBase64, labels.renderError, usePdfJsFallback]);
 
   React.useEffect(() => {
     return () => {
@@ -159,9 +247,145 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
     };
   }, [pdfDocument]);
 
+  const queuePdfZoomAnchor = React.useCallback(
+    (nextZoom: number, clientX?: number, clientY?: number): void => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const localX =
+        typeof clientX === "number"
+          ? clientX - rect.left
+          : container.clientWidth / 2;
+      const localY =
+        typeof clientY === "number"
+          ? clientY - rect.top
+          : container.clientHeight / 2;
+
+      pendingPdfZoomAnchorRef.current = {
+        localX,
+        localY,
+        oldZoom: zoomRef.current,
+        newZoom: nextZoom,
+        scrollLeft: container.scrollLeft,
+        scrollTop: container.scrollTop,
+      };
+    },
+    [],
+  );
+
+  const applyPendingPdfZoomAnchor = React.useCallback((): void => {
+    const pending = pendingPdfZoomAnchorRef.current;
+    const container = containerRef.current;
+    if (!pending || !container) return;
+    pendingPdfZoomAnchorRef.current = null;
+
+    container.scrollLeft = resolveAnchoredPreviewScrollOffset({
+      scrollOffset: pending.scrollLeft,
+      pointerOffset: pending.localX,
+      oldScale: pending.oldZoom,
+      newScale: pending.newZoom,
+      maxScrollOffset: container.scrollWidth - container.clientWidth,
+    });
+    container.scrollTop = resolveAnchoredPreviewScrollOffset({
+      scrollOffset: pending.scrollTop,
+      pointerOffset: pending.localY,
+      oldScale: pending.oldZoom,
+      newScale: pending.newZoom,
+      maxScrollOffset: container.scrollHeight - container.clientHeight,
+    });
+  }, []);
+
+  const setPdfZoom = React.useCallback(
+    (nextZoomInput: number, clientX?: number, clientY?: number): void => {
+      const nextZoom = clamp(nextZoomInput, MIN_ZOOM, MAX_ZOOM);
+      if (Math.abs(nextZoom - zoomRef.current) < 0.0001) {
+        return;
+      }
+      queuePdfZoomAnchor(nextZoom, clientX, clientY);
+      setZoom(nextZoom);
+    },
+    [queuePdfZoomAnchor],
+  );
+
+  const handlePdfWheel = React.useCallback(
+    (event: React.WheelEvent<HTMLDivElement>): void => {
+      if (!shouldHandlePreviewWheelZoom(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+
+      const multiplier = resolvePreviewWheelZoomMultiplier(
+        event.deltaY,
+        event.deltaMode,
+      );
+      setPdfZoom(zoomRef.current * multiplier, event.clientX, event.clientY);
+    },
+    [setPdfZoom],
+  );
+
+  const finishPdfPan = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const container = containerRef.current;
+      const panState = pdfPanStateRef.current;
+      if (!container || !panState || panState.pointerId !== event.pointerId) {
+        return;
+      }
+      pdfPanStateRef.current = null;
+      if (container.hasPointerCapture(event.pointerId)) {
+        container.releasePointerCapture(event.pointerId);
+      }
+      setPdfPanning(false);
+    },
+    [],
+  );
+
+  const handlePdfPointerDown = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const container = containerRef.current;
+      if (
+        !container ||
+        event.button !== 0 ||
+        (container.scrollWidth <= container.clientWidth + 1 &&
+          container.scrollHeight <= container.clientHeight + 1)
+      ) {
+        return;
+      }
+
+      pdfPanStateRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        scrollLeft: container.scrollLeft,
+        scrollTop: container.scrollTop,
+      };
+      container.setPointerCapture(event.pointerId);
+      setPdfPanning(true);
+      event.preventDefault();
+    },
+    [],
+  );
+
+  const handlePdfPointerMove = React.useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const container = containerRef.current;
+      const panState = pdfPanStateRef.current;
+      if (!container || !panState || panState.pointerId !== event.pointerId) {
+        return;
+      }
+      container.scrollLeft =
+        panState.scrollLeft - (event.clientX - panState.startX);
+      container.scrollTop =
+        panState.scrollTop - (event.clientY - panState.startY);
+      event.preventDefault();
+    },
+    [],
+  );
+
   React.useEffect(() => {
     const canvas = canvasRef.current;
-    if (!pdfDocument || !canvas || containerWidth <= 0) {
+    if (!usePdfJsFallback || !pdfDocument || !canvas || containerWidth <= 0) {
       return;
     }
 
@@ -205,6 +429,9 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
       .then(() => {
         if (!cancelled) {
           setRendering(false);
+          window.requestAnimationFrame(() => {
+            applyPendingPdfZoomAnchor();
+          });
         }
       })
       .catch((error) => {
@@ -229,10 +456,42 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
         renderTask.cancel();
       }
     };
-  }, [containerWidth, labels.renderError, pageNumber, pdfDocument, zoom]);
+  }, [
+    applyPendingPdfZoomAnchor,
+    containerWidth,
+    labels.renderError,
+    pageNumber,
+    pdfDocument,
+    usePdfJsFallback,
+    zoom,
+  ]);
 
   const canGoPrevious = pageNumber > 1;
   const canGoNext = pageCount > 0 && pageNumber < pageCount;
+
+  if (!usePdfJsFallback) {
+    return (
+      <div
+        className="file-editor-pdf-preview is-native"
+        data-testid="pdf-preview"
+      >
+        {nativePdfUrl ? (
+          <iframe
+            className="file-editor-pdf-native-frame"
+            src={nativePdfUrl}
+            title={filePath}
+            onError={() => {
+              setUsePdfJsFallback(true);
+            }}
+          />
+        ) : (
+          <div className="file-editor-empty-state">
+            {labels.loadingDocument}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="file-editor-pdf-preview" data-testid="pdf-preview">
@@ -266,9 +525,7 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
           type="button"
           title={labels.zoomOut}
           aria-label={labels.zoomOut}
-          onClick={() =>
-            setZoom((current) => clamp(current - ZOOM_STEP, MIN_ZOOM, MAX_ZOOM))
-          }
+          onClick={() => setPdfZoom(zoomRef.current - ZOOM_STEP)}
           disabled={loading || zoom <= MIN_ZOOM}
         >
           <Minus size={14} strokeWidth={2.2} />
@@ -281,15 +538,22 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
           type="button"
           title={labels.zoomIn}
           aria-label={labels.zoomIn}
-          onClick={() =>
-            setZoom((current) => clamp(current + ZOOM_STEP, MIN_ZOOM, MAX_ZOOM))
-          }
+          onClick={() => setPdfZoom(zoomRef.current + ZOOM_STEP)}
           disabled={loading || zoom >= MAX_ZOOM}
         >
           <Plus size={14} strokeWidth={2.2} />
         </button>
       </div>
-      <div ref={containerRef} className="file-editor-pdf-canvas-wrap">
+      <div
+        ref={containerRef}
+        className={`file-editor-pdf-canvas-wrap${isPdfPanning ? " is-panning" : ""}`}
+        onWheel={handlePdfWheel}
+        onPointerDown={handlePdfPointerDown}
+        onPointerMove={handlePdfPointerMove}
+        onPointerUp={finishPdfPan}
+        onPointerCancel={finishPdfPan}
+        onPointerLeave={finishPdfPan}
+      >
         {loading ? (
           <div className="file-editor-empty-state">
             {labels.loadingDocument}
