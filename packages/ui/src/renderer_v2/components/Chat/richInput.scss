@@ -117,8 +117,7 @@
     margin: 0 2px;
     font-weight: 700;
     font-family: var(--font-mono);
-    border: 1px solid
-      color-mix(in srgb, var(--accent-2) 42%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-2) 42%, transparent);
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
     user-select: none;
@@ -136,6 +135,8 @@
 }
 
 .mention-suggestions {
+  box-sizing: border-box;
+  width: max-content;
   background: var(--panel-bg);
   border: 1px solid var(--border-strong);
   border-radius: 2px;
@@ -143,15 +144,17 @@
     0 10px 30px rgba(0, 0, 0, 0.4),
     0 0 0 1px rgba(255, 255, 255, 0.05);
   min-width: 180px;
+  max-width: min(360px, calc(100vw - 16px));
   max-height: 200px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   z-index: 10001 !important; /* Ensure it's above settings/connections overlays */
   padding: 2px;
-  margin-bottom: 4px;
 
   .suggestion-item {
     display: flex;
     align-items: center;
+    min-width: 0;
     padding: 4px 8px;
     border-radius: 2px;
     cursor: pointer;
@@ -175,6 +178,7 @@
       align-items: center;
       gap: 8px;
       width: 100%;
+      min-width: 0;
     }
 
     .item-type {
@@ -192,6 +196,7 @@
 
     .item-name {
       flex: 1;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;

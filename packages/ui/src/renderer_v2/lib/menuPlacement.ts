@@ -24,14 +24,6 @@ interface FloatingMenuPlacementResult {
   direction: "above" | "below";
 }
 
-interface AnchoredBelowMenuMetricsInput {
-  anchorRect: Pick<MenuAnchorRect, "top" | "height">;
-  viewportHeight: number;
-  margin?: number;
-  gap?: number;
-  preferredMaxHeight?: number;
-}
-
 const clamp = (value: number, min: number, max: number): number => {
   if (max <= min) {
     return min;
@@ -122,29 +114,4 @@ export const resolveFloatingMenuPlacement = ({
     maxWidth: resolvedMaxWidth,
     direction,
   };
-};
-
-export const resolveAnchoredBelowMenuMaxHeight = ({
-  anchorRect,
-  viewportHeight,
-  margin = 8,
-  gap = 1,
-  preferredMaxHeight = 320,
-}: AnchoredBelowMenuMetricsInput): number => {
-  const resolvedViewportHeight = Math.max(
-    0,
-    normalizeFinite(viewportHeight, 0),
-  );
-  const resolvedMargin = Math.max(0, normalizeFinite(margin, 8));
-  const resolvedGap = Math.max(0, normalizeFinite(gap, 1));
-  const resolvedPreferredMaxHeight = Math.max(
-    0,
-    normalizeFinite(preferredMaxHeight, 320),
-  );
-  const anchorBottom = anchorRect.top + anchorRect.height;
-  const availableBelow = Math.max(
-    0,
-    resolvedViewportHeight - anchorBottom - resolvedGap - resolvedMargin,
-  );
-  return Math.min(resolvedPreferredMaxHeight, availableBelow);
 };

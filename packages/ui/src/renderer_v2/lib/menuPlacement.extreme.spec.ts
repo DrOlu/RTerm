@@ -1,7 +1,4 @@
-import {
-  resolveAnchoredBelowMenuMaxHeight,
-  resolveFloatingMenuPlacement,
-} from "./menuPlacement";
+import { resolveFloatingMenuPlacement } from "./menuPlacement";
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
   if (actual !== expected) {
@@ -98,22 +95,6 @@ runCase("floating select clamps width and height inside tiny viewports", () => {
 });
 
 runCase(
-  "anchored tab menus use only the remaining space below the header",
-  () => {
-    const maxHeight = resolveAnchoredBelowMenuMaxHeight({
-      anchorRect: { top: 602, height: 28 },
-      viewportHeight: 700,
-    });
-
-    assertEqual(
-      maxHeight,
-      61,
-      "tab menus should stay attached below the header and scroll within the remaining viewport space",
-    );
-  },
-);
-
-runCase(
   "pointer-anchored menus flip above when opened near the viewport bottom",
   () => {
     const placement = resolveFloatingMenuPlacement({
@@ -138,3 +119,20 @@ runCase(
     );
   },
 );
+
+runCase("floating menus clamp against the right viewport edge", () => {
+  const placement = resolveFloatingMenuPlacement({
+    anchorRect: { left: 780, top: 140, width: 80, height: 28 },
+    menuWidth: 220,
+    menuHeight: 120,
+    viewportWidth: 900,
+    viewportHeight: 700,
+    margin: 8,
+  });
+
+  assertEqual(
+    placement.left,
+    672,
+    "right-edge menus should shift left until their right edge fits inside the viewport margin",
+  );
+});

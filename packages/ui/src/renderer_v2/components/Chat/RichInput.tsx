@@ -32,6 +32,7 @@ import {
   shouldLetImeHandleKeyDown,
   shouldSuppressPostCompositionEnter,
 } from "../../lib/imeComposition";
+import { resolveFloatingMenuPlacement } from "../../lib/menuPlacement";
 import { truncateMentionDisplayText } from "../../lib/mentionDisplay";
 import "./richInput.scss";
 
@@ -68,6 +69,27 @@ type RichMentionItem = {
   preview?: string;
 };
 
+type MentionSuggestionAnchorRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+const MENTION_SUGGESTION_MARGIN = 8;
+const MENTION_SUGGESTION_GAP = 6;
+const MENTION_SUGGESTION_MAX_HEIGHT = 200;
+const MENTION_SUGGESTION_FALLBACK_WIDTH = 180;
+
+const toMentionSuggestionAnchorRect = (
+  rect: Pick<DOMRect, "left" | "top" | "width" | "height">,
+): MentionSuggestionAnchorRect => ({
+  left: rect.left,
+  top: rect.top,
+  width: Math.max(1, rect.width),
+  height: Math.max(1, rect.height),
+});
+
 const escapeHtml = (value: string): string =>
   String(value || "").replace(/[&<>"']/g, (char) => {
     switch (char) {
@@ -95,10 +117,15 @@ export const RichInput = observer(
   forwardRef<RichInputHandle, RichInputProps>(
     ({ store, placeholder, onSend, onInput, disabled }, ref) => {
       const editorRef = useRef<HTMLDivElement>(null);
+      const suggestionMenuRef = useRef<HTMLDivElement>(null);
       const [showSuggestions, setShowSuggestions] = useState(false);
       const [suggestions, setSuggestions] = useState<RichMentionItem[]>([]);
       const [selectedIndex, setSelectedIndex] = useState(0);
-      const [suggestionPos, setSuggestionPos] = useState({ top: 0, left: 0 });
+      const [suggestionAnchorRect, setSuggestionAnchorRect] =
+        useState<MentionSuggestionAnchorRect | null>(null);
+      const [suggestionStyle, setSuggestionStyle] = useState<
+        React.CSSProperties | undefined
+      >(undefined);
       const [imageAttachments, setImageAttachments] = useState<
         ComposerImageAttachment[]
       >([]);
@@ -274,6 +301,81 @@ export const RichInput = observer(
         return { query: textBefore.slice(lastAtIdx + 1), index: lastAtIdx };
       };
 
+      const resolveSuggestionAnchorRect = useCallback(
+        (
+          info: ReturnType<typeof getMentionInfo>,
+        ): MentionSuggestionAnchorRect | null => {
+          const targetTag = (info as { targetTag?: unknown } | null)?.targetTag;
+          if (targetTag instanceof HTMLElement) {
+            return toMentionSuggestionAnchorRect(
+              targetTag.getBoundingClientRect(),
+            );
+          }
+
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0).cloneRange();
+            const rects = range.getClientRects();
+            const rect =
+              rects.length > 0 ? rects[0] : range.getBoundingClientRect();
+            if (rect.width > 0 || rect.height > 0) {
+              return toMentionSuggestionAnchorRect(rect);
+            }
+          }
+
+          const editorRect = editorRef.current?.getBoundingClientRect();
+          if (!editorRect) return null;
+          return {
+            left: editorRect.left + 8,
+            top: editorRect.top,
+            width: 1,
+            height: Math.max(1, editorRect.height),
+          };
+        },
+        [],
+      );
+
+      const recomputeSuggestionPlacement = useCallback(() => {
+        const menu = suggestionMenuRef.current;
+        const anchorRect = suggestionAnchorRect;
+        if (!menu || !anchorRect) return;
+
+        const measured = menu.getBoundingClientRect();
+        const placement = resolveFloatingMenuPlacement({
+          anchorRect,
+          menuWidth: Math.ceil(
+            measured.width || MENTION_SUGGESTION_FALLBACK_WIDTH,
+          ),
+          menuHeight: Math.ceil(
+            measured.height || MENTION_SUGGESTION_MAX_HEIGHT,
+          ),
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+          margin: MENTION_SUGGESTION_MARGIN,
+          gap: MENTION_SUGGESTION_GAP,
+          preferredMaxHeight: MENTION_SUGGESTION_MAX_HEIGHT,
+        });
+
+        setSuggestionStyle((current) => {
+          if (
+            current?.top === placement.top &&
+            current?.left === placement.left &&
+            current?.maxHeight === placement.maxHeight &&
+            current?.maxWidth === placement.maxWidth
+          ) {
+            return current;
+          }
+          return {
+            position: "fixed",
+            top: placement.top,
+            left: placement.left,
+            maxHeight: placement.maxHeight,
+            maxWidth: placement.maxWidth,
+            zIndex: 10000,
+          };
+        });
+      }, [suggestionAnchorRect]);
+
       const updateSuggestions = useCallback(() => {
         const info = getMentionInfo();
         if (!info) {
@@ -315,23 +417,25 @@ export const RichInput = observer(
           .slice(0, 10);
 
         if (filtered.length > 0) {
+          const anchorRect = resolveSuggestionAnchorRect(info);
+          if (!anchorRect) {
+            setShowSuggestions(false);
+            return;
+          }
           setSuggestions(filtered);
           setSelectedIndex(0);
+          setSuggestionAnchorRect(anchorRect);
+          setSuggestionStyle(undefined);
           setShowSuggestions(true);
-
-          const selection = window.getSelection();
-          if (selection && selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0).cloneRange();
-            const rects = range.getClientRects();
-            if (rects.length > 0) {
-              const rect = rects[0];
-              setSuggestionPos({ top: rect.top - 8, left: rect.left });
-            }
-          }
         } else {
           setShowSuggestions(false);
         }
-      }, [store.skills, store.terminalTabs]);
+      }, [
+        resolveSuggestionAnchorRect,
+        store.settings?.tools?.skills,
+        store.skills,
+        store.terminalTabs,
+      ]);
 
       const buildMentionHtml = (item: RichMentionItem, uid: string): string => {
         const fileName = getFileMentionDisplayName(item.name) || item.name;
@@ -396,7 +500,9 @@ export const RichInput = observer(
 
         const selection = window.getSelection();
         const activeRange =
-          selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+          selection && selection.rangeCount > 0
+            ? selection.getRangeAt(0)
+            : null;
         const activeRangeInEditor = activeRange
           ? editor.contains(activeRange.commonAncestorContainer)
           : false;
@@ -768,6 +874,45 @@ export const RichInput = observer(
         }
       }, [disabled, store.view]);
 
+      React.useLayoutEffect(() => {
+        if (!showSuggestions) return;
+        recomputeSuggestionPlacement();
+      }, [
+        recomputeSuggestionPlacement,
+        showSuggestions,
+        suggestionAnchorRect,
+        suggestions.length,
+      ]);
+
+      React.useEffect(() => {
+        if (!showSuggestions) {
+          setSuggestionAnchorRect(null);
+          setSuggestionStyle(undefined);
+          return;
+        }
+
+        const handleReflow = () => {
+          const info = getMentionInfo();
+          const anchorRect = info ? resolveSuggestionAnchorRect(info) : null;
+          if (anchorRect) {
+            setSuggestionAnchorRect(anchorRect);
+          } else {
+            recomputeSuggestionPlacement();
+          }
+        };
+
+        window.addEventListener("resize", handleReflow);
+        window.addEventListener("scroll", handleReflow, true);
+        return () => {
+          window.removeEventListener("resize", handleReflow);
+          window.removeEventListener("scroll", handleReflow, true);
+        };
+      }, [
+        recomputeSuggestionPlacement,
+        resolveSuggestionAnchorRect,
+        showSuggestions,
+      ]);
+
       React.useEffect(() => {
         imageAttachmentsRef.current = imageAttachments;
         onInput?.(buildDraft());
@@ -982,12 +1127,15 @@ export const RichInput = observer(
           {showSuggestions &&
             createPortal(
               <div
+                ref={suggestionMenuRef}
                 className="mention-suggestions"
                 style={{
                   position: "fixed",
-                  top: suggestionPos.top,
-                  left: suggestionPos.left,
-                  transform: "translateY(-100%)",
+                  top: suggestionStyle?.top ?? 0,
+                  left: suggestionStyle?.left ?? 0,
+                  maxHeight: suggestionStyle?.maxHeight,
+                  maxWidth: suggestionStyle?.maxWidth,
+                  visibility: suggestionStyle ? undefined : "hidden",
                   zIndex: 10000,
                 }}
               >

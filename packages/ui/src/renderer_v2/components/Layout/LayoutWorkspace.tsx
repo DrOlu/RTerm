@@ -1610,6 +1610,16 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
         };
       };
 
+      const isPortaledCompactTabMenuTarget = (
+        target: EventTarget | null,
+      ): boolean => {
+        const element = target as HTMLElement | null;
+        if (!element || typeof element.closest !== "function") {
+          return false;
+        }
+        return Boolean(element.closest(".gyshell-compact-tab-menu"));
+      };
+
       const readPanelDragSourceElement = (
         target: EventTarget | null,
       ): HTMLElement | null => {
@@ -2466,6 +2476,11 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
         nativeDragStartHandledRef.current = false;
       };
 
+      const handleWindowPointerDown = (event: MouseEvent) => {
+        if (!isPortaledCompactTabMenuTarget(event.target)) return;
+        handlePointerDown(event);
+      };
+
       const handlePointerUp = () => {
         if (store.layout.isDragging || pendingLocalPanelDragRef.current) {
           return;
@@ -2476,6 +2491,10 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
       };
 
       const handleWindowDragOver = (event: DragEvent) => {
+        if (isPortaledCompactTabMenuTarget(event.target)) {
+          handleDragMove(event);
+          return;
+        }
         if (
           !store.layout.isDragging ||
           (store.layout.dragType !== "tab" && store.layout.dragType !== "panel")
@@ -2504,6 +2523,10 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
       };
 
       const handleWindowDrop = (event: DragEvent) => {
+        if (isPortaledCompactTabMenuTarget(event.target)) {
+          handleDrop(event);
+          return;
+        }
         const inside = isPointInsideHost(event.clientX, event.clientY);
         if (inside) {
           // window capture runs before the host drop handler. Never clear drag state
@@ -2538,9 +2561,25 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
         resetDragUi();
       };
 
+      const handleWindowDragStart = (event: DragEvent) => {
+        if (!isPortaledCompactTabMenuTarget(event.target)) return;
+        handleDragStart(event);
+      };
+
+      const handleWindowDragEnter = (event: DragEvent) => {
+        if (!isPortaledCompactTabMenuTarget(event.target)) return;
+        handleDragMove(event);
+      };
+
+      const handleWindowDragEnd = (event: DragEvent) => {
+        if (!isPortaledCompactTabMenuTarget(event.target)) return;
+        handleDragEnd();
+      };
+
       // Use capture so the workspace sees cross-window drags before nested
       // editors, terminals, or inputs claim the native drag session.
       host.addEventListener("mousedown", handlePointerDown, true);
+      window.addEventListener("mousedown", handleWindowPointerDown, true);
       window.addEventListener("mouseup", handlePointerUp, true);
       host.addEventListener("dragstart", handleDragStart, true);
       host.addEventListener("dragenter", handleDragEnter, true);
@@ -2548,11 +2587,15 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
       host.addEventListener("dragleave", handleDragLeave, true);
       host.addEventListener("drop", handleDrop, true);
       host.addEventListener("dragend", handleDragEnd, true);
+      window.addEventListener("dragstart", handleWindowDragStart, true);
+      window.addEventListener("dragenter", handleWindowDragEnter, true);
       window.addEventListener("dragover", handleWindowDragOver, true);
       window.addEventListener("drop", handleWindowDrop, true);
+      window.addEventListener("dragend", handleWindowDragEnd, true);
 
       return () => {
         host.removeEventListener("mousedown", handlePointerDown, true);
+        window.removeEventListener("mousedown", handleWindowPointerDown, true);
         window.removeEventListener("mouseup", handlePointerUp, true);
         host.removeEventListener("dragstart", handleDragStart, true);
         host.removeEventListener("dragenter", handleDragEnter, true);
@@ -2560,8 +2603,11 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
         host.removeEventListener("dragleave", handleDragLeave, true);
         host.removeEventListener("drop", handleDrop, true);
         host.removeEventListener("dragend", handleDragEnd, true);
+        window.removeEventListener("dragstart", handleWindowDragStart, true);
+        window.removeEventListener("dragenter", handleWindowDragEnter, true);
         window.removeEventListener("dragover", handleWindowDragOver, true);
         window.removeEventListener("drop", handleWindowDrop, true);
+        window.removeEventListener("dragend", handleWindowDragEnd, true);
         clearLocalTabDragState();
         clearLocalPanelDragState();
       };
