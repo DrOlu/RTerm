@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#key-capabilities)
 
 English README | [中文 README](./README.zh-CN.md)  
-Latest release notes: [`changelogs/v1.5.2.md`](./changelogs/v1.5.2.md)
+Latest release notes: [`changelogs/v1.5.3.md`](./changelogs/v1.5.3.md)
 
 If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/GyShell/discussions).
 
@@ -40,9 +40,10 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - **Persistent execution loop**: observe output -> reason -> continue.
 - **Human-in-the-loop by design**: intervene anytime without breaking flow.
 - **Multi-tab orchestration**: compile, inspect logs, and run fixes in parallel tabs.
-- **Workspace persistence**: terminal tabs and panel layout can survive restarts and restore quickly.
+- **Workspace persistence**: terminal tabs, panel layout, and saved layout slots can survive restarts and restore quickly.
 - **Detachable multi-window workspace**: peel panels into sub-windows and move tabs or whole panels across windows.
 - **Adaptive panel tab display**: keep full tab strips or switch to a compact selector for narrow panel headers.
+- **Reusable Agent setting profiles**: save and reapply complete operating profiles for models, tools, policies, memory, and workflow flags.
 - **Integrated file management**: browse, edit, copy, and transfer files across local and SSH sessions without leaving the workspace.
 - **Live resource visibility**: inspect CPU, memory, disks, network, processes, sockets, and GPU from local or SSH sessions.
 - **OpenClawd-style remote conversation control**: keep the runtime core on your own computer and steer it from anywhere through chat.
@@ -60,20 +61,20 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - **For multi-device flow**: desktop + TUI + mobile-web with shared gateway semantics.
 - **For multimodal workflows**: text and image inputs can be combined in one execution turn.
 
-## v1.5.2 Key Highlights
+## v1.5.3 Key Highlights
 
-- **Prevent sleep while a session is running**
-  - a new **Prevent Sleep While Running** setting keeps the computer awake whenever any chat session is actively running, so long autonomous tasks don't stall when you step away — the screen may still turn off, and the block releases automatically once all runs finish
-- **Local terminals stay alive when their shell exits**
-  - if a **local** terminal's shell process exits (you type `exit`, or it crashes), GyShell respawns a fresh shell in the same tab — preserving the tab, its title, and its size — instead of leaving a dead "exited" tab behind
-- **Reconnect disconnected SSH terminals**
-  - a disconnected (exited) **SSH** tab now offers a **Reconnect** action in its right-click menu that re-establishes the connection from the tab's saved SSH config, reusing the same tab
-- **Experimental agent file transfer between terminal tabs**
-  - two new **experimental, off-by-default** agent tools (`copy_between_tabs` / `read_file_transfer_status`) let the agent run **asynchronous, copy-only** file transfers between tabs on **different machines** and poll their progress; tasks appear in the **Transfer Tasks** panel with an **AGENT / USER** origin badge and a new **Scanning** phase
-- **Clearer chat & terminal tab indicators**
-  - chat tabs now show a green **"running" dot** while that session is busy (matching terminal tabs), and tab styling / close buttons were unified for a cleaner, subtler look across chat, terminal, and the compact tab selector
-- **More resilient agent stream loop**
-  - providers that finish with `tool_calls` but emit no actual tool-call payload (e.g. some GLM-compatible endpoints) no longer dead-end a turn — GyShell detects the malformed finish and retries once with a non-streaming request before giving up
+- **Saved workspace layout slots**
+  - save up to three numbered workspace layouts from the rail, restore one with a click, and right-click a slot to overwrite or delete it; saved layouts preserve the v2 split tree, panel tab bindings, active tabs, and compatibility layout projections
+- **Agent Setting profiles**
+  - save up to five complete agent operating profiles covering model profile, command policy, built-in tools, MCP servers, skills, memory, recursion limit, and workflow experimental flags; applying a profile also switches to profile-scoped `memory.md`
+- **Richer mobile-web remote steering**
+  - the mobile companion now has stronger session status signals, a pending-approval jump badge, branch and rollback actions, task-completion toasts, better reconnect behavior, and Settings sub-pages for skills, tools, and Agent Setting profiles
+- **Read-only mobile terminal control**
+  - mobile-web can now poll terminal output tails, show unread output indicators, create local or saved-SSH terminal tabs, close tabs while protecting the last one, refresh output, and reconnect exited SSH tabs
+- **Desktop `gyll` CLI/TUI is deprecated**
+  - desktop packages no longer bundle or install `gyll` / `gyll-tui`; startup only removes old desktop-managed launchers that contain the legacy `GYLL_BIN` marker, leaving unrelated files and shell profile PATH blocks untouched
+- **Font/readability polish**
+  - renderer font smoothing now uses native defaults, and xterm sets explicit normal/bold font weights for more consistent terminal readability
 
 ---
 
@@ -84,12 +85,13 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - Thinking-oriented execution for complex tasks.
 - Context-aware responses from terminal state and selected resources.
 - Per-profile model routing for `Global`, `Thinking`, `Action`, and `Compaction` roles.
+- Reusable Agent Setting profiles for model profile, security policy, tools, skills, memory, recursion, and experimental workflow flags.
 - Long-session context quality with dedicated compaction models and dynamic compaction summaries.
 - SQLite-backed conversation history with automatic one-time migration from legacy JSON storage.
 - AI-assisted terminal command drafting from recent tab context, with paste-before-run control.
 - Background (nowait) commands automatically notify the agent on completion, so the agent can close the loop without polling.
 - Classic or Seamless chat activity display, depending on how much inline tool detail you want.
-- Persistent global memory injection via `memory.md`.
+- Persistent memory injection via `memory.md`, scoped to the active Agent Setting profile when one is applied.
 - Multimodal user input pipeline (text + images) for compatible models.
 - OpenAI-compatible model endpoint support, with automatic recovery from malformed empty tool-call stream finishes.
 - Optional experimental agent tools, including asynchronous cross-machine file transfer between terminal tabs with progress polling.
@@ -116,6 +118,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 ### Workspace + Monitoring
 
 - Detach panels into dedicated sub-windows and move tabs or whole panels across windows.
+- Save up to three workspace layout slots and restore them from the rail.
 - Optionally keep the computer awake while any chat session is running, with the system-sleep block released automatically when runs finish.
 - Chat tabs show a running indicator while a session is busy, mirroring terminal tab runtime-state dots.
 - Choose `Auto`, `Expanded`, or `Select` panel tab display modes based on how much header space your workspace has.
@@ -139,9 +142,12 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - Desktop can serve the mobile-web companion directly and expose copyable access links from settings.
 - OpenClawd-style conversational control from anywhere while your core runtime stays on your own machine.
 - Session list with search and status hints.
+- Pending approval badge with jump-to-blocked-session behavior, plus task-completion toasts.
+- Conversation rollback and branch-from-message controls from mobile.
 - Swipe-to-delete session flow for faster mobile cleanup.
+- Read-only terminal output tails with unread indicators, local/saved-SSH terminal creation, and SSH reconnect.
 - Detailed turn event inspection from phone browser.
-- Tool/skill/terminal/settings access through gateway RPC.
+- Tool, skill, Agent Setting profile, terminal, and settings access through gateway RPC.
 - Gateway exposure can now be limited to localhost, LAN-only, custom CIDR ranges, or all interfaces.
 
 ---
@@ -226,7 +232,7 @@ See:
 
 ## Read More
 
-- Release notes: `changelogs/v1.5.2.md`
+- Release notes: `changelogs/v1.5.3.md`
 - Build matrix and packaging: `docs/build-commands.md`
 - Monorepo boundaries and runtime flow: `docs/monorepo-architecture.md`
 
