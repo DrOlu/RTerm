@@ -385,8 +385,6 @@ export const zh = {
     overwriteAndPaste: "覆盖并粘贴",
     keepBothAndPaste: "保留两者",
     loadingDirectory: "正在加载目录...",
-    openingEditor: (name: string) => `正在编辑器中打开：${name}`,
-    openedInEditor: (name: string) => `已在编辑器中打开：${name}`,
     doubleClickToOpenEditor: "双击文件即可在编辑器面板中打开。",
     previewUnsupportedType: (name: string) => `该文件类型暂不支持预览：${name}`,
     previewTooLarge: (name: string, maxMb: number) =>

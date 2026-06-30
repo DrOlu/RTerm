@@ -162,6 +162,8 @@ function createWindow(options?: CreateWindowOptions): BrowserWindow {
       preload: join(__dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
+      // Chromium's built-in PDF viewer is exposed as a plugin in Electron.
+      plugins: true,
       // Prevent Electron from using the sandboxed renderer bundle in dev.
       // This avoids a known class of startup console errors where the sandbox bundle fails early.
       sandbox: false,

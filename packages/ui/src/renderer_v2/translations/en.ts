@@ -395,8 +395,6 @@ export const en = {
     overwriteAndPaste: "Overwrite and Paste",
     keepBothAndPaste: "Keep Both",
     loadingDirectory: "Loading directory...",
-    openingEditor: (name: string) => `Opening in editor: ${name}`,
-    openedInEditor: (name: string) => `Opened in editor: ${name}`,
     doubleClickToOpenEditor:
       "Double-click a file to open it in the editor panel.",
     previewUnsupportedType: (name: string) =>
