@@ -1,6 +1,7 @@
 {
   "name": "@gyshell/tui-core",
   "version": "0.1.0",
+  "description": "Deprecated unsupported core runtime for historical gyll source.",
   "private": true,
   "type": "module",
   "exports": {

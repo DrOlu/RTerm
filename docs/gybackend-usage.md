@@ -43,9 +43,9 @@ Notes:
 
 ### 2. Connect Clients
 
-- TUI `gyll`: auto-probes local websocket if `--url` is omitted; use `--token <access_token>` for non-local gateways.
 - mobile-web: use desktop-generated access links or configure websocket URL manually in mobile settings.
 - Remote clients outside localhost should also provide an access token.
+- `gyll` / CLI TUI is deprecated and unsupported. Desktop packages no longer bundle or install it.
 
 ### 3. Repository Development Runtime
 
@@ -135,9 +135,9 @@ Gateway exposure policy changes should be done through desktop settings (or runt
 
 ### 2. 客户端连接
 
-- TUI `gyll`：未传 `--url` 时会自动探测本地 websocket；连接非本机网关时请使用 `--token <access_token>`。
 - mobile-web：可直接使用桌面端生成的访问链接，或在移动端 Settings 面板中手动填写 websocket 地址。
 - 非 localhost 远程客户端还应同时提供访问令牌。
+- `gyll` / CLI TUI 已废弃且不再提供支持。桌面安装包不再内置或安装它。
 
 ### 3. 仓库开发运行时
 

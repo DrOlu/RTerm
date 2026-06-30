@@ -150,13 +150,13 @@ GyShell 的定位是“运行在真实终端中的持续执行系统”：
 
 1. **Electron 桌面端**（`apps/electron`）
 2. **独立后端运行时**（`apps/gybackend`）
-3. **TUI 运行时**（`apps/tui` + `packages/tui`）
+3. **已废弃的 TUI 运行时**（`apps/tui` + `packages/tui`）
 4. **Mobile Web 运行时**（`apps/mobile-web` + `packages/mobile-web`）
 
 ### 怎么选入口？
 
 - **桌面端**：主力全功能体验，适合日常开发。
-- **TUI（`gyll`）**：键盘优先、终端原生、自动化友好，并可做多标签并行调度。
+- **TUI（`gyll`）**：已废弃且不再提供支持。桌面安装包不再内置或安装 `gyll`。
 - **Mobile Web**：OpenClawd 风格远程对话控制，适合随时随地接管活跃会话。
 
 ---
@@ -177,15 +177,6 @@ npm install
 npm run dev
 ```
 
-### 首次 CLI 体验
-
-安装并启动一次桌面版后，可直接体验：
-
-```bash
-gyll --help
-gyll "规划并执行：运行测试、修复失败并总结改动"
-```
-
 ### 一句话理解 GyShell
 
 `GyShell = 持续 AI 运行时 + 真实终端控制 + 随时人工接管。`
@@ -196,62 +187,13 @@ gyll "规划并执行：运行测试、修复失败并总结改动"
 npm run dev:mobile-web
 ```
 
-### TUI 开发
-
-```bash
-npm run dev:tui
-```
-
 ---
 
-## 桌面版内置 CLI（`gyll`）
+## 已废弃 CLI（`gyll`）
 
-安装并启动一次 GyShell 桌面版后，可使用 `gyll`。
+`gyll` 已废弃且不再提供支持。桌面安装包不再内置 CLI/TUI 运行时，不再安装 launcher，也不再修改 shell profiles。新安装桌面版不会包含 `gyll`。
 
-不传 `--url` 时，CLI 会尝试连接本机桌面后端（默认 `127.0.0.1:17888`）。
-
-```bash
-gyll --help
-gyll --url ip:port
-gyll --url ip:port --token <access_token>
-gyll --url ip:port "你好"
-gyll --url ip:port --token <access_token> "你好"
-gyll run --url ip:port "执行任务"
-gyll hook --url ip:port "发送后退出"
-```
-
-本机快速模式：
-
-```bash
-gyll
-gyll "你好"
-gyll run "执行任务"
-gyll hook "发送后退出"
-```
-
-模式区别：
-
-- `gyll`：进入交互式 TUI。
-- `gyll "消息"`：新建会话并发送首条消息，然后进入 TUI。
-- `gyll run "消息"`：新建会话并在终端流式输出，不进入 TUI。
-- `gyll hook "消息"`：新建会话，发送一次后立即退出。
-
-连接到非本机 websocket 网关时，请附带 `--token <access_token>`。
-
-恢复指定会话：
-
-```bash
-gyll --sessionid "your-session-id"
-```
-
-`hook` 模式适合长流程任务中的回调唤醒场景。
-
-### `gyll` 常见使用模式
-
-- **交互协作**：`gyll`
-- **先发一条再进入 TUI**：`gyll "消息"`
-- **偏自动化流式输出**：`gyll run "消息"`
-- **回调信号 / 自唤醒**：`gyll hook "消息"`
+从旧版本升级的用户，启动新版 app 时会清理旧版桌面端自动生成的 `gyll` launcher，但保留 shell profile 中已有的 PATH block。
 
 ---
 

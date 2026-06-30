@@ -13,7 +13,6 @@ apps/electron/scripts/*
 !apps/electron/scripts/*.mjs
 !apps/tui/scripts/
 apps/tui/scripts/*
-!apps/tui/scripts/build-cli-binaries.ts
 tests/
 node_modules/
 about_mcp.md

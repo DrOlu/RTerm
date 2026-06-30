@@ -39,7 +39,7 @@ import { VersionService } from "../../../backend/src/services/VersionService";
 import { AccessTokenService } from "../../../backend/src/services/AccessToken/AccessTokenService";
 import { TerminalCommandDraftService } from "../../../backend/src/services/TerminalCommandDraftService";
 import { ElectronAppSettingsMigration } from "../settings/ElectronAppSettingsMigration";
-import { installCliLaunchers } from "./CliInstallService";
+import { cleanupDeprecatedCliLaunchers } from "./DeprecatedCliCleanupService";
 import {
   buildBuiltInToolStatusSummary,
   buildSkillStatusSummary,
@@ -291,17 +291,14 @@ function createWindow(options?: CreateWindowOptions): BrowserWindow {
 
 export async function startElectronMain(): Promise<void> {
   await app.whenReady();
-  const projectRoot = resolve(__dirname, "../..");
 
   try {
-    installCliLaunchers({
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      projectRoot,
-    });
+    cleanupDeprecatedCliLaunchers();
   } catch (error) {
-    console.warn("[Main] Failed to install CLI launchers:", error);
+    console.warn("[Main] Failed to clean up deprecated gyll launchers:", error);
   }
+
+  const projectRoot = resolve(__dirname, "../..");
 
   const userDataDir = app.getPath("userData");
   if (!(process.env.GYSHELL_STORE_DIR || "").trim()) {

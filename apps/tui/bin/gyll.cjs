@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// gyll/CLI TUI is deprecated and unsupported. Desktop builds no longer bundle
+// this wrapper or install launchers; this file is retained only for historical
+// standalone package compatibility.
 const childProcess = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')

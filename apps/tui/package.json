@@ -1,20 +1,9 @@
 {
   "name": "@gyshell/tui",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "type": "module",
-  "description": "Standalone GyShell terminal UI client",
-  "bin": {
-    "gyll": "./bin/gyll.cjs",
-    "gyll-tui": "./bin/gyll.cjs"
-  },
-  "optionalDependencies": {
-    "@gyshell/tui-darwin-arm64": "0.1.0",
-    "@gyshell/tui-darwin-x64": "0.1.0",
-    "@gyshell/tui-linux-arm64": "0.1.0",
-    "@gyshell/tui-linux-x64": "0.1.0",
-    "@gyshell/tui-windows-x64": "0.1.0"
-  },
+  "description": "Deprecated unsupported GyShell terminal UI client",
   "files": [
     "bin/**/*",
     "dist/**/*",
@@ -24,7 +13,6 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "esbuild src/index.tsx --bundle --platform=node --format=esm --conditions=browser --jsx=automatic --jsx-import-source=@opentui/solid --packages=external --outfile=dist/index.js",
-    "build:cli-binaries": "bun run scripts/build-cli-binaries.ts",
     "start": "bun run --conditions=browser --preload @opentui/solid/preload src/index.tsx",
     "dev": "bun run --watch --conditions=browser --preload @opentui/solid/preload src/index.tsx",
     "typecheck": "tsc --noEmit -p tsconfig.json",

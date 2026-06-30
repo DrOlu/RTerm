@@ -150,13 +150,13 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 
 1. **Electron desktop app** (`apps/electron`)
 2. **Standalone backend runtime** (`apps/gybackend`)
-3. **TUI runtime** (`apps/tui` wrapper + `packages/tui` core)
+3. **Deprecated TUI runtime** (`apps/tui` wrapper + `packages/tui` core)
 4. **Mobile-web runtime** (`apps/mobile-web` wrapper + `packages/mobile-web` core)
 
 ### Which Surface Should You Use?
 
 - **Desktop app**: primary full-featured experience for daily development.
-- **TUI (`gyll`)**: terminal-native flow for keyboard-first sessions and automation, including multi-tab command orchestration.
+- **TUI (`gyll`)**: deprecated and unsupported. Desktop packages no longer bundle or install `gyll`.
 - **Mobile-web**: OpenClawd-style remote conversational control from phone/browser.
 
 ---
@@ -177,15 +177,6 @@ npm install
 npm run dev
 ```
 
-### First-run CLI experience
-
-After desktop installation and first launch:
-
-```bash
-gyll --help
-gyll "Plan and execute: run tests, fix failures, and summarize changes"
-```
-
 ### One-line Mental Model
 
 `GyShell = persistent AI runtime + real terminal control + human override at any time.`
@@ -196,62 +187,13 @@ gyll "Plan and execute: run tests, fix failures, and summarize changes"
 npm run dev:mobile-web
 ```
 
-### TUI development
-
-```bash
-npm run dev:tui
-```
-
 ---
 
-## Desktop Bundled CLI (`gyll`)
+## Deprecated CLI (`gyll`)
 
-After installing and launching GyShell desktop once, `gyll` is available from the desktop runtime setup.
+`gyll` is deprecated and unsupported. Desktop packages no longer bundle the CLI/TUI runtime, no longer install launchers, and no longer update shell profiles. New desktop installs do not include `gyll`.
 
-If `--url` is not provided, CLI will try the local desktop backend (`127.0.0.1:17888` by default).
-
-```bash
-gyll --help
-gyll --url ip:port
-gyll --url ip:port --token <access_token>
-gyll --url ip:port "Hello"
-gyll --url ip:port --token <access_token> "Hello"
-gyll run --url ip:port "Run task"
-gyll hook --url ip:port "Send and exit"
-```
-
-Local quick forms:
-
-```bash
-gyll
-gyll "Hello"
-gyll run "Run task"
-gyll hook "Send and exit"
-```
-
-Modes:
-
-- `gyll`: interactive TUI.
-- `gyll "message"`: create session, send immediately, then enter TUI.
-- `gyll run "message"`: create session, stream output in terminal, no TUI entry.
-- `gyll hook "message"`: create session, send once, then exit.
-
-Use `--token <access_token>` when connecting to a non-local websocket gateway.
-
-You can also resume a target session:
-
-```bash
-gyll --sessionid "your-session-id"
-```
-
-Hook mode is useful for callback-style self-wakeup in long workflows.
-
-### Typical `gyll` patterns
-
-- **Interactive pairing**: `gyll`
-- **Single prompt then continue in TUI**: `gyll "message"`
-- **Automation-like terminal streaming**: `gyll run "message"`
-- **Callback signal / wake-up message**: `gyll hook "message"`
+When an existing user updates from a version that installed desktop-managed `gyll` launchers, the updated app removes those legacy launchers on startup while leaving any shell profile PATH block untouched.
 
 ---
 
