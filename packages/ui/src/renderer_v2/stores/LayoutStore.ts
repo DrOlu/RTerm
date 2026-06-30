@@ -86,10 +86,7 @@ const getViewportRect = (viewport: LayoutViewport): LayoutRect => ({
 })
 
 type DragType = 'panel' | 'tab' | null
-type LayoutSaveOptions = {
-  preserveActiveSavedLayout?: boolean
-}
-type SyncPanelBindingOptions = LayoutSaveOptions & {
+type SyncPanelBindingOptions = {
   persist?: boolean
   preservePanelActiveTabs?: boolean
 }
@@ -155,7 +152,6 @@ export class LayoutStore {
       saveCurrentLayoutSlot: action,
       applySavedLayoutSlot: action,
       deleteSavedLayoutSlot: action,
-      overwriteSavedLayoutSlot: action,
       pinPanelsAsRestorePlaceholder: action,
       syncPanelBindings: action,
       setViewport: action,
@@ -253,15 +249,19 @@ export class LayoutStore {
 
     this.savedLayoutSlots = result.slots
     this.activeSavedLayoutId = result.slot.id
-    await this.saveLayout({ preserveActiveSavedLayout: true })
+    await this.saveLayout()
     return result.slot
   }
 
   async applySavedLayoutSlot(slotId: string): Promise<boolean> {
-    const slot = findSavedLayoutSlot(this.savedLayoutSlots, slotId)
+    let slot = findSavedLayoutSlot(this.savedLayoutSlots, slotId)
     if (!slot || !this.shouldPersistLayout()) {
       return false
     }
+
+    this.clearPersistTimer()
+    this.updateActiveSavedLayoutSnapshot()
+    slot = findSavedLayoutSlot(this.savedLayoutSlots, slotId) || slot
 
     const nextTree = buildLayoutTree({
       panelOrder: slot.snapshot.panelOrder,
@@ -272,7 +272,6 @@ export class LayoutStore {
       return false
     }
 
-    this.clearPersistTimer()
     this.materializeRestoredTabs(nextTree)
     this.pinnedEmptyPanelIds.clear()
     this.tree = nextTree
@@ -287,7 +286,7 @@ export class LayoutStore {
       persist: false,
       preservePanelActiveTabs: true
     })
-    await this.saveLayout({ preserveActiveSavedLayout: true })
+    await this.saveLayout()
     return true
   }
 
@@ -303,25 +302,8 @@ export class LayoutStore {
     if (this.activeSavedLayoutId === slotId) {
       this.activeSavedLayoutId = null
     }
-    await this.saveLayout({ preserveActiveSavedLayout: true })
+    await this.saveLayout()
     return true
-  }
-
-  async overwriteSavedLayoutSlot(slotId: string): Promise<SavedLayoutSlot | null> {
-    if (!this.shouldPersistLayout()) {
-      return null
-    }
-
-    const result = overwriteSavedLayoutSlot(this.savedLayoutSlots, slotId, toJS(this.tree))
-    if (!result.slot) {
-      return null
-    }
-
-    this.clearPersistTimer()
-    this.savedLayoutSlots = result.slots
-    this.activeSavedLayoutId = result.slot.id
-    await this.saveLayout({ preserveActiveSavedLayout: true })
-    return result.slot
   }
 
   getPanelsWithMissingTabBindings(kind: PanelKind, ownerTabIds: Iterable<string>): string[] {
@@ -405,9 +387,7 @@ export class LayoutStore {
     }
 
     if (persist) {
-      this.saveLayoutDebounced({
-        preserveActiveSavedLayout: options?.preserveActiveSavedLayout
-      })
+      this.saveLayoutDebounced()
     }
   }
 
@@ -1474,22 +1454,26 @@ export class LayoutStore {
     }
   }
 
-  private markLayoutModified(options?: LayoutSaveOptions): void {
-    if (options?.preserveActiveSavedLayout) {
+  private updateActiveSavedLayoutSnapshot(): void {
+    if (!this.activeSavedLayoutId) {
       return
     }
-    if (this.activeSavedLayoutId) {
+
+    const result = overwriteSavedLayoutSlot(this.savedLayoutSlots, this.activeSavedLayoutId, toJS(this.tree))
+    if (!result.slot) {
       this.activeSavedLayoutId = null
+      return
     }
+    this.savedLayoutSlots = result.slots
   }
 
-  private saveLayoutDebounced(options?: LayoutSaveOptions) {
-    this.markLayoutModified(options)
+  private saveLayoutDebounced() {
+    this.updateActiveSavedLayoutSnapshot()
     this.clearPersistTimer()
 
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null
-      void this.saveLayout({ preserveActiveSavedLayout: true })
+      void this.saveLayout()
     }, 120)
   }
 
@@ -1500,6 +1484,7 @@ export class LayoutStore {
       return
     }
 
+    this.updateActiveSavedLayoutSnapshot()
     const payload = this.buildLayoutSettingsPayload()
     this.layoutSaveRequestId += 1
     try {
@@ -1515,12 +1500,12 @@ export class LayoutStore {
     }
   }
 
-  private async saveLayout(options?: LayoutSaveOptions) {
-    this.markLayoutModified(options)
+  private async saveLayout() {
     if (!this.shouldPersistLayout()) {
       return
     }
 
+    this.updateActiveSavedLayoutSnapshot()
     const payload = this.buildLayoutSettingsPayload()
     const requestId = ++this.layoutSaveRequestId
     await window.gyshell.settings.set(payload)

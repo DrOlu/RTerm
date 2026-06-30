@@ -481,11 +481,6 @@ export const zh = {
     saveCurrentLayoutTitle: "保存当前布局",
     saveCurrentLayoutMessage: "将当前工作区布局保存为一个新的已保存布局？",
     savedLayoutSlot: (slotNumber: number) => `已保存布局 ${slotNumber}`,
-    overwriteWithCurrentLayout: "覆盖为当前布局",
-    overwriteSavedLayoutTitle: "覆盖已保存布局",
-    overwriteSavedLayoutMessage: (slotNumber: number) =>
-      `用当前工作区布局覆盖已保存布局 ${slotNumber} 吗？原已保存布局将无法恢复。`,
-    overwriteSavedLayoutConfirm: "覆盖",
     deleteSavedLayoutTitle: "删除已保存布局",
     deleteSavedLayoutMessage: (slotNumber: number) =>
       `确定删除已保存布局 ${slotNumber} 吗？当前工作区布局不会改变。`,

@@ -499,11 +499,6 @@ export const en = {
     saveCurrentLayoutMessage:
       "Save the current workspace layout as a new saved layout?",
     savedLayoutSlot: (slotNumber: number) => `Saved Layout ${slotNumber}`,
-    overwriteWithCurrentLayout: "Overwrite with Current Layout",
-    overwriteSavedLayoutTitle: "Overwrite Saved Layout",
-    overwriteSavedLayoutMessage: (slotNumber: number) =>
-      `Overwrite saved layout ${slotNumber} with the current workspace layout? The previous saved layout cannot be restored.`,
-    overwriteSavedLayoutConfirm: "Overwrite",
     deleteSavedLayoutTitle: "Delete Saved Layout",
     deleteSavedLayoutMessage: (slotNumber: number) =>
       `Delete saved layout ${slotNumber}? The current workspace layout will not change.`,
