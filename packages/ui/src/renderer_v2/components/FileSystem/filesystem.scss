@@ -472,6 +472,8 @@
   height: 22px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 0 8px;
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
@@ -480,13 +482,48 @@
   text-transform: uppercase;
 }
 
+.filesystem-transfer-panel-title {
+  flex: 0 0 auto;
+}
+
+.filesystem-transfer-panel-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .filesystem-transfer-list {
   max-height: 170px;
   overflow: auto;
   border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
 }
 
+.filesystem-transfer-section-header {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background: color-mix(in srgb, var(--bg) 82%, var(--fg) 4%);
+  color: var(--fg-faint);
+  font-size: var(--filesystem-font-size-xs);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.24px;
+}
+
+.filesystem-transfer-section-count {
+  font-variant-numeric: tabular-nums;
+}
+
 .filesystem-transfer-item {
+  min-height: 64px;
   padding: 4px 8px 5px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
   display: flex;
@@ -495,7 +532,8 @@
 }
 
 .filesystem-transfer-main {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto 20px;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -531,13 +569,17 @@
   color: var(--fg-muted);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
-  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.filesystem-transfer-cancel-btn {
+.filesystem-transfer-cancel-btn,
+.filesystem-transfer-cancel-spacer {
   width: 20px;
   height: 20px;
   margin-left: 2px;
+}
+
+.filesystem-transfer-cancel-btn {
   border: 0;
   background: transparent;
   color: var(--fg-muted);
@@ -546,7 +588,10 @@
   justify-content: center;
   border-radius: 5px;
   cursor: pointer;
-  flex-shrink: 0;
+}
+
+.filesystem-transfer-cancel-spacer {
+  display: inline-block;
 }
 
 .filesystem-transfer-cancel-btn:hover {
@@ -579,7 +624,10 @@
   color: var(--fg-faint);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
+  min-width: 11ch;
+  text-align: right;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .filesystem-transfer-message {
@@ -602,4 +650,10 @@
 
 .filesystem-transfer-item.is-cancelled .filesystem-transfer-status {
   color: var(--fg-faint);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .filesystem-transfer-progress-fill {
+    transition: width 120ms linear;
+  }
 }
