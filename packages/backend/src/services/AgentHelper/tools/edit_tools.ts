@@ -8,6 +8,11 @@ import {
   formatTerminalUnavailableForTool,
   resolveTerminalForTool
 } from './terminal_runtime_guard'
+import {
+  EDIT_FILE_TOOL_NAME,
+  LEGACY_CREATE_OR_EDIT_TOOL_NAME,
+  WRITE_FILE_TOOL_NAME
+} from '../tool_capabilities'
 
 export const editFileSchema = z.object({
   tabIdOrName: z.string().describe('The ID or Name of the terminal tab'),
@@ -18,6 +23,7 @@ export const editFileSchema = z.object({
     ),
   oldString: z
     .string()
+    .min(1, 'oldString must not be empty; use write_file to create or overwrite full files.')
     .describe(
       'Exact text to replace. Must match file content precisely (including indentation and line breaks). Provide enough surrounding context to make it unique.'
     ),
@@ -57,8 +63,11 @@ export const writeAndEditSchema = z
     const hasContent = typeof val.content === 'string'
     const hasOld = typeof val.oldString === 'string'
     const hasNew = typeof val.newString === 'string'
+    const hasMeaningfulContent = hasContent && val.content !== ''
+    const hasMeaningfulEditField =
+      (hasOld && val.oldString !== '') || (hasNew && val.newString !== '')
 
-    if (hasContent && (hasOld || hasNew)) {
+    if (hasMeaningfulContent && hasMeaningfulEditField) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Provide either content (write) OR oldString/newString (edit), not both.'
@@ -66,7 +75,7 @@ export const writeAndEditSchema = z
       return
     }
 
-    if (hasOld !== hasNew) {
+    if (!hasMeaningfulContent && hasOld !== hasNew) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Both oldString and newString are required for edit mode.'
@@ -97,6 +106,10 @@ export async function runEditTool(
     throw new Error('filePath is required')
   }
 
+  if (args.oldString === '') {
+    throw new Error('oldString must not be empty; use write_file to create or overwrite full files.')
+  }
+
   if (args.oldString === args.newString) {
     throw new Error('oldString and newString must be different')
   }
@@ -108,7 +121,7 @@ export async function runEditTool(
   const stat = await terminalService.statFile(terminal.id, filePath)
   if (signal?.aborted) throw new Error('AbortError')
   
-  if (!stat.exists && args.oldString !== '') {
+  if (!stat.exists) {
     throw new Error(`File not found: ${filePath}`)
   }
   if (stat.exists && stat.isDirectory) {
@@ -118,20 +131,7 @@ export async function runEditTool(
   let diff = ''
   let contentOld = ''
   let contentNew = ''
-  const action: EditToolResult['action'] = stat.exists ? 'edited' : 'created'
-
-  if (args.oldString === '') {
-    contentNew = args.newString
-    diff = trimDiff(createTwoFilesPatch(filePath, filePath, contentOld, contentNew))
-    if (signal?.aborted) throw new Error('AbortError')
-    await terminalService.writeFile(terminal.id, filePath, contentNew)
-    return {
-      output: 'Edit applied successfully.',
-      diff,
-      action,
-      filePath: filePath
-    }
-  }
+  const action: EditToolResult['action'] = 'edited'
 
   if (signal?.aborted) throw new Error('AbortError')
   contentOld = (await terminalService.readFile(terminal.id, filePath)).toString('utf8')
@@ -676,13 +676,37 @@ export function replace(content: string, oldString: string, newString: string, r
   throw new Error('Found multiple matches for oldString. Provide more surrounding lines in oldString to identify the correct match.')
 }
 
-export async function writeAndEdit(args: any, context: ToolExecutionContext): Promise<string> {
+type FileMutationArgs = {
+  tabIdOrName: string
+  filePath: string
+}
+
+type FileMutationResult = WriteToolResult | EditToolResult
+
+function formatFileMutationOutput(result: FileMutationResult): string {
+  const actionLine =
+    result.action === 'created' ? `Created file: ${result.filePath}` : `Edited file: ${result.filePath}`
+  return result.diff ? `${actionLine}\n${result.output}\n\n${result.diff}` : `${actionLine}\n${result.output}`
+}
+
+async function runFileMutationTool(
+  args: FileMutationArgs,
+  context: ToolExecutionContext,
+  toolName: string,
+  unavailableOperation: string,
+  runner: (params: {
+    tabIdOrName: string
+    filePath: string
+    terminalService: TerminalService
+    terminal: TerminalTab
+    signal?: AbortSignal
+  }) => Promise<FileMutationResult>
+): Promise<string> {
   const scopedReference = parseTerminalScopedFilePath(String(args.filePath || ''))
   const tabIdOrName = scopedReference?.terminalId || args.tabIdOrName
   const filePathInput = scopedReference?.filePath || args.filePath
   const { terminalService, sessionId, messageId, sendEvent } = context
   
-  // Check for abort before doing anything
   if (context.signal?.aborted) throw new Error('AbortError')
 
   const resolved = resolveTerminalForTool(context, tabIdOrName)
@@ -691,7 +715,7 @@ export async function writeAndEdit(args: any, context: ToolExecutionContext): Pr
     sendEvent(sessionId, {
       messageId,
       type: 'tool_call',
-      toolName: 'create_or_edit',
+      toolName,
       input: JSON.stringify(args),
       output: errorText
     })
@@ -706,12 +730,12 @@ export async function writeAndEdit(args: any, context: ToolExecutionContext): Pr
         ? `Error: Terminal tab "${bestMatch.title || bestMatch.id}" (id=${bestMatch.id}, type=${bestMatch.type}) does not support filesystem operations.`
         : formatTerminalUnavailableForTool(
             resolved.snapshot,
-            'write or edit files through this terminal'
+            unavailableOperation
           )
     sendEvent(sessionId, {
       messageId,
       type: 'file_edit',
-      toolName: 'create_or_edit',
+      toolName,
       output: errorText,
       filePath: filePathInput,
       action: 'error',
@@ -725,35 +749,17 @@ export async function writeAndEdit(args: any, context: ToolExecutionContext): Pr
   let action: 'created' | 'edited' | 'error' = 'edited'
   let filePath = filePathInput
   try {
-    if (typeof args.content === 'string') {
-      const result = await runWriteTool(
-        { tabIdOrName, filePath: filePathInput, content: args.content },
-        { terminalService, terminal: bestMatch, signal: context.signal }
-      )
-      const actionLine =
-        result.action === 'created' ? `Created file: ${result.filePath}` : `Edited file: ${result.filePath}`
-      outputText = result.diff ? `${actionLine}\n${result.output}\n\n${result.diff}` : `${actionLine}\n${result.output}`
-      diffText = result.diff
-      action = result.action
-      filePath = result.filePath
-    } else {
-      const result = await runEditTool(
-        {
-          tabIdOrName,
-          filePath: filePathInput,
-          oldString: args.oldString ?? '',
-          newString: args.newString ?? '',
-          replaceAll: args.replaceAll
-        },
-        { terminalService, terminal: bestMatch, signal: context.signal }
-      )
-      const actionLine =
-        result.action === 'created' ? `Created file: ${result.filePath}` : `Edited file: ${result.filePath}`
-      outputText = result.diff ? `${actionLine}\n${result.output}\n\n${result.diff}` : `${actionLine}\n${result.output}`
-      diffText = result.diff
-      action = result.action
-      filePath = result.filePath
-    }
+    const result = await runner({
+      tabIdOrName,
+      filePath: filePathInput,
+      terminalService,
+      terminal: bestMatch,
+      signal: context.signal
+    })
+    outputText = formatFileMutationOutput(result)
+    diffText = result.diff
+    action = result.action
+    filePath = result.filePath
   } catch (err) {
     outputText = err instanceof Error ? err.message : String(err)
     action = 'error'
@@ -762,7 +768,7 @@ export async function writeAndEdit(args: any, context: ToolExecutionContext): Pr
   sendEvent(sessionId, {
     messageId,
     type: 'file_edit',
-    toolName: 'create_or_edit',
+    toolName,
     output: outputText,
     filePath,
     action,
@@ -770,4 +776,104 @@ export async function writeAndEdit(args: any, context: ToolExecutionContext): Pr
   })
 
   return outputText
+}
+
+export async function writeFile(
+  args: z.infer<typeof writeFileSchema>,
+  context: ToolExecutionContext,
+  toolName = WRITE_FILE_TOOL_NAME
+): Promise<string> {
+  return await runFileMutationTool(
+    args,
+    context,
+    toolName,
+    'write files through this terminal',
+    async ({ tabIdOrName, filePath, terminalService, terminal, signal }) =>
+      await runWriteTool(
+        { tabIdOrName, filePath, content: args.content },
+        { terminalService, terminal, signal }
+      )
+  )
+}
+
+export async function editFile(
+  args: z.infer<typeof editFileSchema>,
+  context: ToolExecutionContext,
+  toolName = EDIT_FILE_TOOL_NAME
+): Promise<string> {
+  return await runFileMutationTool(
+    args,
+    context,
+    toolName,
+    'edit files through this terminal',
+    async ({ tabIdOrName, filePath, terminalService, terminal, signal }) =>
+      await runEditTool(
+        {
+          tabIdOrName,
+          filePath,
+          oldString: args.oldString,
+          newString: args.newString,
+          replaceAll: args.replaceAll
+        },
+        { terminalService, terminal, signal }
+      )
+  )
+}
+
+function normalizeLegacyWriteAndEditArgs(args: any):
+  | { mode: 'write'; args: z.infer<typeof writeFileSchema> }
+  | { mode: 'edit'; args: z.infer<typeof editFileSchema> } {
+  const hasContent = typeof args.content === 'string'
+  const hasOld = typeof args.oldString === 'string'
+  const hasNew = typeof args.newString === 'string'
+  const hasMeaningfulEditField =
+    (hasOld && args.oldString !== '') || (hasNew && args.newString !== '')
+
+  if (hasContent && !hasMeaningfulEditField) {
+    return {
+      mode: 'write',
+      args: {
+        tabIdOrName: args.tabIdOrName,
+        filePath: args.filePath,
+        content: args.content
+      }
+    }
+  }
+
+  if (hasOld && hasNew && args.oldString === '') {
+    if (args.newString === '') {
+      throw new Error('Provide content for write mode or a non-empty oldString for edit mode.')
+    }
+    return {
+      mode: 'write',
+      args: {
+        tabIdOrName: args.tabIdOrName,
+        filePath: args.filePath,
+        content: args.newString
+      }
+    }
+  }
+
+  if (hasOld && hasNew) {
+    return {
+      mode: 'edit',
+      args: {
+        tabIdOrName: args.tabIdOrName,
+        filePath: args.filePath,
+        oldString: args.oldString,
+        newString: args.newString,
+        replaceAll: args.replaceAll
+      }
+    }
+  }
+
+  throw new Error('Provide content for write mode or oldString/newString for edit mode.')
+}
+
+export async function writeAndEdit(args: any, context: ToolExecutionContext): Promise<string> {
+  const normalized = normalizeLegacyWriteAndEditArgs(args)
+  if (normalized.mode === 'write') {
+    return await writeFile(normalized.args, context, LEGACY_CREATE_OR_EDIT_TOOL_NAME)
+  }
+  return await editFile(normalized.args, context, LEGACY_CREATE_OR_EDIT_TOOL_NAME)
 }

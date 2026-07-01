@@ -1856,7 +1856,7 @@ function toolTagForName(toolName: string): string {
   if (name.includes('read_command_output')) return 'READ CMD'
   if (name.includes('read_terminal')) return 'READ TERM'
   if (name.includes('write_stdin')) return 'STDIN'
-  if (name.includes('create_or_edit')) return 'PATCH'
+  if (name.includes('create_or_edit') || name.includes('write_file') || name.includes('edit_file')) return 'PATCH'
   if (name.includes('read_file')) return 'READ FILE'
   return 'TOOL'
 }

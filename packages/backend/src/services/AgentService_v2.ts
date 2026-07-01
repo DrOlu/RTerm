@@ -41,7 +41,9 @@ import {
   readFileSchema,
   writeStdinSchema,
   reconnectTerminalTabSchema,
+  editFileSchema,
   writeAndEditSchema,
+  writeFileSchema,
   waitSchema,
   waitTerminalIdleSchema,
   copyBetweenTabsSchema,
@@ -50,6 +52,12 @@ import {
   buildSkillToolDescription,
 } from "./AgentHelper/tools";
 import type { ToolExecutionContext } from "./AgentHelper/types";
+import {
+  EDIT_FILE_TOOL_NAME,
+  WRITE_FILE_TOOL_NAME,
+  isFileMutationToolName,
+  resolveBuiltInToolCapabilityName,
+} from "./AgentHelper/tool_capabilities";
 import {
   formatTerminalUnavailableForTool,
   resolveTerminalForTool,
@@ -1738,7 +1746,7 @@ export class AgentService_v2 {
         ? state.pendingToolCalls
         : [];
       const toolCall = queue[0];
-      if (!toolCall || toolCall.name !== "create_or_edit") return state;
+      if (!toolCall || !isFileMutationToolName(toolCall.name)) return state;
 
       const toolMessage = this.createToolMessage(toolCall);
       const executionContext = this.createExecutionContext(
@@ -1750,13 +1758,27 @@ export class AgentService_v2 {
 
       let result: string;
       try {
-        const validatedArgs = writeAndEditSchema.parse(toolCall.args || {});
-        result = await toolImplementations.writeAndEdit(
-          validatedArgs,
-          executionContext,
-        );
+        if (toolCall.name === WRITE_FILE_TOOL_NAME) {
+          const validatedArgs = writeFileSchema.parse(toolCall.args || {});
+          result = await toolImplementations.writeFile(
+            validatedArgs,
+            executionContext,
+          );
+        } else if (toolCall.name === EDIT_FILE_TOOL_NAME) {
+          const validatedArgs = editFileSchema.parse(toolCall.args || {});
+          result = await toolImplementations.editFile(
+            validatedArgs,
+            executionContext,
+          );
+        } else {
+          const validatedArgs = writeAndEditSchema.parse(toolCall.args || {});
+          result = await toolImplementations.writeAndEdit(
+            validatedArgs,
+            executionContext,
+          );
+        }
       } catch (err) {
-        result = `Parameter validation or execution error for create_or_edit: ${(err as Error).message}`;
+        result = `Parameter validation or execution error for ${toolCall.name}: ${(err as Error).message}`;
       }
 
       toolMessage.content = result;
@@ -2542,9 +2564,10 @@ export class AgentService_v2 {
     if (first?.name) {
       // Security: Double-check if the tool is actually enabled before routing.
       // This prevents the Agent from calling tools that were disabled during the session.
-      if (this.builtInToolEnabled[first.name] === false) {
+      const capabilityName = resolveBuiltInToolCapabilityName(first.name);
+      if (this.builtInToolEnabled[capabilityName] === false) {
         console.warn(
-          `[AgentService_v2] LLM tried to call disabled tool: ${first.name}`,
+          `[AgentService_v2] LLM tried to call disabled tool: ${first.name} (capability=${capabilityName})`,
         );
         return "final_output";
       }
@@ -2553,7 +2576,7 @@ export class AgentService_v2 {
         return "tools";
       if (this.mcpToolService.isMcpToolName(first.name)) return "mcp_tools";
       if (first.name === "exec_command") return "command_tools";
-      if (first.name === "create_or_edit") return "file_tools";
+      if (isFileMutationToolName(first.name)) return "file_tools";
       if (first.name === "read_file") return "read_file";
       return "tools";
     }
@@ -2599,7 +2622,7 @@ export class AgentService_v2 {
     if (first?.name) {
       if (this.mcpToolService.isMcpToolName(first.name)) return "mcp_tools";
       if (first.name === "exec_command") return "command_tools";
-      if (first.name === "create_or_edit") return "file_tools";
+      if (isFileMutationToolName(first.name)) return "file_tools";
       if (first.name === "read_file") return "read_file";
       if (first.name === "skill" || first.name === "create_skill")
         return "tools";

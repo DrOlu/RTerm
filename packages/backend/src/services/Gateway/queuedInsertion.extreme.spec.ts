@@ -267,7 +267,7 @@ const run = async (): Promise<void> => {
       };
       const editCall = {
         id: "call-edit",
-        name: "create_or_edit",
+        name: "edit_file",
         args: { filePath: "/tmp/stale.txt", instructions: "edit" },
       };
       const stdinCall = {

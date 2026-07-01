@@ -128,23 +128,44 @@ export const WRITE_STDIN_TOOL_DESCRIPTION = [
   'DEL: Delete'
 ].join('\n')
 
-export const CREATE_OR_EDIT_TOOL_DESCRIPTION = [
-  'Create or edit a file. Use write mode to replace the full file content, or edit mode to replace a specific string.',
+export const WRITE_FILE_TOOL_DESCRIPTION = [
+  'Create or overwrite a file by writing the full file content.',
   'If the target terminal tab is disconnected or not ready, this tool returns an explicit terminal_status and does not modify files.',
-  'If you need to create/write something into a file or edit a file, you MUST use this tool.',
+  'Use this tool when you need to create a new file or intentionally replace the entire contents of an existing file.',
   '',
   'Key rules:',
-  '- For edit mode: provide oldString and newString. oldString must match the file exactly (including indentation and line breaks).',
-  '- If oldString appears multiple times, include more context or set replaceAll=true.',
-  '- For write mode: provide content (full file contents).',
+  '- Always provide the complete desired file content in content.',
+  '- Do not use this tool for small targeted replacements inside an existing file; use edit_file instead.',
   '- Use absolute paths when possible; relative paths resolve from the tab working directory.',
   '',
   'Inputs:',
   '- tabIdOrName: ID or name of the terminal tab.',
-  '- filePath: file path to write/edit.',
-  '- content: full file contents (write mode).',
-  '- oldString/newString: exact text to replace (edit mode).',
-  '- replaceAll: replace every occurrence in edit mode.'
+  '- filePath: file path to create or overwrite.',
+  '- content: full file contents to write.'
+].join('\n')
+
+export const EDIT_FILE_TOOL_DESCRIPTION = [
+  'Edit a file by replacing an exact string with another string.',
+  'If the target terminal tab is disconnected or not ready, this tool returns an explicit terminal_status and does not modify files.',
+  'Use this tool for targeted changes to existing files.',
+  '',
+  'Key rules:',
+  '- oldString must match the file exactly, including indentation and line breaks.',
+  '- newString must be different from oldString.',
+  '- If oldString appears multiple times, include more surrounding context or set replaceAll=true.',
+  '- Use absolute paths when possible; relative paths resolve from the tab working directory.',
+  '',
+  'Inputs:',
+  '- tabIdOrName: ID or name of the terminal tab.',
+  '- filePath: file path to edit.',
+  '- oldString: exact text to replace.',
+  '- newString: replacement text.',
+  '- replaceAll: replace every occurrence of oldString.'
+].join('\n')
+
+export const CREATE_OR_EDIT_TOOL_DESCRIPTION = [
+  'File creation and editing capability. When enabled, the agent may use write_file to create or overwrite full files and edit_file to replace exact strings in files.',
+  'This is a user-visible permission setting, not a model-facing tool name.'
 ].join('\n')
 
 export const EXEC_COMMAND_DESCRIPTION =
@@ -381,7 +402,7 @@ function buildMemoryPromptBlock(opts: {
   return [
     GLOBAL_MEMORY_TAG.trim(),
     `Memory file absolute path: ${opts.memoryFilePath}`,
-    'If you need to add or modify memory, use the create_or_edit tool to edit this exact file path directly.',
+    'If you need to add or modify memory, use edit_file to edit this exact file path directly. Use write_file only when intentionally replacing the full memory file.',
     'If you need to re-read memory later, use the read_file tool to read this exact file path directly.',
     '',
     '# Full MEMORY.md Content',
@@ -406,7 +427,7 @@ export function createBaseSystemPromptText(memoryPrompt?: {
       '- **Self-Correction**: If you detect an error in your own execution, acknowledge it and analyze why it happened and how to fix it.',
       '- **Verification**: After executing a command, you MUST check the output or the state of the system to confirm it worked as expected. Never assume success without verification.',
       '- **Strict Adherence**: Follow user instructions precisely. If the user specifies a particular tool, path, or method, you must respect that.',
-      '- **Temporary Code Execution Rule**: If you need to run code to accomplish a task, you MUST NOT write that code directly inside `exec_command` and run it inline. You MUST first use `create_or_edit` to create a code file inside the !!!temporary directory!!!(must in temporary directory) of the target terminal tab, and only then use `exec_command` to run that file. Always create the temporary code file with `create_or_edit`; NEVER use `exec_command` itself to create the file or to inline the code content.',
+      '- **Temporary Code Execution Rule**: If you need to run code to accomplish a task, you MUST NOT write that code directly inside `exec_command` and run it inline. You MUST first use `write_file` to create a code file inside the !!!temporary directory!!!(must in temporary directory) of the target terminal tab, and only then use `exec_command` to run that file. Always create the temporary code file with `write_file`; NEVER use `exec_command` itself to create the file or to inline the code content.',
       '- **Command Output Limits**: Command outputs may be truncated in exec_command. Use read_command_output with history_command_match_id and terminalId to read full output.',
       '',
       '# Waiting & Monitoring Strategies',
@@ -451,7 +472,7 @@ export function createBaseSystemPromptText(memoryPrompt?: {
       `- **\`[MENTION_TAB:#name##id#]\`**: This label in the user input indicates that the user is specifically pointing you to a terminal tab named #name# with ID #id#. You should prioritize using this tab for the requested task.`,
       `- **\`[MENTION_FILE:#path#]\`**: This label in the user input indicates that the user has provided a file path #path#. If the file is small enough (under 4000 chars), its content is provided at the top of the message under the \`${FILE_CONTENT_TAG.trim()}\` tag. Otherwise, you should use this path when you need to read or modify this file.`,
       `- **\`[MENTION_IMAGE:#path##name#]\`**: This label in the user input indicates that the user attached an image file located at #path#. If your current model supports image inputs, the image may be injected directly as a multimodal input.`,
-      `- **\`${USEFUL_SKILL_TAG.trim()}\`**: This tag provides the implementation details or documentation for a specific "Skill" referenced by the user. It also includes the absolute path of the skill file. Use this to understand how to correctly parameterize and call the \`skill\` tool or follow the provided procedure. If you need to modify an existing skill file, just use \`create_or_edit\` with that absolute path. If the skill includes a "Supporting Files" section, you can use the \`read_file\` tool to examine those files or use the terminal to run any provided scripts in the skill's directory.`,
+      `- **\`${USEFUL_SKILL_TAG.trim()}\`**: This tag provides the implementation details or documentation for a specific "Skill" referenced by the user. It also includes the absolute path of the skill file. Use this to understand how to correctly parameterize and call the \`skill\` tool or follow the provided procedure. If you need to modify an existing skill file, use \`edit_file\` with that absolute path. Use \`write_file\` only when creating a new supporting file or intentionally replacing the full file. If the skill includes a "Supporting Files" section, you can use the \`read_file\` tool to examine those files or use the terminal to run any provided scripts in the skill's directory.`,
       `- **\`${TERMINAL_CONTENT_TAG.trim()}\`**: This tag precedes the recent output (last 100 lines) of a terminal tab explicitly mentioned by the user via \`[MENTION_TAB:#name##id#]\`. Use this to understand the current state of that specific terminal.`,
       `- **\`${FILE_CONTENT_TAG.trim()}\`**: This tag precedes the actual content of a mentioned file. Use this as primary context for the user's request.`
     ]
