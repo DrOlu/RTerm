@@ -30,7 +30,7 @@ function tokenToText(token: string): { text: string; kind: 'terminal' | 'skill' 
   return null
 }
 
-export const MentionContent: React.FC<{ text: string }> = ({ text }) => {
+export const MentionContent: React.FC<{ text: string }> = React.memo(({ text }) => {
   const parts = React.useMemo(() => String(text || '').split(MENTION_TOKEN_REGEX), [text])
 
   return (
@@ -48,4 +48,4 @@ export const MentionContent: React.FC<{ text: string }> = ({ text }) => {
       })}
     </>
   )
-}
+})

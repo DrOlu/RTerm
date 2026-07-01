@@ -11,7 +11,7 @@ import type { ChatMessage } from "../../types";
 import { MarkdownContent } from "../common/MarkdownContent";
 import { MentionContent } from "../common/MentionContent";
 
-interface MessageListProps {
+export interface MessageListProps {
   items: ChatTimelineItem[];
   onAskDecision: (message: ChatMessage, decision: "allow" | "deny") => void;
   onOpenDetail: (turnId: string) => void;
@@ -22,13 +22,21 @@ interface MessageListProps {
   listRef: React.RefObject<HTMLDivElement>;
 }
 
-const UserBubble: React.FC<{
+interface UserBubbleProps {
   message: ChatMessage;
   onRollback: (message: ChatMessage) => void;
   onBranch: (message: ChatMessage) => void;
   rollbackDisabled: boolean;
   branchDisabled: boolean;
-}> = ({ message, onRollback, onBranch, rollbackDisabled, branchDisabled }) => {
+}
+
+const UserBubble = React.memo(function UserBubble({
+  message,
+  onRollback,
+  onBranch,
+  rollbackDisabled,
+  branchDisabled,
+}: UserBubbleProps) {
   const { t } = useMobileI18n();
   const displayText = trimOuterBlankLines(
     normalizeDisplayText(String(message.content || "")),
@@ -104,13 +112,19 @@ const UserBubble: React.FC<{
       </div>
     </article>
   );
-};
+});
 
-const AgentTurnBubble: React.FC<{
+interface AgentTurnBubbleProps {
   item: AgentTimelineItem;
   onAskDecision: (message: ChatMessage, decision: "allow" | "deny") => void;
   onOpenDetail: (turnId: string) => void;
-}> = ({ item, onAskDecision, onOpenDetail }) => {
+}
+
+const AgentTurnBubble = React.memo(function AgentTurnBubble({
+  item,
+  onAskDecision,
+  onOpenDetail,
+}: AgentTurnBubbleProps) {
   const { t } = useMobileI18n();
   const message = item.latestMessage;
   const messageTitle = messageTypeTitle(message, t.format);
@@ -209,9 +223,25 @@ const AgentTurnBubble: React.FC<{
       </div>
     </article>
   );
-};
+});
 
-export const MessageList: React.FC<MessageListProps> = ({
+export function areMessageListPropsEqual(
+  previous: MessageListProps,
+  next: MessageListProps,
+): boolean {
+  return (
+    previous.items === next.items &&
+    previous.onAskDecision === next.onAskDecision &&
+    previous.onOpenDetail === next.onOpenDetail &&
+    previous.onRollback === next.onRollback &&
+    previous.onBranch === next.onBranch &&
+    previous.rollbackDisabled === next.rollbackDisabled &&
+    previous.branchDisabled === next.branchDisabled &&
+    previous.listRef === next.listRef
+  );
+}
+
+const MessageListInner: React.FC<MessageListProps> = ({
   items,
   onAskDecision,
   onOpenDetail,
@@ -257,3 +287,8 @@ export const MessageList: React.FC<MessageListProps> = ({
     </main>
   );
 };
+
+export const MessageList = React.memo(
+  MessageListInner,
+  areMessageListPropsEqual,
+);

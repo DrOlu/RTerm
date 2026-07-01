@@ -218,6 +218,8 @@ export const App: React.FC = () => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   }, []);
 
+  const branchFromMessage = actions.branchFromMessage;
+
   const handleRollbackConfirm = React.useCallback(async () => {
     if (!rollbackTarget) return;
     const activeSessionId = state.activeSessionId;
@@ -257,7 +259,7 @@ export const App: React.FC = () => {
       branchPendingRef.current = true;
       setBranchPending(true);
       try {
-        await actions.branchFromMessage(
+        await branchFromMessage(
           state.activeSessionId,
           message.backendMessageId,
         );
@@ -266,7 +268,7 @@ export const App: React.FC = () => {
         setBranchPending(false);
       }
     },
-    [actions, state.activeSessionId],
+    [branchFromMessage, state.activeSessionId],
   );
 
   const sessionItems = React.useMemo<SessionBrowserItem[]>(() => {
