@@ -50,6 +50,7 @@
 
 .queue-card-content {
   flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
@@ -61,15 +62,14 @@
   transition: max-height 0.2s ease, white-space 0.2s ease;
   user-select: none;
   -webkit-user-select: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
 
   &::before {
     content: '$';
     color: var(--accent);
     opacity: 0.7;
     font-weight: bold;
+    margin-right: 6px;
   }
 
   .mention-badge {
@@ -100,6 +100,7 @@
     align-items: center;
     height: 1.4em;
     padding: 0 6px;
+    margin-left: 6px;
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);

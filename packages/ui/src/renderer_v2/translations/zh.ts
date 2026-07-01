@@ -37,7 +37,7 @@ export const zh = {
     general: "通用",
     theme: "外观",
     agentSetting: "Agent Setting",
-    workflow: "Workflow",
+    workflow: "机制",
     model: "模型",
     models: "模型",
     security: "安全",
@@ -138,7 +138,7 @@ export const zh = {
       "将当前 Agent 设置保存为一个可快速切换的配置。",
     saveCurrentAgentSettingTitle: "保存 Agent Setting",
     saveCurrentAgentSettingMessage:
-      "确定保存当前安全、工具、技能、记忆、Workflow 和当前模型配置选择吗？",
+      "确定保存当前安全、工具、技能、记忆、机制和当前模型配置选择吗？",
     agentSettingSlot: (slotNumber: number) => `Agent Setting ${slotNumber}`,
     overwriteWithCurrentAgentSetting: "用当前 Agent Setting 覆盖",
     overwriteAgentSettingTitle: "覆盖 Agent Setting",

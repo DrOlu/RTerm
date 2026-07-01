@@ -18,6 +18,10 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${to(r)}${to(g)}${to(b)}`
 }
 
+function rgbToCssValue(rgb: { r: number; g: number; b: number }): string {
+  return `${rgb.r}, ${rgb.g}, ${rgb.b}`
+}
+
 function luminance(hex: string): number {
   const rgb = hexToRgb(hex)
   if (!rgb) return 0.5
@@ -57,6 +61,12 @@ export function applyAppThemeFromTerminalScheme(scheme: TerminalColorScheme): vo
   root.setProperty('--fg-faint', shade(fg, -0.45))
 
   root.setProperty('--accent', accent)
+  const accentRgb = hexToRgb(accent)
+  if (accentRgb) {
+    root.setProperty('--accent-rgb', rgbToCssValue(accentRgb))
+  } else {
+    root.removeProperty('--accent-rgb')
+  }
   root.setProperty('--accent-2', scheme.colors[5])
 
   // Border/control tokens must adapt in light mode, otherwise icons/controls look "off"
@@ -81,5 +91,4 @@ export function applyAppThemeFromTerminalScheme(scheme: TerminalColorScheme): vo
   root.setProperty('--success', scheme.colors[2])
   root.setProperty('--warning', scheme.colors[3])
 }
-
 
