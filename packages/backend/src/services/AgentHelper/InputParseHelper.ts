@@ -3,6 +3,7 @@ import type { ISkillRuntime } from '../runtimeContracts';
 import { TerminalService } from '../TerminalService';
 import { USEFUL_SKILL_TAG, USER_INPUT_TAGS, FILE_CONTENT_TAG, TERMINAL_CONTENT_TAG } from './prompts';
 import { detectFileKind, readImageFile } from './tools/read_tools';
+import { formatTerminalStatusHeader } from './tools/terminal_runtime_guard';
 import type { InputImageAttachment, UserInputPayload } from '../../types';
 import { ImageAttachmentService } from '../ImageAttachmentService';
 import { parseTerminalScopedFilePath } from './terminalScopedFilePath';
@@ -84,10 +85,12 @@ export class InputParseHelper {
       const tabIds = Array.from(new Set(tabMatches.map(m => m[2])));
       for (const id of tabIds) {
         try {
-          const tab = terminalService.getAllTerminals().find(t => t.id === id);
+          const tab = terminalService.getDisplayTerminals().find(t => t.id === id);
           if (tab) {
             const recentOutput = terminalService.getRecentOutput(id);
-            tabDetails += `${TERMINAL_CONTENT_TAG}Terminal Tab: ${tab.title} (ID: ${id})
+            const snapshot = terminalService.getTerminalRuntimeSnapshot(id);
+            const status = snapshot ? `${formatTerminalStatusHeader(snapshot)}\n` : '';
+            tabDetails += `${TERMINAL_CONTENT_TAG}${status}Terminal Tab: ${tab.title} (ID: ${id})
 <terminal_content>
 ${recentOutput}
 </terminal_content>\n\n`;

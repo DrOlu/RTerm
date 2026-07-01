@@ -81,6 +81,7 @@ function formatTodayLocalDate(now: Date = new Date()): string {
 
 export const WRITE_STDIN_TOOL_DESCRIPTION = [
   'Send characters to a specific terminal tab WITHOUT a trailing newline.',
+  'If the target terminal tab is disconnected or not ready, this tool returns an explicit terminal_status instead of pretending input was sent.',
   'This is a specialized, advanced tool for control/interactive programs (e.g. vim, tmux, REPLs) and for sending C0 control characters like Ctrl+C.',
   'For normal commands, always use exec_command/run_command instead.',
   '',
@@ -129,6 +130,7 @@ export const WRITE_STDIN_TOOL_DESCRIPTION = [
 
 export const CREATE_OR_EDIT_TOOL_DESCRIPTION = [
   'Create or edit a file. Use write mode to replace the full file content, or edit mode to replace a specific string.',
+  'If the target terminal tab is disconnected or not ready, this tool returns an explicit terminal_status and does not modify files.',
   'If you need to create/write something into a file or edit a file, you MUST use this tool.',
   '',
   'Key rules:',
@@ -146,15 +148,22 @@ export const CREATE_OR_EDIT_TOOL_DESCRIPTION = [
 ].join('\n')
 
 export const EXEC_COMMAND_DESCRIPTION =
-  'Execute a shell command in a specific terminal tab. This appends a trailing "\\n" to run the command automatically. If you do NOT want auto-execute, use write_stdin instead. You must provide waitMode: "wait" (synchronous; wait for command result) or "nowait" (asynchronous; return immediately). Command output may be truncated; use read_command_output with history_command_match_id and terminalId to read full output.'
-export const READ_TERMINAL_TAB_DESCRIPTION = 'Read the recent visible output of a specific terminal tab.'
+  'Execute a shell command in a specific terminal tab. This appends a trailing "\\n" to run the command automatically. If you do NOT want auto-execute, use write_stdin instead. You must provide waitMode: "wait" (synchronous; wait for command result) or "nowait" (asynchronous; return immediately). If the terminal is disconnected or not ready, the tool returns an explicit terminal_status and does not run the command. Command output may be truncated; use read_command_output with history_command_match_id and terminalId to read full output.'
+export const READ_TERMINAL_TAB_DESCRIPTION = 'Read the recent visible output and runtime status of a specific terminal tab. If the tab is disconnected, the output is retained history and may be stale.'
 export const READ_COMMAND_OUTPUT_DESCRIPTION =
-  'Read historical output of a specific command by history_command_match_id and terminal tab. Supports offset/limit for paging large outputs.'
-export const READ_FILE_DESCRIPTION = 'Read a file from a specific terminal tab.'
+  'Read historical output of a specific command by history_command_match_id and terminal tab. Supports offset/limit for paging large outputs. The result includes terminal_status so you can tell whether the tab is still connected.'
+export const READ_FILE_DESCRIPTION = 'Read a file from a specific terminal tab. If the terminal is disconnected or not ready, the tool returns an explicit terminal_status instead of a raw backend session error.'
 export const WAIT_TOOL_DESCRIPTION = 'Pause execution for a specified number of seconds (5-120). Use this for short, fixed-duration pauses when you need to wait for an external event that doesn\'t affect the terminal (e.g., waiting for a web server to start up).'
-export const WAIT_TERMINAL_IDLE_DESCRIPTION = 'Wait until the terminal output becomes stable (no changes for a few seconds) or a timeout (120s) is reached. Use this for commands that don\'t emit standard OSC exit markers but eventually stop printing text (e.g., some build tools or log watchers).'
+export const WAIT_TERMINAL_IDLE_DESCRIPTION = 'Wait until the terminal output becomes stable (no changes for a few seconds) or a timeout (120s) is reached. Use this for commands that don\'t emit standard OSC exit markers but eventually stop printing text (e.g., some build tools or log watchers). If the terminal is disconnected or not ready, the tool returns an explicit terminal_status instead of treating stale output as idle.'
+export const RECONNECT_TERMINAL_TAB_DESCRIPTION = [
+  'Attempt to reconnect an existing disconnected SSH terminal tab that has not been closed by the user.',
+  'Use this when a terminal-targeting tool reports terminal_status with runtime_state=exited and reconnectable=true, or when the user asks to reconnect that tab.',
+  'This preserves the same terminal tab id and retained output buffer. It does not recreate tabs that were closed by the user, and it only supports disconnected SSH tabs.',
+  'After reconnect succeeds, verify the remote working directory and environment before continuing.'
+].join('\n')
 export const COPY_BETWEEN_TABS_DESCRIPTION = [
   'Start an asynchronous file copy between two different terminal tabs on different machines. Use this only for cross-terminal-tab file transfer; do not use it for copying within one tab or between two tabs connected to the same machine.',
+  'If either source or target terminal is disconnected or not ready, this tool returns an explicit terminal_status for that side and does not start a transfer.',
   'This tool supports copy only. It never cuts, moves, or deletes source files.',
   'It returns immediately after the transfer task is queued. It does not wait for scanning or file bytes to finish. Use read_file_transfer_status with the returned transferId to monitor progress or verify final status.',
   'Default conflictStrategy is "rename" to keep both files. Use "overwrite" only when the user explicitly asked to replace target files.',
@@ -188,6 +197,10 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: 'write_stdin',
     description: WRITE_STDIN_TOOL_DESCRIPTION
+  },
+  {
+    name: 'reconnect_terminal_tab',
+    description: RECONNECT_TERMINAL_TAB_DESCRIPTION
   },
   {
     name: 'create_or_edit',
@@ -269,9 +282,20 @@ export const COMPACTION_SUMMARY_SCHEMA = z.object({
 /**
  * Build system info block that lists available terminal tabs and runtime system info.
  */
-export function createSystemInfoPromptText(tabs: TerminalTab[], sessionId: string): string {
+export function createSystemInfoPromptText(
+  tabs: TerminalTab[],
+  sessionId: string,
+  options?: { isTerminalReconnectable?: (terminalId: string) => boolean }
+): string {
   const tabInfos = tabs.map(t => {
-    let base = `- ID: ${t.id}, Name: ${t.title}, Type: ${t.type}`
+    const runtimeState = t.runtimeState ?? (t.isInitializing ? 'initializing' : 'unknown')
+    let base = `- ID: ${t.id}, Name: ${t.title}, Type: ${t.type}, State: ${runtimeState}`
+    if (typeof t.lastExitCode === 'number') {
+      base += `, LastExitCode: ${t.lastExitCode}`
+    }
+    if (options?.isTerminalReconnectable?.(t.id)) {
+      base += ', Reconnectable: true'
+    }
     if (t.systemInfo) {
       const s = t.systemInfo
       base += ` (OS: ${s.os}, Release: ${s.release}, Arch: ${s.arch}, Hostname: ${s.hostname}, ${s.isRemote ? 'Remote' : 'Local'})`
@@ -286,9 +310,10 @@ export function createSystemInfoPromptText(tabs: TerminalTab[], sessionId: strin
 export function prependSystemInfoToUserInput(
   userInputContent: string,
   tabs: TerminalTab[],
-  sessionId: string
+  sessionId: string,
+  options?: { isTerminalReconnectable?: (terminalId: string) => boolean }
 ): string {
-  const systemInfoText = createSystemInfoPromptText(tabs, sessionId)
+  const systemInfoText = createSystemInfoPromptText(tabs, sessionId, options)
   return `${systemInfoText}\n\n${userInputContent}`
 }
 
@@ -408,6 +433,7 @@ export function createBaseSystemPromptText(memoryPrompt?: {
       '  - `Local`: Always refers to the user\'s local machine.',
       '  - Other names: Usually represent remote SSH connections or specialized environments.',
       '- **Identity & Context**: The `title` of a tab is just a label provided by the user for convenience. Do NOT make assumptions based on the title alone. Always refer to the `CURRENT_SYSTEM_INFO_MSG` for the current actual OS, architecture, and connection details (Local vs. Remote) of each tab.',
+      '- **Runtime State**: A terminal tab can still exist after its backend session disconnects. If a tool result reports `terminal_status` with `runtime_state: exited`, treat visible output as retained stale history and do not run commands, send input, read/write files, wait for idle, or transfer files through that tab until reconnect succeeds. If `reconnect_terminal_tab` is available and `reconnectable: true`, use it before continuing on that tab.',
       '- **Planning**: You MUST tailor your execution plans and commands to the specific OS (e.g., Linux vs. macOS vs. Windows) and environment of the target tab.',
       '- **Distinguishing Tabs**: If multiple tabs have the same base name, they will be distinguished by a suffix like `(1)`, `(2)`, etc. (e.g., `Server` and `Server (1)`). These are separate sessions; ensure you are operating on the EXACT tab requested by the user. Double-check the `id` if there is any ambiguity.',
       '',

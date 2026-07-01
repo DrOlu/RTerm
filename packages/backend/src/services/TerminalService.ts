@@ -79,6 +79,21 @@ interface RingBuffer {
   offset: number
 }
 
+export type TerminalRuntimeState = NonNullable<TerminalTab['runtimeState']>
+
+export interface TerminalRuntimeSnapshot {
+  id: string
+  title: string
+  type: ConnectionType
+  runtimeState: TerminalRuntimeState | 'unknown'
+  isInitializing: boolean
+  lastExitCode?: number
+  reconnectable: boolean
+  canRunCommand: boolean
+  canWrite: boolean
+  canUseFilesystem: boolean
+}
+
 type RawEventPublisher = (channel: string, data: unknown) => void
 type TerminalClosedListener = (terminalId: string) => void
 type PendingTaskFinish = {
@@ -1073,6 +1088,16 @@ export class TerminalService {
     return terminal.runtimeState === 'ready'
   }
 
+  private canUseFilesystemForTerminal(terminal: TerminalTab): boolean {
+    if (terminal.capabilities?.supportsFilesystem !== true) {
+      return false
+    }
+    if (terminal.type === 'local') {
+      return terminal.runtimeState !== 'exited'
+    }
+    return terminal.runtimeState === 'ready'
+  }
+
   write(terminalId: string, data: string): void {
     const terminal = this.terminals.get(terminalId)
     if (terminal && this.canWriteToTerminal(terminal)) {
@@ -1587,6 +1612,39 @@ export class TerminalService {
 
   getTerminalById(terminalId: string): TerminalTab | undefined {
     return this.terminals.get(terminalId)
+  }
+
+  isTerminalReconnectable(terminalId: string): boolean {
+    const terminal = this.terminals.get(terminalId)
+    const config = this.terminalConfigs.get(terminalId)
+    return (
+      terminal?.type === 'ssh' &&
+      terminal.runtimeState === 'exited' &&
+      !!config &&
+      isSshConnectionConfig(config)
+    )
+  }
+
+  getTerminalRuntimeSnapshot(terminalId: string): TerminalRuntimeSnapshot | null {
+    const terminal = this.terminals.get(terminalId)
+    if (!terminal) return null
+
+    const runtimeState: TerminalRuntimeSnapshot['runtimeState'] =
+      terminal.runtimeState ?? (terminal.isInitializing ? 'initializing' : 'unknown')
+    const isReady = runtimeState === 'ready'
+
+    return {
+      id: terminal.id,
+      title: terminal.title,
+      type: terminal.type,
+      runtimeState,
+      isInitializing: terminal.isInitializing === true,
+      lastExitCode: terminal.lastExitCode,
+      reconnectable: this.isTerminalReconnectable(terminalId),
+      canRunCommand: isReady,
+      canWrite: this.canWriteToTerminal(terminal),
+      canUseFilesystem: this.canUseFilesystemForTerminal(terminal)
+    }
   }
 
   /**

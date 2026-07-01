@@ -40,6 +40,7 @@ import {
   readCommandOutputSchema,
   readFileSchema,
   writeStdinSchema,
+  reconnectTerminalTabSchema,
   writeAndEditSchema,
   waitSchema,
   waitTerminalIdleSchema,
@@ -49,6 +50,10 @@ import {
   buildSkillToolDescription,
 } from "./AgentHelper/tools";
 import type { ToolExecutionContext } from "./AgentHelper/types";
+import {
+  formatTerminalUnavailableForTool,
+  resolveTerminalForTool,
+} from "./AgentHelper/tools/terminal_runtime_guard";
 import { AgentHelpers } from "./AgentHelper/helpers";
 import {
   buildDebugRawResponse,
@@ -205,6 +210,10 @@ const StateAnnotation = Ann.Root({
 const MODEL_RETRY_MAX = 4;
 const MODEL_RETRY_DELAYS_MS = [1000, 2000, 4000, 6000];
 const COMPACTION_PROTECTED_NORMAL_USER_ROUNDS = 2;
+const SINGLE_CALL_TOOL_BOUNDARY_NAMES = new Set([
+  "exec_command",
+  "reconnect_terminal_tab",
+]);
 
 interface SessionModelBinding {
   profileId: string;
@@ -733,11 +742,24 @@ export class AgentService_v2 {
 
       let injectedUserContent = enrichedContent;
       if (startupMode === "normal") {
-        const tabs = this.terminalService.getAllTerminals();
+        const terminalService = this.terminalService as TerminalService & {
+          getDisplayTerminals?: () => ReturnType<TerminalService["getDisplayTerminals"]>;
+          isTerminalReconnectable?: (terminalId: string) => boolean;
+        };
+        const tabs =
+          typeof terminalService.getDisplayTerminals === "function"
+            ? terminalService.getDisplayTerminals()
+            : terminalService.getAllTerminals();
         injectedUserContent = prependSystemInfoToUserInput(
           enrichedContent,
           tabs,
           sessionId,
+          {
+            isTerminalReconnectable: (terminalId) =>
+              typeof terminalService.isTerminalReconnectable === "function"
+                ? terminalService.isTerminalReconnectable(terminalId)
+                : false,
+          },
         );
       }
 
@@ -1202,11 +1224,11 @@ export class AgentService_v2 {
         return { messages, sessionId, pendingToolCalls };
       }
 
-      // If ANY exec_command is present, force single-tool: keep only the first tool call.
-      const hasExecCommand = toolCalls.some(
-        (tc) => tc?.name === "exec_command",
+      // Tools that can change terminal execution state must form a model-visible boundary.
+      const hasSingleCallBoundaryTool = toolCalls.some((tc) =>
+        SINGLE_CALL_TOOL_BOUNDARY_NAMES.has(tc?.name),
       );
-      if (hasExecCommand) {
+      if (hasSingleCallBoundaryTool) {
         pendingToolCalls = toolCalls.slice(0, 1);
         this.cleanupModelToolCallMetadata(lastMessage, pendingToolCalls);
         return { messages, sessionId, pendingToolCalls };
@@ -1352,7 +1374,32 @@ export class AgentService_v2 {
         case "write_stdin": {
           try {
             const validatedArgs = writeStdinSchema.parse(toolCall.args || {});
-            // const messageId = toolMessage.additional_kwargs._gyshellMessageId as string
+            const emitWriteStdinToolCall = (output: string): void => {
+              executionContext.sendEvent(sessionId, {
+                messageId: executionContext.messageId,
+                type: "tool_call",
+                toolName: "write_stdin",
+                input: JSON.stringify(validatedArgs.sequence ?? []),
+                output,
+              });
+            };
+            const resolvedTerminal = resolveTerminalForTool(
+              executionContext,
+              validatedArgs.tabIdOrName,
+            );
+            if (!resolvedTerminal.ok) {
+              result = resolvedTerminal.message;
+              emitWriteStdinToolCall(result);
+              break;
+            }
+            if (!resolvedTerminal.snapshot.canWrite) {
+              result = formatTerminalUnavailableForTool(
+                resolvedTerminal.snapshot,
+                "send input to this terminal",
+              );
+              emitWriteStdinToolCall(result);
+              break;
+            }
 
             if (
               state.writeStdinActionModelEnabled !== false &&
@@ -1410,6 +1457,20 @@ export class AgentService_v2 {
             );
           } catch (err) {
             result = `Parameter validation error for write_stdin: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "reconnect_terminal_tab": {
+          try {
+            const validatedArgs = reconnectTerminalTabSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.reconnectTerminalTab(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for reconnect_terminal_tab: ${(err as Error).message}`;
           }
           break;
         }
@@ -1520,14 +1581,24 @@ export class AgentService_v2 {
         };
       }
 
-      const { found, bestMatch } = this.terminalService.resolveTerminal(
+      const resolvedTerminal = resolveTerminalForTool(
+        executionContext,
         validated.tabIdOrName,
       );
-      if (!bestMatch) {
-        toolMessage.content =
-          found.length > 1
-            ? `Error: Multiple terminal tabs found with name "${validated.tabIdOrName}".`
-            : `Error: Terminal tab "${validated.tabIdOrName}" not found.`;
+      if (!resolvedTerminal.ok) {
+        toolMessage.content = resolvedTerminal.message;
+        return {
+          messages: [...messageHistory, toolMessage],
+          sessionId,
+          pendingToolCalls: queue.slice(1),
+        };
+      }
+      const bestMatch = resolvedTerminal.terminal;
+      if (!resolvedTerminal.snapshot.canRunCommand) {
+        toolMessage.content = formatTerminalUnavailableForTool(
+          resolvedTerminal.snapshot,
+          "run commands in this terminal",
+        );
         return {
           messages: [...messageHistory, toolMessage],
           sessionId,

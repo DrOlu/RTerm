@@ -3,6 +3,10 @@ import path from 'path'
 import { HumanMessage, AIMessage } from '@langchain/core/messages'
 import type { ToolExecutionContext, ReadFileSupport } from '../types'
 import { parseTerminalScopedFilePath } from '../terminalScopedFilePath'
+import {
+  formatTerminalUnavailableForTool,
+  resolveTerminalForTool
+} from './terminal_runtime_guard'
 
 export const DEFAULT_READ_LIMIT = 2000
 export const MAX_LINE_LENGTH = 2000
@@ -227,7 +231,7 @@ export async function runReadFile(
   const scopedReference = parseTerminalScopedFilePath(rawFilePath)
   const filePath = scopedReference?.filePath || rawFilePath
   const tabIdOrName = scopedReference?.terminalId || args.tabIdOrName
-  const { found, bestMatch } = terminalService.resolveTerminal(tabIdOrName)
+  const resolved = resolveTerminalForTool(context, tabIdOrName)
   
   let resultText = ''
   let imageMessage: HumanMessage | undefined
@@ -235,11 +239,22 @@ export async function runReadFile(
   let level: 'info' | 'warning' | 'error' = 'info'
 
   try {
-    if (!bestMatch) {
+    if (!resolved.ok) {
+      resultText = resolved.message
+      level = 'warning'
+      return { resultText }
+    }
+    const bestMatch = resolved.terminal
+
+    if (!resolved.snapshot.canUseFilesystem) {
       resultText =
-        found.length > 1
-          ? `Error: Multiple terminal tabs found with name "${tabIdOrName}".`
-          : `Error: Terminal tab "${tabIdOrName}" not found.`
+        bestMatch.capabilities?.supportsFilesystem !== true &&
+        resolved.snapshot.runtimeState === 'ready'
+          ? `Error: Terminal tab "${bestMatch.title || bestMatch.id}" (id=${bestMatch.id}, type=${bestMatch.type}) does not support filesystem operations.`
+          : formatTerminalUnavailableForTool(
+              resolved.snapshot,
+              'read files through this terminal'
+            )
       level = 'warning'
       return { resultText }
     }

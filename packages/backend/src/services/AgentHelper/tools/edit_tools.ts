@@ -4,6 +4,10 @@ import type { TerminalService } from '../../TerminalService'
 import type { TerminalTab } from '../../../types'
 import type { ToolExecutionContext } from '../types'
 import { parseTerminalScopedFilePath } from '../terminalScopedFilePath'
+import {
+  formatTerminalUnavailableForTool,
+  resolveTerminalForTool
+} from './terminal_runtime_guard'
 
 export const editFileSchema = z.object({
   tabIdOrName: z.string().describe('The ID or Name of the terminal tab'),
@@ -681,20 +685,37 @@ export async function writeAndEdit(args: any, context: ToolExecutionContext): Pr
   // Check for abort before doing anything
   if (context.signal?.aborted) throw new Error('AbortError')
 
-  const { found, bestMatch } = terminalService.resolveTerminal(tabIdOrName)
-  if (!bestMatch) {
-    const errorText =
-      found.length > 1
-        ? `Error: Multiple terminal tabs found with name "${tabIdOrName}". Please use a specific Tab ID: ${found
-            .map((t: any) => t.id)
-            .join(', ')}`
-        : `Error: Terminal tab "${tabIdOrName}" not found.`
+  const resolved = resolveTerminalForTool(context, tabIdOrName)
+  if (!resolved.ok) {
+    const errorText = resolved.message
     sendEvent(sessionId, {
       messageId,
       type: 'tool_call',
       toolName: 'create_or_edit',
       input: JSON.stringify(args),
       output: errorText
+    })
+    return errorText
+  }
+  const bestMatch = resolved.terminal
+
+  if (!resolved.snapshot.canUseFilesystem) {
+    const errorText =
+      bestMatch.capabilities?.supportsFilesystem !== true &&
+      resolved.snapshot.runtimeState === 'ready'
+        ? `Error: Terminal tab "${bestMatch.title || bestMatch.id}" (id=${bestMatch.id}, type=${bestMatch.type}) does not support filesystem operations.`
+        : formatTerminalUnavailableForTool(
+            resolved.snapshot,
+            'write or edit files through this terminal'
+          )
+    sendEvent(sessionId, {
+      messageId,
+      type: 'file_edit',
+      toolName: 'create_or_edit',
+      output: errorText,
+      filePath: filePathInput,
+      action: 'error',
+      diff: ''
     })
     return errorText
   }
