@@ -32,7 +32,10 @@ import {
   shouldLetImeHandleKeyDown,
   shouldSuppressPostCompositionEnter,
 } from "../../lib/imeComposition";
-import { resolveFloatingMenuPlacement } from "../../lib/menuPlacement";
+import {
+  resolveActiveMenuItemScrollTop,
+  resolveFloatingMenuPlacement,
+} from "../../lib/menuPlacement";
 import { truncateMentionDisplayText } from "../../lib/mentionDisplay";
 import "./richInput.scss";
 
@@ -118,6 +121,7 @@ export const RichInput = observer(
     ({ store, placeholder, onSend, onInput, disabled }, ref) => {
       const editorRef = useRef<HTMLDivElement>(null);
       const suggestionMenuRef = useRef<HTMLDivElement>(null);
+      const suggestionItemRefs = useRef<Array<HTMLDivElement | null>>([]);
       const [showSuggestions, setShowSuggestions] = useState(false);
       const [suggestions, setSuggestions] = useState<RichMentionItem[]>([]);
       const [selectedIndex, setSelectedIndex] = useState(0);
@@ -884,10 +888,28 @@ export const RichInput = observer(
         suggestions.length,
       ]);
 
+      React.useLayoutEffect(() => {
+        if (!showSuggestions) return;
+        const menu = suggestionMenuRef.current;
+        const activeItem = suggestionItemRefs.current[selectedIndex] || null;
+        if (!menu || !activeItem) return;
+
+        const nextScrollTop = resolveActiveMenuItemScrollTop({
+          itemTop: activeItem.offsetTop,
+          itemHeight: activeItem.offsetHeight,
+          viewportScrollTop: menu.scrollTop,
+          viewportHeight: menu.clientHeight,
+        });
+        if (nextScrollTop !== menu.scrollTop) {
+          menu.scrollTop = nextScrollTop;
+        }
+      }, [selectedIndex, showSuggestions, suggestions.length]);
+
       React.useEffect(() => {
         if (!showSuggestions) {
           setSuggestionAnchorRect(null);
           setSuggestionStyle(undefined);
+          suggestionItemRefs.current = [];
           return;
         }
 
@@ -1142,6 +1164,9 @@ export const RichInput = observer(
                 {suggestions.map((item, i) => (
                   <div
                     key={`${item.type}-${item.name}-${i}`}
+                    ref={(node) => {
+                      suggestionItemRefs.current[i] = node;
+                    }}
                     className={`suggestion-item ${i === selectedIndex ? "active" : ""}`}
                     onMouseDown={(e) => {
                       e.preventDefault();

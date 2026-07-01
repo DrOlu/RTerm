@@ -1,4 +1,7 @@
-import { resolveFloatingMenuPlacement } from "./menuPlacement";
+import {
+  resolveActiveMenuItemScrollTop,
+  resolveFloatingMenuPlacement,
+} from "./menuPlacement";
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
   if (actual !== expected) {
@@ -134,5 +137,50 @@ runCase("floating menus clamp against the right viewport edge", () => {
     placement.left,
     672,
     "right-edge menus should shift left until their right edge fits inside the viewport margin",
+  );
+});
+
+runCase("active menu item scroll stays unchanged when already visible", () => {
+  const scrollTop = resolveActiveMenuItemScrollTop({
+    itemTop: 72,
+    itemHeight: 28,
+    viewportScrollTop: 40,
+    viewportHeight: 160,
+  });
+
+  assertEqual(
+    scrollTop,
+    40,
+    "visible active items should not move the menu scroll offset",
+  );
+});
+
+runCase("active menu item scroll moves down to reveal lower items", () => {
+  const scrollTop = resolveActiveMenuItemScrollTop({
+    itemTop: 208,
+    itemHeight: 28,
+    viewportScrollTop: 0,
+    viewportHeight: 200,
+  });
+
+  assertEqual(
+    scrollTop,
+    36,
+    "active items below the viewport should align their bottom edge inside the menu",
+  );
+});
+
+runCase("active menu item scroll moves up to reveal upper items", () => {
+  const scrollTop = resolveActiveMenuItemScrollTop({
+    itemTop: 24,
+    itemHeight: 28,
+    viewportScrollTop: 96,
+    viewportHeight: 200,
+  });
+
+  assertEqual(
+    scrollTop,
+    24,
+    "active items above the viewport should align their top edge inside the menu",
   );
 });

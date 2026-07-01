@@ -24,6 +24,13 @@ interface FloatingMenuPlacementResult {
   direction: "above" | "below";
 }
 
+interface ActiveMenuItemScrollInput {
+  itemTop: number;
+  itemHeight: number;
+  viewportScrollTop: number;
+  viewportHeight: number;
+}
+
 const clamp = (value: number, min: number, max: number): number => {
   if (max <= min) {
     return min;
@@ -114,4 +121,32 @@ export const resolveFloatingMenuPlacement = ({
     maxWidth: resolvedMaxWidth,
     direction,
   };
+};
+
+export const resolveActiveMenuItemScrollTop = ({
+  itemTop,
+  itemHeight,
+  viewportScrollTop,
+  viewportHeight,
+}: ActiveMenuItemScrollInput): number => {
+  const resolvedItemTop = Math.max(0, normalizeFinite(itemTop, 0));
+  const resolvedItemHeight = Math.max(0, normalizeFinite(itemHeight, 0));
+  const resolvedViewportScrollTop = Math.max(
+    0,
+    normalizeFinite(viewportScrollTop, 0),
+  );
+  const resolvedViewportHeight = Math.max(
+    0,
+    normalizeFinite(viewportHeight, 0),
+  );
+  const itemBottom = resolvedItemTop + resolvedItemHeight;
+  const viewportBottom = resolvedViewportScrollTop + resolvedViewportHeight;
+
+  if (resolvedItemTop < resolvedViewportScrollTop) {
+    return resolvedItemTop;
+  }
+  if (itemBottom > viewportBottom) {
+    return Math.max(0, itemBottom - resolvedViewportHeight);
+  }
+  return resolvedViewportScrollTop;
 };
