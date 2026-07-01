@@ -1,16 +1,25 @@
-import React from 'react';
-import { getFileMentionDisplayName } from './filesystemDragDrop';
-import { truncateMentionDisplayText } from './mentionDisplay';
+import React from "react";
+import { getFileMentionDisplayName } from "./filesystemDragDrop";
+import { truncateMentionDisplayText } from "./mentionDisplay";
 
 /**
  * Shared by:
  * 1) Chat message/queue mention rendering (`components/Chat/MessageRow.tsx`, `components/Chat/Queue/QueueCard.tsx`)
  * 2) Session-title text normalization (`lib/sessionTitleDisplay.ts`)
  */
-const MENTION_TOKEN_REGEX = /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE):#.+?#(?:#.+?#)?\])/g;
+const MENTION_TOKEN_REGEX =
+  /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|PASS_CHAT):#.+?#(?:#.+?#)?\])/g;
 
 const getFileDisplayName = (path: string): string => {
   return getFileMentionDisplayName(path) || path;
+};
+
+const decodeMentionComponent = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 };
 
 const mentionTokenToText = (token: string): string | null => {
@@ -31,8 +40,18 @@ const mentionTokenToText = (token: string): string | null => {
 
   const imageMatch = token.match(/^\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]$/);
   if (imageMatch) {
-    const explicitName = String(imageMatch[2] || '').trim();
+    const explicitName = String(imageMatch[2] || "").trim();
     return explicitName || getFileDisplayName(imageMatch[1]);
+  }
+
+  const passChatMatch = token.match(
+    /^\[MENTION_PASS_CHAT:#(.+?)(?:##(.+?))?#\]$/,
+  );
+  if (passChatMatch) {
+    const title = passChatMatch[2]
+      ? decodeMentionComponent(passChatMatch[2])
+      : "Chat";
+    return `@Pass Chat: ${title}`;
   }
 
   return null;
@@ -44,21 +63,37 @@ const mentionTokenToText = (token: string): string | null => {
  * not badge-like styled labels.
  */
 export const renderMentionText = (content: string): string => {
-  if (!content) return '';
+  if (!content) return "";
 
   let text = content
     .split(MENTION_TOKEN_REGEX)
     .map((part) => mentionTokenToText(part) ?? part)
-    .join('');
+    .join("");
 
   // Session titles can be truncated (e.g. first 20 chars), leaving incomplete tags.
   // Fallback to the same visible text rule for dangling mention patterns.
   text = text
-    .replace(/\[MENTION_TAB:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, name: string) => `@${name}`)
-    .replace(/\[MENTION_SKILL:#([^#\]\r\n]+)(?:#\])?/g, (_m, name: string) => `@${name}`)
-    .replace(/\[MENTION_FILE:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, path: string) => getFileDisplayName(path))
-    .replace(/\[MENTION_IMAGE:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g, (_m, path: string, name: string) =>
-      String(name || '').trim() || getFileDisplayName(path)
+    .replace(
+      /\[MENTION_TAB:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g,
+      (_m, name: string) => `@${name}`,
+    )
+    .replace(
+      /\[MENTION_SKILL:#([^#\]\r\n]+)(?:#\])?/g,
+      (_m, name: string) => `@${name}`,
+    )
+    .replace(
+      /\[MENTION_FILE:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g,
+      (_m, path: string) => getFileDisplayName(path),
+    )
+    .replace(
+      /\[MENTION_IMAGE:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g,
+      (_m, path: string, name: string) =>
+        String(name || "").trim() || getFileDisplayName(path),
+    )
+    .replace(
+      /\[MENTION_PASS_CHAT:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g,
+      (_m, _sessionId: string, title: string) =>
+        `@Pass Chat: ${title ? decodeMentionComponent(title) : "Chat"}`,
     );
 
   return text;
@@ -68,7 +103,9 @@ export const renderMentionText = (content: string): string => {
  * Unified logic for parsing and rendering Mention tags.
  * Converts text in the format [MENTION_XXX:#...#] into an array of React nodes.
  */
-export const renderMentionContent = (content: string): (string | React.ReactElement)[] => {
+export const renderMentionContent = (
+  content: string,
+): (string | React.ReactElement)[] => {
   if (!content) return [];
 
   const parts = content.split(MENTION_TOKEN_REGEX);
@@ -79,12 +116,14 @@ export const renderMentionContent = (content: string): (string | React.ReactElem
       return part;
     }
 
-    if (mentionText.startsWith('@')) {
-      const cls = part.startsWith('[MENTION_TAB:')
-        ? 'terminal'
-        : part.startsWith('[MENTION_SKILL:')
-          ? 'skill'
-          : 'terminal';
+    if (mentionText.startsWith("@")) {
+      const cls = part.startsWith("[MENTION_TAB:")
+        ? "terminal"
+        : part.startsWith("[MENTION_SKILL:")
+          ? "skill"
+          : part.startsWith("[MENTION_PASS_CHAT:")
+            ? "pass-chat"
+            : "terminal";
       return (
         <span
           key={`mention-${i}`}
@@ -96,7 +135,10 @@ export const renderMentionContent = (content: string): (string | React.ReactElem
       );
     }
 
-    if (part.startsWith('[MENTION_FILE:') || part.startsWith('[MENTION_IMAGE:')) {
+    if (
+      part.startsWith("[MENTION_FILE:") ||
+      part.startsWith("[MENTION_IMAGE:")
+    ) {
       return (
         <span
           key={`mention-${i}`}

@@ -1,51 +1,83 @@
-import React from 'react'
+import React from "react";
 
-const MENTION_TOKEN_REGEX = /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE):#.+?#(?:#.+?#)?\])/g
+const MENTION_TOKEN_REGEX =
+  /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|PASS_CHAT):#.+?#(?:#.+?#)?\])/g;
 
 function fileNameFromPath(path: string): string {
-  return path.split(/[/\\]/).pop() || path
+  return path.split(/[/\\]/).pop() || path;
 }
 
-function tokenToText(token: string): { text: string; kind: 'terminal' | 'skill' | 'file' } | null {
-  const skillMatch = token.match(/^\[MENTION_SKILL:#(.+?)#\]$/)
+function decodeMentionComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function tokenToText(
+  token: string,
+): { text: string; kind: "terminal" | "skill" | "file" } | null {
+  const skillMatch = token.match(/^\[MENTION_SKILL:#(.+?)#\]$/);
   if (skillMatch) {
-    return { text: `@${skillMatch[1]}`, kind: 'skill' }
+    return { text: `@${skillMatch[1]}`, kind: "skill" };
   }
 
-  const tabMatch = token.match(/^\[MENTION_TAB:#(.+?)##(.+?)#\]$/)
+  const tabMatch = token.match(/^\[MENTION_TAB:#(.+?)##(.+?)#\]$/);
   if (tabMatch) {
-    return { text: `@${tabMatch[1]}`, kind: 'terminal' }
+    return { text: `@${tabMatch[1]}`, kind: "terminal" };
   }
 
-  const fileMatch = token.match(/^\[MENTION_FILE:#(.+?)#\]$/)
+  const fileMatch = token.match(/^\[MENTION_FILE:#(.+?)#\]$/);
   if (fileMatch) {
-    return { text: fileNameFromPath(fileMatch[1]), kind: 'file' }
+    return { text: fileNameFromPath(fileMatch[1]), kind: "file" };
   }
 
-  const imageMatch = token.match(/^\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]$/)
+  const imageMatch = token.match(/^\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]$/);
   if (imageMatch) {
-    return { text: imageMatch[2] || fileNameFromPath(imageMatch[1]), kind: 'file' }
+    return {
+      text: imageMatch[2] || fileNameFromPath(imageMatch[1]),
+      kind: "file",
+    };
   }
 
-  return null
+  const passChatMatch = token.match(
+    /^\[MENTION_PASS_CHAT:#(.+?)(?:##(.+?))?#\]$/,
+  );
+  if (passChatMatch) {
+    const title = passChatMatch[2]
+      ? decodeMentionComponent(passChatMatch[2])
+      : "Chat";
+    return { text: `@Pass Chat: ${title}`, kind: "terminal" };
+  }
+
+  return null;
 }
 
-export const MentionContent: React.FC<{ text: string }> = React.memo(({ text }) => {
-  const parts = React.useMemo(() => String(text || '').split(MENTION_TOKEN_REGEX), [text])
+export const MentionContent: React.FC<{ text: string }> = React.memo(
+  ({ text }) => {
+    const parts = React.useMemo(
+      () => String(text || "").split(MENTION_TOKEN_REGEX),
+      [text],
+    );
 
-  return (
-    <>
-      {parts.map((part, index) => {
-        const parsed = tokenToText(part)
-        if (!parsed) {
-          return <React.Fragment key={`raw-${index}`}>{part}</React.Fragment>
-        }
-        return (
-          <span key={`mention-${index}`} className={`mention-inline ${parsed.kind}`}>
-            {parsed.text}
-          </span>
-        )
-      })}
-    </>
-  )
-})
+    return (
+      <>
+        {parts.map((part, index) => {
+          const parsed = tokenToText(part);
+          if (!parsed) {
+            return <React.Fragment key={`raw-${index}`}>{part}</React.Fragment>;
+          }
+          return (
+            <span
+              key={`mention-${index}`}
+              className={`mention-inline ${parsed.kind}`}
+            >
+              {parsed.text}
+            </span>
+          );
+        })}
+      </>
+    );
+  },
+);

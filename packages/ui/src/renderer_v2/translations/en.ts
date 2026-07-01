@@ -435,7 +435,7 @@ export const en = {
   },
   chat: {
     dialog: "Dialog",
-    placeholder: "Type a command or question...",
+    placeholder: "Type a command/question, or output @ refs...",
     searchPlaceholder: "Find in current chat...",
     send: "Send",
     stop: "Stop",

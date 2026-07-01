@@ -36,6 +36,13 @@ import {
   resolveActiveMenuItemScrollTop,
   resolveFloatingMenuPlacement,
 } from "../../lib/menuPlacement";
+import {
+  MENTION_SUGGESTION_GAP,
+  MENTION_SUGGESTION_MARGIN,
+  resolveMentionSuggestionMenuDimensions,
+  truncatePassChatSuggestionTitle,
+  type MentionSuggestionMode,
+} from "../../lib/mentionSuggestionPresentation";
 import { truncateMentionDisplayText } from "../../lib/mentionDisplay";
 import "./richInput.scss";
 
@@ -66,10 +73,18 @@ interface RichInputProps {
 }
 
 type RichMentionItem = {
-  type: "skill" | "terminal" | "file";
+  type: "skill" | "terminal" | "file" | "pass-chat-spec" | "pass-chat";
   name: string;
   id?: string;
   preview?: string;
+};
+
+type StoredChatHistorySummary = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messagesCount: number;
+  lastMessagePreview?: string;
 };
 
 type MentionSuggestionAnchorRect = {
@@ -78,11 +93,6 @@ type MentionSuggestionAnchorRect = {
   width: number;
   height: number;
 };
-
-const MENTION_SUGGESTION_MARGIN = 8;
-const MENTION_SUGGESTION_GAP = 6;
-const MENTION_SUGGESTION_MAX_HEIGHT = 200;
-const MENTION_SUGGESTION_FALLBACK_WIDTH = 180;
 
 const toMentionSuggestionAnchorRect = (
   rect: Pick<DOMRect, "left" | "top" | "width" | "height">,
@@ -116,6 +126,14 @@ const setMentionDisplayText = (span: HTMLElement, rawText: string): void => {
   span.title = rawText;
 };
 
+const decodeMentionComponent = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
 export const RichInput = observer(
   forwardRef<RichInputHandle, RichInputProps>(
     ({ store, placeholder, onSend, onInput, disabled }, ref) => {
@@ -124,6 +142,10 @@ export const RichInput = observer(
       const suggestionItemRefs = useRef<Array<HTMLDivElement | null>>([]);
       const [showSuggestions, setShowSuggestions] = useState(false);
       const [suggestions, setSuggestions] = useState<RichMentionItem[]>([]);
+      const [suggestionMode, setSuggestionMode] =
+        useState<MentionSuggestionMode>("mention");
+      const [passChatLoading, setPassChatLoading] = useState(false);
+      const [passChatError, setPassChatError] = useState("");
       const [selectedIndex, setSelectedIndex] = useState(0);
       const [suggestionAnchorRect, setSuggestionAnchorRect] =
         useState<MentionSuggestionAnchorRect | null>(null);
@@ -136,6 +158,7 @@ export const RichInput = observer(
       const imageAttachmentsRef = useRef<ComposerImageAttachment[]>([]);
       const pendingMentionDeleteRef = useRef<HTMLElement | null>(null);
       const imeCompositionRef = useRef(createImeCompositionTracker());
+      const passChatLoadRequestRef = useRef(0);
       const cursorMarker = "\uFEFF";
 
       const isBlobPreview = (url: string): boolean =>
@@ -344,28 +367,36 @@ export const RichInput = observer(
         const anchorRect = suggestionAnchorRect;
         if (!menu || !anchorRect) return;
 
+        const dimensions = resolveMentionSuggestionMenuDimensions(
+          suggestionMode,
+          window.innerWidth,
+          MENTION_SUGGESTION_MARGIN,
+        );
         const measured = menu.getBoundingClientRect();
         const placement = resolveFloatingMenuPlacement({
           anchorRect,
-          menuWidth: Math.ceil(
-            measured.width || MENTION_SUGGESTION_FALLBACK_WIDTH,
-          ),
+          menuWidth: dimensions.width,
           menuHeight: Math.ceil(
-            measured.height || MENTION_SUGGESTION_MAX_HEIGHT,
+            measured.height || dimensions.preferredMaxHeight,
           ),
           viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
           margin: MENTION_SUGGESTION_MARGIN,
           gap: MENTION_SUGGESTION_GAP,
-          preferredMaxHeight: MENTION_SUGGESTION_MAX_HEIGHT,
+          preferredMaxHeight: dimensions.preferredMaxHeight,
         });
+        const nextWidth = Math.min(dimensions.width, placement.maxWidth);
 
         setSuggestionStyle((current) => {
+          if (suggestionMode === "pass-chat" && current) {
+            return current;
+          }
           if (
             current?.top === placement.top &&
             current?.left === placement.left &&
             current?.maxHeight === placement.maxHeight &&
-            current?.maxWidth === placement.maxWidth
+            current?.maxWidth === nextWidth &&
+            current?.width === nextWidth
           ) {
             return current;
           }
@@ -373,17 +404,19 @@ export const RichInput = observer(
             position: "fixed",
             top: placement.top,
             left: placement.left,
+            width: nextWidth,
             maxHeight: placement.maxHeight,
-            maxWidth: placement.maxWidth,
+            maxWidth: nextWidth,
             zIndex: 10000,
           };
         });
-      }, [suggestionAnchorRect]);
+      }, [suggestionAnchorRect, suggestionMode]);
 
       const updateSuggestions = useCallback(() => {
         const info = getMentionInfo();
         if (!info) {
           setShowSuggestions(false);
+          setSuggestionMode("mention");
           return;
         }
 
@@ -402,10 +435,33 @@ export const RichInput = observer(
           name: t.title,
           id: t.id,
         }));
+        const passChatSpec: RichMentionItem = {
+          type: "pass-chat-spec",
+          name: "Pass Chat",
+          preview: "Reference a chat history",
+        };
+        const shouldShowPassChatSpec =
+          query.length === 0 ||
+          "[spec] pass chat".includes(query) ||
+          "pass chat".includes(query) ||
+          "past chat".includes(query) ||
+          "chat history".includes(query);
 
-        const filtered = [...skills, ...tabs]
-          .filter((item) => item.name.toLowerCase().includes(query))
+        const filtered = [
+          ...(shouldShowPassChatSpec ? [passChatSpec] : []),
+          ...skills,
+          ...tabs,
+        ]
+          .filter(
+            (item) =>
+              item.type === "pass-chat-spec" ||
+              item.name.toLowerCase().includes(query),
+          )
           .sort((a, b) => {
+            if (a.type === "pass-chat-spec" && b.type !== "pass-chat-spec")
+              return -1;
+            if (b.type === "pass-chat-spec" && a.type !== "pass-chat-spec")
+              return 1;
             const aLower = a.name.toLowerCase();
             const bLower = b.name.toLowerCase();
             if (aLower === query && bLower !== query) return -1;
@@ -427,6 +483,9 @@ export const RichInput = observer(
             return;
           }
           setSuggestions(filtered);
+          setSuggestionMode("mention");
+          setPassChatLoading(false);
+          setPassChatError("");
           setSelectedIndex(0);
           setSuggestionAnchorRect(anchorRect);
           setSuggestionStyle(undefined);
@@ -441,13 +500,69 @@ export const RichInput = observer(
         store.terminalTabs,
       ]);
 
+      const formatPassChatMeta = (
+        session: StoredChatHistorySummary,
+      ): string => {
+        const date = new Date(session.updatedAt || 0);
+        const dateText = Number.isFinite(date.getTime())
+          ? date.toLocaleString()
+          : "Unknown time";
+        return `${dateText} · ${session.messagesCount || 0} messages`;
+      };
+
+      const openPassChatPicker = async () => {
+        const requestId = passChatLoadRequestRef.current + 1;
+        passChatLoadRequestRef.current = requestId;
+        setSuggestionMode("pass-chat");
+        setPassChatLoading(true);
+        setPassChatError("");
+        setSuggestions([]);
+        setSelectedIndex(0);
+        setShowSuggestions(true);
+
+        try {
+          const history =
+            (await store.chat.getAllChatHistory()) as StoredChatHistorySummary[];
+          if (passChatLoadRequestRef.current !== requestId) return;
+          const nextSuggestions = history
+            .filter((session) => String(session?.id || "").trim().length > 0)
+            .map((session) => ({
+              type: "pass-chat" as const,
+              id: session.id,
+              name:
+                String(session.title || "")
+                  .replace(/\s+/g, " ")
+                  .trim() || "Untitled Chat",
+              preview: formatPassChatMeta(session),
+            }));
+          setSuggestions(nextSuggestions);
+          setSelectedIndex(0);
+        } catch (error) {
+          if (passChatLoadRequestRef.current !== requestId) return;
+          console.error(
+            "Failed to load chat history for pass-chat mention:",
+            error,
+          );
+          setPassChatError("Failed to load chat history");
+          setSuggestions([]);
+        } finally {
+          if (passChatLoadRequestRef.current === requestId) {
+            setPassChatLoading(false);
+          }
+        }
+      };
+
       const buildMentionHtml = (item: RichMentionItem, uid: string): string => {
         const fileName = getFileMentionDisplayName(item.name) || item.name;
         const rawDisplayText =
-          item.type === "file" ? item.preview || fileName : `@${item.name}`;
+          item.type === "file"
+            ? item.preview || fileName
+            : item.type === "pass-chat"
+              ? `@Pass Chat: ${item.name}`
+              : `@${item.name}`;
         const displayText = truncateMentionDisplayText(rawDisplayText);
         const attributes = [
-          `class="mention-tag"`,
+          `class="mention-tag mention-${escapeHtml(item.type)}"`,
           `contenteditable="false"`,
           `title="${escapeHtml(rawDisplayText)}"`,
           `data-insert-id="${escapeHtml(uid)}"`,
@@ -568,8 +683,20 @@ export const RichInput = observer(
 
         editorRef.current?.focus();
         pendingMentionDeleteRef.current = null;
+        setSuggestionMode("mention");
+        setPassChatLoading(false);
+        setPassChatError("");
         setShowSuggestions(false);
         onInput?.(buildDraft());
+      };
+
+      const acceptSuggestion = (item: RichMentionItem | undefined) => {
+        if (!item) return;
+        if (item.type === "pass-chat-spec") {
+          void openPassChatPicker();
+          return;
+        }
+        insertMention(item);
       };
 
       const serialize = (): string => {
@@ -593,6 +720,8 @@ export const RichInput = observer(
                 result += `[MENTION_TAB:#${name}##${id}#]`;
               } else if (type === "file") {
                 result += `[MENTION_FILE:#${name}#]`;
+              } else if (type === "pass-chat" && id) {
+                result += `[MENTION_PASS_CHAT:#${id}##${encodeURIComponent(name || "Chat")}#]`;
               }
             } else if (el.tagName === "BR") {
               result += "\n";
@@ -619,7 +748,7 @@ export const RichInput = observer(
           if (editorRef.current) {
             // Parser for [MENTION_XXX:#...#] labels to restore them as rich DOM nodes
             const parts = val.split(
-              /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE):#.+?#(?:#.+?#)?\])/g,
+              /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|PASS_CHAT):#.+?#(?:#.+?#)?\])/g,
             );
             editorRef.current.innerHTML = "";
 
@@ -627,6 +756,9 @@ export const RichInput = observer(
               const skillMatch = part.match(/\[MENTION_SKILL:#(.+?)#\]/);
               const terminalMatch = part.match(
                 /\[MENTION_TAB:#(.+?)##(.+?)#\]/,
+              );
+              const passChatMatch = part.match(
+                /\[MENTION_PASS_CHAT:#(.+?)(?:##(.+?))?#\]/,
               );
 
               if (skillMatch) {
@@ -660,6 +792,17 @@ export const RichInput = observer(
                   setMentionDisplayText(span, fileName);
                   editorRef.current?.appendChild(span);
                 }
+              } else if (passChatMatch) {
+                const span = document.createElement("span");
+                span.className = "mention-tag mention-pass-chat";
+                span.contentEditable = "false";
+                span.dataset.type = "pass-chat";
+                span.dataset.id = passChatMatch[1];
+                span.dataset.name = passChatMatch[2]
+                  ? decodeMentionComponent(passChatMatch[2])
+                  : "Chat";
+                setMentionDisplayText(span, `@Pass Chat: ${span.dataset.name}`);
+                editorRef.current?.appendChild(span);
               } else if (part.match(/\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/)) {
                 const imageMatch = part.match(
                   /\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/,
@@ -698,13 +841,16 @@ export const RichInput = observer(
           if (editorRef.current) {
             // Reuse token parser to restore text mentions.
             const parts = nextText.split(
-              /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE):#.+?#(?:#.+?#)?\])/g,
+              /(\[MENTION_(?:SKILL|TAB|FILE|IMAGE|PASS_CHAT):#.+?#(?:#.+?#)?\])/g,
             );
             editorRef.current.innerHTML = "";
             parts.forEach((part) => {
               const skillMatch = part.match(/\[MENTION_SKILL:#(.+?)#\]/);
               const terminalMatch = part.match(
                 /\[MENTION_TAB:#(.+?)##(.+?)#\]/,
+              );
+              const passChatMatch = part.match(
+                /\[MENTION_PASS_CHAT:#(.+?)(?:##(.+?))?#\]/,
               );
               if (skillMatch) {
                 const span = document.createElement("span");
@@ -736,6 +882,17 @@ export const RichInput = observer(
                   setMentionDisplayText(span, fileName);
                   editorRef.current?.appendChild(span);
                 }
+              } else if (passChatMatch) {
+                const span = document.createElement("span");
+                span.className = "mention-tag mention-pass-chat";
+                span.contentEditable = "false";
+                span.dataset.type = "pass-chat";
+                span.dataset.id = passChatMatch[1];
+                span.dataset.name = passChatMatch[2]
+                  ? decodeMentionComponent(passChatMatch[2])
+                  : "Chat";
+                setMentionDisplayText(span, `@Pass Chat: ${span.dataset.name}`);
+                editorRef.current?.appendChild(span);
               } else if (part.match(/\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/)) {
                 const imageMatch = part.match(
                   /\[MENTION_IMAGE:#(.+?)(?:##(.+?))?#\]/,
@@ -826,24 +983,36 @@ export const RichInput = observer(
         if (showSuggestions) {
           if (e.key === "ArrowDown") {
             e.preventDefault();
-            setSelectedIndex((i) => (i + 1) % suggestions.length);
+            if (suggestions.length > 0) {
+              setSelectedIndex((i) => (i + 1) % suggestions.length);
+            }
             return;
           }
           if (e.key === "ArrowUp") {
             e.preventDefault();
-            setSelectedIndex(
-              (i) => (i - 1 + suggestions.length) % suggestions.length,
-            );
+            if (suggestions.length > 0) {
+              setSelectedIndex(
+                (i) => (i - 1 + suggestions.length) % suggestions.length,
+              );
+            }
             return;
           }
           if (e.key === "Enter" || e.key === "Tab") {
             e.preventDefault();
-            insertMention(suggestions[selectedIndex]);
+            acceptSuggestion(suggestions[selectedIndex]);
             return;
           }
           if (e.key === "Escape") {
             e.preventDefault();
             pendingMentionDeleteRef.current = null;
+            if (suggestionMode === "pass-chat") {
+              passChatLoadRequestRef.current += 1;
+              setSuggestionMode("mention");
+              setPassChatLoading(false);
+              setPassChatError("");
+              updateSuggestions();
+              return;
+            }
             setShowSuggestions(false);
             return;
           }
@@ -875,6 +1044,9 @@ export const RichInput = observer(
       React.useEffect(() => {
         if (disabled || store.view !== "main") {
           setShowSuggestions(false);
+          setSuggestionMode("mention");
+          setPassChatLoading(false);
+          setPassChatError("");
         }
       }, [disabled, store.view]);
 
@@ -1150,37 +1322,64 @@ export const RichInput = observer(
             createPortal(
               <div
                 ref={suggestionMenuRef}
-                className="mention-suggestions"
+                className={`mention-suggestions ${suggestionMode === "pass-chat" ? "pass-chat-mode" : ""}`}
                 style={{
                   position: "fixed",
                   top: suggestionStyle?.top ?? 0,
                   left: suggestionStyle?.left ?? 0,
+                  width: suggestionStyle?.width,
                   maxHeight: suggestionStyle?.maxHeight,
                   maxWidth: suggestionStyle?.maxWidth,
                   visibility: suggestionStyle ? undefined : "hidden",
                   zIndex: 10000,
                 }}
               >
-                {suggestions.map((item, i) => (
-                  <div
-                    key={`${item.type}-${item.name}-${i}`}
-                    ref={(node) => {
-                      suggestionItemRefs.current[i] = node;
-                    }}
-                    className={`suggestion-item ${i === selectedIndex ? "active" : ""}`}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      insertMention(item);
-                    }}
-                  >
-                    <div className="item-content">
-                      <span className={`item-type ${item.type}`}>
-                        {item.type === "skill" ? "Skill" : "Tab"}
-                      </span>
-                      <span className="item-name">{item.name}</span>
-                    </div>
+                {passChatLoading ? (
+                  <div className="suggestion-status">Loading chats...</div>
+                ) : passChatError ? (
+                  <div className="suggestion-status warning">
+                    {passChatError}
                   </div>
-                ))}
+                ) : suggestionMode === "pass-chat" &&
+                  suggestions.length === 0 ? (
+                  <div className="suggestion-status">No chat history</div>
+                ) : (
+                  suggestions.map((item, i) => (
+                    <div
+                      key={`${item.type}-${item.id || item.name}-${i}`}
+                      ref={(node) => {
+                        suggestionItemRefs.current[i] = node;
+                      }}
+                      className={`suggestion-item suggestion-${item.type} ${i === selectedIndex ? "active" : ""}`}
+                      title={
+                        item.preview ? `${item.name}\n${item.preview}` : item.name
+                      }
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        acceptSuggestion(item);
+                      }}
+                    >
+                      <div className="item-content">
+                        <span className={`item-type ${item.type}`}>
+                          {item.type === "skill"
+                            ? "Skill"
+                            : item.type === "terminal"
+                              ? "Tab"
+                              : item.type === "pass-chat-spec"
+                                ? "SPEC"
+                                : item.type === "pass-chat"
+                                  ? "Chat"
+                                  : "File"}
+                        </span>
+                        <span className="item-name">
+                          {item.type === "pass-chat"
+                            ? truncatePassChatSuggestionTitle(item.name)
+                            : item.name}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>,
               document.body,
             )}

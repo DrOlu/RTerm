@@ -131,12 +131,16 @@
     overflow-wrap: anywhere;
     word-break: break-word;
     position: relative;
+
+    &.mention-pass-chat {
+      text-transform: none;
+    }
   }
 }
 
 .mention-suggestions {
   box-sizing: border-box;
-  width: max-content;
+  width: min(280px, calc(100vw - 16px));
   background: var(--panel-bg);
   border: 1px solid var(--border-strong);
   border-radius: 2px;
@@ -174,7 +178,7 @@
 
     .item-content {
       display: grid;
-      grid-template-columns: 42px 1fr;
+      grid-template-columns: 42px minmax(0, 1fr);
       align-items: center;
       gap: 8px;
       width: 100%;
@@ -195,12 +199,22 @@
     }
 
     .item-name {
-      flex: 1;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       color: var(--fg); // Use normal text color from theme
+    }
+  }
+
+  .suggestion-status {
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--fg-muted);
+    white-space: nowrap;
+
+    &.warning {
+      color: var(--danger);
     }
   }
 }

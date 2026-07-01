@@ -413,6 +413,10 @@ body.chat-drag-selection-suppressed * {
     overflow-wrap: anywhere;
     word-break: break-word;
     position: relative;
+
+    &.pass-chat {
+      text-transform: none;
+    }
   }
 
   .message-user-images {

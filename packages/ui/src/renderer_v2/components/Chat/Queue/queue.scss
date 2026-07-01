@@ -28,7 +28,7 @@
   transition: all 0.15s ease;
 
   &::before {
-    content: '';
+    content: "";
     position: absolute;
     left: 0;
     top: 0;
@@ -42,7 +42,7 @@
   z-index: 200;
   border-color: var(--fg-muted);
   background: color-mix(in srgb, var(--fg) 6%, var(--panel-bg));
-  
+
   &::before {
     background: var(--accent);
   }
@@ -59,13 +59,15 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  transition: max-height 0.2s ease, white-space 0.2s ease;
+  transition:
+    max-height 0.2s ease,
+    white-space 0.2s ease;
   user-select: none;
   -webkit-user-select: none;
   display: block;
 
   &::before {
-    content: '$';
+    content: "$";
     color: var(--accent);
     opacity: 0.7;
     font-weight: bold;
@@ -93,6 +95,10 @@
     overflow-wrap: anywhere;
     word-break: break-word;
     position: relative;
+
+    &.pass-chat {
+      text-transform: none;
+    }
   }
 
   .queue-card-image-count {
@@ -138,7 +144,7 @@
   &.is-active {
     color: var(--accent) !important;
     background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
-    
+
     &:hover {
       background: color-mix(in srgb, var(--accent) 20%, transparent) !important;
     }

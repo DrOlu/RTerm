@@ -422,7 +422,7 @@ export const zh = {
   },
   chat: {
     dialog: "对话",
-    placeholder: "输入命令或问题...",
+    placeholder: "输入命令或问题，可输出 @ 引用内容...",
     searchPlaceholder: "在当前对话中查找...",
     send: "发送",
     stop: "停止",
