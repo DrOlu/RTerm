@@ -126,6 +126,11 @@ const setMentionDisplayText = (span: HTMLElement, rawText: string): void => {
   span.title = rawText;
 };
 
+const getMentionTagClassName = (type: RichMentionItem["type"]): string => {
+  if (type === "pass-chat-spec") return "mention-tag";
+  return `mention-tag mention-${type}`;
+};
+
 const decodeMentionComponent = (value: string): string => {
   try {
     return decodeURIComponent(value);
@@ -562,7 +567,7 @@ export const RichInput = observer(
               : `@${item.name}`;
         const displayText = truncateMentionDisplayText(rawDisplayText);
         const attributes = [
-          `class="mention-tag mention-${escapeHtml(item.type)}"`,
+          `class="${escapeHtml(getMentionTagClassName(item.type))}"`,
           `contenteditable="false"`,
           `title="${escapeHtml(rawDisplayText)}"`,
           `data-insert-id="${escapeHtml(uid)}"`,
@@ -763,7 +768,7 @@ export const RichInput = observer(
 
               if (skillMatch) {
                 const span = document.createElement("span");
-                span.className = "mention-tag";
+                span.className = getMentionTagClassName("skill");
                 span.contentEditable = "false";
                 span.dataset.type = "skill";
                 span.dataset.name = skillMatch[1];
@@ -771,7 +776,7 @@ export const RichInput = observer(
                 editorRef.current?.appendChild(span);
               } else if (terminalMatch) {
                 const span = document.createElement("span");
-                span.className = "mention-tag";
+                span.className = getMentionTagClassName("terminal");
                 span.contentEditable = "false";
                 span.dataset.type = "terminal";
                 span.dataset.name = terminalMatch[1];
@@ -782,7 +787,7 @@ export const RichInput = observer(
                 const fileMatch = part.match(/\[MENTION_FILE:#(.+?)#\]/);
                 if (fileMatch) {
                   const span = document.createElement("span");
-                  span.className = "mention-tag";
+                  span.className = getMentionTagClassName("file");
                   span.contentEditable = "false";
                   span.dataset.type = "file";
                   span.dataset.name = fileMatch[1];
@@ -794,7 +799,7 @@ export const RichInput = observer(
                 }
               } else if (passChatMatch) {
                 const span = document.createElement("span");
-                span.className = "mention-tag mention-pass-chat";
+                span.className = getMentionTagClassName("pass-chat");
                 span.contentEditable = "false";
                 span.dataset.type = "pass-chat";
                 span.dataset.id = passChatMatch[1];
@@ -809,7 +814,7 @@ export const RichInput = observer(
                 );
                 if (imageMatch) {
                   const span = document.createElement("span");
-                  span.className = "mention-tag";
+                  span.className = getMentionTagClassName("file");
                   span.contentEditable = "false";
                   span.dataset.type = "file";
                   span.dataset.name = imageMatch[1];
@@ -854,7 +859,7 @@ export const RichInput = observer(
               );
               if (skillMatch) {
                 const span = document.createElement("span");
-                span.className = "mention-tag";
+                span.className = getMentionTagClassName("skill");
                 span.contentEditable = "false";
                 span.dataset.type = "skill";
                 span.dataset.name = skillMatch[1];
@@ -862,7 +867,7 @@ export const RichInput = observer(
                 editorRef.current?.appendChild(span);
               } else if (terminalMatch) {
                 const span = document.createElement("span");
-                span.className = "mention-tag";
+                span.className = getMentionTagClassName("terminal");
                 span.contentEditable = "false";
                 span.dataset.type = "terminal";
                 span.dataset.name = terminalMatch[1];
@@ -873,7 +878,7 @@ export const RichInput = observer(
                 const fileMatch = part.match(/\[MENTION_FILE:#(.+?)#\]/);
                 if (fileMatch) {
                   const span = document.createElement("span");
-                  span.className = "mention-tag";
+                  span.className = getMentionTagClassName("file");
                   span.contentEditable = "false";
                   span.dataset.type = "file";
                   span.dataset.name = fileMatch[1];
@@ -884,7 +889,7 @@ export const RichInput = observer(
                 }
               } else if (passChatMatch) {
                 const span = document.createElement("span");
-                span.className = "mention-tag mention-pass-chat";
+                span.className = getMentionTagClassName("pass-chat");
                 span.contentEditable = "false";
                 span.dataset.type = "pass-chat";
                 span.dataset.id = passChatMatch[1];
@@ -899,7 +904,7 @@ export const RichInput = observer(
                 );
                 if (imageMatch) {
                   const span = document.createElement("span");
-                  span.className = "mention-tag";
+                  span.className = getMentionTagClassName("file");
                   span.contentEditable = "false";
                   span.dataset.type = "file";
                   span.dataset.name = imageMatch[1];

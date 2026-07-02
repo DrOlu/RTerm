@@ -1,3 +1,5 @@
+@use "./mentionKind";
+
 .rich-input-wrapper {
   position: relative;
   width: 100%;
@@ -110,8 +112,6 @@
 
   .mention-tag {
     display: inline;
-    background: color-mix(in srgb, var(--accent-2) 24%, transparent);
-    color: var(--fg);
     padding: 0.02em 0.24em;
     border-radius: 4px;
     margin: 0 2px;
@@ -132,9 +132,7 @@
     word-break: break-word;
     position: relative;
 
-    &.mention-pass-chat {
-      text-transform: none;
-    }
+    @include mentionKind.mention-kind-badge;
   }
 }
 
@@ -194,8 +192,6 @@
       text-align: center;
       border-radius: 3px;
       font-weight: 700;
-      background: color-mix(in srgb, var(--accent-2) 15%, transparent);
-      color: var(--accent-2);
     }
 
     .item-name {
@@ -217,4 +213,6 @@
       color: var(--danger);
     }
   }
+
+  @include mentionKind.mention-suggestion-tone-rail;
 }

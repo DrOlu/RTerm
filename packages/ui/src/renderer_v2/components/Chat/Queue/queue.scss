@@ -1,3 +1,5 @@
+@use "../mentionKind";
+
 .queue-stack {
   position: relative;
   display: flex;
@@ -82,8 +84,6 @@
     font-size: 11px;
     font-family: var(--font-mono);
     margin: 0 2px;
-    background: color-mix(in srgb, var(--accent-2) 24%, transparent);
-    color: var(--fg);
     border: 1px solid color-mix(in srgb, var(--accent-2) 42%, transparent);
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
@@ -96,9 +96,7 @@
     word-break: break-word;
     position: relative;
 
-    &.pass-chat {
-      text-transform: none;
-    }
+    @include mentionKind.mention-kind-badge;
   }
 
   .queue-card-image-count {
