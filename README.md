@@ -44,6 +44,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - **Detachable multi-window workspace**: peel panels into sub-windows and move tabs or whole panels across windows.
 - **Adaptive panel tab display**: keep full tab strips or switch to a compact selector for narrow panel headers.
 - **Reusable Agent setting profiles**: save and reapply complete operating profiles for models, tools, policies, memory, and workflow flags.
+- **Cross-chat context handoff**: reference previous conversations from the composer with `Pass Chat` mentions instead of manually copying history.
 - **Integrated file management**: browse, edit, copy, and transfer files across local and SSH sessions without leaving the workspace.
 - **Live resource visibility**: inspect CPU, memory, disks, network, processes, sockets, and GPU from local or SSH sessions.
 - **OpenClawd-style remote conversation control**: keep the runtime core on your own computer and steer it from anywhere through chat.
@@ -69,10 +70,16 @@ GyShell is built for **persistent execution in your real terminal runtime**:
   - direct and jump-host SSH connections now use protocol keepalive probes to reduce silent idle disconnects
 - **Clearer file mutation tools**
   - model-facing file mutation is split into `write_file` for full writes and `edit_file` for exact replacements, while the Settings capability remains the single `create_or_edit` toggle
+- **Pass Chat mentions**
+  - the desktop `@` picker can reference a previous chat, exporting it as a private local Markdown file that the agent can inspect on demand without treating it as a new instruction source
+- **Mobile-web long chat responsiveness**
+  - long mobile conversations avoid rerendering the whole message timeline while you type in the composer
 - **Transfer panel stability**
   - the file transfer panel now separates current-tab, background, and recent tasks, adds summary counts, and keeps agent-origin transfers visible even when they are not tied to the active tab
 - **Dynamic saved layouts and floating-menu polish**
   - active saved layout slots now update as you continue editing them, and compact tab / `@` mention suggestion menus fit and scroll correctly near viewport edges
+- **Clearer mention labels**
+  - terminal, skill, file, and pass-chat mentions now use distinct visual tones in the desktop composer, chat, queue cards, and suggestion menu
 
 ---
 
@@ -89,6 +96,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - AI-assisted terminal command drafting from recent tab context, with paste-before-run control.
 - Background (nowait) commands automatically notify the agent on completion, so the agent can close the loop without polling.
 - Terminal-targeting agent tools report runtime status and refuse stale operations on disconnected tabs until reconnect succeeds.
+- Reference previous conversations with `Pass Chat` mentions; GyShell exports the selected chat as private local Markdown and tells the agent how to read it only when needed.
 - Classic or Seamless chat activity display, depending on how much inline tool detail you want.
 - Persistent memory injection via `memory.md`, scoped to the active Agent Setting profile when one is applied.
 - Multimodal user input pipeline (text + images) for compatible models.
@@ -148,6 +156,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - Read-only terminal output tails with unread indicators, local/saved-SSH terminal creation, and SSH reconnect.
 - Detailed turn event inspection from phone browser.
 - Tool, skill, Agent Setting profile, terminal, and settings access through gateway RPC.
+- Long chat timelines avoid full-list rerenders during composer input, keeping history-heavy mobile sessions responsive.
 - Gateway exposure can now be limited to localhost, LAN-only, custom CIDR ranges, or all interfaces.
 
 ---
