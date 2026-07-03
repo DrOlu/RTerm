@@ -1,13 +1,36 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   buildCompactPanelTabMeasureSignature,
   resolveCompactPanelTabMenuScrollbarCompensation,
 } from "./compactPanelTabMeasure";
+
+const currentDir = dirname(fileURLToPath(import.meta.url));
+const compactTabStylesheet = readFileSync(
+  join(currentDir, "compactPanelTabSelect.scss"),
+  "utf8",
+);
+const compactTabComponent = readFileSync(
+  join(currentDir, "CompactPanelTabSelect.tsx"),
+  "utf8",
+);
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
   if (actual !== expected) {
     throw new Error(
       `${message}. expected=${String(expected)} actual=${String(actual)}`,
     );
+  }
+};
+
+const assertMatch = (
+  actual: string,
+  pattern: RegExp,
+  message: string,
+): void => {
+  if (!pattern.test(actual)) {
+    throw new Error(message);
   }
 };
 
@@ -86,6 +109,33 @@ runCase(
       second,
       "layout-equivalent compact tabs should not force a new measure signature on rerender",
     );
+  },
+);
+
+runCase(
+  "portaled compact tab menus keep the panel-kind spacing variables",
+  () => {
+    assertMatch(
+      compactTabComponent,
+      /className="gyshell-compact-tab-menu"[\s\S]*data-layout-tab-kind=\{panelKind\}/,
+      "portaled compact tab menus should carry panelKind for kind-specific CSS variables",
+    );
+
+    assertMatch(
+      compactTabStylesheet,
+      /\.gyshell-compact-tab-select,\s*\.gyshell-compact-tab-menu\s*\{[\s\S]*--compact-tab-inline-padding:/,
+      "base compact tab variables should be available on both the trigger and portaled menu",
+    );
+
+    ["terminal", "chat", "filesystem", "monitor"].forEach((kind) => {
+      assertMatch(
+        compactTabStylesheet,
+        new RegExp(
+          `\\.gyshell-compact-tab-menu\\[data-layout-tab-kind="${kind}"\\]`,
+        ),
+        `${kind} compact tab menu should receive the same kind-specific CSS variables as its trigger`,
+      );
+    });
   },
 );
 

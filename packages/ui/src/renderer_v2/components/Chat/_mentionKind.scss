@@ -1,0 +1,126 @@
+@mixin mention-kind-vars {
+  --mention-kind-tab: var(--accent);
+  --mention-kind-skill: var(--accent-2);
+  --mention-kind-file: color-mix(in srgb, var(--success) 82%, var(--fg));
+  --mention-kind-chat: color-mix(in srgb, var(--accent) 55%, var(--success));
+  --mention-kind-spec: var(--mention-kind-chat);
+}
+
+@mixin mention-kind-badge {
+  @include mention-kind-vars;
+
+  --mention-badge-kind: var(--mention-kind-skill);
+
+  background: color-mix(
+    in srgb,
+    var(--mention-badge-kind) 18%,
+    transparent
+  );
+  border-color: color-mix(
+    in srgb,
+    var(--mention-badge-kind) 42%,
+    transparent
+  );
+  color: var(--fg);
+
+  &.terminal,
+  &.mention-terminal {
+    --mention-badge-kind: var(--mention-kind-tab);
+    background: color-mix(
+      in srgb,
+      var(--mention-badge-kind) 16%,
+      transparent
+    );
+  }
+
+  &.skill,
+  &.mention-skill {
+    --mention-badge-kind: var(--mention-kind-skill);
+  }
+
+  &.file,
+  &.mention-file {
+    --mention-badge-kind: var(--mention-kind-file);
+    background: color-mix(
+      in srgb,
+      var(--mention-badge-kind) 15%,
+      transparent
+    );
+  }
+
+  &.pass-chat,
+  &.mention-pass-chat {
+    --mention-badge-kind: var(--mention-kind-chat);
+    background: color-mix(
+      in srgb,
+      var(--accent) 9%,
+      color-mix(in srgb, var(--success) 8%, transparent)
+    );
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--success));
+    text-transform: none;
+  }
+}
+
+@mixin mention-suggestion-tone-rail {
+  @include mention-kind-vars;
+
+  --mention-suggestion-kind: var(--mention-kind-skill);
+
+  .suggestion-item {
+    position: relative;
+    padding-left: 10px;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: 3px;
+      top: 5px;
+      bottom: 5px;
+      width: 2px;
+      border-radius: 1px;
+      background: var(--mention-suggestion-kind);
+      opacity: 0.85;
+    }
+
+    &.active::before {
+      opacity: 1;
+      width: 3px;
+    }
+  }
+
+  .suggestion-terminal {
+    --mention-suggestion-kind: var(--mention-kind-tab);
+  }
+
+  .suggestion-skill {
+    --mention-suggestion-kind: var(--mention-kind-skill);
+  }
+
+  .suggestion-file {
+    --mention-suggestion-kind: var(--mention-kind-file);
+  }
+
+  .suggestion-pass-chat,
+  .suggestion-pass-chat-spec {
+    --mention-suggestion-kind: var(--mention-kind-chat);
+  }
+
+  .item-type {
+    background: color-mix(
+      in srgb,
+      var(--mention-suggestion-kind) 16%,
+      transparent
+    );
+    border: 1px solid
+      color-mix(in srgb, var(--mention-suggestion-kind) 28%, transparent);
+    color: color-mix(
+      in srgb,
+      var(--mention-suggestion-kind) 86%,
+      var(--fg)
+    );
+
+    &.pass-chat-spec {
+      --mention-suggestion-kind: var(--mention-kind-spec);
+    }
+  }
+}

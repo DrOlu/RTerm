@@ -55,6 +55,11 @@ import {
   type FileSystemSortMode,
 } from "./filesystemSort";
 import {
+  buildFileSystemTransferPanelModel,
+  isFileTransferTerminalStatus,
+  type FileTransferPanelSectionKind,
+} from "./fileTransferPresentation";
+import {
   cycleSearchIndex,
   findTextMatches,
   isFindShortcutEvent,
@@ -99,15 +104,6 @@ const createInitialTabState = (): BrowserTabState => ({
   selectionAnchorPath: null,
   statusMessage: null,
 });
-
-const TRANSFER_TERMINAL_DISPLAY_MS = 7000;
-const TERMINAL_TRANSFER_STATUSES = new Set<
-  FileTransferTaskSnapshot["status"]
->([
-  "success",
-  "error",
-  "cancelled",
-]);
 
 type FileSystemTransferConflictStrategy = "error" | "overwrite" | "rename";
 type InlinePathActionType = "createDirectory" | "createFile" | "renamePath";
@@ -439,10 +435,12 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
 
     React.useEffect(() => {
       Object.values(store.fileTransferTasks).forEach((task) => {
-        if (!TERMINAL_TRANSFER_STATUSES.has(task.status)) {
+        if (!isFileTransferTerminalStatus(task.status)) {
           return;
         }
-        if (handledTransferTerminalStatusesRef.current[task.id] === task.status) {
+        if (
+          handledTransferTerminalStatusesRef.current[task.id] === task.status
+        ) {
           return;
         }
         handledTransferTerminalStatusesRef.current[task.id] = task.status;
@@ -814,10 +812,53 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
       [t.filesystem],
     );
 
+    const getTransferSectionLabel = React.useCallback(
+      (sectionKind: FileTransferPanelSectionKind): string => {
+        if (sectionKind === "background")
+          return t.filesystem.transferSectionBackground;
+        if (sectionKind === "recent") return t.filesystem.transferSectionRecent;
+        return t.filesystem.transferSectionCurrent;
+      },
+      [t.filesystem],
+    );
+
+    const getTransferRouteLabel = React.useCallback(
+      (task: FileTransferTaskSnapshot): string => {
+        const sourceName = task.sourceTerminalName || task.sourceTerminalId;
+        const targetName = task.targetTerminalName || task.targetTerminalId;
+        return `${sourceName} -> ${targetName} · ${task.targetDirPath}`;
+      },
+      [],
+    );
+
+    const getTransferDetailLabel = React.useCallback(
+      (task: FileTransferTaskSnapshot): string => {
+        if (task.errorMessage) return task.errorMessage;
+        if (
+          task.cancelRequested &&
+          !isFileTransferTerminalStatus(task.status)
+        ) {
+          return t.filesystem.transferCancelling;
+        }
+        const routeLabel = getTransferRouteLabel(task);
+        if (task.status === "queued") {
+          return `${t.filesystem.transferWaitingForSlot} · ${routeLabel}`;
+        }
+        if (task.status === "scanning") {
+          return `${task.message || t.filesystem.transferScanning} · ${routeLabel}`;
+        }
+        if (isFileTransferTerminalStatus(task.status)) {
+          return task.message || routeLabel;
+        }
+        return routeLabel;
+      },
+      [getTransferRouteLabel, t.filesystem],
+    );
+
     const cancelTransferTask = React.useCallback(
       (taskId: string): void => {
         const current = store.fileTransferTasks[taskId];
-        if (!current || TERMINAL_TRANSFER_STATUSES.has(current.status)) {
+        if (!current || isFileTransferTerminalStatus(current.status)) {
           return;
         }
         void store.cancelFileTransferTask(taskId);
@@ -1751,34 +1792,38 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
         }) as React.CSSProperties,
       [terminalFontSize],
     );
-    const transferTaskList = React.useMemo(() => {
-      return Object.values(store.fileTransferTasks)
-        .filter((task) => {
-          const relatesToActiveTab =
-            task.targetTerminalId === activeTerminalId ||
-            task.sourceTerminalId === activeTerminalId;
-          if (
-            task.origin === "agent" &&
-            !TERMINAL_TRANSFER_STATUSES.has(task.status)
-          ) {
-            return true;
-          }
-          if (!TERMINAL_TRANSFER_STATUSES.has(task.status)) {
-            return relatesToActiveTab;
-          }
-          if (task.origin === "agent") {
-            return (
-              transferDisplayNow - task.updatedAt <=
-              TRANSFER_TERMINAL_DISPLAY_MS
-            );
-          }
-          return (
-            relatesToActiveTab &&
-            transferDisplayNow - task.updatedAt <= TRANSFER_TERMINAL_DISPLAY_MS
-          );
-        })
-        .sort((left, right) => right.updatedAt - left.updatedAt);
-    }, [activeTerminalId, store.fileTransferTasks, transferDisplayNow]);
+    const transferPanelModel = React.useMemo(
+      () =>
+        buildFileSystemTransferPanelModel(
+          Object.values(store.fileTransferTasks),
+          activeTerminalId,
+          transferDisplayNow,
+        ),
+      [activeTerminalId, store.fileTransferTasks, transferDisplayNow],
+    );
+    const transferHeaderSummary = React.useMemo(() => {
+      const { counts } = transferPanelModel;
+      const parts: string[] = [];
+      if (counts.running > 0) {
+        parts.push(t.filesystem.transferSummaryRunning(counts.running));
+      }
+      if (counts.scanning > 0) {
+        parts.push(t.filesystem.transferSummaryScanning(counts.scanning));
+      }
+      if (counts.queued > 0) {
+        parts.push(t.filesystem.transferSummaryQueued(counts.queued));
+      }
+      if (counts.background > 0) {
+        parts.push(t.filesystem.transferSummaryBackground(counts.background));
+      }
+      if (
+        counts.recent > 0 &&
+        counts.running + counts.scanning + counts.queued === 0
+      ) {
+        parts.push(t.filesystem.transferSummaryRecent(counts.recent));
+      }
+      return parts.join(" · ");
+    }, [t.filesystem, transferPanelModel]);
     const inlineActionLabel = React.useMemo(() => {
       if (!inlinePathAction) return "";
       if (inlinePathAction.type === "createDirectory")
@@ -2529,87 +2574,119 @@ export const FileSystemPanel: React.FC<FileSystemPanelProps> = observer(
               )}
             </div>
           </div>
-          {transferTaskList.length > 0 ? (
+          {transferPanelModel.counts.total > 0 ? (
             <div className="filesystem-transfer-panel">
               <div className="filesystem-transfer-panel-header">
-                {t.filesystem.transferPanelTitle}
+                <span className="filesystem-transfer-panel-title">
+                  {t.filesystem.transferPanelTitle}
+                </span>
+                {transferHeaderSummary ? (
+                  <span className="filesystem-transfer-panel-summary">
+                    {transferHeaderSummary}
+                  </span>
+                ) : null}
               </div>
               <div className="filesystem-transfer-list">
-                {transferTaskList.map((task) => {
-                  const percent = Math.max(0, Math.min(100, task.percent));
-                  const taskKindLabel =
-                    task.mode === "move"
-                      ? t.filesystem.transferMoveKind
-                      : t.filesystem.transferCopyKind;
-                  const progressLabel =
-                    task.totalBytes > 0
-                      ? `${formatFileSize(task.bytesDone)} / ${formatFileSize(task.totalBytes)}`
-                      : `${task.transferredFiles}/${task.totalFiles || task.itemNames.length}`;
-                  const taskName =
-                    task.itemNames.length === 1
-                      ? task.itemNames[0]
-                      : `${task.itemNames[0]} +${task.itemNames.length - 1}`;
-                  const canCancel =
-                    (task.status === "queued" ||
-                      task.status === "scanning" ||
-                      task.status === "running") &&
-                    !task.cancelRequested;
-                  const originLabel =
-                    task.origin === "agent"
-                      ? t.filesystem.transferAgentOrigin
-                      : t.filesystem.transferUserOrigin;
+                {transferPanelModel.sections.map((section) => (
+                  <React.Fragment key={section.kind}>
+                    {transferPanelModel.sections.length > 1 ? (
+                      <div className="filesystem-transfer-section-header">
+                        <span>{getTransferSectionLabel(section.kind)}</span>
+                        <span className="filesystem-transfer-section-count">
+                          {section.tasks.length}
+                        </span>
+                      </div>
+                    ) : null}
+                    {section.tasks.map((task) => {
+                      const percent = Math.max(0, Math.min(100, task.percent));
+                      const taskKindLabel =
+                        task.mode === "move"
+                          ? t.filesystem.transferMoveKind
+                          : t.filesystem.transferCopyKind;
+                      const progressLabel =
+                        task.totalBytes > 0
+                          ? `${formatFileSize(task.bytesDone)} / ${formatFileSize(task.totalBytes)}`
+                          : `${task.transferredFiles}/${task.totalFiles || task.itemNames.length}`;
+                      const taskName =
+                        task.itemNames.length === 1
+                          ? task.itemNames[0]
+                          : `${task.itemNames[0]} +${task.itemNames.length - 1}`;
+                      const canCancel =
+                        (task.status === "queued" ||
+                          task.status === "scanning" ||
+                          task.status === "running") &&
+                        !task.cancelRequested;
+                      const originLabel =
+                        task.origin === "agent"
+                          ? t.filesystem.transferAgentOrigin
+                          : t.filesystem.transferUserOrigin;
+                      const statusLabel =
+                        task.cancelRequested &&
+                        !isFileTransferTerminalStatus(task.status)
+                          ? t.filesystem.transferCancelling
+                          : getTransferStatusLabel(task.status);
+                      const detailLabel = getTransferDetailLabel(task);
+                      const routeLabel = getTransferRouteLabel(task);
 
-                  return (
-                    <div
-                      key={task.id}
-                      className={`filesystem-transfer-item is-${task.status}`}
-                    >
-                      <div className="filesystem-transfer-main">
-                        <span className="filesystem-transfer-kind">
-                          {taskKindLabel}
-                        </span>
-                        <span className="filesystem-transfer-origin">
-                          {originLabel}
-                        </span>
-                        <span
-                          className="filesystem-transfer-name"
-                          title={task.itemNames.join(", ")}
+                      return (
+                        <div
+                          key={task.id}
+                          className={`filesystem-transfer-item is-${task.status} is-origin-${task.origin}`}
+                          title={routeLabel}
                         >
-                          {taskName}
-                        </span>
-                        <span className="filesystem-transfer-status">
-                          {getTransferStatusLabel(task.status)}
-                        </span>
-                        {canCancel ? (
-                          <button
-                            className="filesystem-transfer-cancel-btn"
-                            title={t.filesystem.cancelTransfer}
-                            onClick={() => cancelTransferTask(task.id)}
+                          <div className="filesystem-transfer-main">
+                            <span className="filesystem-transfer-kind">
+                              {taskKindLabel}
+                            </span>
+                            <span className="filesystem-transfer-origin">
+                              {originLabel}
+                            </span>
+                            <span
+                              className="filesystem-transfer-name"
+                              title={task.itemNames.join(", ")}
+                            >
+                              {taskName}
+                            </span>
+                            <span className="filesystem-transfer-status">
+                              {statusLabel}
+                            </span>
+                            {canCancel ? (
+                              <button
+                                className="filesystem-transfer-cancel-btn"
+                                title={t.filesystem.cancelTransfer}
+                                onClick={() => cancelTransferTask(task.id)}
+                              >
+                                <X size={18} />
+                              </button>
+                            ) : (
+                              <span
+                                className="filesystem-transfer-cancel-spacer"
+                                aria-hidden="true"
+                              />
+                            )}
+                          </div>
+                          <div className="filesystem-transfer-progress">
+                            <span className="filesystem-transfer-progress-track">
+                              <span
+                                className="filesystem-transfer-progress-fill"
+                                style={{ width: `${percent}%` }}
+                              />
+                            </span>
+                            <span className="filesystem-transfer-progress-label">
+                              {progressLabel}
+                            </span>
+                          </div>
+                          <div
+                            className="filesystem-transfer-message"
+                            title={detailLabel}
                           >
-                            <X size={18} />
-                          </button>
-                        ) : null}
-                      </div>
-                      <div className="filesystem-transfer-progress">
-                        <span className="filesystem-transfer-progress-track">
-                          <span
-                            className="filesystem-transfer-progress-fill"
-                            style={{ width: `${percent}%` }}
-                          />
-                        </span>
-                        <span className="filesystem-transfer-progress-label">
-                          {progressLabel}
-                        </span>
-                      </div>
-                      <div
-                        className="filesystem-transfer-message"
-                        title={task.errorMessage || task.message || ""}
-                      >
-                        {task.errorMessage || task.message || ""}
-                      </div>
-                    </div>
-                  );
-                })}
+                            {detailLabel}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
               </div>
             </div>
           ) : null}

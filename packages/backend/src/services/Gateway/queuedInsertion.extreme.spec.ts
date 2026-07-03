@@ -244,9 +244,9 @@ const createGateway = (): {
   return { gateway, agent, uiHistory };
 };
 
-const createAgentService = (): AgentService_v2 =>
+const createAgentService = (terminalService: any = {}): AgentService_v2 =>
   new AgentService_v2(
-    {} as any,
+    terminalService as any,
     {} as any,
     {} as any,
     {} as any,
@@ -256,6 +256,160 @@ const createAgentService = (): AgentService_v2 =>
   );
 
 const run = async (): Promise<void> => {
+  await runCase(
+    "reconnect terminal tab is a model-visible tool-call boundary",
+    async () => {
+      const agent = createAgentService();
+      const reconnectCall = {
+        id: "call-reconnect",
+        name: "reconnect_terminal_tab",
+        args: { tabIdOrName: "ssh-disconnected" },
+      };
+      const editCall = {
+        id: "call-edit",
+        name: "edit_file",
+        args: { filePath: "/tmp/stale.txt", instructions: "edit" },
+      };
+      const stdinCall = {
+        id: "call-stdin",
+        name: "write_stdin",
+        args: { tabIdOrName: "ssh-disconnected", sequence: ["pwd\n"] },
+      };
+      const assistantMessage = new AIMessage({
+        content: "",
+        tool_calls: [reconnectCall, editCall, stdinCall],
+      });
+
+      const node = (agent as any).createBatchToolcallExecutorNode();
+      const result = await node.invoke({
+        sessionId: "session-reconnect-boundary",
+        messages: [assistantMessage],
+      });
+
+      assertEqual(
+        result.pendingToolCalls.length,
+        1,
+        "reconnect should not leave later tool calls pending in the same model response",
+      );
+      assertEqual(
+        result.pendingToolCalls[0]?.id,
+        "call-reconnect",
+        "reconnect should be the only queued tool call",
+      );
+
+      const cleanedAssistantMessage = result.messages[0] as any;
+      assertEqual(
+        cleanedAssistantMessage.tool_calls.length,
+        1,
+        "reconnect boundary should trim skipped tool calls from assistant history",
+      );
+      assertEqual(
+        cleanedAssistantMessage.tool_calls[0]?.id,
+        "call-reconnect",
+        "assistant history should keep only the reconnect tool call",
+      );
+    },
+  );
+
+  await runCase(
+    "write_stdin disconnected precheck emits a normal tool event",
+    async () => {
+      const terminal = {
+        id: "ssh-disconnected",
+        title: "Disconnected SSH",
+        type: "ssh",
+      };
+      const terminalService = {
+        resolveTerminal(tabIdOrName: string) {
+          return tabIdOrName === terminal.id
+            ? { found: [terminal], bestMatch: terminal }
+            : { found: [] };
+        },
+        getTerminalRuntimeSnapshot(terminalId: string) {
+          if (terminalId !== terminal.id) return null;
+          return {
+            id: terminal.id,
+            title: terminal.title,
+            type: terminal.type,
+            runtimeState: "exited",
+            isInitializing: false,
+            lastExitCode: 255,
+            reconnectable: true,
+            canRunCommand: false,
+            canWrite: false,
+            canUseFilesystem: false,
+          };
+        },
+      };
+      const agent = createAgentService(terminalService);
+      const events: any[] = [];
+      let actionModelCalls = 0;
+      agent.setEventPublisher((_sessionId, event) => events.push(event));
+      (agent as any).sessionModelBindings.set("session-write-stdin-precheck", {
+        actionModel: {
+          async invoke() {
+            actionModelCalls += 1;
+            throw new Error("write_stdin action model should not be called");
+          },
+        },
+      });
+
+      const writeCall = {
+        id: "call-write-stdin",
+        name: "write_stdin",
+        args: { tabIdOrName: terminal.id, sequence: ["ETX"] },
+      };
+      const node = (agent as any).createToolsNode();
+      const result = await node.invoke({
+        sessionId: "session-write-stdin-precheck",
+        writeStdinActionModelEnabled: true,
+        messages: [
+          new AIMessage({
+            content: "",
+            tool_calls: [writeCall],
+          }),
+        ],
+        pendingToolCalls: [writeCall],
+      });
+
+      const toolMessage = result.messages[result.messages.length - 1] as any;
+      assertEqual(
+        String(toolMessage.content).includes("terminal_status:"),
+        true,
+        "write_stdin tool message should include terminal status",
+      );
+      assertEqual(
+        actionModelCalls,
+        0,
+        "write_stdin disconnected precheck should not call the action model",
+      );
+
+      const toolEvent = events.find(
+        (event) =>
+          event.type === "tool_call" && event.toolName === "write_stdin",
+      );
+      assertTruthy(
+        toolEvent,
+        "write_stdin disconnected precheck should emit a tool_call event",
+      );
+      assertEqual(
+        toolEvent.input,
+        JSON.stringify(["ETX"]),
+        "write_stdin tool event input should match the normal tool implementation",
+      );
+      assertEqual(
+        String(toolEvent.output).includes("terminal_status:"),
+        true,
+        "write_stdin tool event output should include terminal status",
+      );
+      assertEqual(
+        toolEvent.output,
+        toolMessage.content,
+        "write_stdin tool event output should match the tool message",
+      );
+    },
+  );
+
   await runCase(
     "nowait completion uses documented notification tag format",
     () => {

@@ -1,5 +1,6 @@
 import { ChatOpenAI } from '@langchain/openai'
 import type { BackendSettings, ModelDefinition } from '../../../types'
+import { resolveBuiltInToolCapabilityName } from '../tool_capabilities'
 
 export function createChatModel(item: ModelDefinition, temperature: number): ChatOpenAI {
   return new ChatOpenAI({
@@ -42,7 +43,8 @@ export function getEnabledBuiltInTools(allTools: any[], enabledMap: Record<strin
   return allTools.filter((tool: any) => {
     const name = tool?.function?.name ?? tool?.name
     if (!name) return false
-    const enabled = enabledMap[name]
+    const capabilityName = resolveBuiltInToolCapabilityName(name)
+    const enabled = enabledMap[capabilityName]
     return enabled !== false
   })
 }

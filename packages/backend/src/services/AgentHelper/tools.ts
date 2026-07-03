@@ -1,22 +1,33 @@
 import { convertToOpenAITool } from '@langchain/core/utils/function_calling'
-import { writeAndEditSchema, writeAndEdit } from './tools/edit_tools'
+import {
+  editFile,
+  editFileSchema,
+  writeAndEdit,
+  writeFile,
+  writeFileSchema
+} from './tools/edit_tools'
 import { readFileSchema, runReadFile } from './tools/read_tools'
 import { 
   execCommandSchema, 
   readTerminalTabSchema, 
   readCommandOutputSchema,
   writeStdinSchema,
+  reconnectTerminalTabSchema,
   runCommand, 
   runCommandNowait, 
   readTerminalTab, 
   readCommandOutput,
-  writeStdin
+  writeStdin,
+  reconnectTerminalTab
 } from './tools/terminal_tools'
 import { 
   BUILTIN_TOOL_INFO, 
+  EDIT_FILE_TOOL_DESCRIPTION,
+  WRITE_FILE_TOOL_DESCRIPTION,
   buildReadFileDescription,
   WAIT_TERMINAL_IDLE_DESCRIPTION
 } from './prompts'
+import { EDIT_FILE_TOOL_NAME, WRITE_FILE_TOOL_NAME } from './tool_capabilities'
 import type { ReadFileSupport } from './types'
 import { waitSchema, waitTerminalIdleSchema, wait, waitTerminalIdle } from './tools/wait_tools'
 import {
@@ -35,14 +46,16 @@ import {
 // Re-export schemas for AgentService to use
 export { 
   editFileSchema, 
-  writeAndEditSchema 
+  writeAndEditSchema,
+  writeFileSchema
 } from './tools/edit_tools'
 
 export { 
   execCommandSchema, 
   readTerminalTabSchema, 
   readCommandOutputSchema,
-  writeStdinSchema
+  writeStdinSchema,
+  reconnectTerminalTabSchema
 } from './tools/terminal_tools'
 
 export { readFileSchema } from './tools/read_tools'
@@ -83,9 +96,19 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: writeStdinSchema
     },
     {
-      name: 'create_or_edit',
-      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'create_or_edit')?.description ?? '',
-      schema: writeAndEditSchema
+      name: 'reconnect_terminal_tab',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'reconnect_terminal_tab')?.description ?? '',
+      schema: reconnectTerminalTabSchema
+    },
+    {
+      name: WRITE_FILE_TOOL_NAME,
+      description: WRITE_FILE_TOOL_DESCRIPTION,
+      schema: writeFileSchema
+    },
+    {
+      name: EDIT_FILE_TOOL_NAME,
+      description: EDIT_FILE_TOOL_DESCRIPTION,
+      schema: editFileSchema
     },
     {
       name: 'skill',
@@ -94,7 +117,7 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
     },
     {
       name: 'create_skill',
-      description: 'Create a new skill in GyShell skills. This tool only creates new skills and does not modify or overwrite existing ones. If the skill name already exists, the call must fail and you should choose a different name. If you need to modify an existing skill, use the create_or_edit tool to edit that skill\'s md file directly.',
+      description: 'Create a new skill in GyShell skills. This tool only creates new skills and does not modify or overwrite existing ones. If the skill name already exists, the call must fail and you should choose a different name. If you need to modify an existing skill, use edit_file to edit that skill\'s md file directly, or write_file only when intentionally replacing the full file.',
       schema: createSkillSchema
     },
     {
@@ -129,10 +152,13 @@ export const toolImplementations = {
   readTerminalTab,
   readCommandOutput,
   writeStdin,
+  reconnectTerminalTab,
   wait,
   waitTerminalIdle,
   copyBetweenTabs,
   readFileTransferStatus,
+  writeFile,
+  editFile,
   writeAndEdit,
   runReadFile,
   runCreateSkillTool

@@ -2,6 +2,10 @@ import { z } from 'zod'
 import type { ToolExecutionContext } from '../types'
 import { buildFileTransferFinishedInsertion } from '../queuedInsertions'
 import type { FileTransferTaskSnapshot } from '../../FileTransferService'
+import {
+  formatTerminalUnavailableForTool,
+  resolveTerminalForTool
+} from './terminal_runtime_guard'
 
 export const copyBetweenTabsSchema = z.object({
   sourceTabIdOrName: z
@@ -44,17 +48,6 @@ export const readFileTransferStatusSchema = z.object({
       'Whether completed, failed, and cancelled transfers should be included when listing transfers.',
     ),
 })
-
-const terminalRefError = (
-  label: string,
-  tabIdOrName: string,
-  found: Array<{ id: string; title?: string }>,
-): string => {
-  if (found.length > 1) {
-    return `Error: Multiple ${label} terminal tabs found for "${tabIdOrName}". Use a specific tab id: ${found.map((item) => item.id).join(', ')}`
-  }
-  return `Error: ${label} terminal tab "${tabIdOrName}" not found.`
-}
 
 const summarizeTransfer = (
   task: FileTransferTaskSnapshot,
@@ -112,7 +105,6 @@ export async function copyBetweenTabs(
   context: ToolExecutionContext,
 ): Promise<string> {
   const {
-    terminalService,
     fileTransferService,
     sessionId,
     messageId,
@@ -122,21 +114,40 @@ export async function copyBetweenTabs(
     return 'Error: File transfer service is not available.'
   }
 
-  const sourceResolved = terminalService.resolveTerminal(args.sourceTabIdOrName)
-  if (!sourceResolved.bestMatch) {
-    return terminalRefError(
-      'source',
-      args.sourceTabIdOrName,
-      sourceResolved.found,
-    )
+  const sourceResolved = resolveTerminalForTool(
+    context,
+    args.sourceTabIdOrName,
+    'source terminal tab',
+  )
+  if (!sourceResolved.ok) {
+    return sourceResolved.message
   }
-  const targetResolved = terminalService.resolveTerminal(args.targetTabIdOrName)
-  if (!targetResolved.bestMatch) {
-    return terminalRefError(
-      'target',
-      args.targetTabIdOrName,
-      targetResolved.found,
-    )
+  if (!sourceResolved.snapshot.canUseFilesystem) {
+    return sourceResolved.terminal.capabilities?.supportsFilesystem !== true &&
+      sourceResolved.snapshot.runtimeState === 'ready'
+      ? `Error: Source terminal tab "${sourceResolved.terminal.title || sourceResolved.terminal.id}" (id=${sourceResolved.terminal.id}, type=${sourceResolved.terminal.type}) does not support filesystem operations.`
+      : formatTerminalUnavailableForTool(
+          sourceResolved.snapshot,
+          'copy files from this source terminal'
+        )
+  }
+
+  const targetResolved = resolveTerminalForTool(
+    context,
+    args.targetTabIdOrName,
+    'target terminal tab',
+  )
+  if (!targetResolved.ok) {
+    return targetResolved.message
+  }
+  if (!targetResolved.snapshot.canUseFilesystem) {
+    return targetResolved.terminal.capabilities?.supportsFilesystem !== true &&
+      targetResolved.snapshot.runtimeState === 'ready'
+      ? `Error: Target terminal tab "${targetResolved.terminal.title || targetResolved.terminal.id}" (id=${targetResolved.terminal.id}, type=${targetResolved.terminal.type}) does not support filesystem operations.`
+      : formatTerminalUnavailableForTool(
+          targetResolved.snapshot,
+          'copy files into this target terminal'
+        )
   }
 
   sendEvent(sessionId, {
@@ -144,7 +155,7 @@ export async function copyBetweenTabs(
     type: 'sub_tool_started',
     toolName: 'copy_between_tabs',
     title: 'Copy between tabs',
-    hint: `${sourceResolved.bestMatch.title || sourceResolved.bestMatch.id} -> ${targetResolved.bestMatch.title || targetResolved.bestMatch.id}`,
+    hint: `${sourceResolved.terminal.title || sourceResolved.terminal.id} -> ${targetResolved.terminal.title || targetResolved.terminal.id}`,
     input: JSON.stringify(args),
   })
 
@@ -152,9 +163,9 @@ export async function copyBetweenTabs(
     const task = fileTransferService.startTransfer({
       origin: 'agent',
       mode: 'copy',
-      sourceTerminalId: sourceResolved.bestMatch.id,
+      sourceTerminalId: sourceResolved.terminal.id,
       sourcePaths: args.sourcePaths,
-      targetTerminalId: targetResolved.bestMatch.id,
+      targetTerminalId: targetResolved.terminal.id,
       targetDirPath: args.targetDirPath,
       conflictStrategy: args.conflictStrategy,
       requireDistinctMachine: true,

@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import type { ToolExecutionContext } from '../types'
+import {
+  formatTerminalUnavailableForTool,
+  resolveTerminalForTool
+} from './terminal_runtime_guard'
 
 export const waitSchema = z.object({
   seconds: z.number().min(5).max(120).describe('Number of seconds to wait (5-120)')
@@ -58,11 +62,16 @@ export async function waitTerminalIdle(
   const { terminalService, sessionId, messageId, sendEvent } = context
 
   abortIfNeeded(context.signal)
-  const { found, bestMatch } = terminalService.resolveTerminal(tabIdOrName)
-  if (!bestMatch) {
-    return found.length > 1
-      ? `Error: Multiple terminal tabs found with name "${tabIdOrName}".`
-      : `Error: Terminal tab "${tabIdOrName}" not found.`
+  const resolved = resolveTerminalForTool(context, tabIdOrName)
+  if (!resolved.ok) {
+    return resolved.message
+  }
+  const bestMatch = resolved.terminal
+  if (!resolved.snapshot.canRunCommand) {
+    return formatTerminalUnavailableForTool(
+      resolved.snapshot,
+      'wait for this terminal to become idle'
+    )
   }
 
   sendEvent(sessionId, {

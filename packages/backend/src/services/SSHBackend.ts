@@ -36,6 +36,9 @@ import {
 } from "./windowsPowerShellTracking";
 
 const GYSHELL_READY_MARKER = "__GYSHELL_READY__";
+const SSH_CONNECT_READY_TIMEOUT_MS = 20_000;
+const SSH_KEEPALIVE_INTERVAL_MS = 30_000;
+const SSH_KEEPALIVE_COUNT_MAX = 3;
 
 interface TerminalWindowSize {
   cols: number;
@@ -113,6 +116,21 @@ export class SSHBackend implements TerminalBackend {
   private static readonly SYSTEM_INFO_RETRY_BASE_MS = 1500;
   private static readonly SYSTEM_INFO_RETRY_MAX_MS = 8000;
   private static readonly SYSTEM_INFO_RETRY_MAX_ATTEMPTS = 6;
+
+  private buildBaseConnectConfig(
+    sshConfig: SSHConnectionConfig,
+    sock?: ssh2.ConnectConfig["sock"],
+  ): ssh2.ConnectConfig {
+    return {
+      host: sshConfig.host,
+      port: sshConfig.port,
+      username: sshConfig.username,
+      readyTimeout: SSH_CONNECT_READY_TIMEOUT_MS,
+      keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
+      keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
+      ...(sock ? { sock } : {}),
+    };
+  }
 
   private normalizeWindowSize(
     cols: number | undefined,
@@ -999,13 +1017,10 @@ export class SSHBackend implements TerminalBackend {
       }
 
       await new Promise<void>((resolve, reject) => {
-        const jumpConnectConfig: ssh2.ConnectConfig = {
-          host: sshConfig.jumpHost!.host,
-          port: sshConfig.jumpHost!.port,
-          username: sshConfig.jumpHost!.username,
-          readyTimeout: 20000,
-          sock: jumpSock,
-        };
+        const jumpConnectConfig = this.buildBaseConnectConfig(
+          sshConfig.jumpHost!,
+          jumpSock,
+        );
 
         if (sshConfig.jumpHost!.authMethod === "password") {
           jumpConnectConfig.password = sshConfig.jumpHost!.password;
@@ -1613,12 +1628,7 @@ export class SSHBackend implements TerminalBackend {
         emitExit(-1);
       });
 
-      const connectConfig: ssh2.ConnectConfig = {
-        host: sshConfig.host,
-        port: sshConfig.port,
-        username: sshConfig.username,
-        readyTimeout: 20000,
-      };
+      const connectConfig = this.buildBaseConnectConfig(sshConfig);
 
       if (sshConfig.authMethod === "password") {
         connectConfig.password = sshConfig.password;

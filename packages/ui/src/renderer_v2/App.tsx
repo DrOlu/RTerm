@@ -17,10 +17,6 @@ export const App: React.FC = observer(() => {
   }, []);
 
   React.useEffect(() => {
-    if (window.gyshell.system.platform !== "win32") {
-      return;
-    }
-
     let flushed = false;
     const flushLayoutBeforeUnload = () => {
       if (flushed || !store.isBootstrapped || !store.layout.isReady) {

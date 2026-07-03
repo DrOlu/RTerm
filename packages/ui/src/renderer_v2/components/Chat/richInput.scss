@@ -1,3 +1,5 @@
+@use "./mentionKind";
+
 .rich-input-wrapper {
   position: relative;
   width: 100%;
@@ -110,15 +112,12 @@
 
   .mention-tag {
     display: inline;
-    background: color-mix(in srgb, var(--accent-2) 24%, transparent);
-    color: var(--fg);
     padding: 0.02em 0.24em;
     border-radius: 4px;
     margin: 0 2px;
     font-weight: 700;
     font-family: var(--font-mono);
-    border: 1px solid
-      color-mix(in srgb, var(--accent-2) 42%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-2) 42%, transparent);
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
     user-select: none;
@@ -132,10 +131,14 @@
     overflow-wrap: anywhere;
     word-break: break-word;
     position: relative;
+
+    @include mentionKind.mention-kind-badge;
   }
 }
 
 .mention-suggestions {
+  box-sizing: border-box;
+  width: min(280px, calc(100vw - 16px));
   background: var(--panel-bg);
   border: 1px solid var(--border-strong);
   border-radius: 2px;
@@ -143,15 +146,17 @@
     0 10px 30px rgba(0, 0, 0, 0.4),
     0 0 0 1px rgba(255, 255, 255, 0.05);
   min-width: 180px;
+  max-width: min(360px, calc(100vw - 16px));
   max-height: 200px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   z-index: 10001 !important; /* Ensure it's above settings/connections overlays */
   padding: 2px;
-  margin-bottom: 4px;
 
   .suggestion-item {
     display: flex;
     align-items: center;
+    min-width: 0;
     padding: 4px 8px;
     border-radius: 2px;
     cursor: pointer;
@@ -171,10 +176,11 @@
 
     .item-content {
       display: grid;
-      grid-template-columns: 42px 1fr;
+      grid-template-columns: 42px minmax(0, 1fr);
       align-items: center;
       gap: 8px;
       width: 100%;
+      min-width: 0;
     }
 
     .item-type {
@@ -186,16 +192,27 @@
       text-align: center;
       border-radius: 3px;
       font-weight: 700;
-      background: color-mix(in srgb, var(--accent-2) 15%, transparent);
-      color: var(--accent-2);
     }
 
     .item-name {
-      flex: 1;
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       color: var(--fg); // Use normal text color from theme
     }
   }
+
+  .suggestion-status {
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--fg-muted);
+    white-space: nowrap;
+
+    &.warning {
+      color: var(--danger);
+    }
+  }
+
+  @include mentionKind.mention-suggestion-tone-rail;
 }

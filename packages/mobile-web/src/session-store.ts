@@ -1,185 +1,237 @@
-import type { ChatMessage, UIUpdateAction } from './types'
+import type { ChatMessage, UIUpdateAction } from "./types";
 
 export interface SessionState {
-  id: string
-  title: string
-  messages: ChatMessage[]
-  isThinking: boolean
-  isBusy: boolean
-  lockedProfileId: string | null
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  isThinking: boolean;
+  isBusy: boolean;
+  lockedProfileId: string | null;
 }
 
 export interface SessionMeta {
-  id: string
-  title: string
-  updatedAt: number
-  messagesCount: number
-  lastMessagePreview?: string
-  loaded: boolean
+  id: string;
+  title: string;
+  updatedAt: number;
+  messagesCount: number;
+  lastMessagePreview?: string;
+  loaded: boolean;
 }
 
-export function createSessionState(id: string, title = 'New Chat'): SessionState {
+export function createSessionState(
+  id: string,
+  title = "New Chat",
+): SessionState {
   return {
     id,
     title,
     messages: [],
     isThinking: false,
     isBusy: false,
-    lockedProfileId: null
-  }
+    lockedProfileId: null,
+  };
 }
 
 export function cloneMessage(message: ChatMessage): ChatMessage {
   return {
     ...message,
-    metadata: message.metadata ? { ...message.metadata } : undefined
-  }
+    metadata: message.metadata ? { ...message.metadata } : undefined,
+  };
 }
 
 export function cloneSession(session: SessionState): SessionState {
   return {
     ...session,
-    messages: session.messages.map(cloneMessage)
-  }
+    messages: session.messages.map(cloneMessage),
+  };
 }
 
-export function applyUiUpdate(session: SessionState, update: UIUpdateAction): void {
+export function applyUiUpdate(
+  session: SessionState,
+  update: UIUpdateAction,
+): void {
   switch (update.type) {
-    case 'ADD_MESSAGE': {
-      const message = cloneMessage(update.message)
+    case "ADD_MESSAGE": {
+      const message = cloneMessage(update.message);
       // Keep reasoning/compaction transient in frontend: once any new message arrives, old transient activity banners are removed.
-      session.messages = session.messages.filter((item) => item.type !== 'reasoning' && item.type !== 'compaction')
-      session.messages.push(message)
+      session.messages = session.messages.filter(
+        (item) => item.type !== "reasoning" && item.type !== "compaction",
+      );
+      session.messages.push(message);
 
-      if (message.role === 'user') {
-        session.isThinking = true
-        session.isBusy = true
-        const firstUser = session.messages.filter((item) => item.role === 'user').length === 1
+      if (message.role === "user") {
+        session.isThinking = true;
+        session.isBusy = true;
+        const firstUser =
+          session.messages.filter((item) => item.role === "user").length === 1;
         if (firstUser) {
-          session.title = autoTitle(message.content)
+          session.title = autoTitle(message.content);
         }
       }
-      break
+      break;
     }
-    case 'REMOVE_MESSAGE': {
-      session.messages = session.messages.filter((item) => item.id !== update.messageId)
-      break
+    case "REMOVE_MESSAGE": {
+      session.messages = session.messages.filter(
+        (item) => item.id !== update.messageId,
+      );
+      break;
     }
-    case 'APPEND_CONTENT': {
-      const message = session.messages.find((item) => item.id === update.messageId)
+    case "APPEND_CONTENT": {
+      const message = session.messages.find(
+        (item) => item.id === update.messageId,
+      );
       if (message) {
-        message.content += update.content
-        session.isBusy = true
+        message.content += update.content;
+        session.isBusy = true;
       }
-      break
+      break;
     }
-    case 'APPEND_OUTPUT': {
-      const message = session.messages.find((item) => item.id === update.messageId)
+    case "APPEND_OUTPUT": {
+      const message = session.messages.find(
+        (item) => item.id === update.messageId,
+      );
       if (message) {
         message.metadata = {
           ...(message.metadata ?? {}),
-          output: `${message.metadata?.output ?? ''}${update.outputDelta ?? ''}`
-        }
-        session.isBusy = true
+          output: `${message.metadata?.output ?? ""}${update.outputDelta ?? ""}`,
+        };
+        session.isBusy = true;
       }
-      break
+      break;
     }
-    case 'UPDATE_MESSAGE': {
-      const message = session.messages.find((item) => item.id === update.messageId)
+    case "UPDATE_MESSAGE": {
+      const message = session.messages.find(
+        (item) => item.id === update.messageId,
+      );
       if (message) {
-        Object.assign(message, update.patch)
-        session.isBusy = true
+        Object.assign(message, update.patch);
+        session.isBusy = true;
       }
-      break
+      break;
     }
-    case 'DONE': {
-      session.isThinking = false
+    case "DONE": {
+      session.isThinking = false;
       session.messages.forEach((item) => {
-        item.streaming = false
-      })
-      break
+        item.streaming = false;
+      });
+      break;
     }
-    case 'SESSION_PROFILE_LOCKED': {
-      session.isBusy = true
-      session.lockedProfileId = update.lockedProfileId || null
-      break
+    case "SESSION_PROFILE_LOCKED": {
+      session.isBusy = true;
+      session.lockedProfileId = update.lockedProfileId || null;
+      break;
     }
-    case 'SESSION_READY': {
-      session.isBusy = false
-      session.lockedProfileId = null
-      break
+    case "SESSION_READY": {
+      session.isBusy = false;
+      session.lockedProfileId = null;
+      break;
     }
-    case 'ROLLBACK': {
-      const index = session.messages.findIndex((item) => item.backendMessageId === update.messageId)
+    case "ROLLBACK": {
+      const index = session.messages.findIndex(
+        (item) => item.backendMessageId === update.messageId,
+      );
       if (index >= 0) {
-        session.messages = session.messages.slice(0, index)
+        session.messages = session.messages.slice(0, index);
       }
-      session.isThinking = false
-      session.isBusy = false
-      break
+      session.isThinking = false;
+      session.isBusy = false;
+      break;
     }
   }
 }
 
 export function autoTitle(content: string): string {
-  const normalized = normalizeDisplayText(content || '').replace(/\s+/g, ' ').trim()
-  if (!normalized) return 'New Chat'
-  return normalized.length <= 48 ? normalized : `${normalized.slice(0, 47)}...`
+  const normalized = normalizeDisplayText(content || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return "New Chat";
+  return normalized.length <= 48 ? normalized : `${normalized.slice(0, 47)}...`;
 }
 
 export function normalizeDisplayText(input: string): string {
-  return String(input || '')
-    .replace(/\u001b\[[0-9;]*m/g, '')
-    .replace(/\[MENTION_TAB:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, name: string) => `@${name}`)
-    .replace(/\[MENTION_SKILL:#([^#\]\r\n]+)(?:#\])?/g, (_m, name: string) => `@${name}`)
-    .replace(/\[MENTION_FILE:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g, (_m, path: string) => path.split(/[/\\]/).pop() || path)
-    .replace(/\[MENTION_IMAGE:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g, (_m, path: string, name: string) =>
-      String(name || '').trim() || path.split(/[/\\]/).pop() || path
+  return String(input || "")
+    .replace(/\u001b\[[0-9;]*m/g, "")
+    .replace(
+      /\[MENTION_TAB:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g,
+      (_m, name: string) => `@${name}`,
     )
-    .replace(/\s+$/g, '')
+    .replace(
+      /\[MENTION_SKILL:#([^#\]\r\n]+)(?:#\])?/g,
+      (_m, name: string) => `@${name}`,
+    )
+    .replace(
+      /\[MENTION_FILE:#([^#\]\r\n]+)(?:##[^#\]\r\n]*)?(?:#\])?/g,
+      (_m, path: string) => path.split(/[/\\]/).pop() || path,
+    )
+    .replace(
+      /\[MENTION_IMAGE:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g,
+      (_m, path: string, name: string) =>
+        String(name || "").trim() || path.split(/[/\\]/).pop() || path,
+    )
+    .replace(
+      /\[MENTION_PASS_CHAT:#([^#\]\r\n]+)(?:##([^#\]\r\n]+))?(?:#\])?/g,
+      (_m, _sessionId: string, title: string) =>
+        `@Pass Chat: ${decodeMentionComponent(title || "Chat")}`,
+    )
+    .replace(/\s+$/g, "");
+}
+
+function decodeMentionComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 export function trimOuterBlankLines(input: string): string {
-  const normalized = String(input || '').replace(/\r/g, '')
-  return normalized
-    .replace(/^\n+/, '')
-    .replace(/\n+$/, '')
+  const normalized = String(input || "").replace(/\r/g, "");
+  return normalized.replace(/^\n+/, "").replace(/\n+$/, "");
 }
 
 export function isEmptyMessageContent(message: ChatMessage): boolean {
-  if (Array.isArray(message.metadata?.inputImages) && message.metadata.inputImages.length > 0) {
-    return false
+  if (
+    Array.isArray(message.metadata?.inputImages) &&
+    message.metadata.inputImages.length > 0
+  ) {
+    return false;
   }
-  const content = normalizeDisplayText(message.content || '')
-  const output = normalizeDisplayText(message.metadata?.output || '')
-  return content.trim().length === 0 && output.trim().length === 0
+  const content = normalizeDisplayText(message.content || "");
+  const output = normalizeDisplayText(message.metadata?.output || "");
+  return content.trim().length === 0 && output.trim().length === 0;
 }
 
 export function previewFromSession(session: SessionState): string {
   const latest = [...session.messages]
     .reverse()
-    .find((item) => item.type !== 'tokens_count' && !isEmptyMessageContent(item))
+    .find(
+      (item) => item.type !== "tokens_count" && !isEmptyMessageContent(item),
+    );
 
-  if (!latest) return ''
+  if (!latest) return "";
 
   const base =
-    latest.type === 'command'
+    latest.type === "command"
       ? latest.metadata?.output || latest.content
       : latest.metadata?.output ||
         latest.content ||
-        (Array.isArray(latest.metadata?.inputImages) && latest.metadata.inputImages.length > 0
+        (Array.isArray(latest.metadata?.inputImages) &&
+        latest.metadata.inputImages.length > 0
           ? latest.metadata.inputImages
-              .map((image) => image.fileName || image.attachmentId || 'image')
-              .join(', ')
-          : '')
+              .map((image) => image.fileName || image.attachmentId || "image")
+              .join(", ")
+          : "");
 
-  return normalizeDisplayText(base).replace(/\s+/g, ' ').trim().slice(0, 140)
+  return normalizeDisplayText(base).replace(/\s+/g, " ").trim().slice(0, 140);
 }
 
-export function reorderSessionIds(order: string[], metaMap: Record<string, SessionMeta>): string[] {
+export function reorderSessionIds(
+  order: string[],
+  metaMap: Record<string, SessionMeta>,
+): string[] {
   return [...new Set(order)].sort((left, right) => {
-    const a = metaMap[left]
-    const b = metaMap[right]
-    return (b?.updatedAt ?? 0) - (a?.updatedAt ?? 0)
-  })
+    const a = metaMap[left];
+    const b = metaMap[right];
+    return (b?.updatedAt ?? 0) - (a?.updatedAt ?? 0);
+  });
 }

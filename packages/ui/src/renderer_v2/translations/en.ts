@@ -377,6 +377,14 @@ export const en = {
     filesCopied: (count: number) => `${count} item(s) copied.`,
     filesMoved: (count: number) => `${count} item(s) moved.`,
     transferPanelTitle: "Transfer Tasks",
+    transferSummaryRunning: (count: number) => `${count} running`,
+    transferSummaryScanning: (count: number) => `${count} scanning`,
+    transferSummaryQueued: (count: number) => `${count} queued`,
+    transferSummaryBackground: (count: number) => `${count} background`,
+    transferSummaryRecent: (count: number) => `${count} recent`,
+    transferSectionCurrent: "This Tab",
+    transferSectionBackground: "Background",
+    transferSectionRecent: "Recent",
     transferCopyKind: "COPY",
     transferMoveKind: "MOVE",
     transferAgentOrigin: "AGENT",
@@ -388,6 +396,7 @@ export const en = {
     transferCancelled: "Cancelled",
     transferCancelling: "Cancelling...",
     transferFailed: "Failed",
+    transferWaitingForSlot: "Waiting for transfer slot",
     cancelTransfer: "Cancel transfer",
     pasteConflictTitle: "Name Conflict Detected",
     pasteConflictMessage: (count: number, namesPreview: string) =>
@@ -426,7 +435,7 @@ export const en = {
   },
   chat: {
     dialog: "Dialog",
-    placeholder: "Type a command or question...",
+    placeholder: "Type a command/question, or output @ refs...",
     searchPlaceholder: "Find in current chat...",
     send: "Send",
     stop: "Stop",
@@ -499,11 +508,6 @@ export const en = {
     saveCurrentLayoutMessage:
       "Save the current workspace layout as a new saved layout?",
     savedLayoutSlot: (slotNumber: number) => `Saved Layout ${slotNumber}`,
-    overwriteWithCurrentLayout: "Overwrite with Current Layout",
-    overwriteSavedLayoutTitle: "Overwrite Saved Layout",
-    overwriteSavedLayoutMessage: (slotNumber: number) =>
-      `Overwrite saved layout ${slotNumber} with the current workspace layout? The previous saved layout cannot be restored.`,
-    overwriteSavedLayoutConfirm: "Overwrite",
     deleteSavedLayoutTitle: "Delete Saved Layout",
     deleteSavedLayoutMessage: (slotNumber: number) =>
       `Delete saved layout ${slotNumber}? The current workspace layout will not change.`,

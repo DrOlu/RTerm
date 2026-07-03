@@ -18,7 +18,6 @@ interface SlotMenuState {
 
 type PendingLayoutSlotAction =
   | { type: 'save' }
-  | { type: 'overwrite'; slotId: string }
   | { type: 'delete'; slotId: string }
 
 export const LayoutSlotRailControls: React.FC<LayoutSlotRailControlsProps> = observer(({ store }) => {
@@ -138,21 +137,6 @@ export const LayoutSlotRailControls: React.FC<LayoutSlotRailControlsProps> = obs
       return null
     }
 
-    if (pendingAction.type === 'overwrite') {
-      return {
-        title: t.layout.overwriteSavedLayoutTitle,
-        message: t.layout.overwriteSavedLayoutMessage(pendingActionSlot.slotNumber),
-        confirmText: t.layout.overwriteSavedLayoutConfirm,
-        danger: true,
-        onConfirm: () => {
-          void runBusyAction(async () => {
-            await store.layout.overwriteSavedLayoutSlot(pendingActionSlot.id)
-            setPendingAction(null)
-          })
-        }
-      }
-    }
-
     return {
       title: t.layout.deleteSavedLayoutTitle,
       message: t.layout.deleteSavedLayoutMessage(pendingActionSlot.slotNumber),
@@ -242,16 +226,6 @@ export const LayoutSlotRailControls: React.FC<LayoutSlotRailControlsProps> = obs
             }
           }
         >
-          <button
-            className="gyshell-layout-menu-item"
-            type="button"
-            onClick={() => {
-              setPendingAction({ type: 'overwrite', slotId: slotMenu.slotId })
-              setSlotMenu(null)
-            }}
-          >
-            {t.layout.overwriteWithCurrentLayout}
-          </button>
           <button
             className="gyshell-layout-menu-item is-danger"
             type="button"

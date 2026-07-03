@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import type { ToolExecutionContext } from '../types'
 import { buildExecCommandNowaitCompletedInsertion } from '../queuedInsertions'
+import {
+  formatTerminalStatusHeader,
+  formatTerminalUnavailableForTool,
+  resolveTerminalForTool
+} from './terminal_runtime_guard'
 
 // --- Schemas ---
 
@@ -38,6 +43,10 @@ export const writeStdinSchema = z
     message: 'Provide a non-empty sequence list.'
   })
 
+export const reconnectTerminalTabSchema = z.object({
+  tabIdOrName: z.string().describe('The ID or Name of the disconnected SSH terminal tab to reconnect')
+})
+
 // --- Constants ---
 
 export const C0_NAMES = [
@@ -63,6 +72,8 @@ const COMMAND_OUTPUT_MAX_BYTES = 50 * 1024
 const COMMAND_READ_DEFAULT_LIMIT = 2000
 const COMMAND_READ_MAX_LINE_LENGTH = 2000
 const COMMAND_READ_MAX_BYTES = 50 * 1024
+const RECONNECT_READY_TIMEOUT_MS = 45 * 1000
+const RECONNECT_READY_POLL_MS = 500
 
 // --- Implementations ---
 
@@ -107,12 +118,16 @@ export async function runCommand(
   const { terminalService, sessionId, messageId } = context
   
   abortIfNeeded(context.signal)
-  const { found, bestMatch } = terminalService.resolveTerminal(tabIdOrName)
-  if (!bestMatch) {
-    if (found.length > 1) {
-      return `Error: Multiple terminal tabs found with name "${tabIdOrName}". Please use a specific Tab ID: ${found.map((t: any) => t.id).join(', ')}`
-    }
-    return `Error: Terminal tab "${tabIdOrName}" not found.`
+  const resolved = resolveTerminalForTool(context, tabIdOrName)
+  if (!resolved.ok) {
+    return resolved.message
+  }
+  const bestMatch = resolved.terminal
+  if (!resolved.snapshot.canRunCommand) {
+    return formatTerminalUnavailableForTool(
+      resolved.snapshot,
+      'run commands in this terminal'
+    )
   }
 
   const allowed = await checkCommandPolicy(command, 'run_command', context)
@@ -272,12 +287,16 @@ export async function runCommandNowait(args: z.infer<typeof execCommandSchema>, 
   const { terminalService, sessionId, messageId } = context
   
   abortIfNeeded(context.signal)
-  const { found, bestMatch } = terminalService.resolveTerminal(tabIdOrName)
-  if (!bestMatch) {
-    if (found.length > 1) {
-      return `Error: Multiple terminal tabs found with name "${tabIdOrName}". Please use a specific Tab ID: ${found.map((t: any) => t.id).join(', ')}`
-    }
-    return `Error: Terminal tab "${tabIdOrName}" not found.`
+  const resolved = resolveTerminalForTool(context, tabIdOrName)
+  if (!resolved.ok) {
+    return resolved.message
+  }
+  const bestMatch = resolved.terminal
+  if (!resolved.snapshot.canRunCommand) {
+    return formatTerminalUnavailableForTool(
+      resolved.snapshot,
+      'run commands in this terminal'
+    )
   }
 
   const allowed = await checkCommandPolicy(command, 'run_command_nowait', context)
@@ -366,13 +385,11 @@ export async function readTerminalTab(args: z.infer<typeof readTerminalTabSchema
   const { terminalService, sessionId, messageId, sendEvent } = context
   
   abortIfNeeded(context.signal)
-  const { found, bestMatch } = terminalService.resolveTerminal(tabIdOrName)
-  if (!bestMatch) {
-    if (found.length > 1) {
-      return `Error: Multiple terminal tabs found with name "${tabIdOrName}". Please use a specific Tab ID: ${found.map((t: any) => t.id).join(', ')}`
-    }
-    return `Error: Terminal tab "${tabIdOrName}" not found.`
+  const resolved = resolveTerminalForTool(context, tabIdOrName)
+  if (!resolved.ok) {
+    return resolved.message
   }
+  const bestMatch = resolved.terminal
   
   sendEvent(sessionId, {
     messageId,
@@ -385,14 +402,13 @@ export async function readTerminalTab(args: z.infer<typeof readTerminalTabSchema
   const output = args.lines === undefined 
     ? terminalService.getRecentOutput(bestMatch.id) 
     : terminalService.getRecentOutput(bestMatch.id, lines)
+  const terminalContent =
+    output && output !== 'No output available.' ? output : '(No output available.)'
   
-  if (!output || output === 'No output available.') {
-    return 'No output available.'
-  }
-
-  const finalResult = `The following is the current visible state of the terminal tab "${bestMatch.title || bestMatch.id}":
+  const finalResult = `${formatTerminalStatusHeader(resolved.snapshot)}
+The following is the current visible state of the terminal tab "${bestMatch.title || bestMatch.id}":
 <terminal_content>
-${output}
+${terminalContent}
 </terminal_content>`
   
   sendEvent(sessionId, {
@@ -403,16 +419,10 @@ ${output}
 
   sendEvent(sessionId, {
     messageId,
-    type: 'sub_tool_delta',
-    outputDelta: output
-  })
-
-  sendEvent(sessionId, {
-    messageId,
     type: 'sub_tool_finished'
   })
 
-  return output
+  return finalResult
 }
 
 export async function readCommandOutput(
@@ -423,16 +433,9 @@ export async function readCommandOutput(
   const { terminalService, sessionId, messageId, sendEvent } = context
 
   abortIfNeeded(context.signal)
-  const { found, bestMatch } = terminalService.resolveTerminal(tabIdOrName)
-  if (!bestMatch) {
-    const tabs = terminalService.getAllTerminals()
-    const list = tabs.length
-      ? tabs.map((t) => `- ID: ${t.id}, Name: ${t.title}, Type: ${t.type}`).join('\n')
-      : '(No active terminal tabs)'
-    const errorText =
-      found.length > 1
-        ? `Error: Multiple terminal tabs found with name "${tabIdOrName}". Please use a specific Tab ID.\n${list}`
-        : `Error: Terminal tab "${tabIdOrName}" not found.\n${list}`
+  const terminalResolution = resolveTerminalForTool(context, tabIdOrName)
+  if (!terminalResolution.ok) {
+    const errorText = terminalResolution.message
     sendEvent(sessionId, {
       messageId,
       type: 'tool_call',
@@ -442,6 +445,7 @@ export async function readCommandOutput(
     })
     return errorText
   }
+  const bestMatch = terminalResolution.terminal
 
   const task = terminalService.getCommandTask(bestMatch.id, history_command_match_id)
   if (!task) {
@@ -481,7 +485,8 @@ export async function readCommandOutput(
     `Status: ${task.status}`
   ].join('\n')
 
-  const finalOutput = `${header}
+  const finalOutput = `${formatTerminalStatusHeader(terminalResolution.snapshot)}
+${header}
 <terminal_content>
 ${result}
 </terminal_content>`
@@ -502,12 +507,25 @@ export async function writeStdin(args: z.infer<typeof writeStdinSchema>, context
   const { terminalService, sessionId, messageId, sendEvent } = context
 
   abortIfNeeded(context.signal)
-  const { found, bestMatch } = terminalService.resolveTerminal(tabIdOrName)
-  if (!bestMatch) {
-    const errorText =
-      found.length > 1
-        ? `Error: Multiple terminal tabs found with name "${tabIdOrName}". Please use a specific Tab ID: ${found.map((t: any) => t.id).join(', ')}`
-        : `Error: Terminal tab "${tabIdOrName}" not found.`
+  const terminalResolution = resolveTerminalForTool(context, tabIdOrName)
+  if (!terminalResolution.ok) {
+    const errorText = terminalResolution.message
+    sendEvent(sessionId, {
+      messageId,
+      type: 'tool_call',
+      toolName: 'write_stdin',
+      input: JSON.stringify(sequence ?? []),
+      output: errorText
+    })
+    return errorText
+  }
+  const bestMatch = terminalResolution.terminal
+
+  if (!terminalResolution.snapshot.canWrite) {
+    const errorText = formatTerminalUnavailableForTool(
+      terminalResolution.snapshot,
+      'send input to this terminal'
+    )
     sendEvent(sessionId, {
       messageId,
       type: 'tool_call',
@@ -532,20 +550,20 @@ export async function writeStdin(args: z.infer<typeof writeStdinSchema>, context
     return allowed.message
   }
 
-  const resolved: string[] = []
+  const resolvedSequence: string[] = []
   for (const item of sequence ?? []) {
     if (C0_NAMES.includes(item as (typeof C0_NAMES)[number])) {
-      resolved.push(C0_CHAR_BY_NAME[item as (typeof C0_NAMES)[number]])
+      resolvedSequence.push(C0_CHAR_BY_NAME[item as (typeof C0_NAMES)[number]])
     } else {
-      resolved.push(item)
+      resolvedSequence.push(item)
     }
   }
 
-  for (const ch of resolved) {
+  for (const ch of resolvedSequence) {
     abortIfNeeded(context.signal)
     terminalService.write(bestMatch.id, ch)
     // Add 0.1s interval between characters if it's a list
-    if (resolved.length > 1) {
+    if (resolvedSequence.length > 1) {
       await waitWithSignal(100, context.signal)
     }
   }
@@ -567,6 +585,116 @@ ${output}
   })
 
   return resultHint
+}
+
+export async function reconnectTerminalTab(
+  args: z.infer<typeof reconnectTerminalTabSchema>,
+  context: ToolExecutionContext
+): Promise<string> {
+  const { tabIdOrName } = args
+  const { terminalService, sessionId, messageId, sendEvent } = context
+
+  abortIfNeeded(context.signal)
+  const resolved = resolveTerminalForTool(context, tabIdOrName)
+  if (!resolved.ok) {
+    sendEvent(sessionId, {
+      messageId,
+      type: 'tool_call',
+      toolName: 'reconnect_terminal_tab',
+      input: JSON.stringify(args),
+      output: resolved.message
+    })
+    return resolved.message
+  }
+
+  const terminal = resolved.terminal
+  const startSnapshot = resolved.snapshot
+  sendEvent(sessionId, {
+    messageId,
+    type: 'sub_tool_started',
+    toolName: 'reconnect_terminal_tab',
+    title: `Reconnect ${terminal.title || terminal.id}`,
+    hint: startSnapshot.runtimeState,
+    input: JSON.stringify(args)
+  })
+
+  const finish = (output: string): string => {
+    sendEvent(sessionId, {
+      messageId,
+      type: 'sub_tool_delta',
+      outputDelta: output
+    })
+    sendEvent(sessionId, {
+      messageId,
+      type: 'sub_tool_finished'
+    })
+    return output
+  }
+
+  if (startSnapshot.runtimeState === 'ready') {
+    return finish(
+      `${formatTerminalStatusHeader(startSnapshot)}
+Terminal tab "${terminal.title || terminal.id}" is already connected. No reconnect was attempted.`
+    )
+  }
+
+  if (startSnapshot.runtimeState === 'initializing') {
+    return finish(
+      `${formatTerminalStatusHeader(startSnapshot)}
+Terminal tab "${terminal.title || terminal.id}" is already initializing. Wait briefly, then verify it with read_terminal_tab or exec_command.`
+    )
+  }
+
+  if (!startSnapshot.reconnectable) {
+    return finish(
+      `${formatTerminalStatusHeader(startSnapshot)}
+Cannot reconnect this tab. Only disconnected SSH tabs with a saved SSH config are reconnectable.`
+    )
+  }
+
+  try {
+    await terminalService.reconnectTerminal(terminal.id)
+    const finalSnapshot = await waitForReconnectTerminalState(
+      terminalService,
+      terminal.id,
+      context.signal
+    )
+
+    if (!finalSnapshot) {
+      return finish(
+        `Reconnect was requested for terminal tab "${terminal.title || terminal.id}", but the tab was closed before readiness could be confirmed.`
+      )
+    }
+
+    if (finalSnapshot.runtimeState === 'ready') {
+      return finish(
+        `${formatTerminalStatusHeader(finalSnapshot)}
+Reconnect succeeded. The existing terminal tab is ready again. Re-validate the remote working directory and environment before continuing.`
+      )
+    }
+
+    if (finalSnapshot.runtimeState === 'exited') {
+      return finish(
+        `${formatTerminalStatusHeader(finalSnapshot)}
+Reconnect was attempted, but the terminal disconnected again before becoming ready.`
+      )
+    }
+
+    return finish(
+      `${formatTerminalStatusHeader(finalSnapshot)}
+Reconnect was requested, but the terminal is still initializing after ${Math.floor(
+        RECONNECT_READY_TIMEOUT_MS / 1000
+      )} seconds. Check the tab again before running commands.`
+    )
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    const snapshot = terminalService.getTerminalRuntimeSnapshot(terminal.id)
+    const status = snapshot ? `\n${formatTerminalStatusHeader(snapshot)}` : ''
+    return finish(`Reconnect failed: ${message}${status}`)
+  }
 }
 
 
@@ -604,6 +732,23 @@ function abortIfNeeded(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new Error('AbortError')
   }
+}
+
+async function waitForReconnectTerminalState(
+  terminalService: ToolExecutionContext['terminalService'],
+  terminalId: string,
+  signal?: AbortSignal
+) {
+  const deadline = Date.now() + RECONNECT_READY_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    abortIfNeeded(signal)
+    const snapshot = terminalService.getTerminalRuntimeSnapshot(terminalId)
+    if (!snapshot || snapshot.runtimeState === 'ready' || snapshot.runtimeState === 'exited') {
+      return snapshot
+    }
+    await waitWithSignal(RECONNECT_READY_POLL_MS, signal)
+  }
+  return terminalService.getTerminalRuntimeSnapshot(terminalId)
 }
 
 function isAbortError(error: unknown): boolean {

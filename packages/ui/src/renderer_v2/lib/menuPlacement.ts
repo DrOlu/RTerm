@@ -24,12 +24,11 @@ interface FloatingMenuPlacementResult {
   direction: "above" | "below";
 }
 
-interface AnchoredBelowMenuMetricsInput {
-  anchorRect: Pick<MenuAnchorRect, "top" | "height">;
+interface ActiveMenuItemScrollInput {
+  itemTop: number;
+  itemHeight: number;
+  viewportScrollTop: number;
   viewportHeight: number;
-  margin?: number;
-  gap?: number;
-  preferredMaxHeight?: number;
 }
 
 const clamp = (value: number, min: number, max: number): number => {
@@ -124,27 +123,30 @@ export const resolveFloatingMenuPlacement = ({
   };
 };
 
-export const resolveAnchoredBelowMenuMaxHeight = ({
-  anchorRect,
+export const resolveActiveMenuItemScrollTop = ({
+  itemTop,
+  itemHeight,
+  viewportScrollTop,
   viewportHeight,
-  margin = 8,
-  gap = 1,
-  preferredMaxHeight = 320,
-}: AnchoredBelowMenuMetricsInput): number => {
+}: ActiveMenuItemScrollInput): number => {
+  const resolvedItemTop = Math.max(0, normalizeFinite(itemTop, 0));
+  const resolvedItemHeight = Math.max(0, normalizeFinite(itemHeight, 0));
+  const resolvedViewportScrollTop = Math.max(
+    0,
+    normalizeFinite(viewportScrollTop, 0),
+  );
   const resolvedViewportHeight = Math.max(
     0,
     normalizeFinite(viewportHeight, 0),
   );
-  const resolvedMargin = Math.max(0, normalizeFinite(margin, 8));
-  const resolvedGap = Math.max(0, normalizeFinite(gap, 1));
-  const resolvedPreferredMaxHeight = Math.max(
-    0,
-    normalizeFinite(preferredMaxHeight, 320),
-  );
-  const anchorBottom = anchorRect.top + anchorRect.height;
-  const availableBelow = Math.max(
-    0,
-    resolvedViewportHeight - anchorBottom - resolvedGap - resolvedMargin,
-  );
-  return Math.min(resolvedPreferredMaxHeight, availableBelow);
+  const itemBottom = resolvedItemTop + resolvedItemHeight;
+  const viewportBottom = resolvedViewportScrollTop + resolvedViewportHeight;
+
+  if (resolvedItemTop < resolvedViewportScrollTop) {
+    return resolvedItemTop;
+  }
+  if (itemBottom > viewportBottom) {
+    return Math.max(0, itemBottom - resolvedViewportHeight);
+  }
+  return resolvedViewportScrollTop;
 };

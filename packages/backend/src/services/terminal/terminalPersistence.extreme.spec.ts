@@ -849,6 +849,20 @@ const run = async (): Promise<void> => {
       assertCondition(!!tab, 'local terminal should exist before write test')
       tab!.runtimeState = 'initializing'
 
+      const runtimeSnapshot = service.getTerminalRuntimeSnapshot('local-writable-initializing')
+      assertEqual(
+        runtimeSnapshot?.canUseFilesystem,
+        true,
+        'initializing local terminal should still expose filesystem operations'
+      )
+
+      await service.listDirectory('local-writable-initializing', '/tmp')
+      assertEqual(
+        backend.getLastListDirectoryCall()?.ptyId,
+        'pty-local-writable-initializing',
+        'initializing local terminal filesystem calls should still target the backend pty'
+      )
+
       service.write('local-writable-initializing', 'echo ok\n')
 
       const writeCall = backend.getWriteCalls()[0]
@@ -882,11 +896,17 @@ const run = async (): Promise<void> => {
       })
 
       service.write('ssh-not-ready-write', 'echo blocked\n')
+      const runtimeSnapshot = service.getTerminalRuntimeSnapshot('ssh-not-ready-write')
 
       assertEqual(
         backend.getWriteCalls().length,
         0,
         'initializing ssh terminal writes should remain blocked'
+      )
+      assertEqual(
+        runtimeSnapshot?.canUseFilesystem,
+        false,
+        'initializing ssh terminal should not expose filesystem operations'
       )
     })
 
@@ -986,6 +1006,11 @@ const run = async (): Promise<void> => {
         .find((terminal) => terminal.id === 'ssh-reconnect-same-id')
       assertEqual(tab?.runtimeState, 'exited', 'ssh tab should stay in the inventory after disconnect')
       assertEqual(tab?.lastExitCode, 255, 'disconnect exit code should be retained before reconnect')
+      let runtimeSnapshot = service.getTerminalRuntimeSnapshot('ssh-reconnect-same-id')
+      assertEqual(runtimeSnapshot?.runtimeState, 'exited', 'runtime snapshot should report disconnected ssh tab')
+      assertEqual(runtimeSnapshot?.reconnectable, true, 'disconnected ssh tab with config should be reconnectable')
+      assertEqual(runtimeSnapshot?.canRunCommand, false, 'disconnected ssh tab should not accept commands')
+      assertEqual(runtimeSnapshot?.canUseFilesystem, false, 'disconnected ssh tab should not expose filesystem operations')
 
       const reconnected = await service.reconnectTerminal(
         'ssh-reconnect-same-id'
@@ -1008,6 +1033,10 @@ const run = async (): Promise<void> => {
         .find((terminal) => terminal.id === 'ssh-reconnect-same-id')
       assertEqual(tab?.runtimeState, 'initializing', 'reconnect should mark the existing tab as reconnecting')
       assertEqual(tab?.lastExitCode, undefined, 'successful reconnect attempt should clear the old exit code')
+      runtimeSnapshot = service.getTerminalRuntimeSnapshot('ssh-reconnect-same-id')
+      assertEqual(runtimeSnapshot?.runtimeState, 'initializing', 'runtime snapshot should report reconnect initialization')
+      assertEqual(runtimeSnapshot?.reconnectable, false, 'initializing ssh tab should not start another reconnect')
+      assertEqual(runtimeSnapshot?.canUseFilesystem, false, 'initializing ssh tab should not expose filesystem operations')
 
       backend.setInitializationStateForTerminalId(
         'ssh-reconnect-same-id',
@@ -1028,6 +1057,10 @@ const run = async (): Promise<void> => {
         service.getBufferDelta('ssh-reconnect-same-id', 0).includes('ready again'),
         'reconnected runtime should continue streaming data to the same terminal buffer'
       )
+      runtimeSnapshot = service.getTerminalRuntimeSnapshot('ssh-reconnect-same-id')
+      assertEqual(runtimeSnapshot?.runtimeState, 'ready', 'runtime snapshot should report reconnected tab ready')
+      assertEqual(runtimeSnapshot?.canRunCommand, true, 'ready ssh tab should accept commands')
+      assertEqual(runtimeSnapshot?.canUseFilesystem, true, 'ready ssh tab should expose filesystem operations')
     })
 
     await runCase('reconnectTerminal restores exited state when respawn fails synchronously', async () => {

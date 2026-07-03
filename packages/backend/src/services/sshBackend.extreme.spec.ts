@@ -39,6 +39,80 @@ const createSession = () =>
 
 const run = async (): Promise<void> => {
   await runCase(
+    "base ssh connect config enables protocol keepalive for direct connections",
+    () => {
+      const backend = new SSHBackend() as any;
+      const connectConfig = backend.buildBaseConnectConfig({
+        type: "ssh",
+        id: "direct-keepalive",
+        title: "Direct Keepalive",
+        host: "example.test",
+        port: 22,
+        username: "tester",
+        authMethod: "password",
+        password: "secret",
+        cols: 80,
+        rows: 24,
+      });
+
+      assertEqual(
+        connectConfig.keepaliveInterval,
+        30_000,
+        "direct SSH connections should send encrypted keepalive probes",
+      );
+      assertEqual(
+        connectConfig.keepaliveCountMax,
+        3,
+        "direct SSH connections should keep ssh2's bounded keepalive failure threshold",
+      );
+      assertEqual(
+        connectConfig.readyTimeout,
+        20_000,
+        "direct SSH connections should preserve the existing ready timeout",
+      );
+    },
+  );
+
+  await runCase(
+    "base ssh connect config keeps protocol keepalive for tunneled jump connections",
+    () => {
+      const backend = new SSHBackend() as any;
+      const sock = new EventEmitter();
+      const connectConfig = backend.buildBaseConnectConfig(
+        {
+          type: "ssh",
+          id: "jump-keepalive",
+          title: "Jump Keepalive",
+          host: "jump.example.test",
+          port: 2222,
+          username: "jumper",
+          authMethod: "privateKey",
+          privateKey: "key",
+          cols: 80,
+          rows: 24,
+        },
+        sock,
+      );
+
+      assertEqual(
+        connectConfig.keepaliveInterval,
+        30_000,
+        "jump SSH connections should send encrypted keepalive probes",
+      );
+      assertEqual(
+        connectConfig.keepaliveCountMax,
+        3,
+        "jump SSH connections should keep ssh2's bounded keepalive failure threshold",
+      );
+      assertEqual(
+        connectConfig.sock,
+        sock,
+        "jump SSH connections should preserve the tunnel socket",
+      );
+    },
+  );
+
+  await runCase(
     "windows regular init script keeps the existing OSC prompt path for supported builds",
     async () => {
       const backend = new SSHBackend();

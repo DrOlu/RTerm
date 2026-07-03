@@ -1,3 +1,5 @@
+@use "../mentionKind";
+
 .queue-stack {
   position: relative;
   display: flex;
@@ -28,7 +30,7 @@
   transition: all 0.15s ease;
 
   &::before {
-    content: '';
+    content: "";
     position: absolute;
     left: 0;
     top: 0;
@@ -42,7 +44,7 @@
   z-index: 200;
   border-color: var(--fg-muted);
   background: color-mix(in srgb, var(--fg) 6%, var(--panel-bg));
-  
+
   &::before {
     background: var(--accent);
   }
@@ -50,6 +52,7 @@
 
 .queue-card-content {
   flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
@@ -58,18 +61,19 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  transition: max-height 0.2s ease, white-space 0.2s ease;
+  transition:
+    max-height 0.2s ease,
+    white-space 0.2s ease;
   user-select: none;
   -webkit-user-select: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: block;
 
   &::before {
-    content: '$';
+    content: "$";
     color: var(--accent);
     opacity: 0.7;
     font-weight: bold;
+    margin-right: 6px;
   }
 
   .mention-badge {
@@ -80,8 +84,6 @@
     font-size: 11px;
     font-family: var(--font-mono);
     margin: 0 2px;
-    background: color-mix(in srgb, var(--accent-2) 24%, transparent);
-    color: var(--fg);
     border: 1px solid color-mix(in srgb, var(--accent-2) 42%, transparent);
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
@@ -93,6 +95,8 @@
     overflow-wrap: anywhere;
     word-break: break-word;
     position: relative;
+
+    @include mentionKind.mention-kind-badge;
   }
 
   .queue-card-image-count {
@@ -100,6 +104,7 @@
     align-items: center;
     height: 1.4em;
     padding: 0 6px;
+    margin-left: 6px;
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
     background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -137,7 +142,7 @@
   &.is-active {
     color: var(--accent) !important;
     background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
-    
+
     &:hover {
       background: color-mix(in srgb, var(--accent) 20%, transparent) !important;
     }

@@ -1,8 +1,9 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import clsx from "clsx";
 import { X } from "lucide-react";
 import type { PanelKind } from "../../layout";
-import { resolveAnchoredBelowMenuMaxHeight } from "../../lib/menuPlacement";
+import { resolveFloatingMenuPlacement } from "../../lib/menuPlacement";
 import {
   buildCompactPanelTabMeasureSignature,
   resolveCompactPanelTabMenuScrollbarCompensation,
@@ -89,12 +90,13 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
   });
   const [open, setOpen] = React.useState(false);
   const [shellWidthPx, setShellWidthPx] = React.useState<number | null>(null);
-  const [menuMaxHeightPx, setMenuMaxHeightPx] = React.useState<number | null>(
-    null,
-  );
+  const [menuPlacementStyle, setMenuPlacementStyle] = React.useState<
+    React.CSSProperties | undefined
+  >(undefined);
   const [menuScrollbarCompensationPx, setMenuScrollbarCompensationPx] =
     React.useState(0);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
+  const shellWrapRef = React.useRef<HTMLDivElement | null>(null);
   const shellRef = React.useRef<HTMLDivElement | null>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const measureRef = React.useRef<HTMLDivElement | null>(null);
@@ -107,24 +109,59 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
     pendingMenuMeasureFrameRef.current = null;
   }, []);
 
-  const recomputeMenuMaxHeight = React.useCallback(() => {
-    const root = rootRef.current;
-    if (!root) return;
-    const rect = root.getBoundingClientRect();
-    const nextMaxHeight = resolveAnchoredBelowMenuMaxHeight({
+  const recomputeMenuPlacement = React.useCallback(() => {
+    const anchor = shellWrapRef.current;
+    const menu = menuRef.current;
+    if (!anchor || !menu) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const measured = menu.getBoundingClientRect();
+    const desiredWidth = Math.max(
+      0,
+      Math.ceil(rect.width) + menuScrollbarCompensationPx,
+    );
+    const placement = resolveFloatingMenuPlacement({
       anchorRect: {
+        left: rect.left,
         top: rect.top,
+        width: rect.width,
         height: rect.height,
       },
+      menuWidth: Math.max(desiredWidth, Math.ceil(measured.width)),
+      menuHeight: Math.ceil(measured.height),
+      viewportWidth: window.innerWidth,
       viewportHeight: window.innerHeight,
       margin: 8,
       gap: 1,
       preferredMaxHeight: 320,
     });
-    setMenuMaxHeightPx((current) =>
-      current === nextMaxHeight ? current : nextMaxHeight,
+    const renderedWidth = Math.min(
+      desiredWidth || placement.maxWidth,
+      placement.maxWidth || desiredWidth,
     );
-  }, []);
+
+    setMenuPlacementStyle((current) => {
+      if (
+        current?.top === placement.top &&
+        current?.left === placement.left &&
+        current?.width === renderedWidth &&
+        current?.minWidth === renderedWidth &&
+        current?.maxWidth === renderedWidth &&
+        current?.maxHeight === placement.maxHeight
+      ) {
+        return current;
+      }
+      return {
+        position: "fixed",
+        top: placement.top,
+        left: placement.left,
+        width: renderedWidth,
+        minWidth: renderedWidth,
+        maxWidth: renderedWidth,
+        maxHeight: placement.maxHeight,
+      };
+    });
+  }, [menuScrollbarCompensationPx]);
 
   const recomputeMenuScrollbarCompensation = React.useCallback(() => {
     const menu = menuRef.current;
@@ -154,9 +191,9 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
   }, [cancelPendingMenuMeasurement, recomputeMenuScrollbarCompensation]);
 
   const recomputeOpenMenuLayout = React.useCallback(() => {
-    recomputeMenuMaxHeight();
+    recomputeMenuPlacement();
     scheduleMenuScrollbarCompensation();
-  }, [recomputeMenuMaxHeight, scheduleMenuScrollbarCompensation]);
+  }, [recomputeMenuPlacement, scheduleMenuScrollbarCompensation]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -164,6 +201,7 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
       if (target && rootRef.current?.contains(target)) return;
+      if (target && menuRef.current?.contains(target)) return;
       setOpen(false);
     };
 
@@ -199,6 +237,7 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
     if (open) return;
     cancelPendingMenuMeasurement();
     setMenuScrollbarCompensationPx(0);
+    setMenuPlacementStyle(undefined);
   }, [open, cancelPendingMenuMeasurement]);
 
   React.useEffect(
@@ -270,21 +309,20 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
   }, [shellWidthPx]);
 
   const menuStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    const style: React.CSSProperties = {};
-
-    if (menuMaxHeightPx !== null) {
-      style.maxHeight = `${menuMaxHeightPx}px`;
+    if (menuPlacementStyle) {
+      return menuPlacementStyle;
     }
 
-    if (menuScrollbarCompensationPx > 0) {
-      const expandedWidth = `calc(100% + ${menuScrollbarCompensationPx}px)`;
-      style.width = expandedWidth;
-      style.minWidth = expandedWidth;
-      style.maxWidth = expandedWidth;
-    }
-
-    return Object.keys(style).length > 0 ? style : undefined;
-  }, [menuMaxHeightPx, menuScrollbarCompensationPx]);
+    return {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      width: shellWidthPx ?? undefined,
+      minWidth: shellWidthPx ?? undefined,
+      maxWidth: shellWidthPx ?? undefined,
+      visibility: "hidden",
+    };
+  }, [menuPlacementStyle, shellWidthPx]);
 
   return (
     <div
@@ -329,7 +367,11 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
           {options.length}
         </span>
       </button>
-      <div className="gyshell-compact-tab-shell-wrap" style={shellWrapStyle}>
+      <div
+        ref={shellWrapRef}
+        className="gyshell-compact-tab-shell-wrap"
+        style={shellWrapStyle}
+      >
         <div
           ref={shellRef}
           className={clsx("gyshell-compact-tab-select-shell", {
@@ -394,95 +436,99 @@ export const CompactPanelTabSelect: React.FC<CompactPanelTabSelectProps> = ({
             </div>
           ) : null}
         </div>
-        {open && options.length > 1 ? (
-          <div
-            ref={menuRef}
-            className="gyshell-compact-tab-menu"
-            role="listbox"
-            style={menuStyle}
-          >
-            {options.map((option, index) => {
-              const isActive = option.value === resolvedValue;
-              return (
-                <div
-                  key={option.value}
-                  className={clsx("gyshell-compact-tab-option", {
-                    "is-active": isActive,
-                    "is-closable": !!option.onClose,
-                    "has-trailing-actions": hasTrailingActionRail,
-                  })}
-                  data-layout-tab-menu-item="true"
-                  role="option"
-                  aria-selected={isActive}
-                  tabIndex={0}
-                  draggable
-                  data-layout-tab-draggable="true"
-                  data-layout-tab-id={option.value}
-                  data-layout-tab-kind={panelKind}
-                  data-layout-tab-panel-id={panelId}
-                  data-layout-tab-index={String(index)}
-                  onClick={() => {
-                    if (Date.now() - lastDragStartedAtRef.current < 180) {
-                      return;
-                    }
-                    onChange(option.value);
-                    setOpen(false);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onChange(option.value);
-                      setOpen(false);
-                    }
-                  }}
-                  onDragStart={() => {
-                    lastDragStartedAtRef.current = Date.now();
-                  }}
-                >
-                  <div className="gyshell-compact-tab-option-main">
-                    {option.leading ? (
-                      <span className="gyshell-compact-tab-option-leading">
-                        {option.leading}
-                      </span>
-                    ) : null}
-                    <span className="gyshell-compact-tab-option-label">
-                      {option.label}
-                    </span>
-                    {option.trailing ? (
-                      <span className="gyshell-compact-tab-option-trailing">
-                        {option.trailing}
-                      </span>
-                    ) : null}
-                  </div>
-                  {hasTrailingActionRail ? (
-                    <div className="gyshell-compact-tab-option-actions-rail">
-                      {option.onClose ? (
-                        <button
-                          type="button"
-                          className="gyshell-compact-tab-option-close"
-                          title={option.closeTitle}
-                          aria-label={option.closeTitle}
-                          draggable={false}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            option.onClose?.();
-                          }}
-                        >
-                          <X size={12} strokeWidth={2.2} />
-                        </button>
-                      ) : (
-                        <span
-                          className="gyshell-compact-tab-action-rail-placeholder"
-                          aria-hidden="true"
-                        />
-                      )}
+        {open && options.length > 1
+          ? createPortal(
+              <div
+                ref={menuRef}
+                className="gyshell-compact-tab-menu"
+                data-layout-tab-kind={panelKind}
+                role="listbox"
+                style={menuStyle}
+              >
+                {options.map((option, index) => {
+                  const isActive = option.value === resolvedValue;
+                  return (
+                    <div
+                      key={option.value}
+                      className={clsx("gyshell-compact-tab-option", {
+                        "is-active": isActive,
+                        "is-closable": !!option.onClose,
+                        "has-trailing-actions": hasTrailingActionRail,
+                      })}
+                      data-layout-tab-menu-item="true"
+                      role="option"
+                      aria-selected={isActive}
+                      tabIndex={0}
+                      draggable
+                      data-layout-tab-draggable="true"
+                      data-layout-tab-id={option.value}
+                      data-layout-tab-kind={panelKind}
+                      data-layout-tab-panel-id={panelId}
+                      data-layout-tab-index={String(index)}
+                      onClick={() => {
+                        if (Date.now() - lastDragStartedAtRef.current < 180) {
+                          return;
+                        }
+                        onChange(option.value);
+                        setOpen(false);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onChange(option.value);
+                          setOpen(false);
+                        }
+                      }}
+                      onDragStart={() => {
+                        lastDragStartedAtRef.current = Date.now();
+                      }}
+                    >
+                      <div className="gyshell-compact-tab-option-main">
+                        {option.leading ? (
+                          <span className="gyshell-compact-tab-option-leading">
+                            {option.leading}
+                          </span>
+                        ) : null}
+                        <span className="gyshell-compact-tab-option-label">
+                          {option.label}
+                        </span>
+                        {option.trailing ? (
+                          <span className="gyshell-compact-tab-option-trailing">
+                            {option.trailing}
+                          </span>
+                        ) : null}
+                      </div>
+                      {hasTrailingActionRail ? (
+                        <div className="gyshell-compact-tab-option-actions-rail">
+                          {option.onClose ? (
+                            <button
+                              type="button"
+                              className="gyshell-compact-tab-option-close"
+                              title={option.closeTitle}
+                              aria-label={option.closeTitle}
+                              draggable={false}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                option.onClose?.();
+                              }}
+                            >
+                              <X size={12} strokeWidth={2.2} />
+                            </button>
+                          ) : (
+                            <span
+                              className="gyshell-compact-tab-action-rail-placeholder"
+                              aria-hidden="true"
+                            />
+                          )}
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
+                  );
+                })}
+              </div>,
+              document.body,
+            )
+          : null}
         <div
           ref={measureRef}
           className="gyshell-compact-tab-measure"

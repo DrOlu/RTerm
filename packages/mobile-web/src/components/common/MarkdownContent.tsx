@@ -1,5 +1,5 @@
 import React from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 interface MarkdownContentProps {
@@ -7,17 +7,21 @@ interface MarkdownContentProps {
   className?: string
 }
 
-export const MarkdownContent: React.FC<MarkdownContentProps> = ({ content, className }) => {
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
+
+const MARKDOWN_COMPONENTS: Components = {
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />
+}
+
+export const MarkdownContent: React.FC<MarkdownContentProps> = React.memo(({ content, className }) => {
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />
-        }}
+        remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
       >
         {content}
       </ReactMarkdown>
     </div>
   )
-}
+})
