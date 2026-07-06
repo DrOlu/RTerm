@@ -23,7 +23,8 @@ export const PanelTypeRail: React.FC<PanelTypeRailProps> = observer(({
     chat: t.layout.addChatSession,
     terminal: t.layout.addTerminalTab,
     filesystem: t.layout.openFilesystemPanel,
-    monitor: t.layout.openMonitorPanel
+    monitor: t.layout.openMonitorPanel,
+    listPanel: t.layout.openListPanel
   }
 
   const handleCreate = React.useCallback(

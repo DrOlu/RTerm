@@ -51,6 +51,12 @@ export interface DetachedWindowState {
    * and does not roll editor state back into another renderer automatically.
    */
   fileEditorSnapshot?: FileEditorSnapshot
+  /**
+   * Terminal tabs that may not exist in the target renderer/backend inventory
+   * yet. Detached windows use these snapshots to keep tab bindings intact until
+   * the terminal view mounts and creates the real runtime.
+   */
+  terminalTabs?: WindowingTerminalTabSnapshot[]
 }
 
 export interface WindowingTerminalTabSnapshot {
@@ -262,11 +268,17 @@ const parseDetachedWindowState = (raw: string): DetachedWindowState | null => {
   const sourceClientId = typeof parsed.sourceClientId === 'string' ? parsed.sourceClientId.trim() : ''
   if (!sourceClientId) return null
   const fileEditorSnapshot = normalizeFileEditorSnapshot((parsed as any).fileEditorSnapshot)
+  const terminalTabs = Array.isArray((parsed as any).terminalTabs)
+    ? (parsed as any).terminalTabs
+        .map((entry: unknown) => normalizeWindowingTerminalTabSnapshot(entry))
+        .filter((entry: WindowingTerminalTabSnapshot | undefined): entry is WindowingTerminalTabSnapshot => !!entry)
+    : undefined
   return {
     sourceClientId,
     layoutTree: parsed.layoutTree as LayoutTree,
     createdAt: Number.isFinite(parsed.createdAt) ? Number(parsed.createdAt) : Date.now(),
-    ...(fileEditorSnapshot ? { fileEditorSnapshot } : {})
+    ...(fileEditorSnapshot ? { fileEditorSnapshot } : {}),
+    ...(terminalTabs && terminalTabs.length > 0 ? { terminalTabs } : {})
   }
 }
 
@@ -416,7 +428,7 @@ const normalizePanelDragState = (value: unknown): WindowingPanelDragPayload | nu
   if (!sourceClientId || !sourcePanelId) {
     return null
   }
-  if (kind !== 'chat' && kind !== 'terminal' && kind !== 'filesystem' && kind !== 'fileEditor' && kind !== 'monitor') {
+  if (kind !== 'chat' && kind !== 'terminal' && kind !== 'filesystem' && kind !== 'fileEditor' && kind !== 'monitor' && kind !== 'listPanel') {
     return null
   }
   const tabBinding = normalizePanelTabBinding(parsed.tabBinding)
@@ -450,7 +462,7 @@ const normalizeTabDragState = (value: unknown): WindowingTabDragPayload | null =
   if (!sourceClientId || !tabId || !sourcePanelId) {
     return null
   }
-  if (kind !== 'chat' && kind !== 'terminal' && kind !== 'filesystem' && kind !== 'fileEditor' && kind !== 'monitor') {
+  if (kind !== 'chat' && kind !== 'terminal' && kind !== 'filesystem' && kind !== 'fileEditor' && kind !== 'monitor' && kind !== 'listPanel') {
     return null
   }
   const terminalTab = normalizeWindowingTerminalTabSnapshot(parsed.terminalTab)

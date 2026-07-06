@@ -216,7 +216,26 @@ runCase('detached window state survives repeated reads for renderer reloads', ()
         root: { type: 'panel' as const, id: 'node-term', panel: { id: 'panel-term', kind: 'terminal' as const } },
         focusedPanelId: 'panel-term'
       } as LayoutTree,
-      createdAt: 123
+      createdAt: 123,
+      terminalTabs: [
+        {
+          id: 'ssh-detached',
+          title: 'Deploy Host',
+          config: {
+            type: 'ssh' as const,
+            id: 'ssh-detached',
+            title: 'Deploy Host',
+            cols: 120,
+            rows: 32,
+            host: 'deploy.example.test',
+            port: 22,
+            username: 'deploy',
+            authMethod: 'password' as const
+          },
+          connectionRef: { type: 'ssh', entryId: 'ssh-entry' },
+          runtimeState: 'initializing' as const
+        }
+      ]
     }
 
     assertEqual(stashDetachedWindowState(token, detachedState), true, 'detached state should be stashed')
@@ -424,7 +443,7 @@ runCase('drag-start from different window should be accepted by receiver', () =>
 // ---------------------------------------------------------------------------
 
 runCase('all panel kinds are valid in tab drag payload', () => {
-  const kinds: PanelKind[] = ['chat', 'terminal', 'filesystem', 'fileEditor']
+  const kinds: PanelKind[] = ['chat', 'terminal', 'filesystem', 'fileEditor', 'monitor', 'listPanel']
   kinds.forEach((kind) => {
     const msg: WindowingDragStartMessage = {
       type: 'drag-start',

@@ -26,6 +26,9 @@ const PANEL_TAB_BAR_LAYOUT: Record<PanelKind, PanelTabBarLayoutConfig> = {
   },
   monitor: {
     hardCompactWidth: 260
+  },
+  listPanel: {
+    hardCompactWidth: 260
   }
 }
 

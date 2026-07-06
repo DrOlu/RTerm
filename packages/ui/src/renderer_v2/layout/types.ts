@@ -6,7 +6,7 @@ export const CHAT_GRID_TOTAL_ROWS = 24
 export const MAX_LAYOUT_PANELS = 32
 export const MAX_LAYOUT_SPLIT_CHILDREN = 5
 
-export type PanelKind = 'chat' | 'terminal' | 'filesystem' | 'fileEditor' | 'monitor'
+export type PanelKind = 'chat' | 'terminal' | 'filesystem' | 'fileEditor' | 'monitor' | 'listPanel'
 
 export type SplitDirection = 'horizontal' | 'vertical'
 

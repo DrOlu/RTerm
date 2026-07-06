@@ -21,6 +21,7 @@ import {
 import { ConfirmDialog } from "../Common/ConfirmDialog";
 import { renderPanelByKind } from "./panelRenderRegistry";
 import { PanelTypeRail } from "./PanelTypeRail";
+import type { RailClickIntent, RailPanelKind } from "./panelKindUiRegistry";
 import {
   resolveCompactMenuTabReorderHint,
   resolveHorizontalTabBarReorderHint,
@@ -104,6 +105,53 @@ interface LocalPanelDragPayload {
   kind: PanelKind;
 }
 
+const isTerminalBackedPanelKind = (kind: PanelKind): boolean =>
+  kind === "terminal" || kind === "filesystem" || kind === "monitor";
+
+const toWindowingTerminalTabSnapshot = (
+  terminalTab: AppStore["terminalTabs"][number],
+): WindowingTerminalTabSnapshot => ({
+  id: terminalTab.id,
+  title: terminalTab.title,
+  config: terminalTab.config,
+  ...(terminalTab.connectionRef
+    ? { connectionRef: terminalTab.connectionRef }
+    : {}),
+  ...(terminalTab.runtimeState
+    ? { runtimeState: terminalTab.runtimeState }
+    : {}),
+  ...(typeof terminalTab.lastExitCode === "number"
+    ? { lastExitCode: terminalTab.lastExitCode }
+    : {}),
+});
+
+const collectWindowingTerminalTabSnapshots = (
+  store: AppStore,
+  tabIds: readonly string[],
+): WindowingTerminalTabSnapshot[] | undefined => {
+  if (tabIds.length === 0) {
+    return undefined;
+  }
+  const terminalTabById = new Map(
+    store.terminalTabs.map((terminalTab) => [terminalTab.id, terminalTab]),
+  );
+  const seen = new Set<string>();
+  const snapshots: WindowingTerminalTabSnapshot[] = [];
+  tabIds.forEach((tabId) => {
+    const normalizedTabId = String(tabId || "").trim();
+    if (!normalizedTabId || seen.has(normalizedTabId)) {
+      return;
+    }
+    seen.add(normalizedTabId);
+    const terminalTab = terminalTabById.get(normalizedTabId);
+    if (!terminalTab) {
+      return;
+    }
+    snapshots.push(toWindowingTerminalTabSnapshot(terminalTab));
+  });
+  return snapshots.length > 0 ? snapshots : undefined;
+};
+
 const LAYOUT_TAB_DRAG_MIME = "application/x-gyshell-layout-tab";
 const LAYOUT_TAB_DRAG_TEXT_PREFIX = "gyshell-tab:";
 const LAYOUT_PANEL_DRAG_MIME = "application/x-gyshell-layout-panel";
@@ -168,7 +216,8 @@ const parseCrossWindowTabDragPayload = (
       kind !== "terminal" &&
       kind !== "filesystem" &&
       kind !== "fileEditor" &&
-      kind !== "monitor"
+      kind !== "monitor" &&
+      kind !== "listPanel"
     ) {
       return null;
     }
@@ -217,7 +266,8 @@ const parseCrossWindowPanelDragPayload = (
       kind !== "terminal" &&
       kind !== "filesystem" &&
       kind !== "fileEditor" &&
-      kind !== "monitor"
+      kind !== "monitor" &&
+      kind !== "listPanel"
     ) {
       return null;
     }
@@ -334,8 +384,15 @@ const PanelLeaf: React.FC<{
     event: React.MouseEvent<HTMLElement>,
   ) => void;
   onRequestCloseTabsByKind: (kind: PanelKind, tabIds: string[]) => void;
+  onRequestOpenTabInDetachedWindow: (payload: TabDragPayload) => void;
 }> = observer(
-  ({ node, store, onHeaderContextMenu, onRequestCloseTabsByKind }) => {
+  ({
+    node,
+    store,
+    onHeaderContextMenu,
+    onRequestCloseTabsByKind,
+    onRequestOpenTabInDetachedWindow,
+  }) => {
     const panelId = node.panel.id;
     const dragSource =
       store.layout.isDragging && store.layout.draggingPanelId === panelId;
@@ -361,6 +418,7 @@ const PanelLeaf: React.FC<{
             store.layout.setPanelActiveTab(panelId, tabId),
           onRequestCloseTabs: (tabIds) =>
             onRequestCloseTabsByKind(node.panel.kind, tabIds),
+          onRequestOpenTabInDetachedWindow,
           onLayoutHeaderContextMenu: (event) =>
             onHeaderContextMenu(panelId, event),
         })}
@@ -377,8 +435,15 @@ const SplitNodeView: React.FC<{
     event: React.MouseEvent<HTMLElement>,
   ) => void;
   onRequestCloseTabsByKind: (kind: PanelKind, tabIds: string[]) => void;
+  onRequestOpenTabInDetachedWindow: (payload: TabDragPayload) => void;
 }> = observer(
-  ({ node, store, onHeaderContextMenu, onRequestCloseTabsByKind }) => {
+  ({
+    node,
+    store,
+    onHeaderContextMenu,
+    onRequestCloseTabsByKind,
+    onRequestOpenTabInDetachedWindow,
+  }) => {
     const panelGroupRef = React.useRef<ImperativePanelGroupHandle | null>(null);
     const applyingLayoutRef = React.useRef(true);
 
@@ -447,6 +512,9 @@ const SplitNodeView: React.FC<{
                   store={store}
                   onHeaderContextMenu={onHeaderContextMenu}
                   onRequestCloseTabsByKind={onRequestCloseTabsByKind}
+                  onRequestOpenTabInDetachedWindow={
+                    onRequestOpenTabInDetachedWindow
+                  }
                 />
               </Panel>
               {index < node.children.length - 1 ? (
@@ -468,7 +536,14 @@ const LayoutNodeView: React.FC<{
     event: React.MouseEvent<HTMLElement>,
   ) => void;
   onRequestCloseTabsByKind: (kind: PanelKind, tabIds: string[]) => void;
-}> = ({ node, store, onHeaderContextMenu, onRequestCloseTabsByKind }) => {
+  onRequestOpenTabInDetachedWindow: (payload: TabDragPayload) => void;
+}> = ({
+  node,
+  store,
+  onHeaderContextMenu,
+  onRequestCloseTabsByKind,
+  onRequestOpenTabInDetachedWindow,
+}) => {
   if (node.type === "panel") {
     return (
       <PanelLeaf
@@ -476,6 +551,7 @@ const LayoutNodeView: React.FC<{
         store={store}
         onHeaderContextMenu={onHeaderContextMenu}
         onRequestCloseTabsByKind={onRequestCloseTabsByKind}
+        onRequestOpenTabInDetachedWindow={onRequestOpenTabInDetachedWindow}
       />
     );
   }
@@ -486,6 +562,7 @@ const LayoutNodeView: React.FC<{
       store={store}
       onHeaderContextMenu={onHeaderContextMenu}
       onRequestCloseTabsByKind={onRequestCloseTabsByKind}
+      onRequestOpenTabInDetachedWindow={onRequestOpenTabInDetachedWindow}
     />
   );
 };
@@ -995,11 +1072,18 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
       if (!detachedStateToken || !sourceClientId) {
         return;
       }
+      const assignedTabs = store.collectAssignedTabsByKind();
+      const terminalTabs = collectWindowingTerminalTabSnapshots(store, [
+        ...(assignedTabs.terminal || []),
+        ...(assignedTabs.filesystem || []),
+        ...(assignedTabs.monitor || []),
+      ]);
       const nextState: DetachedWindowState = {
         sourceClientId,
         layoutTree: toJS(store.layout.tree),
         createdAt: Date.now(),
         fileEditorSnapshot: store.fileEditor.captureSnapshot(),
+        ...(terminalTabs ? { terminalTabs } : {}),
       };
       syncDetachedWindowState(detachedStateToken, nextState);
     }, [store]);
@@ -1100,12 +1184,17 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
 
         const panelBinding = toPanelTabBinding(panelId, panelKind);
         const fileEditorSnapshot = toPanelFileEditorSnapshot(panelKind);
+        const terminalTabs =
+          panelBinding && isTerminalBackedPanelKind(panelKind)
+            ? collectWindowingTerminalTabSnapshots(store, panelBinding.tabIds)
+            : undefined;
         const detachedTree = buildDetachedLayoutTree(panelKind, panelBinding);
         const opened = await openDetachedWindowState({
           sourceClientId: store.windowClientId,
           layoutTree: detachedTree,
           createdAt: Date.now(),
           ...(fileEditorSnapshot ? { fileEditorSnapshot } : {}),
+          ...(terminalTabs ? { terminalTabs } : {}),
         });
         if (!opened) {
           return;
@@ -1129,10 +1218,14 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
           tabIds: [tabId],
           activeTabId: tabId,
         });
+        const terminalTabs = isTerminalBackedPanelKind(payload.kind)
+          ? collectWindowingTerminalTabSnapshots(store, [tabId])
+          : undefined;
         const opened = await openDetachedWindowState({
           sourceClientId: store.windowClientId,
           layoutTree: detachedTree,
           createdAt: Date.now(),
+          ...(terminalTabs ? { terminalTabs } : {}),
         });
         if (!opened) {
           return;
@@ -1145,10 +1238,7 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
     );
 
     const openKindInDetachedWindow = React.useCallback(
-      async (
-        kind: "chat" | "terminal" | "filesystem" | "monitor",
-        intent: "create-new-tab" | "open-panel-only",
-      ) => {
+      async (kind: RailPanelKind, intent: RailClickIntent) => {
         const adapter = getPanelKindAdapter(kind);
         const ownerTabIds = adapter.supportsTabs
           ? adapter.getOwnerTabIds(store)
@@ -1169,10 +1259,14 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
               }
             : undefined;
 
+        const terminalTabs = isTerminalBackedPanelKind(kind)
+          ? collectWindowingTerminalTabSnapshots(store, ownerTabIds)
+          : undefined;
         await openDetachedWindowState({
           sourceClientId: store.windowClientId,
           layoutTree: buildDetachedLayoutTree(kind, tabBinding),
           createdAt: Date.now(),
+          ...(terminalTabs ? { terminalTabs } : {}),
         });
       },
       [store],
@@ -1455,13 +1549,10 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
           rawTabHost?.getAttribute("data-layout-tab-menu-item") === "true"
             ? null
             : rawTabHost;
+        const draggingTab =
+          store.layout.dragType === "tab" ? store.layout.draggingTab : null;
         if (store.layout.dragType === "tab") {
-          const draggingTab = store.layout.draggingTab;
-          if (
-            !draggingTab ||
-            !targetPanelKind ||
-            targetPanelKind !== draggingTab.kind
-          ) {
+          if (!draggingTab || !targetPanelKind) {
             store.layout.clearTabReorderTarget();
             store.layout.setDropTarget(null, null);
             return;
@@ -1471,12 +1562,17 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
             tabHost?.getAttribute("data-layout-tab-id") || null;
           const targetTabPanelId =
             tabHost?.getAttribute("data-layout-tab-panel-id") || null;
-          if (targetTabId && targetTabId === draggingTab.tabId) {
+          if (
+            targetPanelKind === draggingTab.kind &&
+            targetTabId &&
+            targetTabId === draggingTab.tabId
+          ) {
             store.layout.clearTabReorderTarget();
             store.layout.setDropTarget(null, null);
             return;
           }
           if (
+            targetPanelKind === draggingTab.kind &&
             tabHost &&
             targetTabId &&
             targetTabPanelId === targetPanelId &&
@@ -1508,6 +1604,15 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
           store.layout.draggingExternalPanelKind
             ? resolveExternalPanelDropDirection(panelRect, clientX, clientY)
             : determineDropDirection(panelRect, clientX, clientY);
+        if (
+          draggingTab &&
+          targetPanelKind &&
+          targetPanelKind !== draggingTab.kind &&
+          direction === "center"
+        ) {
+          store.layout.setDropTarget(null, null);
+          return;
+        }
         store.layout.setDropTarget(targetPanelId, direction);
       },
       [clearTabInsertIndicator, resolveTabBarReorderHint, store.layout],
@@ -1596,7 +1701,8 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
             kind !== "terminal" &&
             kind !== "filesystem" &&
             kind !== "fileEditor" &&
-            kind !== "monitor")
+            kind !== "monitor" &&
+            kind !== "listPanel")
         ) {
           return null;
         }
@@ -1653,7 +1759,8 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
             kind !== "terminal" &&
             kind !== "filesystem" &&
             kind !== "fileEditor" &&
-            kind !== "monitor")
+            kind !== "monitor" &&
+            kind !== "listPanel")
         ) {
           return null;
         }
@@ -1676,44 +1783,20 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
       const readTransferredTerminalTabSnapshot = (
         tabId: string,
       ): WindowingTerminalTabSnapshot | undefined => {
-        const terminalTab = store.terminalTabs.find((tab) => tab.id === tabId);
-        if (!terminalTab) {
-          return undefined;
-        }
-        return {
-          id: terminalTab.id,
-          title: terminalTab.title,
-          config: terminalTab.config,
-          ...(terminalTab.connectionRef
-            ? { connectionRef: terminalTab.connectionRef }
-            : {}),
-          ...(terminalTab.runtimeState
-            ? { runtimeState: terminalTab.runtimeState }
-            : {}),
-          ...(typeof terminalTab.lastExitCode === "number"
-            ? { lastExitCode: terminalTab.lastExitCode }
-            : {}),
-        };
+        return collectWindowingTerminalTabSnapshots(store, [tabId])?.[0];
       };
 
       const readTransferredTerminalTabSnapshotsForPanel = (
         panelId: string,
         kind: PanelKind,
       ): WindowingTerminalTabSnapshot[] | undefined => {
-        if (
-          kind !== "terminal" &&
-          kind !== "filesystem" &&
-          kind !== "monitor"
-        ) {
+        if (!isTerminalBackedPanelKind(kind)) {
           return undefined;
         }
-        const snapshots = store.layout
-          .getPanelTabIds(panelId)
-          .map((tabId) => readTransferredTerminalTabSnapshot(tabId))
-          .filter(
-            (snapshot): snapshot is WindowingTerminalTabSnapshot => !!snapshot,
-          );
-        return snapshots.length > 0 ? snapshots : undefined;
+        return collectWindowingTerminalTabSnapshots(
+          store,
+          store.layout.getPanelTabIds(panelId),
+        );
       };
 
       const toCrossWindowTabDragPayload = (
@@ -2920,6 +3003,7 @@ export const LayoutWorkspace: React.FC<LayoutWorkspaceProps> = observer(
             store={store}
             onHeaderContextMenu={handleHeaderContextMenu}
             onRequestCloseTabsByKind={requestCloseTabsByKind}
+            onRequestOpenTabInDetachedWindow={requestDetachTabToWindow}
           />
 
           {store.layout.isDragging ? (

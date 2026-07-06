@@ -1,13 +1,6 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import {
-  GripVertical,
-  Laptop,
-  MoreVertical,
-  Plus,
-  Server,
-  X,
-} from "lucide-react";
+import { GripVertical, MoreVertical, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { AppStore, TerminalTabModel } from "../../stores/AppStore";
 import "./terminal.scss";
@@ -21,6 +14,7 @@ import {
 } from "../../lib/terminalConnectionModel";
 import { isLinux, isWindows } from "../../platform/platform";
 import { CompactPanelTabSelect } from "../Layout/CompactPanelTabSelect";
+import { TerminalAddButton } from "./TerminalAddButton";
 import { resolvePanelTabBarMode } from "../Layout/panelHeaderPresentation";
 import { resolveTerminalTabIcon } from "./terminalTabIcons";
 import {
@@ -66,8 +60,6 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
     const terminalViewRefs = React.useRef<
       Record<string, XTermSearchHandle | null>
     >({});
-    const addMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
-    const addMenuRef = React.useRef<HTMLDivElement | null>(null);
     const moreMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
     const moreMenuRef = React.useRef<HTMLDivElement | null>(null);
     const [menuStyle, setMenuStyle] = React.useState<
@@ -118,12 +110,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
     );
 
     const recomputeMenuPosition = React.useCallback(() => {
-      const trigger =
-        openMenu === "more"
-          ? moreMenuButtonRef.current
-          : addMenuButtonRef.current;
-      const menu =
-        openMenu === "more" ? moreMenuRef.current : addMenuRef.current;
+      const trigger = moreMenuButtonRef.current;
+      const menu = moreMenuRef.current;
       if (!trigger || !menu) return;
 
       const rect = trigger.getBoundingClientRect();
@@ -151,24 +139,20 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
         maxHeight: placement.maxHeight,
         maxWidth: placement.maxWidth,
       });
-    }, [openMenu]);
+    }, []);
 
     React.useEffect(() => {
-      if (!openMenu) return;
+      if (openMenu !== "more") return;
 
       const onMouseDown = (event: MouseEvent) => {
         const target = event.target as Node | null;
         if (!target) return;
         if (
-          addMenuRef.current?.contains(target) ||
           moreMenuRef.current?.contains(target)
         ) {
           return;
         }
-        if (
-          addMenuButtonRef.current?.contains(target) ||
-          moreMenuButtonRef.current?.contains(target)
-        ) {
+        if (moreMenuButtonRef.current?.contains(target)) {
           return;
         }
         setOpenMenu(null);
@@ -195,7 +179,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
     }, [openMenu, recomputeMenuPosition]);
 
     React.useLayoutEffect(() => {
-      if (!openMenu) return;
+      if (openMenu !== "more") return;
       recomputeMenuPosition();
     }, [openMenu, recomputeMenuPosition]);
 
@@ -425,16 +409,15 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
           )}
 
           <div className="terminal-tabs-actions">
-            <button
-              ref={addMenuButtonRef}
+            <TerminalAddButton
+              store={store}
+              targetPanelId={panelId}
               className="tab-add-btn"
               title={t.terminal.newTab}
-              onClick={() =>
-                setOpenMenu((current) => (current === "add" ? null : "add"))
-              }
-            >
-              <Plus size={14} strokeWidth={2} />
-            </button>
+              ariaLabel={t.terminal.newTab}
+              open={openMenu === "add"}
+              onOpenChange={(nextOpen) => setOpenMenu(nextOpen ? "add" : null)}
+            />
             <button
               ref={moreMenuButtonRef}
               className="tab-more-btn"
@@ -449,64 +432,6 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
               <MoreVertical size={14} strokeWidth={2} />
             </button>
           </div>
-          {openMenu === "add"
-            ? createPortal(
-                <div
-                  className={
-                    menuPlatformClassName
-                      ? `win-select-menu tab-menu ${menuPlatformClassName}`
-                      : "win-select-menu tab-menu"
-                  }
-                  role="menu"
-                  ref={addMenuRef}
-                  style={menuStyle}
-                >
-                  <button
-                    className="tab-menu-item"
-                    onClick={() => {
-                      store.createLocalTab(panelId);
-                      setOpenMenu(null);
-                    }}
-                  >
-                    <Laptop size={14} strokeWidth={2} />
-                    <span>{t.terminal.local}</span>
-                  </button>
-
-                  {store.settings?.connections?.ssh?.length ? (
-                    <div className="tab-menu-sep" />
-                  ) : null}
-
-                  {store.settings?.connections?.ssh?.map((entry) => (
-                    <button
-                      key={entry.id}
-                      className="tab-menu-item"
-                      onClick={() => {
-                        store.createSshTab(entry.id, panelId);
-                        setOpenMenu(null);
-                      }}
-                    >
-                      <Server size={14} strokeWidth={2} />
-                      <span>
-                        {entry.name || `${entry.username}@${entry.host}`}
-                      </span>
-                    </button>
-                  ))}
-
-                  <div className="tab-menu-sep" />
-                  <button
-                    className="tab-menu-item"
-                    onClick={() => {
-                      store.openConnections();
-                      setOpenMenu(null);
-                    }}
-                  >
-                    <Server size={14} strokeWidth={2} />
-                    <span>{t.connections.manage}</span>
-                  </button>
-                </div>,
-                document.body,
-              )
-            : null}
           {openMenu === "more"
             ? createPortal(
                 <div

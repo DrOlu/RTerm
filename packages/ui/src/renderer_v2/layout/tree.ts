@@ -147,6 +147,9 @@ export const parsePersistedLayoutV2 = (raw: unknown): LayoutTree | null => {
     if (typeof manager.filesystem === 'string' && manager.filesystem.length > 0) {
       next.filesystem = manager.filesystem
     }
+    if (typeof manager.listPanel === 'string' && manager.listPanel.length > 0) {
+      next.listPanel = manager.listPanel
+    }
     return Object.keys(next).length > 0 ? next : undefined
   })()
 
@@ -159,18 +162,22 @@ export const parsePersistedLayoutV2 = (raw: unknown): LayoutTree | null => {
   }
 }
 
+const DEFAULT_PANEL_ORDER: readonly PanelKind[] = ['listPanel', 'chat', 'terminal']
+const DEFAULT_PANEL_SIZES = [18, 41, 41]
+
+const normalizeLegacyPanelKind = (panelName: string): PanelKind => {
+  if (panelName === 'chat') return 'chat'
+  if (panelName === 'filesystem') return 'filesystem'
+  if (panelName === 'fileEditor') return 'fileEditor'
+  if (panelName === 'listPanel') return 'listPanel'
+  return 'terminal'
+}
+
 const createLegacyRoot = (order: string[] | undefined, sizes: number[] | undefined): LayoutNode => {
-  const panelOrder = Array.isArray(order) && order.length > 0 ? order : ['chat', 'terminal']
+  const hasExplicitOrder = Array.isArray(order) && order.length > 0
+  const panelOrder = hasExplicitOrder ? order!.map(normalizeLegacyPanelKind) : DEFAULT_PANEL_ORDER
   const nodes = panelOrder.map((panelName) => {
-    const kind: PanelKind =
-      panelName === 'chat'
-        ? 'chat'
-        : panelName === 'filesystem'
-          ? 'filesystem'
-          : panelName === 'fileEditor'
-            ? 'fileEditor'
-          : 'terminal'
-    return createPanelNode(kind)
+    return createPanelNode(panelName)
   })
 
   if (nodes.length === 1) {
@@ -182,7 +189,7 @@ const createLegacyRoot = (order: string[] | undefined, sizes: number[] | undefin
     id: makeLayoutId('node'),
     direction: 'horizontal',
     children: nodes,
-    sizes: normalizeSizes(sizes, nodes.length)
+    sizes: normalizeSizes(hasExplicitOrder ? sizes : DEFAULT_PANEL_SIZES, nodes.length)
   }
 }
 

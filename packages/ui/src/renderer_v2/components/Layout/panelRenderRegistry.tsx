@@ -5,7 +5,8 @@ import { TerminalPanel } from '../Terminal/TerminalPanel'
 import { FileSystemPanel } from '../FileSystem/FileSystemPanel'
 import { FileEditorPanel } from '../FileSystem/FileEditorPanel'
 import { MonitorPanel } from '../Monitor/MonitorPanel'
-import type { PanelKind } from '../../layout'
+import { ListPanel } from '../ListPanel/ListPanel'
+import type { PanelKind, TabDragPayload } from '../../layout'
 
 export interface LayoutPanelRenderProps {
   store: AppStore
@@ -14,6 +15,7 @@ export interface LayoutPanelRenderProps {
   activeTabId: string | null
   onSelectTab: (tabId: string) => void
   onRequestCloseTabs?: (tabIds: string[]) => void
+  onRequestOpenTabInDetachedWindow?: (payload: TabDragPayload) => void
   onLayoutHeaderContextMenu?: (event: React.MouseEvent<HTMLElement>) => void
 }
 
@@ -113,12 +115,27 @@ const MonitorPanelRenderer: LayoutPanelRenderer = ({
   />
 )
 
+const ListPanelRenderer: LayoutPanelRenderer = ({
+  store,
+  panelId,
+  onRequestOpenTabInDetachedWindow,
+  onLayoutHeaderContextMenu
+}) => (
+  <ListPanel
+    store={store}
+    panelId={panelId}
+    onRequestOpenTabInDetachedWindow={onRequestOpenTabInDetachedWindow}
+    onLayoutHeaderContextMenu={onLayoutHeaderContextMenu}
+  />
+)
+
 const PANEL_RENDERERS: Record<PanelKind, LayoutPanelRenderer> = {
   terminal: TerminalPanelRenderer,
   chat: ChatPanelRenderer,
   filesystem: FileSystemPanelRenderer,
   fileEditor: FileEditorPanelRenderer,
-  monitor: MonitorPanelRenderer
+  monitor: MonitorPanelRenderer,
+  listPanel: ListPanelRenderer
 }
 
 export const renderPanelByKind = (

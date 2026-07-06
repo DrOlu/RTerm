@@ -136,6 +136,7 @@ const installBootstrapWindowMock = (
     ) => void;
     onMemoryUpdatedRegister?: (callback: (snapshot: any) => void) => void;
     loadChatSessionCalls?: string[];
+    terminalListPayload?: { terminals: any[] };
   },
 ): void => {
   const versionPayload = {
@@ -253,18 +254,19 @@ const installBootstrapWindowMock = (
       terminal: {
         onExit: () => {},
         onTabsUpdated: () => {},
-        list: async () => ({
-          terminals: [
-            {
-              id: "term-a",
-              title: "Local",
-              type: "local",
-              cols: 80,
-              rows: 24,
-              runtimeState: "ready",
-            },
-          ],
-        }),
+        list: async () =>
+          options?.terminalListPayload || {
+            terminals: [
+              {
+                id: "term-a",
+                title: "Local",
+                type: "local",
+                cols: 80,
+                rows: 24,
+                runtimeState: "ready",
+              },
+            ],
+          },
       },
       filesystem: {
         listTransfers: async () => [],
@@ -864,6 +866,116 @@ const run = async (): Promise<void> => {
   );
 
   await runCase(
+    "createSshTab can start runtime without attaching to a terminal panel",
+    async () => {
+      const originalWindow = (globalThis as any).window;
+      let createdConfig: any = null;
+      let attachCallCount = 0;
+      let syncCallCount = 0;
+
+      (globalThis as any).window = {
+        gyshell: {
+          terminal: {
+            createTab: async (config: any) => {
+              createdConfig = config;
+              return { id: config.id };
+            },
+            list: async () => ({
+              terminals: createdConfig
+                ? [
+                    {
+                      id: createdConfig.id,
+                      title: createdConfig.title,
+                      type: "ssh",
+                      cols: createdConfig.cols,
+                      rows: createdConfig.rows,
+                      runtimeState: "initializing",
+                    },
+                  ]
+                : [],
+            }),
+          },
+        },
+      };
+
+      try {
+        const store = new AppStore();
+        store.settings = {
+          connections: {
+            ssh: [
+              {
+                id: "ssh-entry",
+                name: "Deploy Host",
+                host: "deploy.example.test",
+                port: 22,
+                username: "deploy",
+                authMethod: "password",
+                password: "secret",
+              },
+            ],
+            proxies: [],
+            tunnels: [],
+          },
+        } as any;
+        (store.layout as any).getPrimaryPanelId = (kind: string) =>
+          kind === "terminal" ? "panel-terminal" : null;
+        (store.layout as any).attachTabToPanel = () => {
+          attachCallCount += 1;
+        };
+        (store.layout as any).syncPanelBindings = () => {
+          syncCallCount += 1;
+        };
+
+        const tabId = store.createSshTab("ssh-entry", undefined, {
+          ensurePanel: false,
+          attachToPanel: false,
+          startRuntime: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assertCondition(Boolean(tabId), "SSH tab should be created");
+        assertEqual(
+          attachCallCount,
+          0,
+          "background SSH creation should not attach to a visible terminal panel",
+        );
+        assertEqual(
+          syncCallCount,
+          2,
+          "background SSH creation should sync layout locally and after backend reconciliation",
+        );
+        assertEqual(
+          createdConfig?.id,
+          tabId,
+          "background SSH creation should start the backend runtime with the new tab id",
+        );
+        assertEqual(
+          createdConfig?.host,
+          "deploy.example.test",
+          "background SSH creation should preserve SSH connection config",
+        );
+        assertEqual(
+          JSON.stringify(store.getOwnedTabIds("terminal")),
+          JSON.stringify([tabId]),
+          "background SSH creation should keep the tab visible in global terminal inventory",
+        );
+        assertEqual(
+          JSON.stringify(store.getLayoutBindableTabIds("terminal")),
+          JSON.stringify([]),
+          "background SSH creation should keep the tab out of automatic layout binding",
+        );
+        assertEqual(
+          store.activeTerminalId,
+          tabId,
+          "background SSH creation should make the new tab active in global inventory",
+        );
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+    },
+  );
+
+  await runCase(
     "collectPersistedChatInventoryState preserves focused chat active tab",
     async () => {
       const store = new AppStore();
@@ -1393,6 +1505,109 @@ const run = async (): Promise<void> => {
           JSON.stringify(store.getOwnedTabIds("filesystem")),
           JSON.stringify(["term-a"]),
           "detached bootstrap should restore file-capable terminal visibility for filesystem panels",
+        );
+      } finally {
+        (WINDOW_CONTEXT as any).role = originalContext.role;
+        (WINDOW_CONTEXT as any).detachedStateToken =
+          originalContext.detachedStateToken;
+        (WINDOW_CONTEXT as any).sourceClientId = originalContext.sourceClientId;
+        (globalThis as any).window = originalWindow;
+      }
+    },
+  );
+
+  await runCase(
+    "detached bootstrap materializes terminal snapshots before backend runtime exists",
+    async () => {
+      const originalWindow = (globalThis as any).window;
+      const originalContext = {
+        role: WINDOW_CONTEXT.role,
+        detachedStateToken: WINDOW_CONTEXT.detachedStateToken,
+        sourceClientId: WINDOW_CONTEXT.sourceClientId,
+      };
+      const localStorageState = new Map<string, string>();
+      const sessionStorageState = new Map<string, string>();
+      const token = "detached-ssh-bootstrap";
+      const detachedLayoutTree: LayoutTree = {
+        schemaVersion: 2,
+        root: {
+          type: "panel",
+          id: "node-terminal",
+          panel: { id: "panel-terminal-detached", kind: "terminal" },
+        },
+        focusedPanelId: "panel-terminal-detached",
+        panelTabs: {
+          "panel-terminal-detached": {
+            tabIds: ["ssh-detached"],
+            activeTabId: "ssh-detached",
+          },
+        },
+      };
+
+      try {
+        installBootstrapWindowMock(buildPersistedTree(), {
+          terminalListPayload: { terminals: [] },
+        });
+        (globalThis as any).window.localStorage =
+          createStorage(localStorageState);
+        (globalThis as any).window.sessionStorage =
+          createStorage(sessionStorageState);
+        stashDetachedWindowState(token, {
+          sourceClientId: "win-main",
+          layoutTree: detachedLayoutTree,
+          createdAt: 123,
+          terminalTabs: [
+            {
+              id: "ssh-detached",
+              title: "Deploy Host",
+              config: {
+                type: "ssh",
+                id: "ssh-detached",
+                title: "Deploy Host",
+                cols: 120,
+                rows: 32,
+                host: "deploy.example.test",
+                port: 22,
+                username: "deploy",
+                authMethod: "password",
+              } as any,
+              connectionRef: { type: "ssh", entryId: "ssh-entry" },
+              runtimeState: "initializing",
+            },
+          ],
+        });
+        (WINDOW_CONTEXT as any).role = "detached";
+        (WINDOW_CONTEXT as any).detachedStateToken = token;
+        (WINDOW_CONTEXT as any).sourceClientId = "win-main";
+
+        const store = new AppStore();
+        (store.layout as any).bootstrap = () => {};
+        (store.layout as any).syncPanelBindings = () => {};
+        (store as any).loadTools = async () => {};
+        (store as any).loadSkills = async () => {};
+        (store as any).loadMemory = async () => {};
+        (store as any).loadCommandPolicyLists = async () => {};
+        (store as any).loadAccessTokens = async () => {};
+        (store as any).loadVersionState = async () => {};
+        (store as any).loadMobileWebStatus = async () => {};
+        (store as any).checkVersion = async () => {};
+
+        await store.bootstrap();
+
+        assertEqual(
+          JSON.stringify(store.getOwnedTabIds("terminal")),
+          JSON.stringify(["ssh-detached"]),
+          "detached bootstrap should expose the transferred SSH terminal tab",
+        );
+        assertEqual(
+          store.activeTerminalId,
+          "ssh-detached",
+          "detached bootstrap should activate the transferred SSH terminal tab",
+        );
+        assertEqual(
+          (store.terminalTabs[0]?.config as any).host,
+          "deploy.example.test",
+          "detached bootstrap should preserve the SSH config needed to create the runtime",
         );
       } finally {
         (WINDOW_CONTEXT as any).role = originalContext.role;
