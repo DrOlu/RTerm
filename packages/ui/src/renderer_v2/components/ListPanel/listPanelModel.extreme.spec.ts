@@ -1,5 +1,6 @@
 import {
   buildListPanelRows,
+  resolveListPanelChatStatusLabel,
   resolveListPanelHost,
   resolveListPanelRowActivation,
   type ListPanelTabSource,
@@ -158,6 +159,19 @@ runCase("row activation selects hosted rows but opens unhosted rows", () => {
       hostPanelId: null,
     },
     "single-clicking an unhosted row should restore it through the open path",
+  );
+});
+
+runCase("chat status dots are green only for busy sessions", () => {
+  assertEqual(
+    resolveListPanelChatStatusLabel(true),
+    "running",
+    "busy chat sessions should use the running status dot",
+  );
+  assertEqual(
+    resolveListPanelChatStatusLabel(false),
+    "inactive",
+    "idle chat sessions should use the inactive status dot",
   );
 });
 

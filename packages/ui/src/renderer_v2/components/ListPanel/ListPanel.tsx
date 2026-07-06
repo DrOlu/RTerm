@@ -23,6 +23,7 @@ import {
 import { resolveTerminalTabIcon } from "../Terminal/terminalTabIcons";
 import {
   buildListPanelRows,
+  resolveListPanelChatStatusLabel,
   resolveListPanelRowActivation,
   type ListPanelRow,
   type ListPanelTabKind,
@@ -86,7 +87,7 @@ const buildChatSources = (
           : session.isSessionBusy
             ? labels.running
             : labels.ready,
-      statusLabel: session.isSessionBusy ? "running" : "ready",
+      statusLabel: resolveListPanelChatStatusLabel(session.isSessionBusy),
       updatedAt: Number.isFinite(lastMessageTimestamp)
         ? lastMessageTimestamp
         : Number.MAX_SAFE_INTEGER - (sessions.length - index),

@@ -34,6 +34,10 @@ export type ListPanelRowActivation =
       hostPanelId: string | null;
     };
 
+export const resolveListPanelChatStatusLabel = (
+  isSessionBusy: boolean,
+): "running" | "inactive" => (isSessionBusy ? "running" : "inactive");
+
 export const resolveListPanelHost = (
   panelIds: readonly string[],
   getPanelTabIds: (panelId: string) => readonly string[],
