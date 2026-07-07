@@ -778,6 +778,117 @@ const run = async (): Promise<void> => {
     }
   )
 
+  await runCase('applying saved layout auto-hosts previously unhosted terminal tabs', async () => {
+    const spy: SettingsSetSpy = { calls: [] }
+    installWindowMock(spy)
+
+    const currentTree: LayoutTree = {
+      schemaVersion: 2,
+      root: {
+        type: 'split',
+        id: 'root-current',
+        direction: 'horizontal',
+        children: [
+          {
+            type: 'panel',
+            id: 'node-list',
+            panel: { id: 'panel-list', kind: 'listPanel' }
+          },
+          {
+            type: 'panel',
+            id: 'node-chat',
+            panel: { id: 'panel-chat', kind: 'chat' }
+          }
+        ],
+        sizes: [34, 66]
+      },
+      managerPanels: {
+        listPanel: 'panel-list',
+        chat: 'panel-chat'
+      },
+      panelTabs: {
+        'panel-chat': { tabIds: ['chat-a'], activeTabId: 'chat-a' }
+      },
+      focusedPanelId: 'panel-list'
+    }
+    const savedTree: LayoutTree = {
+      schemaVersion: 2,
+      root: {
+        type: 'split',
+        id: 'root-saved',
+        direction: 'horizontal',
+        children: [
+          {
+            type: 'panel',
+            id: 'node-saved-list',
+            panel: { id: 'panel-saved-list', kind: 'listPanel' }
+          },
+          {
+            type: 'panel',
+            id: 'node-saved-chat',
+            panel: { id: 'panel-saved-chat', kind: 'chat' }
+          },
+          {
+            type: 'panel',
+            id: 'node-saved-terminal',
+            panel: { id: 'panel-saved-terminal', kind: 'terminal' }
+          }
+        ],
+        sizes: [24, 46, 30]
+      },
+      managerPanels: {
+        listPanel: 'panel-saved-list',
+        chat: 'panel-saved-chat',
+        terminal: 'panel-saved-terminal'
+      },
+      panelTabs: {
+        'panel-saved-chat': { tabIds: ['chat-a'], activeTabId: 'chat-a' },
+        'panel-saved-terminal': { tabIds: [] }
+      },
+      focusedPanelId: 'panel-saved-terminal'
+    }
+
+    const store = createStore({
+      settings: {
+        layout: {
+          v2: currentTree,
+          savedLayouts: [
+            {
+              slotNumber: 1,
+              createdAt: 1,
+              updatedAt: 1,
+              snapshot: createSavedLayoutSnapshot(savedTree)
+            }
+          ]
+        }
+      },
+      terminalIds: ['term-a'],
+      chatIds: ['chat-a'],
+      activeTerminalId: 'term-a'
+    })
+    store.bootstrap()
+    store.setViewport(1440, 900)
+
+    assertEqual(store.getPrimaryPanelId('terminal'), null, 'current layout should start without terminal panel')
+    assertEqual(
+      JSON.stringify(store.getPanelIdsByKind('terminal')),
+      JSON.stringify([]),
+      'terminal tab should be unhosted while no terminal panel exists'
+    )
+
+    const applied = await store.applySavedLayoutSlot(getSavedLayoutSlotId(1))
+    assertEqual(applied, true, 'saved layout containing a terminal panel should apply')
+
+    const terminalPanelId = store.getPrimaryPanelId('terminal')
+    assertCondition(Boolean(terminalPanelId), 'applied saved layout should restore a terminal panel')
+    assertEqual(
+      JSON.stringify(store.getPanelTabIds(terminalPanelId!)),
+      JSON.stringify(['term-a']),
+      'restored terminal panel should automatically host the previously unhosted tab'
+    )
+    assertEqual(store.getPanelActiveTabId(terminalPanelId!), 'term-a', 'restored terminal panel should activate the tab')
+  })
+
   await runCase('active tab changes update the active saved layout slot', async () => {
     const spy: SettingsSetSpy = { calls: [] }
     installWindowMock(spy)
@@ -1523,7 +1634,7 @@ const run = async (): Promise<void> => {
     assertEqual(store.getPanelTabIds(chatPanelId!).includes('term-b'), false, 'chat panel should not receive terminal tab ids')
   })
 
-  await runCase('unhosted tab can be attached after recreating its missing panel kind', async () => {
+  await runCase('unhosted tab auto-attaches after recreating its missing panel kind', async () => {
     const store = createStore({
       terminalIds: ['term-a'],
       chatIds: ['chat-a']
@@ -1541,7 +1652,6 @@ const run = async (): Promise<void> => {
 
     const recreatedPanelId = store.ensurePrimaryPanelForKind('terminal')
     assertCondition(Boolean(recreatedPanelId), 'missing terminal panel should be recreatable')
-    store.attachTabToPanel('terminal', 'term-a', recreatedPanelId!)
 
     assertEqual(
       JSON.stringify(store.getPanelTabIds(recreatedPanelId!)),

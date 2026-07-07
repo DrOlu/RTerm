@@ -68,6 +68,35 @@ const upsertById = <T extends { id: string }>(list: T[], entry: T): T[] => {
 const removeById = <T extends { id: string }>(list: T[], id: string): T[] =>
   list.filter((x) => x.id !== id);
 
+const normalizeTerminalTitle = (value: unknown, fallback: string): string => {
+  const title = String(value || "").trim();
+  return title || fallback;
+};
+
+const resolveUniqueTerminalTitle = (
+  baseTitle: string,
+  existingTitles: Iterable<string>,
+): string => {
+  const usedTitles = new Set(
+    Array.from(existingTitles)
+      .map((title) => String(title || "").trim())
+      .filter((title) => title.length > 0),
+  );
+  const normalizedBaseTitle = normalizeTerminalTitle(baseTitle, "Terminal");
+  if (!usedTitles.has(normalizedBaseTitle)) {
+    return normalizedBaseTitle;
+  }
+
+  const rootTitle = normalizedBaseTitle;
+  let counter = 1;
+  let nextTitle = `${rootTitle} (${counter})`;
+  while (usedTitles.has(nextTitle)) {
+    counter += 1;
+    nextTitle = `${rootTitle} (${counter})`;
+  }
+  return nextTitle;
+};
+
 const FILE_TRANSFER_STATUS_RANK: Record<string, number> = {
   queued: 0,
   scanning: 1,
@@ -790,18 +819,17 @@ export class AppStore {
   }
 
   getUniqueTitle(baseTitle: string): string {
-    const existingTitles = this.terminalTabs.map((t) => t.title);
-    if (!existingTitles.includes(baseTitle)) {
-      return baseTitle;
-    }
+    return this.getUniqueTerminalTitle(baseTitle);
+  }
 
-    let counter = 1;
-    let newTitle = `${baseTitle} (${counter})`;
-    while (existingTitles.includes(newTitle)) {
-      counter++;
-      newTitle = `${baseTitle} (${counter})`;
-    }
-    return newTitle;
+  private getUniqueTerminalTitle(
+    baseTitle: string,
+    options?: { excludeTabId?: string },
+  ): string {
+    const existingTitles = this.terminalTabs
+      .filter((tab) => tab.id !== options?.excludeTabId)
+      .map((tab) => tab.title);
+    return resolveUniqueTerminalTitle(baseTitle, existingTitles);
   }
 
   get isDetachedWindow(): boolean {
@@ -919,6 +947,24 @@ export class AppStore {
     }
     normalizedIds.forEach((tabId) => {
       this.getVisibilityLinkedKindsForTab(kind, tabId).forEach((targetKind) => {
+        this.layoutHiddenTabIdsByKind[targetKind].add(tabId);
+      });
+    });
+  }
+
+  private hideTabsFromLayoutKinds(
+    kinds: Iterable<WindowScopedTabKind>,
+    tabIds: string[],
+  ): void {
+    const normalizedIds = tabIds
+      .map((tabId) => String(tabId || "").trim())
+      .filter((tabId) => tabId.length > 0);
+    const targetKinds = Array.from(new Set(kinds));
+    if (normalizedIds.length === 0 || targetKinds.length === 0) {
+      return;
+    }
+    normalizedIds.forEach((tabId) => {
+      targetKinds.forEach((targetKind) => {
         this.layoutHiddenTabIdsByKind[targetKind].add(tabId);
       });
     });
@@ -1052,11 +1098,19 @@ export class AppStore {
     if (!normalizedId) {
       return;
     }
+    const title = this.getUniqueTerminalTitle(
+      normalizeTerminalTitle(snapshot.title, normalizedId),
+      { excludeTabId: normalizedId },
+    );
+    const config = {
+      ...snapshot.config,
+      title,
+    } as TerminalConfig;
     const nextTab: TerminalTabModel = {
       id: normalizedId,
-      title: String(snapshot.title || "").trim() || normalizedId,
-      config: snapshot.config,
-      capabilities: resolveTerminalConnectionCapabilities(snapshot.config),
+      title,
+      config,
+      capabilities: resolveTerminalConnectionCapabilities(config),
       ...(snapshot.connectionRef
         ? { connectionRef: snapshot.connectionRef }
         : {}),
@@ -1452,8 +1506,32 @@ export class AppStore {
     }
     const existingById = new Map(this.terminalTabs.map((tab) => [tab.id, tab]));
     let nextMonitorEnabledSources = this.monitorEnabledSources;
+    const usedTitles = new Set<string>();
+    const allocateIncomingTitle = (
+      item: TerminalListEntry,
+      existing: TerminalTabModel | undefined,
+    ): string => {
+      const backendTitle = normalizeTerminalTitle(item.title, item.id);
+      if (!usedTitles.has(backendTitle)) {
+        usedTitles.add(backendTitle);
+        return backendTitle;
+      }
+
+      const existingTitle = existing
+        ? normalizeTerminalTitle(existing.title, "")
+        : "";
+      if (existingTitle && !usedTitles.has(existingTitle)) {
+        usedTitles.add(existingTitle);
+        return existingTitle;
+      }
+
+      const uniqueTitle = resolveUniqueTerminalTitle(backendTitle, usedTitles);
+      usedTitles.add(uniqueTitle);
+      return uniqueTitle;
+    };
     const nextTabs: TerminalTabModel[] = incoming.map((item) => {
       const existing = existingById.get(item.id);
+      const title = allocateIncomingTitle(item, existing);
       if (existing) {
         if (item.monitorIdentity) {
           const previousSourceKey = this.resolveMonitorSourceKey(existing);
@@ -1469,7 +1547,7 @@ export class AppStore {
         }
         return {
           ...existing,
-          title: item.title,
+          title,
           runtimeState: item.runtimeState,
           lastExitCode: item.lastExitCode,
           remoteOs: item.remoteOs ?? existing.remoteOs,
@@ -1480,7 +1558,7 @@ export class AppStore {
           }),
           config: {
             ...existing.config,
-            title: item.title,
+            title,
             cols: item.cols > 0 ? item.cols : existing.config.cols,
             rows: item.rows > 0 ? item.rows : existing.config.rows,
           },
@@ -1488,8 +1566,8 @@ export class AppStore {
       }
       return {
         id: item.id,
-        title: item.title,
-        config: this.toTerminalConfig(item),
+        title,
+        config: this.toTerminalConfig({ ...item, title }),
         capabilities: resolveTerminalConnectionCapabilities({
           type: item.type,
         }),
@@ -2815,7 +2893,20 @@ export class AppStore {
     if (shouldAttachToPanel) {
       this.showTabsInLayout("terminal", [id]);
     } else {
-      this.hideTabsFromLayout("terminal", [id]);
+      const panelIdsByHiddenKind = new Map<WindowScopedTabKind, string[]>();
+      this.getVisibilityLinkedKindsForTab("terminal", id).forEach(
+        (linkedKind) => {
+          const panelIds = this.layout.getPanelIdsByKind(linkedKind);
+          if (linkedKind === "terminal" && panelIds.length === 0) {
+            return;
+          }
+          panelIdsByHiddenKind.set(linkedKind, panelIds);
+        },
+      );
+      this.hideTabsFromLayoutKinds(panelIdsByHiddenKind.keys(), [id]);
+      this.layout.pinPanelsAsRestorePlaceholder(
+        Array.from(panelIdsByHiddenKind.values()).flat(),
+      );
     }
     if (options?.startRuntime === true) {
       void this.startTerminalRuntime(tab);
