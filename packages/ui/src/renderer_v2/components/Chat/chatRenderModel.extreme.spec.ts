@@ -385,6 +385,108 @@ runCase(
 )
 
 runCase(
+  'compaction boundary renders as an independent row without hiding assistant turn actions',
+  () => {
+    const session = createSession([
+      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+      createMessage({
+        id: 'a1',
+        role: 'assistant',
+        type: 'text',
+        content: 'answer before cutoff',
+        backendMessageId: 'backend-assistant-1',
+        streaming: false,
+      }),
+      createMessage({
+        id: 'boundary',
+        role: 'system',
+        type: 'compaction_boundary',
+        content: '',
+        backendMessageId: 'ui-boundary-1',
+        metadata: {
+          compactionBoundaryTargetBackendMessageId: 'backend-user-2',
+        },
+      }),
+      createMessage({
+        id: 'u2',
+        role: 'user',
+        type: 'text',
+        content: 'protected tail starts',
+        backendMessageId: 'backend-user-2',
+      }),
+    ])
+
+    const items = buildChatRenderItems(session, false, 'classic')
+    assertDeepEqual(
+      items.map((item) => `${item.kind}:${item.id}`),
+      ['user:u1', 'assistant:a1', 'boundary:boundary', 'user:u2'],
+      'boundary marker should be a visible non-assistant row',
+    )
+    assertEqual(
+      items[1]?.showAssistantGroupCopy,
+      true,
+      'boundary marker should not suppress copy controls for the preceding assistant turn',
+    )
+    assertEqual(
+      items[2]?.estimatedHeight,
+      40,
+      'boundary marker should use a compact virtual height estimate',
+    )
+  },
+)
+
+runCase(
+  'seamless trailing tool group keeps turn actions when followed by a compaction boundary',
+  () => {
+    const session = createSession([
+      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+      createMessage({
+        id: 'tool1',
+        role: 'assistant',
+        type: 'tool_call',
+        content: '{"query":"example"}',
+        backendMessageId: 'backend-tool-1',
+        streaming: false,
+      }),
+      createMessage({
+        id: 'boundary',
+        role: 'system',
+        type: 'compaction_boundary',
+        content: '',
+        backendMessageId: 'ui-boundary-1',
+        metadata: {
+          compactionBoundaryTargetBackendMessageId: 'backend-user-2',
+        },
+      }),
+      createMessage({
+        id: 'u2',
+        role: 'user',
+        type: 'text',
+        content: 'protected tail starts',
+        backendMessageId: 'backend-user-2',
+      }),
+    ])
+
+    const items = buildChatRenderItems(session, false, 'seamless')
+    assertDeepEqual(
+      items.map((item) => `${item.kind}:${item.id}`),
+      ['user:u1', 'assistant:tool1', 'boundary:boundary', 'user:u2'],
+      'seamless mode should keep the boundary outside tool grouping',
+    )
+    assertEqual(
+      items[1]?.showAssistantGroupCopy,
+      true,
+      'boundary marker should not suppress tool-group turn actions',
+    )
+    assertDeepEqual(
+      items[1]?.seamlessGroupMessageIds,
+      ['tool1'],
+      'boundary marker should not enter the seamless tool group',
+    )
+  },
+)
+
+runCase(
   'completed whitespace assistant messages and token rows do not become visible rows',
   () => {
     const session = createSession([
@@ -419,46 +521,43 @@ runCase(
   },
 )
 
-runCase(
-  'seamless overlay only includes the trailing overlay block',
-  () => {
-    const session = createSession([
-      createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
-      createMessage({
-        id: 'err-old',
-        role: 'assistant',
-        type: 'error',
-        content: 'old failure',
-      }),
-      createMessage({
-        id: 'a1',
-        role: 'assistant',
-        type: 'text',
-        content: 'recovered',
-      }),
-      createMessage({
-        id: 'ask-current',
-        role: 'assistant',
-        type: 'ask',
-        content: 'Need approval',
-      }),
-      createMessage({
-        id: 'alert-current',
-        role: 'assistant',
-        type: 'alert',
-        content: 'Current warning',
-        metadata: { subToolLevel: 'warning' },
-      }),
-    ])
+runCase('seamless overlay only includes the trailing overlay block', () => {
+  const session = createSession([
+    createMessage({ id: 'u1', role: 'user', type: 'text', content: 'hello' }),
+    createMessage({
+      id: 'err-old',
+      role: 'assistant',
+      type: 'error',
+      content: 'old failure',
+    }),
+    createMessage({
+      id: 'a1',
+      role: 'assistant',
+      type: 'text',
+      content: 'recovered',
+    }),
+    createMessage({
+      id: 'ask-current',
+      role: 'assistant',
+      type: 'ask',
+      content: 'Need approval',
+    }),
+    createMessage({
+      id: 'alert-current',
+      role: 'assistant',
+      type: 'alert',
+      content: 'Current warning',
+      metadata: { subToolLevel: 'warning' },
+    }),
+  ])
 
-    const overlayMessages = resolveSeamlessOverlayMessages(session)
-    assertDeepEqual(
-      overlayMessages.map((message) => message.id),
-      ['ask-current', 'alert-current'],
-      'historical overlay rows should stop pinning once newer visible chat content exists',
-    )
-  },
-)
+  const overlayMessages = resolveSeamlessOverlayMessages(session)
+  assertDeepEqual(
+    overlayMessages.map((message) => message.id),
+    ['ask-current', 'alert-current'],
+    'historical overlay rows should stop pinning once newer visible chat content exists',
+  )
+})
 
 runCase(
   'seamless overlay ignores hidden tail rows when keeping the current issue',

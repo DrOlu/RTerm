@@ -261,6 +261,11 @@ body.chat-drag-selection-suppressed * {
     background: transparent;
   }
 
+  &.role-compaction-boundary {
+    padding: 8px 16px;
+    background: transparent;
+  }
+
   &.is-search-match {
     background: color-mix(in srgb, var(--accent) 7%, transparent);
   }
@@ -298,6 +303,46 @@ body.chat-drag-selection-suppressed * {
   &.role-assistant::before {
     background: color-mix(in srgb, var(--fg) 25%, transparent);
   }
+
+  &.role-compaction-boundary::before {
+    background: color-mix(in srgb, var(--accent) 42%, transparent);
+  }
+}
+
+.compaction-boundary-marker {
+  display: grid;
+  grid-template-columns: minmax(16px, 1fr) auto minmax(16px, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding-left: 16px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0;
+  color: color-mix(in srgb, var(--fg-muted) 86%, var(--accent));
+}
+
+.compaction-boundary-line {
+  height: 1px;
+  min-width: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 28%, transparent)
+  );
+}
+
+.compaction-boundary-line:last-child {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 28%, transparent),
+    transparent
+  );
+}
+
+.compaction-boundary-label {
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--fg-muted) 72%, var(--accent));
 }
 
 .message-user-row {

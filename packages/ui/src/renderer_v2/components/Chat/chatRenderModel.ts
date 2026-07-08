@@ -1,6 +1,6 @@
 import type { ChatMessage, ChatSession } from '../../stores/ChatStore'
 
-export type ChatVisibleRowKind = 'assistant' | 'user'
+export type ChatVisibleRowKind = 'assistant' | 'user' | 'boundary'
 
 export interface ChatRenderItem {
   id: string
@@ -68,6 +68,17 @@ const isSeamlessOverlayMessage = (
 const isHiddenTailMessage = (message: ChatMessage): boolean =>
   message.type === 'tokens_count' || isCompletedWhitespaceAssistantText(message)
 
+const findNextNonBoundaryVisibleRow = (
+  rows: readonly VisibleRow[],
+  startIndex: number,
+): VisibleRow | undefined => {
+  for (let index = startIndex; index < rows.length; index += 1) {
+    const row = rows[index]
+    if (row.kind !== 'boundary') return row
+  }
+  return undefined
+}
+
 export const resolveSeamlessOverlayMessages = (
   session: ChatSession | null,
 ): ChatMessage[] => {
@@ -99,6 +110,7 @@ const getRowDisplayKind = (
   const candidate = session.messagesById.get(messageId)
   if (!candidate) return 'hidden'
   if (candidate.type === 'tokens_count') return 'hidden'
+  if (candidate.type === 'compaction_boundary') return 'boundary'
   if (candidate.role === 'user') return 'user'
   if (isCompletedWhitespaceAssistantText(candidate)) return 'hidden'
 
@@ -126,6 +138,7 @@ const estimateRowHeight = (
       ? 156
       : 92
   }
+  if (kind === 'boundary') return 40
 
   switch (message.type) {
     case 'command':
@@ -152,7 +165,9 @@ const hasAssistantItemInCurrentTurn = (
   items: readonly ChatRenderItem[],
 ): boolean => {
   for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (items[index].kind === 'user') return false
+    if (items[index].kind === 'user' || items[index].kind === 'boundary') {
+      return false
+    }
     if (items[index].kind === 'assistant') return true
   }
   return false
@@ -231,7 +246,8 @@ export const buildChatRenderItems = (
       }
 
       // Merge if this is not the first assistant item in the turn.
-      const prevIsAssistant = items.length > 0 && items[items.length - 1].kind === 'assistant'
+      const prevIsAssistant =
+        items.length > 0 && items[items.length - 1].kind === 'assistant'
       const turnAlreadyHasLabel = hasAssistantItemInCurrentTurn(items)
 
       // When this grouped tool activity is the tail of an assistant turn
@@ -239,7 +255,10 @@ export const buildChatRenderItems = (
       // copy/branch controls for the turn — mirroring a trailing text run.
       // Otherwise the controls would vanish whenever a turn ends on a tool call.
       const groupTailRow = visibleRows[visibleIndex]
-      const nextVisibleRow = visibleRows[visibleIndex + 1]
+      const nextVisibleRow = findNextNonBoundaryVisibleRow(
+        visibleRows,
+        visibleIndex + 1,
+      )
       const nextVisibleKind = nextVisibleRow?.kind ?? null
       const isTurnTail =
         !isGroupStreaming &&
@@ -252,7 +271,9 @@ export const buildChatRenderItems = (
         mergeWithPreviousAssistant: prevIsAssistant,
         showAssistantRoleLabel: !turnAlreadyHasLabel,
         showAssistantGroupCopy: isTurnTail,
-        assistantGroupMessageIds: isTurnTail ? [...seamlessGroupMessageIds] : [],
+        assistantGroupMessageIds: isTurnTail
+          ? [...seamlessGroupMessageIds]
+          : [],
         assistantGroupBranchMessageId: isTurnTail
           ? (groupTailRow?.id ?? null)
           : null,
@@ -270,27 +291,35 @@ export const buildChatRenderItems = (
       visibleIndex + 1 < visibleRows.length &&
       visibleRows[visibleIndex + 1].kind === 'assistant' &&
       // In seamless mode, don't extend a run into tool types (they're grouped separately)
-      !(displayMode === 'seamless' && SEAMLESS_TOOL_TYPES.has(visibleRows[visibleIndex + 1].msg.type))
+      !(
+        displayMode === 'seamless' &&
+        SEAMLESS_TOOL_TYPES.has(visibleRows[visibleIndex + 1].msg.type)
+      )
     ) {
       visibleIndex += 1
       assistantGroupMessageIds.push(visibleRows[visibleIndex].id)
     }
 
     const runEnd = visibleIndex
-    const nextVisibleRow = visibleRows[runEnd + 1]
+    const nextVisibleRow = findNextNonBoundaryVisibleRow(
+      visibleRows,
+      runEnd + 1,
+    )
     const nextVisibleKind = nextVisibleRow?.kind ?? null
-    const runMessages = visibleRows.slice(runStart, runEnd + 1).map((entry) => entry.msg)
+    const runMessages = visibleRows
+      .slice(runStart, runEnd + 1)
+      .map((entry) => entry.msg)
     const canShowGroupCopy =
       runMessages.length > 0 &&
       runMessages.every((message) => !message.streaming) &&
-      (nextVisibleKind === 'user' ||
-        (!nextVisibleRow && !isThinking))
+      (nextVisibleKind === 'user' || (!nextVisibleRow && !isThinking))
     const branchTargetMessageId = visibleRows[runEnd]?.id ?? null
 
     let turnAlreadyHasLabel = hasAssistantItemInCurrentTurn(items)
     for (let index = runStart; index <= runEnd; index += 1) {
       const assistantRow = visibleRows[index]
-      const prevIsAssistant = items.length > 0 && items[items.length - 1].kind === 'assistant'
+      const prevIsAssistant =
+        items.length > 0 && items[items.length - 1].kind === 'assistant'
       const showAssistantRoleLabel = !turnAlreadyHasLabel
       if (showAssistantRoleLabel) turnAlreadyHasLabel = true
 
@@ -302,13 +331,9 @@ export const buildChatRenderItems = (
         showAssistantRoleLabel,
         showAssistantGroupCopy: canShowGroupCopy && index === runEnd,
         assistantGroupMessageIds:
-          canShowGroupCopy && index === runEnd
-            ? assistantGroupMessageIds
-            : [],
+          canShowGroupCopy && index === runEnd ? assistantGroupMessageIds : [],
         assistantGroupBranchMessageId:
-          canShowGroupCopy && index === runEnd
-            ? branchTargetMessageId
-            : null,
+          canShowGroupCopy && index === runEnd ? branchTargetMessageId : null,
       })
     }
 

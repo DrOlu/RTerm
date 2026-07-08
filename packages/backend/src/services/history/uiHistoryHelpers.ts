@@ -1,6 +1,12 @@
 import type { ChatMessage, UIChatSession } from "../../types/ui-chat";
 import type { UISessionSummaryRecord } from "./historyTypes";
 
+const normalizeBoundaryBackendId = (value: unknown): string => {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : "";
+};
+
 export const buildAutoSessionTitle = (content: string): string => {
   const normalized = String(content || "")
     .replace(/\s+/g, " ")
@@ -50,14 +56,89 @@ export function sanitizeUiSession(session: UIChatSession): UIChatSession {
       message.metadata.output = `${message.metadata.output || ""}\n[Session closed before command finished]`;
     }
   });
+  sanitized.messages = normalizeCompactionBoundaryMarkers(sanitized.messages);
   restoreLegacyAutoTitleIfTruncated(sanitized);
   return sanitized;
+}
+
+export function normalizeCompactionBoundaryMarkers(
+  messages: ChatMessage[],
+): ChatMessage[] {
+  if (messages.length === 0) return messages;
+
+  const baseMessages: ChatMessage[] = [];
+  const boundaryMessages: ChatMessage[] = [];
+  for (const message of messages) {
+    if (message.type === "compaction_boundary") {
+      boundaryMessages.push({
+        ...message,
+        role: "system",
+        content: "",
+        streaming: false,
+      });
+      continue;
+    }
+    baseMessages.push(message);
+  }
+
+  if (boundaryMessages.length === 0) return messages;
+
+  const normalized = [...baseMessages];
+  const seenBoundaryKeys = new Set<string>();
+
+  for (const boundary of boundaryMessages) {
+    const targetBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundaryTargetBackendMessageId,
+    );
+    const previousBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundaryPreviousBackendMessageId,
+    );
+    const summaryBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundarySummaryBackendMessageId,
+    );
+    const boundaryKey =
+      summaryBackendId ||
+      targetBackendId ||
+      previousBackendId ||
+      boundary.backendMessageId ||
+      boundary.id;
+
+    if (seenBoundaryKeys.has(boundaryKey)) {
+      continue;
+    }
+
+    if (targetBackendId) {
+      const targetIndex = normalized.findIndex(
+        (message) => message.backendMessageId === targetBackendId,
+      );
+      if (targetIndex < 0) {
+        continue;
+      }
+      normalized.splice(targetIndex, 0, boundary);
+      seenBoundaryKeys.add(boundaryKey);
+      continue;
+    }
+
+    if (previousBackendId) {
+      const previousIndex = normalized.findIndex(
+        (message) => message.backendMessageId === previousBackendId,
+      );
+      if (previousIndex < 0) {
+        continue;
+      }
+      normalized.splice(previousIndex + 1, 0, boundary);
+      seenBoundaryKeys.add(boundaryKey);
+    }
+  }
+
+  return normalized;
 }
 
 export function getLastVisiblePreview(messages: ChatMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.type === "tokens_count") continue;
+    if (message.type === "compaction_boundary") continue;
     const imagePreview =
       Array.isArray(message.metadata?.inputImages) &&
       message.metadata.inputImages.length > 0

@@ -10,6 +10,7 @@ import { HistorySqliteStore } from "./history/HistorySqliteStore";
 import {
   buildAutoSessionTitle,
   buildUiSessionSummary,
+  normalizeCompactionBoundaryMarkers,
   sanitizeUiSession,
 } from "./history/uiHistoryHelpers";
 
@@ -415,6 +416,71 @@ export class UIHistoryService {
           patch: { streaming: false },
         });
       }
+    } else if (type === "compaction_boundary") {
+      const boundaryTargetBackendMessageId = this.normalizeBackendMessageId(
+        event.boundaryTargetMessageId,
+      );
+      const boundaryPreviousBackendMessageId = this.normalizeBackendMessageId(
+        event.boundaryPreviousMessageId,
+      );
+      const boundarySummaryBackendMessageId = this.normalizeBackendMessageId(
+        event.summaryMessageId,
+      );
+      if (
+        !boundaryTargetBackendMessageId &&
+        !boundaryPreviousBackendMessageId
+      ) {
+        return actions;
+      }
+
+      const message = this.createMessage(
+        {
+          role: "system",
+          type: "compaction_boundary",
+          content: "",
+          metadata: {
+            ...(boundaryTargetBackendMessageId
+              ? {
+                  compactionBoundaryTargetBackendMessageId:
+                    boundaryTargetBackendMessageId,
+                }
+              : {}),
+            ...(boundaryPreviousBackendMessageId
+              ? {
+                  compactionBoundaryPreviousBackendMessageId:
+                    boundaryPreviousBackendMessageId,
+                }
+              : {}),
+            ...(boundarySummaryBackendMessageId
+              ? {
+                  compactionBoundarySummaryBackendMessageId:
+                    boundarySummaryBackendMessageId,
+                }
+              : {}),
+            ...(typeof event.protectedNormalRounds === "number"
+              ? {
+                  compactionBoundaryProtectedNormalRounds:
+                    event.protectedNormalRounds,
+                }
+              : {}),
+          },
+          streaming: false,
+          backendMessageId: event.messageId,
+        },
+        sessionId,
+      );
+
+      const insertion = this.insertCompactionBoundaryMessage(session, message);
+      if (insertion) {
+        actions.push({
+          type: "INSERT_MESSAGE",
+          sessionId,
+          message,
+          anchorMessageId: insertion.anchorMessageId,
+          anchorBackendMessageId: insertion.anchorBackendMessageId,
+          placement: insertion.placement,
+        });
+      }
     } else if (type === "remove_message") {
       const message = event.messageId
         ? [...session.messages]
@@ -503,7 +569,9 @@ export class UIHistoryService {
         (message) => message.backendMessageId === backendMessageId,
       );
       if (index !== -1) {
-        session.messages = session.messages.slice(0, index);
+        session.messages = normalizeCompactionBoundaryMarkers(
+          session.messages.slice(0, index),
+        );
         this.dirtySessions.add(sessionId);
         actions.push({
           type: "ROLLBACK" as any,
@@ -543,6 +611,103 @@ export class UIHistoryService {
       id: uuidv4(),
       timestamp: Date.now(),
     };
+  }
+
+  private normalizeBackendMessageId(value: unknown): string {
+    return typeof value === "string" && value.trim().length > 0
+      ? value.trim()
+      : "";
+  }
+
+  private findExistingCompactionBoundaryIndex(
+    messages: ChatMessage[],
+    boundary: ChatMessage,
+  ): number {
+    const summaryBackendId = this.normalizeBackendMessageId(
+      boundary.metadata?.compactionBoundarySummaryBackendMessageId,
+    );
+    const targetBackendId = this.normalizeBackendMessageId(
+      boundary.metadata?.compactionBoundaryTargetBackendMessageId,
+    );
+    return messages.findIndex((message) => {
+      if (message.type !== "compaction_boundary") return false;
+      if (
+        boundary.backendMessageId &&
+        message.backendMessageId === boundary.backendMessageId
+      ) {
+        return true;
+      }
+      if (
+        summaryBackendId &&
+        message.metadata?.compactionBoundarySummaryBackendMessageId ===
+          summaryBackendId
+      ) {
+        return true;
+      }
+      return (
+        !!targetBackendId &&
+        message.metadata?.compactionBoundaryTargetBackendMessageId ===
+          targetBackendId
+      );
+    });
+  }
+
+  private insertCompactionBoundaryMessage(
+    session: UIChatSession,
+    message: ChatMessage,
+  ): {
+    anchorMessageId: string;
+    anchorBackendMessageId: string;
+    placement: "before" | "after";
+  } | null {
+    if (
+      this.findExistingCompactionBoundaryIndex(session.messages, message) >= 0
+    ) {
+      session.messages = normalizeCompactionBoundaryMarkers(session.messages);
+      return null;
+    }
+
+    const targetBackendId = this.normalizeBackendMessageId(
+      message.metadata?.compactionBoundaryTargetBackendMessageId,
+    );
+    const previousBackendId = this.normalizeBackendMessageId(
+      message.metadata?.compactionBoundaryPreviousBackendMessageId,
+    );
+
+    if (targetBackendId) {
+      const targetIndex = session.messages.findIndex(
+        (entry) => entry.backendMessageId === targetBackendId,
+      );
+      if (targetIndex >= 0) {
+        const anchor = session.messages[targetIndex];
+        session.messages.splice(targetIndex, 0, message);
+        return {
+          anchorMessageId: anchor.id,
+          anchorBackendMessageId: targetBackendId,
+          placement: "before",
+        };
+      }
+    }
+
+    if (previousBackendId && !targetBackendId) {
+      const previousIndex = session.messages.findIndex(
+        (entry) => entry.backendMessageId === previousBackendId,
+      );
+      if (previousIndex >= 0) {
+        const anchor = session.messages[previousIndex];
+        session.messages.splice(previousIndex + 1, 0, message);
+        return {
+          anchorMessageId: anchor.id,
+          anchorBackendMessageId: previousBackendId,
+          placement: "after",
+        };
+      }
+    }
+
+    console.warn(
+      `[UIHistoryService] Dropped compaction boundary marker because its UI anchor was not found (target=${targetBackendId || "none"}, previous=${previousBackendId || "none"}).`,
+    );
+    return null;
   }
 
   private getSubToolMessageType(event: AgentEvent): ChatMessage["type"] {
@@ -640,7 +805,9 @@ export class UIHistoryService {
     if (index === -1) return 0;
 
     const removedCount = session.messages.length - index;
-    session.messages = session.messages.slice(0, index);
+    session.messages = normalizeCompactionBoundaryMarkers(
+      session.messages.slice(0, index),
+    );
     this.syncSessionSummary(sessionId);
     this.dirtySessions.add(sessionId);
     this.flush(sessionId);
@@ -675,11 +842,13 @@ export class UIHistoryService {
       id: branchSessionId,
       title: title.trim() || "Branch",
       updatedAt,
-      messages: source.messages.slice(0, index + 1).map((message) => ({
-        ...JSON.parse(JSON.stringify(message)),
-        id: uuidv4(),
-        streaming: false,
-      })),
+      messages: normalizeCompactionBoundaryMarkers(
+        source.messages.slice(0, index + 1).map((message) => ({
+          ...JSON.parse(JSON.stringify(message)),
+          id: uuidv4(),
+          streaming: false,
+        })),
+      ),
     };
     this.sessionsCache[branchSessionId] = branch;
     this.syncSessionSummary(branchSessionId);

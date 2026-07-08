@@ -505,6 +505,53 @@ button:disabled {
   justify-content: flex-start;
 }
 
+.bubble-row.boundary {
+  justify-content: stretch;
+  padding: 2px 0;
+}
+
+.mobile-compaction-boundary {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(16px, 1fr) auto minmax(16px, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in srgb, var(--accent-strong) 78%, var(--ink-soft));
+  font-family: "JetBrains Mono", "SF Mono", "Menlo", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.mobile-compaction-boundary-line {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--accent) 42%, transparent)
+  );
+}
+
+.mobile-compaction-boundary-line:last-child {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 42%, transparent),
+    transparent
+  );
+}
+
+.mobile-compaction-boundary-label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--accent-soft));
+  padding: 2px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bubble {
   max-width: 90%;
   min-width: 0;

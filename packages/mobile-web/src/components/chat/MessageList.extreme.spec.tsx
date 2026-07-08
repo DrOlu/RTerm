@@ -3,7 +3,10 @@ import {
   areMessageListPropsEqual,
   type MessageListProps,
 } from "./MessageList";
-import type { ChatTimelineItem } from "../../lib/chat-timeline";
+import {
+  buildChatTimeline,
+  type ChatTimelineItem,
+} from "../../lib/chat-timeline";
 import type { ChatMessage } from "../../types";
 
 function assertEqual<T>(actual: T, expected: T, message: string): void {
@@ -17,6 +20,12 @@ function assertEqual<T>(actual: T, expected: T, message: string): void {
 function runCase(name: string, fn: () => void): void {
   fn();
   console.log(`PASS ${name}`);
+}
+
+function assertCondition(condition: unknown, message: string): void {
+  if (!condition) {
+    throw new Error(message);
+  }
 }
 
 const noopAsk = (_message: ChatMessage, _decision: "allow" | "deny") => {};
@@ -120,5 +129,46 @@ runCase("message list props change when command disabled state changes", () => {
     areMessageListPropsEqual(previous, next),
     false,
     "rollback disabled state must refresh user bubble buttons",
+  );
+});
+
+runCase("chat timeline preserves compaction boundary markers", () => {
+  const boundary = makeMessage({
+    id: "boundary-1",
+    role: "system",
+    type: "compaction_boundary",
+    backendMessageId: "backend-boundary-1",
+    metadata: {
+      compactionBoundaryPreviousBackendMessageId: "backend-assistant-1",
+      compactionBoundarySummaryBackendMessageId: "backend-summary-1",
+    },
+  });
+  const nextUserMessage = makeMessage({
+    id: "user-2",
+    role: "user",
+    content: "continue",
+    backendMessageId: "backend-user-2",
+  });
+
+  const timeline = buildChatTimeline([
+    userMessage,
+    assistantMessage,
+    boundary,
+    nextUserMessage,
+  ]);
+
+  assertEqual(
+    timeline.length,
+    4,
+    "boundary marker should occupy its own timeline slot",
+  );
+  assertEqual(
+    timeline[2]?.kind,
+    "boundary",
+    "third timeline item should be boundary",
+  );
+  assertCondition(
+    timeline[2]?.kind === "boundary" && timeline[2].message.id === boundary.id,
+    "boundary timeline item should keep the original message",
   );
 });

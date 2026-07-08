@@ -218,6 +218,22 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
     }
 
     if (!msg) return null;
+    if (msg.type === "compaction_boundary") {
+      return (
+        <div
+          className={`message-row-container role-compaction-boundary${isSearchMatch ? " is-search-match" : ""}${isActiveSearchMatch ? " is-search-active" : ""}`}
+          role="separator"
+          aria-label="Context compacted"
+          title="Older context was compacted above this point."
+        >
+          <div className="compaction-boundary-marker">
+            <span className="compaction-boundary-line" />
+            <span className="compaction-boundary-label">[CTX COMPACTED]</span>
+            <span className="compaction-boundary-line" />
+          </div>
+        </div>
+      );
+    }
     const isUser = msg.role === "user";
 
     // Logic: If this is an 'alert' (retry hint), only show it if it's the absolute last message in the session

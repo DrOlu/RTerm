@@ -2530,11 +2530,12 @@ export class AgentService_v2 {
       return { changed: false, messages };
     }
 
+    const summaryMessageBackendId = uuidv4();
     const summaryMessage = new HumanMessage(
       `${WHAT_HAVE_DONE_IN_THE_PAST_TAG}${summaryText}`,
     );
     (summaryMessage as any).additional_kwargs = {
-      _gyshellMessageId: uuidv4(),
+      _gyshellMessageId: summaryMessageBackendId,
       [TokenManager.LAST_COMPACTION_FLAG_KEY]: true,
     };
 
@@ -2547,6 +2548,19 @@ export class AgentService_v2 {
     console.log(
       `[TokenManager] Compaction inserted summary at index=${insertionIndex} (sessionId=${sessionId}).`,
     );
+    this.helpers.sendEvent(sessionId, {
+      messageId: uuidv4(),
+      type: "compaction_boundary",
+      boundaryTargetMessageId: this.getBaseMessageBackendId(
+        messages[insertionIndex],
+      ),
+      boundaryPreviousMessageId: this.getNearestPreviousBaseMessageBackendId(
+        messages,
+        insertionIndex,
+      ),
+      summaryMessageId: summaryMessageBackendId,
+      protectedNormalRounds: COMPACTION_PROTECTED_NORMAL_USER_ROUNDS,
+    });
     this.helpers.sendEvent(sessionId, {
       messageId: compactionMessageId,
       type: "sub_tool_finished",
@@ -2591,6 +2605,24 @@ export class AgentService_v2 {
       TokenManager.hasLastCompactionFlag(messages[insertionIndex - 1]);
 
     return markerAtInsertion || markerBeforeInsertion;
+  }
+
+  private getBaseMessageBackendId(
+    message: BaseMessage | undefined,
+  ): string | undefined {
+    const value = (message as any)?.additional_kwargs?._gyshellMessageId;
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  }
+
+  private getNearestPreviousBaseMessageBackendId(
+    messages: BaseMessage[],
+    beforeIndex: number,
+  ): string | undefined {
+    for (let index = beforeIndex - 1; index >= 0; index -= 1) {
+      const messageId = this.getBaseMessageBackendId(messages[index]);
+      if (messageId) return messageId;
+    }
+    return undefined;
   }
 
   private spawnSelfCorrectionAudit(

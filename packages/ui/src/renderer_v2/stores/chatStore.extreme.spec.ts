@@ -179,4 +179,154 @@ runCase('ROLLBACK invalidates renderListVersion after pruning trailing messages'
   )
 })
 
+runCase(
+  'INSERT_MESSAGE places a compaction boundary before its backend anchor',
+  () => {
+    const store = new ChatStore()
+    const session = getActiveSessionOrThrow(store)
+
+    store.handleUiUpdate({
+      type: 'ADD_MESSAGE',
+      sessionId: session.id,
+      message: createAssistantMessage('assistant-1', {
+        content: 'first',
+        backendMessageId: 'backend-assistant-1',
+        streaming: false,
+      }),
+    })
+    store.handleUiUpdate({
+      type: 'ADD_MESSAGE',
+      sessionId: session.id,
+      message: createAssistantMessage('user-2', {
+        role: 'user',
+        type: 'text',
+        content: 'second user',
+        backendMessageId: 'backend-user-2',
+        streaming: false,
+      }),
+    })
+
+    store.handleUiUpdate({
+      type: 'INSERT_MESSAGE',
+      sessionId: session.id,
+      message: createAssistantMessage('boundary-1', {
+        role: 'system',
+        type: 'compaction_boundary',
+        content: '',
+        backendMessageId: 'ui-boundary-1',
+        streaming: false,
+        metadata: {
+          compactionBoundaryTargetBackendMessageId: 'backend-user-2',
+          compactionBoundarySummaryBackendMessageId: 'backend-summary-1',
+        },
+      }),
+      anchorBackendMessageId: 'backend-user-2',
+      placement: 'before',
+    })
+
+    assertEqual(
+      session.messageIds.join(','),
+      'assistant-1,boundary-1,user-2',
+      'insert action should place the boundary before its protected tail anchor',
+    )
+  },
+)
+
+runCase(
+  'ROLLBACK removes compaction boundaries whose target anchor is cut',
+  () => {
+    const store = new ChatStore()
+    const session = getActiveSessionOrThrow(store)
+
+    store.handleUiUpdate({
+      type: 'ADD_MESSAGE',
+      sessionId: session.id,
+      message: createAssistantMessage('assistant-1', {
+        content: 'first',
+        backendMessageId: 'backend-assistant-1',
+        streaming: false,
+      }),
+    })
+    store.handleUiUpdate({
+      type: 'ADD_MESSAGE',
+      sessionId: session.id,
+      message: createAssistantMessage('user-2', {
+        role: 'user',
+        type: 'text',
+        content: 'second user',
+        backendMessageId: 'backend-user-2',
+        streaming: false,
+      }),
+    })
+    store.handleUiUpdate({
+      type: 'INSERT_MESSAGE',
+      sessionId: session.id,
+      message: createAssistantMessage('boundary-1', {
+        role: 'system',
+        type: 'compaction_boundary',
+        content: '',
+        backendMessageId: 'ui-boundary-1',
+        streaming: false,
+        metadata: {
+          compactionBoundaryTargetBackendMessageId: 'backend-user-2',
+        },
+      }),
+      anchorBackendMessageId: 'backend-user-2',
+      placement: 'before',
+    })
+    const versionBeforeRollback = session.renderListVersion
+
+    store.handleUiUpdate({
+      type: 'ROLLBACK',
+      sessionId: session.id,
+      messageId: 'backend-user-2',
+    })
+
+    assertEqual(
+      session.messageIds.join(','),
+      'assistant-1',
+      'rollback should drop the boundary after its target is removed',
+    )
+    assertEqual(
+      session.renderListVersion,
+      versionBeforeRollback + 1,
+      'rollback cleanup should invalidate the render model once',
+    )
+  },
+)
+
+runCase('INSERT_MESSAGE ignores missing anchors instead of appending', () => {
+  const store = new ChatStore()
+  const session = getActiveSessionOrThrow(store)
+  const previousVersion = session.renderListVersion
+
+  store.handleUiUpdate({
+    type: 'INSERT_MESSAGE',
+    sessionId: session.id,
+    message: createAssistantMessage('boundary-1', {
+      role: 'system',
+      type: 'compaction_boundary',
+      content: '',
+      backendMessageId: 'ui-boundary-1',
+      streaming: false,
+      metadata: {
+        compactionBoundaryTargetBackendMessageId: 'missing-backend-user',
+      },
+    }),
+    anchorBackendMessageId: 'missing-backend-user',
+    placement: 'before',
+  })
+
+  assertEqual(
+    session.messageIds.length,
+    0,
+    'missing insert anchor should not add a misplaced boundary',
+  )
+  assertEqual(
+    session.renderListVersion,
+    previousVersion,
+    'missing insert anchor should not invalidate rendering',
+  )
+})
+
 console.log('All ChatStore extreme tests passed.')
