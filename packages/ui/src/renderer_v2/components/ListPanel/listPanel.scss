@@ -163,10 +163,10 @@
   min-height: 48px;
   width: 100%;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 24px;
+  grid-template-columns: 22px minmax(0, 1fr) 20px;
   align-items: center;
   gap: 1.5px;
-  padding: 4px 4px 4px 6px;
+  padding: 4px 6px 4px 6px;
   color: var(--fg-muted);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   cursor: pointer;
@@ -284,7 +284,8 @@
   height: 24px;
   border-radius: 5px;
   display: inline-grid;
-  place-items: center start;
+  justify-self: end;
+  place-items: center end;
   opacity: 0;
 }
 
@@ -294,7 +295,7 @@
 }
 
 .list-panel-row-close:hover {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: transparent;
   color: var(--danger);
   opacity: 1;
 }
