@@ -1046,7 +1046,7 @@ const run = async (): Promise<void> => {
   );
 
   await runCase(
-    "background SSH tab stays hidden when a terminal panel already exists",
+    "background SSH tab binds when a terminal panel already exists",
     async () => {
       const store = new AppStore();
       store.settings = {
@@ -1088,30 +1088,18 @@ const run = async (): Promise<void> => {
       );
       assertEqual(
         JSON.stringify(store.getLayoutBindableTabIds("terminal")),
-        JSON.stringify([]),
-        "background SSH tab should stay out of automatic binding while an existing terminal panel is present",
-      );
-      assertEqual(
-        JSON.stringify(store.layout.getPanelTabIds(terminalPanelId!)),
-        JSON.stringify([]),
-        "existing terminal panel should not receive a background SSH tab until the user opens it",
-      );
-
-      store.layout.attachTabToPanel("terminal", tabId!, terminalPanelId!);
-      assertEqual(
-        JSON.stringify(store.getLayoutBindableTabIds("terminal")),
         JSON.stringify([tabId]),
-        "explicitly opening the background SSH tab should make it layout-bindable again",
+        "background SSH tab should stay layout-bindable when a terminal panel exists",
       );
       assertEqual(
         JSON.stringify(store.layout.getPanelTabIds(terminalPanelId!)),
         JSON.stringify([tabId]),
-        "explicitly opening the background SSH tab should attach it to the terminal panel",
+        "existing terminal panel should automatically receive a background SSH tab",
       );
       assertEqual(
         store.layout.getPanelActiveTabId(terminalPanelId!),
         tabId,
-        "explicitly opening the background SSH tab should activate it in the terminal panel",
+        "existing terminal panel should activate the new background SSH tab",
       );
     },
   );

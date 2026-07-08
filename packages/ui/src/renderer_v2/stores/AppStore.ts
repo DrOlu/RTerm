@@ -2896,10 +2896,10 @@ export class AppStore {
       const panelIdsByHiddenKind = new Map<WindowScopedTabKind, string[]>();
       this.getVisibilityLinkedKindsForTab("terminal", id).forEach(
         (linkedKind) => {
-          const panelIds = this.layout.getPanelIdsByKind(linkedKind);
-          if (linkedKind === "terminal" && panelIds.length === 0) {
+          if (linkedKind === "terminal") {
             return;
           }
+          const panelIds = this.layout.getPanelIdsByKind(linkedKind);
           panelIdsByHiddenKind.set(linkedKind, panelIds);
         },
       );
