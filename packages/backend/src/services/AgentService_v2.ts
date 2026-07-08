@@ -71,10 +71,12 @@ import {
   EMPTY_MALFORMED_TOOL_CALL_FINISH_KEY,
   SKIPPED_EMPTY_GENERIC_CHUNKS_KEY,
   appendStreamedModelResponseChunk,
+  describeStreamedResponseFinish,
   extractStreamedResponseUsage,
   getStreamedResponseModelName,
   hasEmptyMalformedToolCallFinishFlag,
   isEmptyMalformedToolCallFinish,
+  isEmptyUnusableModelResponse,
 } from "./AgentHelper/utils/streamed_model_response";
 import {
   buildDynamicRequestHistory,
@@ -1219,6 +1221,19 @@ export class AgentService_v2 {
               }
               response = invokeResponse;
             }
+          }
+
+          if (
+            !isEmptyMalformedToolCallFinish(response, attemptDebugRawChunks) &&
+            isEmptyUnusableModelResponse(response, attemptDebugRawChunks)
+          ) {
+            const finishReason = describeStreamedResponseFinish(
+              response,
+              attemptDebugRawChunks,
+            );
+            throw new Error(
+              `Model stream ended with an empty unusable response (finish_reason=${finishReason}).`,
+            );
           }
 
           debugRawChunks = attemptDebugRawChunks;

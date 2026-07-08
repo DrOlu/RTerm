@@ -54,20 +54,24 @@ export const PanelTypeRail: React.FC<PanelTypeRailProps> = observer(({
           const item = getPanelKindUiItem(kind)
           const Icon = item.icon
           const ownerTabCount = item.getOwnerTabCount(store)
+          const railIndicator =
+            item.formatRailIndicator?.(ownerTabCount) ?? String(ownerTabCount)
           const panelCount = store.layout.getPanelIdsByKind(kind).length
           const isDetached = panelCount === 0
           const tooltip = railTooltipByKind[kind]
+          const label = `${t.layout[item.labelKey]} · ${tooltip}`
           return (
             <button
               key={kind}
               className={clsx('gyshell-panel-type-rail-btn', {
                 'is-detached': isDetached
               })}
-              title={`${t.layout[item.labelKey]} · ${tooltip}`}
+              title={label}
+              aria-label={label}
               onClick={() => handleCreate(kind)}
             >
               <Icon size={14} strokeWidth={2.2} />
-              <span className="gyshell-panel-type-rail-count">{ownerTabCount}</span>
+              <span className="gyshell-panel-type-rail-count">{railIndicator}</span>
             </button>
           )
         })}

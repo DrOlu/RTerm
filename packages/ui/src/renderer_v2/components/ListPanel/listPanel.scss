@@ -165,7 +165,7 @@
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 24px;
   align-items: center;
-  gap: 6px;
+  gap: 1.5px;
   padding: 4px 4px 4px 6px;
   color: var(--fg-muted);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
@@ -284,7 +284,7 @@
   height: 24px;
   border-radius: 5px;
   display: inline-grid;
-  place-items: center;
+  place-items: center start;
   opacity: 0;
 }
 

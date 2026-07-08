@@ -15,6 +15,7 @@ import {
   appendStreamedModelResponseChunk,
   extractStreamedResponseUsage,
   isEmptyMalformedToolCallFinish,
+  isEmptyUnusableModelResponse,
 } from "./streamed_model_response";
 import { captureRawResponseChunk } from "./raw_response";
 
@@ -62,6 +63,26 @@ const createMalformedToolCallRawChunk = (): Record<string, any> => ({
   },
 });
 
+const createEmptyErrorRawChunk = (): Record<string, any> => ({
+  id: "gen-gemini-empty-error",
+  model: "google/gemini-3.5-flash-20260519",
+  choices: [
+    {
+      index: 0,
+      delta: {
+        role: "assistant",
+        content: "",
+      },
+      finish_reason: "error",
+    },
+  ],
+  usage: {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  },
+});
+
 const createReasoningOnlyMalformedToolCallRawChunk = (): Record<
   string,
   any
@@ -95,6 +116,18 @@ const createMalformedAssistantChunk = (): AIMessageChunk =>
     },
     additional_kwargs: {
       __raw_response: createMalformedToolCallRawChunk(),
+    },
+  });
+
+const createEmptyErrorAssistantChunk = (): AIMessageChunk =>
+  new AIMessageChunk({
+    content: "",
+    response_metadata: {
+      model_name: "google/gemini-3.5-flash-20260519",
+      finish_reason: "error",
+    },
+    additional_kwargs: {
+      __raw_response: createEmptyErrorRawChunk(),
     },
   });
 
@@ -277,6 +310,41 @@ class FakeMalformedStreamWithInvokeModel extends FakeStreamingModel {
         self.invokeCalls += 1;
         self.invokeRequests.push(Array.isArray(messages) ? messages : []);
         return self.invokeResponse;
+      },
+    };
+  }
+}
+
+class FakeEmptyErrorThenTextModel extends FakeStreamingModel {
+  bindTools(): {
+    stream: (messages?: any[]) => AsyncGenerator<any>;
+    invoke: () => Promise<never>;
+  } {
+    const self = this;
+    return {
+      stream: async function* (messages?: any[]) {
+        self.streamCalls += 1;
+        self.requests.push(Array.isArray(messages) ? messages : []);
+        if (self.streamCalls === 1) {
+          yield createEmptyErrorAssistantChunk();
+          return;
+        }
+        yield new AIMessageChunk({
+          content: "Recovered answer.",
+          response_metadata: {
+            model_name: "google/gemini-3.5-flash-20260519",
+            finish_reason: "stop",
+            usage: {
+              prompt_tokens: 100,
+              completion_tokens: 4,
+              total_tokens: 104,
+            },
+          },
+        });
+      },
+      invoke: async () => {
+        self.invokeCalls += 1;
+        throw new Error("empty error retry should not use non-stream invoke");
       },
     };
   }
@@ -526,6 +594,61 @@ const run = async (): Promise<void> => {
       "empty tool_calls finish without tool call payload should be malformed",
     );
   });
+
+  await runCase(
+    "empty provider error finishes are treated as unusable model responses",
+    () => {
+      const rawChunks: any[] = [];
+      const chunk = createEmptyErrorAssistantChunk();
+      const rawChunk = captureRawResponseChunk(chunk, rawChunks);
+      const appended = appendStreamedModelResponseChunk(
+        null,
+        chunk,
+        rawChunk,
+      );
+
+      assertEqual(
+        isEmptyMalformedToolCallFinish(appended.response, rawChunks),
+        false,
+        "provider error finishes are not malformed tool-call finishes",
+      );
+      assertEqual(
+        isEmptyUnusableModelResponse(appended.response, rawChunks),
+        true,
+        "empty provider error finishes should not be accepted as final assistant output",
+      );
+      assertEqual(
+        extractStreamedResponseUsage(appended.response, rawChunks)?.totalTokens,
+        0,
+        "zero-usage provider error chunks should still expose usage for diagnostics",
+      );
+    },
+  );
+
+  await runCase(
+    "valid empty tool calls are not treated as generic unusable responses",
+    () => {
+      const response = new AIMessage({
+        content: "",
+        tool_calls: [
+          {
+            id: "call-read",
+            name: "read_file",
+            args: { filePath: "README.md" },
+          } as any,
+        ],
+        response_metadata: {
+          finish_reason: "tool_calls",
+        },
+      } as any);
+
+      assertEqual(
+        isEmptyUnusableModelResponse(response, []),
+        false,
+        "tool-call payloads should stay routable even when assistant text is empty",
+      );
+    },
+  );
 
   await runCase(
     "reasoning-only tool-call finish is still malformed",
@@ -846,6 +969,114 @@ const run = async (): Promise<void> => {
         ),
         false,
         "backend history should not persist the internal malformed response",
+      );
+    },
+  );
+
+  await runCase(
+    "empty provider error stream retries instead of ending the turn silently",
+    async () => {
+      const tempDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "gyshell-stream-response-extreme-"),
+      );
+      const store = new HistorySqliteStore({
+        filePath: path.join(tempDir, "history.sqlite3"),
+      });
+      const chatHistory = new ChatHistoryService({ store });
+      const uiHistory = new UIHistoryService({ store });
+      const agent = createAgentService(chatHistory, uiHistory);
+      const events: any[] = [];
+      agent.setEventPublisher((_sessionId, event) => {
+        events.push(event);
+      });
+
+      const sessionId = "gemini-empty-error-retry";
+      const profileId = "gemini-profile";
+      const mainModel = new FakeEmptyErrorThenTextModel();
+      const guardModel = new GuardShouldNotRunModel();
+      (agent as any).sessionModelBindings.set(sessionId, {
+        profileId,
+        model: mainModel,
+        actionModel: guardModel,
+        thinkingModel: guardModel,
+        compactionModel: guardModel,
+        actionModelSupportsStructuredOutput: true,
+        actionModelSupportsObjectToolChoice: false,
+        thinkingModelSupportsStructuredOutput: true,
+        thinkingModelSupportsObjectToolChoice: false,
+        compactionModelSupportsStructuredOutput: true,
+        compactionModelSupportsObjectToolChoice: false,
+        readFileSupport: { image: false },
+        toolsForModel: [],
+        globalMaxTokens: 1000000,
+        thinkingMaxTokens: 1000000,
+        compactionMaxTokens: 1000000,
+      });
+
+      await agent.run(
+        {
+          sessionId,
+          lockedProfileId: profileId,
+          metadata: {},
+          lockedExperimentalFlags: {
+            runtimeThinkingCorrectionEnabled: false,
+            taskFinishGuardEnabled: false,
+            firstTurnThinkingModelEnabled: false,
+            execCommandActionModelEnabled: true,
+            writeStdinActionModelEnabled: true,
+          },
+        } as any,
+        "continue",
+        new AbortController().signal,
+      );
+
+      assertEqual(
+        mainModel.streamCalls,
+        2,
+        "empty provider error finish should retry the streaming request",
+      );
+      assertEqual(
+        mainModel.invokeCalls,
+        0,
+        "empty provider error finish should not use the tool-call fallback invoke path",
+      );
+      assertCondition(
+        events.some(
+          (event) =>
+            event.type === "alert" &&
+            String(event.message).includes("Retrying"),
+        ),
+        "retry should be visible to the UI",
+      );
+      assertCondition(
+        events.some(
+          (event) =>
+            event.type === "say" && event.content === "Recovered answer.",
+        ),
+        "retry recovery should emit the successful assistant text",
+      );
+      assertEqual(
+        guardModel.streamCalls + guardModel.invokeCalls,
+        0,
+        "completion guard should not be needed after retry recovery with task guard disabled",
+      );
+
+      const saved = chatHistory.loadSession(sessionId);
+      const storedMessages = Array.from(saved?.messages.values() ?? []);
+      const emptyErrorStored = storedMessages.some((message: any) => {
+        const data = message?.data || message;
+        return (
+          data?.type === "ai" &&
+          data?.content === "" &&
+          String(data?.response_metadata?.finish_reason || "").includes(
+            "error",
+          )
+        );
+      });
+      assertEqual(
+        emptyErrorStored,
+        false,
+        "backend history should not persist the transient empty provider error response",
       );
     },
   );

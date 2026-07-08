@@ -25,6 +25,7 @@ export interface PanelKindUiRegistryItem {
   labelKey: LayoutPanelKindLabelKey
   resolveRailClickIntent: (context: RailClickContext) => RailClickIntent
   getOwnerTabCount: (store: AppStore) => number
+  formatRailIndicator?: (ownerTabCount: number) => string
   createDefaultTab: (store: AppStore, panelId: string) => void
 }
 
@@ -77,7 +78,8 @@ export const PANEL_KIND_UI_REGISTRY: Record<RailPanelKind, PanelKindUiRegistryIt
     icon: ListTree,
     labelKey: 'listPanelKind',
     resolveRailClickIntent: () => 'open-panel-only',
-    getOwnerTabCount: (store) => store.getOwnedTabIds('terminal').length + store.getOwnedTabIds('chat').length,
+    getOwnerTabCount: () => 0,
+    formatRailIndicator: () => '-',
     createDefaultTab: () => {
       // The list panel opens a global shadow directory and does not own tabs.
     }
