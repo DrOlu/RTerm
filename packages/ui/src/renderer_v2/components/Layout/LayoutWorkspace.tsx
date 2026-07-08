@@ -418,6 +418,7 @@ const PanelLeaf: React.FC<{
             store.layout.setPanelActiveTab(panelId, tabId),
           onRequestCloseTabs: (tabIds) =>
             onRequestCloseTabsByKind(node.panel.kind, tabIds),
+          onRequestCloseTabsByKind,
           onRequestOpenTabInDetachedWindow,
           onLayoutHeaderContextMenu: (event) =>
             onHeaderContextMenu(panelId, event),

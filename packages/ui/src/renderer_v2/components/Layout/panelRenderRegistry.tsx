@@ -15,6 +15,7 @@ export interface LayoutPanelRenderProps {
   activeTabId: string | null
   onSelectTab: (tabId: string) => void
   onRequestCloseTabs?: (tabIds: string[]) => void
+  onRequestCloseTabsByKind?: (kind: PanelKind, tabIds: string[]) => void
   onRequestOpenTabInDetachedWindow?: (payload: TabDragPayload) => void
   onLayoutHeaderContextMenu?: (event: React.MouseEvent<HTMLElement>) => void
 }
@@ -118,12 +119,14 @@ const MonitorPanelRenderer: LayoutPanelRenderer = ({
 const ListPanelRenderer: LayoutPanelRenderer = ({
   store,
   panelId,
+  onRequestCloseTabsByKind,
   onRequestOpenTabInDetachedWindow,
   onLayoutHeaderContextMenu
 }) => (
   <ListPanel
     store={store}
     panelId={panelId}
+    onRequestCloseTabsByKind={onRequestCloseTabsByKind}
     onRequestOpenTabInDetachedWindow={onRequestOpenTabInDetachedWindow}
     onLayoutHeaderContextMenu={onLayoutHeaderContextMenu}
   />

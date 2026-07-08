@@ -34,6 +34,10 @@ import "./listPanel.scss";
 interface ListPanelProps {
   store: AppStore;
   panelId: string;
+  onRequestCloseTabsByKind?: (
+    kind: ListPanelTabKind,
+    tabIds: string[],
+  ) => void;
   onRequestOpenTabInDetachedWindow?: (payload: TabDragPayload) => void;
   onLayoutHeaderContextMenu?: (event: React.MouseEvent<HTMLElement>) => void;
 }
@@ -122,6 +126,7 @@ export const ListPanel: React.FC<ListPanelProps> = observer(
   ({
     store,
     panelId,
+    onRequestCloseTabsByKind,
     onRequestOpenTabInDetachedWindow,
     onLayoutHeaderContextMenu,
   }) => {
@@ -223,13 +228,17 @@ export const ListPanel: React.FC<ListPanelProps> = observer(
 
     const handleCloseRow = React.useCallback(
       (row: ListPanelRow) => {
+        if (onRequestCloseTabsByKind) {
+          onRequestCloseTabsByKind(row.kind, [row.id]);
+          return;
+        }
         if (row.kind === "terminal") {
           void store.closeTab(row.id);
           return;
         }
         store.chat.closeSession(row.id);
       },
-      [store],
+      [onRequestCloseTabsByKind, store],
     );
 
     const handlePanelMouseDownCapture = React.useCallback(() => {
