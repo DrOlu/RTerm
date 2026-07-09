@@ -866,6 +866,159 @@ const run = async (): Promise<void> => {
   );
 
   await runCase(
+    "createLocalTab without a terminal panel stays unhosted until one exists",
+    () => {
+      (globalThis as unknown as { window: unknown }).window = {
+        gyshell: {
+          system: {
+            platform: "darwin",
+          },
+        },
+      };
+      const store = new AppStore();
+      (store.layout as any).saveLayoutDebounced = () => {};
+      store.layout.setViewport(1400, 900);
+
+      const initialTerminalPanelId = store.layout.getPrimaryPanelId("terminal");
+      assertCondition(
+        Boolean(initialTerminalPanelId),
+        "default layout should start with a terminal panel",
+      );
+      store.layout.removePanel(initialTerminalPanelId!);
+      assertEqual(
+        store.layout.getPrimaryPanelId("terminal"),
+        null,
+        "test setup should remove all terminal panels before local creation",
+      );
+
+      const tabId = store.createLocalTab(undefined, { ensurePanel: false });
+      assertEqual(
+        store.layout.getPrimaryPanelId("terminal"),
+        null,
+        "list-panel local creation should not recreate a terminal panel by itself",
+      );
+      assertCondition(
+        store.getLayoutBindableTabIds("terminal").includes(tabId),
+        "unhosted local tab should remain eligible for a future terminal panel",
+      );
+
+      const restoredPanelId =
+        store.layout.ensurePrimaryPanelForKind("terminal");
+      assertCondition(
+        Boolean(restoredPanelId),
+        "terminal panel should be restorable after local background creation",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(restoredPanelId!)),
+        JSON.stringify([tabId]),
+        "future terminal panel should automatically host the unhosted local tab",
+      );
+      assertEqual(
+        store.layout.getPanelActiveTabId(restoredPanelId!),
+        tabId,
+        "future terminal panel should activate the unhosted local tab",
+      );
+    },
+  );
+
+  await runCase(
+    "createLocalTab can start runtime without attaching to a terminal panel",
+    async () => {
+      const originalWindow = (globalThis as any).window;
+      let createdConfig: any = null;
+
+      (globalThis as any).window = {
+        gyshell: {
+          system: {
+            platform: "darwin",
+          },
+          terminal: {
+            createTab: async (config: any) => {
+              createdConfig = config;
+              return { id: config.id };
+            },
+            list: async () => ({
+              terminals: createdConfig
+                ? [
+                    {
+                      id: createdConfig.id,
+                      title: createdConfig.title,
+                      type: "local",
+                      cols: createdConfig.cols,
+                      rows: createdConfig.rows,
+                      runtimeState: "ready",
+                    },
+                  ]
+                : [],
+            }),
+          },
+        },
+      };
+
+      try {
+        const store = new AppStore();
+        (store.layout as any).saveLayoutDebounced = () => {};
+        store.layout.setViewport(1400, 900);
+
+        const initialTerminalPanelId =
+          store.layout.getPrimaryPanelId("terminal");
+        assertCondition(
+          Boolean(initialTerminalPanelId),
+          "default layout should start with a terminal panel",
+        );
+        store.layout.removePanel(initialTerminalPanelId!);
+
+        const tabId = store.createLocalTab(undefined, {
+          ensurePanel: false,
+          startRuntime: true,
+        });
+        const initializingTab = store.terminalTabs.find(
+          (entry) => entry.id === tabId,
+        );
+        assertEqual(
+          initializingTab?.runtimeState,
+          "initializing",
+          "background local tabs should not look ready before backend creation",
+        );
+        assertEqual(
+          store.layout.getPrimaryPanelId("terminal"),
+          null,
+          "background local runtime creation should not create a terminal panel",
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assertEqual(
+          createdConfig?.id,
+          tabId,
+          "background local creation should create the backend terminal runtime",
+        );
+        assertEqual(
+          store.layout.getPrimaryPanelId("terminal"),
+          null,
+          "backend local runtime creation should keep the tab unhosted when no terminal panel exists",
+        );
+        assertCondition(
+          store.getLayoutBindableTabIds("terminal").includes(tabId),
+          "background local runtime should stay eligible for future terminal panels after reconciliation",
+        );
+        assertEqual(
+          store.activeTerminalId,
+          tabId,
+          "background local runtime should remain the active terminal after reconciliation",
+        );
+        assertEqual(
+          store.terminalTabs.find((entry) => entry.id === tabId)?.runtimeState,
+          "ready",
+          "background local runtime should reconcile to the backend ready state",
+        );
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+    },
+  );
+
+  await runCase(
     "createSshTab can start runtime without attaching to a terminal panel",
     async () => {
       const originalWindow = (globalThis as any).window;

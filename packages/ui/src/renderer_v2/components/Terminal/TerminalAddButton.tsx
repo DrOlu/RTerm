@@ -160,8 +160,11 @@ export const TerminalAddButton: React.FC<TerminalAddButtonProps> = ({
               <button
                 className="tab-menu-item"
                 onClick={() => {
+                  const shouldStartLocalRuntime =
+                    ensurePanelOnCreate === false && !resolvedTargetPanelId;
                   const tabId = store.createLocalTab(resolvedTargetPanelId, {
                     ensurePanel: ensurePanelOnCreate,
+                    startRuntime: shouldStartLocalRuntime,
                   });
                   onTabCreated?.(tabId, { type: "local" });
                   setOpen(false);

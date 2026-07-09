@@ -34,6 +34,16 @@ export type ListPanelRowActivation =
       hostPanelId: string | null;
     };
 
+export type ListPanelCreatedTerminalActivation =
+  | {
+      type: "activate-host";
+      panelId: string;
+      tabId: string;
+    }
+  | {
+      type: "none";
+    };
+
 export const resolveListPanelChatStatusLabel = (
   isSessionBusy: boolean,
 ): "running" | "inactive" => (isSessionBusy ? "running" : "inactive");
@@ -121,5 +131,19 @@ export const resolveListPanelRowActivation = (
     kind: row.kind,
     tabId: row.id,
     hostPanelId: null,
+  };
+};
+
+export const resolveCreatedTerminalTabActivation = (input: {
+  tabId: string;
+  hostPanelId: string | null;
+}): ListPanelCreatedTerminalActivation => {
+  if (!input.hostPanelId) {
+    return { type: "none" };
+  }
+  return {
+    type: "activate-host",
+    panelId: input.hostPanelId,
+    tabId: input.tabId,
   };
 };

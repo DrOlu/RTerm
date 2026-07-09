@@ -2788,10 +2788,11 @@ export class AppStore {
 
   createLocalTab(
     targetPanelId?: string,
-    options?: { ensurePanel?: boolean },
+    options?: { ensurePanel?: boolean; startRuntime?: boolean },
   ): string {
     const id = `local-${uuidv4()}`;
     const title = this.getUniqueTitle("Local");
+    const shouldStartRuntime = options?.startRuntime === true;
     const cfg: TerminalConfig = {
       type: "local",
       id,
@@ -2805,7 +2806,7 @@ export class AppStore {
       config: cfg,
       capabilities: resolveTerminalConnectionCapabilities(cfg),
       connectionRef: { type: "local" },
-      runtimeState: shouldInitializeLocalTerminalSilently()
+      runtimeState: shouldStartRuntime || shouldInitializeLocalTerminalSilently()
         ? "initializing"
         : "ready",
     };
@@ -2825,6 +2826,9 @@ export class AppStore {
       this.layout.attachTabToPanel("terminal", id, resolvedPanelId);
     } else {
       this.layout.syncPanelBindings();
+    }
+    if (shouldStartRuntime) {
+      void this.startTerminalRuntime(tab);
     }
     return id;
   }

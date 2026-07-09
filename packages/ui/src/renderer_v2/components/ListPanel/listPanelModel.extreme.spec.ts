@@ -1,5 +1,6 @@
 import {
   buildListPanelRows,
+  resolveCreatedTerminalTabActivation,
   resolveListPanelChatStatusLabel,
   resolveListPanelHost,
   resolveListPanelRowActivation,
@@ -174,6 +175,32 @@ runCase("chat status dots are green only for busy sessions", () => {
     "idle chat sessions should use the inactive status dot",
   );
 });
+
+runCase(
+  "created terminal tabs activate only an existing host panel",
+  () => {
+    assertDeepEqual(
+      resolveCreatedTerminalTabActivation({
+        tabId: "term-new",
+        hostPanelId: "panel-terminal",
+      }),
+      {
+        type: "activate-host",
+        panelId: "panel-terminal",
+        tabId: "term-new",
+      },
+      "created terminal tabs should activate the existing terminal panel",
+    );
+    assertDeepEqual(
+      resolveCreatedTerminalTabActivation({
+        tabId: "term-new",
+        hostPanelId: null,
+      }),
+      { type: "none" },
+      "created terminal tabs should not create a terminal panel from the list panel",
+    );
+  },
+);
 
 runCase(
   "visible tab inventory filters suppressed or detached-away tabs before host resolution",

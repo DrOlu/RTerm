@@ -16,13 +16,11 @@ import {
   resolveTerminalRuntimeIndicatorState,
 } from "../../lib/terminalConnectionModel";
 import { normalizeSessionTitleText } from "../../lib/sessionTitleDisplay";
-import {
-  TerminalAddButton,
-  type TerminalAddButtonCreateContext,
-} from "../Terminal/TerminalAddButton";
+import { TerminalAddButton } from "../Terminal/TerminalAddButton";
 import { resolveTerminalTabIcon } from "../Terminal/terminalTabIcons";
 import {
   buildListPanelRows,
+  resolveCreatedTerminalTabActivation,
   resolveListPanelChatStatusLabel,
   resolveListPanelRowActivation,
   type ListPanelRow,
@@ -217,13 +215,17 @@ export const ListPanel: React.FC<ListPanelProps> = observer(
     );
 
     const handleTerminalTabCreated = React.useCallback(
-      (tabId: string, context: TerminalAddButtonCreateContext) => {
-        if (context.type === "ssh") {
+      (tabId: string) => {
+        const activation = resolveCreatedTerminalTabActivation({
+          tabId,
+          hostPanelId: store.layout.getPrimaryPanelId("terminal"),
+        });
+        if (activation.type === "none") {
           return;
         }
-        openTabInPrimaryPanel("terminal", tabId);
+        store.layout.setPanelActiveTab(activation.panelId, activation.tabId);
       },
-      [openTabInPrimaryPanel],
+      [store.layout],
     );
 
     const handleCloseRow = React.useCallback(
