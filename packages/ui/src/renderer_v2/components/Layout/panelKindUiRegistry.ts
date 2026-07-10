@@ -1,9 +1,9 @@
 import type { LucideIcon } from 'lucide-react'
-import { Activity, FolderTree, MessageSquare, SquareTerminal } from 'lucide-react'
+import { Activity, FolderTree, ListTree, MessageSquare, SquareTerminal } from 'lucide-react'
 import { PANEL_KINDS_WITH_RAIL } from '../../layout'
 import type { AppStore } from '../../stores/AppStore'
 
-type LayoutPanelKindLabelKey = 'chatKind' | 'terminalKind' | 'filesystemKind' | 'monitorKind'
+type LayoutPanelKindLabelKey = 'chatKind' | 'terminalKind' | 'filesystemKind' | 'monitorKind' | 'listPanelKind'
 export type RailClickIntent = 'open-panel-only' | 'create-new-tab'
 export type RailPanelKind = (typeof PANEL_KINDS_WITH_RAIL)[number]
 
@@ -25,6 +25,7 @@ export interface PanelKindUiRegistryItem {
   labelKey: LayoutPanelKindLabelKey
   resolveRailClickIntent: (context: RailClickContext) => RailClickIntent
   getOwnerTabCount: (store: AppStore) => number
+  formatRailIndicator?: (ownerTabCount: number) => string
   createDefaultTab: (store: AppStore, panelId: string) => void
 }
 
@@ -70,6 +71,17 @@ export const PANEL_KIND_UI_REGISTRY: Record<RailPanelKind, PanelKindUiRegistryIt
     getOwnerTabCount: (store) => store.monitorTabs.length,
     createDefaultTab: () => {
       // Monitor tabs are derived from terminal tabs and cannot be created independently.
+    }
+  }),
+  listPanel: createPanelKindUiItem({
+    kind: 'listPanel',
+    icon: ListTree,
+    labelKey: 'listPanelKind',
+    resolveRailClickIntent: () => 'open-panel-only',
+    getOwnerTabCount: () => 0,
+    formatRailIndicator: () => '-',
+    createDefaultTab: () => {
+      // The list panel opens a global shadow directory and does not own tabs.
     }
   })
 }

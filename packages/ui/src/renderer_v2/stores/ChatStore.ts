@@ -25,6 +25,7 @@ export type MessageType =
   | "sub_tool"
   | "reasoning"
   | "compaction"
+  | "compaction_boundary"
   | "alert"
   | "error"
   | "ask"
@@ -59,6 +60,10 @@ export interface ChatMessage {
     details?: string;
     inputKind?: "normal" | "inserted";
     inputImages?: InputImageAttachment[];
+    compactionBoundaryTargetBackendMessageId?: string;
+    compactionBoundaryPreviousBackendMessageId?: string;
+    compactionBoundarySummaryBackendMessageId?: string;
+    compactionBoundaryProtectedNormalRounds?: number;
   };
   timestamp: number;
   streaming?: boolean;
@@ -84,6 +89,78 @@ interface ChatHydrationPayload {
   isBusy: boolean;
   lockedProfileId: string | null;
 }
+
+const normalizeBoundaryBackendId = (value: unknown): string => {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : "";
+};
+
+const normalizeCompactionBoundaryMessageOrder = (
+  messages: ChatMessage[],
+): ChatMessage[] => {
+  if (messages.length === 0) return messages;
+
+  const baseMessages: ChatMessage[] = [];
+  const boundaryMessages: ChatMessage[] = [];
+  messages.forEach((message) => {
+    if (message.type === "compaction_boundary") {
+      boundaryMessages.push({
+        ...message,
+        role: "system",
+        content: "",
+        streaming: false,
+      });
+      return;
+    }
+    baseMessages.push(message);
+  });
+
+  if (boundaryMessages.length === 0) return messages;
+
+  const normalized = [...baseMessages];
+  const seenBoundaryKeys = new Set<string>();
+
+  boundaryMessages.forEach((boundary) => {
+    const targetBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundaryTargetBackendMessageId,
+    );
+    const previousBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundaryPreviousBackendMessageId,
+    );
+    const summaryBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundarySummaryBackendMessageId,
+    );
+    const boundaryKey =
+      summaryBackendId ||
+      targetBackendId ||
+      previousBackendId ||
+      boundary.backendMessageId ||
+      boundary.id;
+    if (seenBoundaryKeys.has(boundaryKey)) return;
+
+    if (targetBackendId) {
+      const targetIndex = normalized.findIndex(
+        (message) => message.backendMessageId === targetBackendId,
+      );
+      if (targetIndex < 0) return;
+      normalized.splice(targetIndex, 0, boundary);
+      seenBoundaryKeys.add(boundaryKey);
+      return;
+    }
+
+    if (previousBackendId) {
+      const previousIndex = normalized.findIndex(
+        (message) => message.backendMessageId === previousBackendId,
+      );
+      if (previousIndex < 0) return;
+      normalized.splice(previousIndex + 1, 0, boundary);
+      seenBoundaryKeys.add(boundaryKey);
+    }
+  });
+
+  return normalized;
+};
 
 export class ChatStore {
   sessions: ChatSession[] = [];
@@ -515,6 +592,46 @@ export class ChatStore {
     });
   }
 
+  private normalizeCompactionBoundaryMessages(session: ChatSession): void {
+    const orderedMessages = session.messageIds
+      .map((messageId) => session.messagesById.get(messageId))
+      .filter((message): message is ChatMessage => !!message);
+    const normalized = normalizeCompactionBoundaryMessageOrder(orderedMessages);
+    const normalizedIds = new Set(normalized.map((message) => message.id));
+
+    orderedMessages.forEach((message) => {
+      if (!normalizedIds.has(message.id)) {
+        session.messagesById.delete(message.id);
+      }
+    });
+    normalized.forEach((message) => {
+      session.messagesById.set(message.id, message);
+    });
+    session.messageIds = normalized.map((message) => message.id);
+  }
+
+  private resolveInsertAnchorIndex(
+    session: ChatSession,
+    update: {
+      anchorMessageId?: string;
+      anchorBackendMessageId?: string;
+    },
+  ): number {
+    if (typeof update.anchorMessageId === "string") {
+      const byUiId = session.messageIds.indexOf(update.anchorMessageId);
+      if (byUiId >= 0) return byUiId;
+    }
+
+    if (typeof update.anchorBackendMessageId === "string") {
+      return session.messageIds.findIndex((messageId) => {
+        const message = session.messagesById.get(messageId);
+        return message?.backendMessageId === update.anchorBackendMessageId;
+      });
+    }
+
+    return -1;
+  }
+
   setThinking(thinking: boolean, sessionId: string) {
     const session = this.sessions.find((s) => s.id === sessionId);
     if (session) {
@@ -588,6 +705,35 @@ export class ChatStore {
           }
           break;
         }
+        case "INSERT_MESSAGE": {
+          const msg = update.message;
+          if (!msg || typeof msg.id !== "string" || msg.id.length === 0) {
+            break;
+          }
+          const anchorIndex = this.resolveInsertAnchorIndex(session, update);
+          if (anchorIndex < 0) {
+            break;
+          }
+
+          const existingIndex = session.messageIds.indexOf(msg.id);
+          if (existingIndex >= 0) {
+            session.messageIds.splice(existingIndex, 1);
+          }
+          session.messagesById.set(msg.id, msg);
+
+          const adjustedAnchorIndex =
+            existingIndex >= 0 && existingIndex < anchorIndex
+              ? anchorIndex - 1
+              : anchorIndex;
+          const insertIndex =
+            update.placement === "after"
+              ? adjustedAnchorIndex + 1
+              : adjustedAnchorIndex;
+          session.messageIds.splice(insertIndex, 0, msg.id);
+          this.normalizeCompactionBoundaryMessages(session);
+          this.bumpSessionRenderListVersion(session);
+          break;
+        }
         case "REMOVE_MESSAGE": {
           session.messagesById.delete(update.messageId);
           session.messageIds = session.messageIds.filter(
@@ -646,6 +792,7 @@ export class ChatStore {
               session.messagesById.delete(messageId),
             );
             session.messageIds = session.messageIds.slice(0, rollbackIndex);
+            this.normalizeCompactionBoundaryMessages(session);
             this.bumpSessionRenderListVersion(session);
           }
           session.isThinking = false;
@@ -869,6 +1016,7 @@ export class ChatStore {
 
       // Update IDs array
       session.messageIds = keptIds;
+      this.normalizeCompactionBoundaryMessages(session);
       this.bumpSessionRenderListVersion(session);
       session.isThinking = false;
     });

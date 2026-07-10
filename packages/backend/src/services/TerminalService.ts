@@ -139,6 +139,30 @@ const normalizeTerminalConfigForRuntime = (config: TerminalConfig): TerminalConf
   return normalized
 }
 
+const resolveUniqueTerminalTitle = (
+  baseTitle: string,
+  existingTitles: Iterable<string>
+): string => {
+  const usedTitles = new Set(
+    Array.from(existingTitles)
+      .map((title) => String(title || '').trim())
+      .filter((title) => title.length > 0)
+  )
+  const normalizedBaseTitle = String(baseTitle || '').trim() || 'Terminal'
+  if (!usedTitles.has(normalizedBaseTitle)) {
+    return normalizedBaseTitle
+  }
+
+  const rootTitle = normalizedBaseTitle
+  let counter = 1
+  let nextTitle = `${rootTitle} (${counter})`
+  while (usedTitles.has(nextTitle)) {
+    counter += 1
+    nextTitle = `${rootTitle} (${counter})`
+  }
+  return nextTitle
+}
+
 const normalizeTerminalResizeTarget = (
   cols: number,
   rows: number
@@ -156,6 +180,7 @@ export class TerminalService {
   private backends: Map<ConnectionType, TerminalBackend> = new Map()
   private terminals: Map<string, TerminalTab> = new Map()
   private terminalConfigs: Map<string, TerminalConfig> = new Map()
+  private pendingTerminalTitles: Map<string, string> = new Map()
   private pendingResizeByTerminal: Map<string, TerminalResizeTarget> = new Map()
   private buffers: Map<string, RingBuffer> = new Map()
   private headlessPtys: Map<string, TerminalType> = new Map()
@@ -319,6 +344,33 @@ export class TerminalService {
     } as TerminalConfig)
   }
 
+  private resolveUniqueTitleForTerminal(title: string, terminalId: string): string {
+    return resolveUniqueTerminalTitle(
+      title,
+      [
+        ...Array.from(this.terminals.values())
+          .filter((terminal) => terminal.id !== terminalId)
+          .map((terminal) => terminal.title),
+        ...Array.from(this.pendingTerminalTitles.entries())
+          .filter(([pendingTerminalId]) => pendingTerminalId !== terminalId)
+          .map(([, pendingTitle]) => pendingTitle)
+      ]
+    )
+  }
+
+  private reserveUniqueTitleForTerminal(title: string, terminalId: string): string {
+    const uniqueTitle = this.resolveUniqueTitleForTerminal(title, terminalId)
+    this.pendingTerminalTitles.set(terminalId, uniqueTitle)
+    return uniqueTitle
+  }
+
+  private releaseReservedTitleForTerminal(terminalId: string, title: string): void {
+    if (this.pendingTerminalTitles.get(terminalId) !== title) {
+      return
+    }
+    this.pendingTerminalTitles.delete(terminalId)
+  }
+
   private extractTerminalConfigForPersist(terminal: TerminalTab): TerminalConfig | null {
     const existing = this.terminalConfigs.get(terminal.id)
     if (existing) {
@@ -469,10 +521,13 @@ export class TerminalService {
       } as TerminalConfig)
       this.pendingResizeByTerminal.delete(config.id)
     }
-
     // Idempotent: renderer may call createTab more than once (dev reload / re-mount).
     const existing = this.terminals.get(config.id)
     if (existing) {
+      config = normalizeTerminalConfigForRuntime({
+        ...config,
+        title: this.resolveUniqueTitleForTerminal(config.title, config.id)
+      } as TerminalConfig)
       const existingConfig = this.terminalConfigs.get(config.id)
       const mergedConfig = existingConfig
         ? this.mergeTerminalConfigForIdempotent(existingConfig, config)
@@ -509,7 +564,19 @@ export class TerminalService {
       return existing
     }
 
-    const runtime = await this.spawnBackendRuntime(config)
+    const reservedTitle = this.reserveUniqueTitleForTerminal(config.title, config.id)
+    config = normalizeTerminalConfigForRuntime({
+      ...config,
+      title: reservedTitle
+    } as TerminalConfig)
+
+    let runtime: { config: TerminalConfig; ptyId: string }
+    try {
+      runtime = await this.spawnBackendRuntime(config)
+    } catch (error) {
+      this.releaseReservedTitleForTerminal(config.id, reservedTitle)
+      throw error
+    }
     config = runtime.config
 
     const tab: TerminalTab = {
@@ -534,6 +601,7 @@ export class TerminalService {
 
     this.terminals.set(config.id, tab)
     this.terminalConfigs.set(config.id, config)
+    this.releaseReservedTitleForTerminal(config.id, reservedTitle)
     this.buffers.set(config.id, { content: '', offset: 0 })
     this.headlessPtys.set(config.id, headless)
     if (config.type === 'local' && !this.primaryLocalTerminalId) {

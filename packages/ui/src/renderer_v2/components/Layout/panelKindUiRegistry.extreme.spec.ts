@@ -49,25 +49,46 @@ runCase('filesystem rail click always opens panel only', () => {
   assertEqual(intentWithTabs, 'open-panel-only', 'filesystem rail should not create tabs when tabs exist')
 })
 
-runCase('owner tab count reflects global inventory', () => {
+runCase('owner tab count reflects global inventory for tab-owning rail items', () => {
   const mockStore = {
     chat: {
       sessions: [{ id: 'chat-a' }, { id: 'chat-b' }]
     },
     terminalTabs: [{ id: 'term-a' }],
-    fileSystemTabs: []
+    fileSystemTabs: [],
+    monitorTabs: [],
+    getOwnedTabIds(kind: string) {
+      if (kind === 'terminal') return ['term-a']
+      if (kind === 'chat') return ['chat-a', 'chat-b']
+      return []
+    }
   } as any
   assertEqual(getPanelKindUiItem('chat').getOwnerTabCount(mockStore), 2, 'chat owner count should use global inventory')
   assertEqual(getPanelKindUiItem('terminal').getOwnerTabCount(mockStore), 1, 'terminal owner count should use global inventory')
   assertEqual(getPanelKindUiItem('filesystem').getOwnerTabCount(mockStore), 0, 'filesystem owner count should use global inventory')
+  assertEqual(getPanelKindUiItem('listPanel').getOwnerTabCount(mockStore), 0, 'list panel should not report a combined tab inventory count')
+  assertEqual(getPanelKindUiItem('listPanel').formatRailIndicator?.(3), '-', 'list panel rail indicator should use a fixed placeholder')
 })
 
-runCase('special file editor panel is hidden from rail', () => {
+runCase('special file editor panel is hidden from rail but list panel is visible', () => {
   const railKinds = PANEL_KIND_UI_ORDER as readonly string[]
   assertEqual(
     railKinds.includes('fileEditor'),
     false,
     'special panel kinds without rail entry should not be rendered in rail'
+  )
+  assertEqual(railKinds.includes('listPanel'), true, 'list panel should be rendered in the rail')
+})
+
+runCase('list panel rail click opens the panel without creating a shadow tab', () => {
+  const item = getPanelKindUiItem('listPanel')
+  assertEqual(
+    item.resolveRailClickIntent({
+      panelCount: 1,
+      ownerTabCount: 10
+    }),
+    'open-panel-only',
+    'list panel should never create tabs from the rail'
   )
 })
 

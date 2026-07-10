@@ -64,6 +64,7 @@ class FakeTerminalBackend implements TerminalBackend {
   private readonly spawnConfigs: TerminalConfig[] = []
   private readonly resizeCalls: Array<{ ptyId: string; cols: number; rows: number }> = []
   private readonly writeCalls: Array<{ ptyId: string; data: string }> = []
+  private spawnDelayMs = 0
 
   private getPtyIdForTerminalId(terminalId: string): string {
     return `pty-${terminalId}`
@@ -145,6 +146,10 @@ class FakeTerminalBackend implements TerminalBackend {
     this.spawnFailures.add(terminalId)
   }
 
+  setSpawnDelayMs(delayMs: number): void {
+    this.spawnDelayMs = Math.max(0, Math.floor(delayMs))
+  }
+
   setInitializationStateForTerminalId(
     terminalId: string,
     state: 'initializing' | 'ready' | 'failed'
@@ -175,6 +180,9 @@ class FakeTerminalBackend implements TerminalBackend {
       throw new Error(`intentional spawn failure for ${config.id}`)
     }
     this.spawnConfigs.push(JSON.parse(JSON.stringify(config)) as TerminalConfig)
+    if (this.spawnDelayMs > 0) {
+      await sleep(this.spawnDelayMs)
+    }
     const id = this.getPtyIdForTerminalId(config.id)
     this.sessions.set(id, {
       id,
@@ -766,6 +774,187 @@ const run = async (): Promise<void> => {
         remounted?.cols,
         120,
         'idempotent remount should still update terminal dimensions'
+      )
+    })
+
+    await runCase('terminal service allocates unique titles for duplicate terminal names', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'local',
+        id: 'local-a',
+        title: 'Local (1)',
+        cols: 80,
+        rows: 24
+      })
+      await service.createTerminal({
+        type: 'local',
+        id: 'local-b',
+        title: 'Local (1)',
+        cols: 80,
+        rows: 24
+      })
+      await service.createTerminal({
+        type: 'local',
+        id: 'local-c',
+        title: 'Local (3)',
+        cols: 80,
+        rows: 24
+      })
+
+      assertEqual(
+        JSON.stringify(service.getDisplayTerminals().map((terminal) => terminal.title)),
+        JSON.stringify(['Local (1)', 'Local (1) (1)', 'Local (3)']),
+        'runtime terminal inventory should not expose duplicate titles'
+      )
+
+      await service.createTerminal({
+        type: 'local',
+        id: 'local-b',
+        title: 'Local (1)',
+        cols: 120,
+        rows: 40
+      })
+
+      const remounted = service.getDisplayTerminals().find((terminal) => terminal.id === 'local-b')
+      assertEqual(
+        remounted?.title,
+        'Local (1) (1)',
+        'idempotent remount should keep a unique title for the existing terminal id'
+      )
+      assertEqual(
+        remounted?.cols,
+        120,
+        'idempotent remount should still update dimensions after title normalization'
+      )
+    })
+
+    await runCase('terminal service preserves numeric suffixes in user titles', async () => {
+      const backend = new FakeTerminalBackend()
+      const service = createService(stateFilePath, backend)
+
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'gpu-root',
+        title: 'GPU',
+        cols: 80,
+        rows: 24,
+        host: 'gpu.example.test',
+        port: 22,
+        username: 'gpu',
+        authMethod: 'password'
+      } as any)
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'gpu-a',
+        title: 'GPU (8)',
+        cols: 80,
+        rows: 24,
+        host: 'gpu.example.test',
+        port: 22,
+        username: 'gpu',
+        authMethod: 'password'
+      } as any)
+      await service.createTerminal({
+        type: 'ssh',
+        id: 'gpu-b',
+        title: 'GPU (8)',
+        cols: 80,
+        rows: 24,
+        host: 'gpu.example.test',
+        port: 22,
+        username: 'gpu',
+        authMethod: 'password'
+      } as any)
+
+      assertEqual(
+        JSON.stringify(service.getDisplayTerminals().map((terminal) => terminal.title)),
+        JSON.stringify(['GPU', 'GPU (8)', 'GPU (8) (1)']),
+        'user-provided numeric title suffixes should be preserved when allocating duplicates'
+      )
+    })
+
+    await runCase('terminal service reserves unique titles across parallel creates', async () => {
+      const backend = new FakeTerminalBackend()
+      backend.setSpawnDelayMs(20)
+      const service = createService(stateFilePath, backend)
+
+      await Promise.all([
+        service.createTerminal({
+          type: 'local',
+          id: 'race-a',
+          title: 'Race',
+          cols: 80,
+          rows: 24
+        }),
+        service.createTerminal({
+          type: 'local',
+          id: 'race-b',
+          title: 'Race',
+          cols: 80,
+          rows: 24
+        })
+      ])
+
+      const titlesById = new Map(
+        service.getDisplayTerminals().map((terminal) => [terminal.id, terminal.title])
+      )
+      assertEqual(
+        titlesById.get('race-a'),
+        'Race',
+        'first parallel create should reserve the requested title'
+      )
+      assertEqual(
+        titlesById.get('race-b'),
+        'Race (1)',
+        'second parallel create should see the pending title reservation'
+      )
+
+      const spawnTitlesById = new Map(
+        backend.getSpawnConfigs().map((config) => [config.id, config.title])
+      )
+      assertEqual(
+        spawnTitlesById.get('race-a'),
+        'Race',
+        'backend spawn config should carry the reserved title for the first create'
+      )
+      assertEqual(
+        spawnTitlesById.get('race-b'),
+        'Race (1)',
+        'backend spawn config should carry the reserved title for the second create'
+      )
+    })
+
+    await runCase('terminal service releases reserved title after spawn failure', async () => {
+      const backend = new FakeTerminalBackend()
+      backend.failSpawnForTerminalId('race-fail')
+      const service = createService(stateFilePath, backend)
+
+      await assertRejects(
+        service.createTerminal({
+          type: 'local',
+          id: 'race-fail',
+          title: 'Race',
+          cols: 80,
+          rows: 24
+        }),
+        /intentional spawn failure/,
+        'failed spawn should reject'
+      )
+
+      await service.createTerminal({
+        type: 'local',
+        id: 'race-ok',
+        title: 'Race',
+        cols: 80,
+        rows: 24
+      })
+
+      assertEqual(
+        service.getDisplayTerminals().find((terminal) => terminal.id === 'race-ok')?.title,
+        'Race',
+        'failed spawn should release its pending title reservation'
       )
     })
 

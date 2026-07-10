@@ -6,6 +6,7 @@ export type MessageType =
   | 'sub_tool'
   | 'reasoning'
   | 'compaction'
+  | 'compaction_boundary'
   | 'alert'
   | 'error'
   | 'ask'
@@ -55,6 +56,10 @@ export interface ChatMessage {
     details?: string
     inputKind?: 'normal' | 'inserted'
     inputImages?: InputImageAttachment[]
+    compactionBoundaryTargetBackendMessageId?: string
+    compactionBoundaryPreviousBackendMessageId?: string
+    compactionBoundarySummaryBackendMessageId?: string
+    compactionBoundaryProtectedNormalRounds?: number
   }
   timestamp: number
   streaming?: boolean
@@ -62,6 +67,14 @@ export interface ChatMessage {
 
 export type UIUpdateAction =
   | { type: 'ADD_MESSAGE'; sessionId: string; message: ChatMessage }
+  | {
+      type: 'INSERT_MESSAGE'
+      sessionId: string
+      message: ChatMessage
+      anchorMessageId?: string
+      anchorBackendMessageId?: string
+      placement: 'before' | 'after'
+    }
   | { type: 'REMOVE_MESSAGE'; sessionId: string; messageId: string }
   | { type: 'APPEND_CONTENT'; sessionId: string; messageId: string; content: string }
   | { type: 'APPEND_OUTPUT'; sessionId: string; messageId: string; outputDelta: string }

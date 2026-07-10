@@ -2,6 +2,7 @@ import {
   CHAT_PANEL_MIN_WIDTH_PX,
   MAX_LAYOUT_PANELS,
   MAX_LAYOUT_SPLIT_CHILDREN,
+  buildLayoutTree,
   clampSplitSizesToChildMinSizePercentages,
   computeChildMinSizePercentages,
   determineDropDirection,
@@ -109,6 +110,36 @@ runCase('removePanel never removes the final panel', () => {
   const next = removePanel(initial, 'panel-only')
   assertCondition(next === initial, 'removePanel should no-op for final panel')
   assertEqual(getPanelCount(next), 1, 'final panel must remain')
+})
+
+runCase('fresh default layout starts with list panel, chat, then terminal', () => {
+  const tree = buildLayoutTree(undefined)
+  assertEqual(tree.root.type, 'split', 'fresh default layout should use a horizontal split')
+  if (tree.root.type !== 'split') return
+
+  assertEqual(tree.root.direction, 'horizontal', 'fresh default layout should be horizontal')
+  assertEqual(
+    JSON.stringify(listPanels(tree).map((panel) => panel.panel.kind)),
+    JSON.stringify(['listPanel', 'chat', 'terminal']),
+    'fresh default panel order should match the global tab directory workflow'
+  )
+  assertEqual(
+    JSON.stringify(tree.root.sizes.map((size) => Math.round(size))),
+    JSON.stringify([18, 41, 41]),
+    'fresh default layout should keep the list panel visually narrow'
+  )
+})
+
+runCase('legacy explicit panel order does not gain a list panel implicitly', () => {
+  const tree = buildLayoutTree({
+    panelOrder: ['chat', 'terminal'],
+    panelSizes: [30, 70]
+  })
+  assertEqual(
+    JSON.stringify(listPanels(tree).map((panel) => panel.panel.kind)),
+    JSON.stringify(['chat', 'terminal']),
+    'legacy explicit layouts should preserve their panel order'
+  )
 })
 
 runCase('setSplitSizes normalizes arbitrary size vectors', () => {

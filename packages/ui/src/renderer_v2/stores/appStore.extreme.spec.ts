@@ -136,6 +136,7 @@ const installBootstrapWindowMock = (
     ) => void;
     onMemoryUpdatedRegister?: (callback: (snapshot: any) => void) => void;
     loadChatSessionCalls?: string[];
+    terminalListPayload?: { terminals: any[] };
   },
 ): void => {
   const versionPayload = {
@@ -253,18 +254,19 @@ const installBootstrapWindowMock = (
       terminal: {
         onExit: () => {},
         onTabsUpdated: () => {},
-        list: async () => ({
-          terminals: [
-            {
-              id: "term-a",
-              title: "Local",
-              type: "local",
-              cols: 80,
-              rows: 24,
-              runtimeState: "ready",
-            },
-          ],
-        }),
+        list: async () =>
+          options?.terminalListPayload || {
+            terminals: [
+              {
+                id: "term-a",
+                title: "Local",
+                type: "local",
+                cols: 80,
+                rows: 24,
+                runtimeState: "ready",
+              },
+            ],
+          },
       },
       filesystem: {
         listTransfers: async () => [],
@@ -864,6 +866,626 @@ const run = async (): Promise<void> => {
   );
 
   await runCase(
+    "createLocalTab without a terminal panel stays unhosted until one exists",
+    () => {
+      (globalThis as unknown as { window: unknown }).window = {
+        gyshell: {
+          system: {
+            platform: "darwin",
+          },
+        },
+      };
+      const store = new AppStore();
+      (store.layout as any).saveLayoutDebounced = () => {};
+      store.layout.setViewport(1400, 900);
+
+      const initialTerminalPanelId = store.layout.getPrimaryPanelId("terminal");
+      assertCondition(
+        Boolean(initialTerminalPanelId),
+        "default layout should start with a terminal panel",
+      );
+      store.layout.removePanel(initialTerminalPanelId!);
+      assertEqual(
+        store.layout.getPrimaryPanelId("terminal"),
+        null,
+        "test setup should remove all terminal panels before local creation",
+      );
+
+      const tabId = store.createLocalTab(undefined, { ensurePanel: false });
+      assertEqual(
+        store.layout.getPrimaryPanelId("terminal"),
+        null,
+        "list-panel local creation should not recreate a terminal panel by itself",
+      );
+      assertCondition(
+        store.getLayoutBindableTabIds("terminal").includes(tabId),
+        "unhosted local tab should remain eligible for a future terminal panel",
+      );
+
+      const restoredPanelId =
+        store.layout.ensurePrimaryPanelForKind("terminal");
+      assertCondition(
+        Boolean(restoredPanelId),
+        "terminal panel should be restorable after local background creation",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(restoredPanelId!)),
+        JSON.stringify([tabId]),
+        "future terminal panel should automatically host the unhosted local tab",
+      );
+      assertEqual(
+        store.layout.getPanelActiveTabId(restoredPanelId!),
+        tabId,
+        "future terminal panel should activate the unhosted local tab",
+      );
+    },
+  );
+
+  await runCase(
+    "createLocalTab can start runtime without attaching to a terminal panel",
+    async () => {
+      const originalWindow = (globalThis as any).window;
+      let createdConfig: any = null;
+
+      (globalThis as any).window = {
+        gyshell: {
+          system: {
+            platform: "darwin",
+          },
+          terminal: {
+            createTab: async (config: any) => {
+              createdConfig = config;
+              return { id: config.id };
+            },
+            list: async () => ({
+              terminals: createdConfig
+                ? [
+                    {
+                      id: createdConfig.id,
+                      title: createdConfig.title,
+                      type: "local",
+                      cols: createdConfig.cols,
+                      rows: createdConfig.rows,
+                      runtimeState: "ready",
+                    },
+                  ]
+                : [],
+            }),
+          },
+        },
+      };
+
+      try {
+        const store = new AppStore();
+        (store.layout as any).saveLayoutDebounced = () => {};
+        store.layout.setViewport(1400, 900);
+
+        const initialTerminalPanelId =
+          store.layout.getPrimaryPanelId("terminal");
+        assertCondition(
+          Boolean(initialTerminalPanelId),
+          "default layout should start with a terminal panel",
+        );
+        store.layout.removePanel(initialTerminalPanelId!);
+
+        const tabId = store.createLocalTab(undefined, {
+          ensurePanel: false,
+          startRuntime: true,
+        });
+        const initializingTab = store.terminalTabs.find(
+          (entry) => entry.id === tabId,
+        );
+        assertEqual(
+          initializingTab?.runtimeState,
+          "initializing",
+          "background local tabs should not look ready before backend creation",
+        );
+        assertEqual(
+          store.layout.getPrimaryPanelId("terminal"),
+          null,
+          "background local runtime creation should not create a terminal panel",
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assertEqual(
+          createdConfig?.id,
+          tabId,
+          "background local creation should create the backend terminal runtime",
+        );
+        assertEqual(
+          store.layout.getPrimaryPanelId("terminal"),
+          null,
+          "backend local runtime creation should keep the tab unhosted when no terminal panel exists",
+        );
+        assertCondition(
+          store.getLayoutBindableTabIds("terminal").includes(tabId),
+          "background local runtime should stay eligible for future terminal panels after reconciliation",
+        );
+        assertEqual(
+          store.activeTerminalId,
+          tabId,
+          "background local runtime should remain the active terminal after reconciliation",
+        );
+        assertEqual(
+          store.terminalTabs.find((entry) => entry.id === tabId)?.runtimeState,
+          "ready",
+          "background local runtime should reconcile to the backend ready state",
+        );
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+    },
+  );
+
+  await runCase(
+    "createSshTab can start runtime without attaching to a terminal panel",
+    async () => {
+      const originalWindow = (globalThis as any).window;
+      let createdConfig: any = null;
+      let attachCallCount = 0;
+      let syncCallCount = 0;
+
+      (globalThis as any).window = {
+        gyshell: {
+          terminal: {
+            createTab: async (config: any) => {
+              createdConfig = config;
+              return { id: config.id };
+            },
+            list: async () => ({
+              terminals: createdConfig
+                ? [
+                    {
+                      id: createdConfig.id,
+                      title: createdConfig.title,
+                      type: "ssh",
+                      cols: createdConfig.cols,
+                      rows: createdConfig.rows,
+                      runtimeState: "initializing",
+                    },
+                  ]
+                : [],
+            }),
+          },
+        },
+      };
+
+      try {
+        const store = new AppStore();
+        store.settings = {
+          connections: {
+            ssh: [
+              {
+                id: "ssh-entry",
+                name: "Deploy Host",
+                host: "deploy.example.test",
+                port: 22,
+                username: "deploy",
+                authMethod: "password",
+                password: "secret",
+              },
+            ],
+            proxies: [],
+            tunnels: [],
+          },
+        } as any;
+        (store.layout as any).getPrimaryPanelId = () => null;
+        (store.layout as any).getPanelIdsByKind = () => [];
+        (store.layout as any).attachTabToPanel = () => {
+          attachCallCount += 1;
+        };
+        (store.layout as any).syncPanelBindings = () => {
+          syncCallCount += 1;
+        };
+
+        const tabId = store.createSshTab("ssh-entry", undefined, {
+          ensurePanel: false,
+          attachToPanel: false,
+          startRuntime: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        assertCondition(Boolean(tabId), "SSH tab should be created");
+        assertEqual(
+          attachCallCount,
+          0,
+          "background SSH creation should not attach to a visible terminal panel",
+        );
+        assertEqual(
+          syncCallCount,
+          2,
+          "background SSH creation should sync layout locally and after backend reconciliation",
+        );
+        assertEqual(
+          createdConfig?.id,
+          tabId,
+          "background SSH creation should start the backend runtime with the new tab id",
+        );
+        assertEqual(
+          createdConfig?.host,
+          "deploy.example.test",
+          "background SSH creation should preserve SSH connection config",
+        );
+        assertEqual(
+          JSON.stringify(store.getOwnedTabIds("terminal")),
+          JSON.stringify([tabId]),
+          "background SSH creation should keep the tab visible in global terminal inventory",
+        );
+        assertEqual(
+          JSON.stringify(store.getLayoutBindableTabIds("terminal")),
+          JSON.stringify([tabId]),
+          "background SSH creation should remain bindable when a terminal panel appears later",
+        );
+        assertEqual(
+          store.activeTerminalId,
+          tabId,
+          "background SSH creation should make the new tab active in global inventory",
+        );
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+    },
+  );
+
+  await runCase(
+    "background SSH tab binds when a terminal panel appears later",
+    async () => {
+      const store = new AppStore();
+      store.settings = {
+        connections: {
+          ssh: [
+            {
+              id: "ssh-entry",
+              name: "Deploy Host",
+              host: "deploy.example.test",
+              port: 22,
+              username: "deploy",
+              authMethod: "password",
+              password: "secret",
+            },
+          ],
+          proxies: [],
+          tunnels: [],
+        },
+      } as any;
+      store.layout.setViewport(1400, 900);
+
+      const initialTerminalPanelId = store.layout.getPrimaryPanelId("terminal");
+      assertCondition(
+        Boolean(initialTerminalPanelId),
+        "default main layout should start with a terminal panel",
+      );
+      store.layout.removePanel(initialTerminalPanelId!);
+      assertEqual(
+        store.layout.getPrimaryPanelId("terminal"),
+        null,
+        "test setup should remove all terminal panels before background creation",
+      );
+
+      const tabId = store.createSshTab("ssh-entry", undefined, {
+        ensurePanel: false,
+        attachToPanel: false,
+        startRuntime: false,
+      });
+      assertCondition(Boolean(tabId), "background SSH tab should be created");
+      assertEqual(
+        store.layout.getPrimaryPanelId("terminal"),
+        null,
+        "background SSH creation should not recreate a terminal panel by itself",
+      );
+      assertCondition(
+        store.getLayoutBindableTabIds("terminal").includes(tabId!),
+        "background SSH tab should stay eligible for future terminal panels",
+      );
+
+      const restoredPanelId =
+        store.layout.ensurePrimaryPanelForKind("terminal");
+      assertCondition(
+        Boolean(restoredPanelId),
+        "terminal panel should be restorable after background tab creation",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(restoredPanelId!)),
+        JSON.stringify([tabId]),
+        "restored terminal panel should automatically host the background tab",
+      );
+      assertEqual(
+        store.layout.getPanelActiveTabId(restoredPanelId!),
+        tabId,
+        "restored terminal panel should activate the background tab",
+      );
+    },
+  );
+
+  await runCase(
+    "background SSH tab binds when a terminal panel already exists",
+    async () => {
+      const store = new AppStore();
+      store.settings = {
+        connections: {
+          ssh: [
+            {
+              id: "ssh-entry",
+              name: "Deploy Host",
+              host: "deploy.example.test",
+              port: 22,
+              username: "deploy",
+              authMethod: "password",
+              password: "secret",
+            },
+          ],
+          proxies: [],
+          tunnels: [],
+        },
+      } as any;
+      (store.layout as any).saveLayoutDebounced = () => {};
+      store.layout.setViewport(1400, 900);
+
+      const terminalPanelId = store.layout.getPrimaryPanelId("terminal");
+      assertCondition(
+        Boolean(terminalPanelId),
+        "default main layout should start with a terminal panel",
+      );
+
+      const tabId = store.createSshTab("ssh-entry", undefined, {
+        ensurePanel: false,
+        attachToPanel: false,
+        startRuntime: false,
+      });
+      assertCondition(Boolean(tabId), "background SSH tab should be created");
+      assertEqual(
+        JSON.stringify(store.getOwnedTabIds("terminal")),
+        JSON.stringify([tabId]),
+        "background SSH tab should stay visible in global terminal inventory",
+      );
+      assertEqual(
+        JSON.stringify(store.getLayoutBindableTabIds("terminal")),
+        JSON.stringify([tabId]),
+        "background SSH tab should stay layout-bindable when a terminal panel exists",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(terminalPanelId!)),
+        JSON.stringify([tabId]),
+        "existing terminal panel should automatically receive a background SSH tab",
+      );
+      assertEqual(
+        store.layout.getPanelActiveTabId(terminalPanelId!),
+        tabId,
+        "existing terminal panel should activate the new background SSH tab",
+      );
+    },
+  );
+
+  await runCase(
+    "background SSH tab stays hidden from existing linked non-terminal panels",
+    async () => {
+      const store = new AppStore();
+      store.settings = {
+        connections: {
+          ssh: [
+            {
+              id: "ssh-entry",
+              name: "Deploy Host",
+              host: "deploy.example.test",
+              port: 22,
+              username: "deploy",
+              authMethod: "password",
+              password: "secret",
+            },
+          ],
+          proxies: [],
+          tunnels: [],
+        },
+      } as any;
+      (store.layout as any).saveLayoutDebounced = () => {};
+      store.layout.setViewport(1400, 900);
+
+      const initialTerminalPanelId = store.layout.getPrimaryPanelId("terminal");
+      assertCondition(
+        Boolean(initialTerminalPanelId),
+        "default main layout should start with a terminal panel",
+      );
+      store.layout.removePanel(initialTerminalPanelId!);
+      assertEqual(
+        store.layout.getPrimaryPanelId("terminal"),
+        null,
+        "test setup should remove terminal panels before background creation",
+      );
+      const initialChatPanelId = store.layout.getPrimaryPanelId("chat");
+      if (initialChatPanelId) {
+        store.layout.removePanel(initialChatPanelId);
+      }
+      const filesystemPanelId =
+        store.layout.ensurePrimaryPanelForKind("filesystem");
+      const monitorPanelId = store.layout.ensurePrimaryPanelForKind("monitor");
+      assertCondition(
+        Boolean(filesystemPanelId),
+        "test setup should create a filesystem panel",
+      );
+      assertCondition(
+        Boolean(monitorPanelId),
+        "test setup should create a monitor panel",
+      );
+
+      const tabId = store.createSshTab("ssh-entry", undefined, {
+        ensurePanel: false,
+        attachToPanel: false,
+        startRuntime: false,
+      });
+      assertCondition(Boolean(tabId), "background SSH tab should be created");
+      assertCondition(
+        store.getLayoutBindableTabIds("terminal").includes(tabId!),
+        "background SSH tab should remain eligible for a future terminal panel",
+      );
+      assertCondition(
+        !store.getLayoutBindableTabIds("filesystem").includes(tabId!),
+        "background SSH tab should stay out of existing filesystem panels",
+      );
+      assertCondition(
+        !store.getLayoutBindableTabIds("monitor").includes(tabId!),
+        "background SSH tab should stay out of existing monitor panels",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(filesystemPanelId!)),
+        JSON.stringify([]),
+        "existing filesystem panel should not receive a background SSH tab",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(monitorPanelId!)),
+        JSON.stringify([]),
+        "existing monitor panel should not receive a background SSH tab",
+      );
+
+      const restoredTerminalPanelId =
+        store.layout.ensurePrimaryPanelForKind("terminal");
+      assertCondition(
+        Boolean(restoredTerminalPanelId),
+        "terminal panel should still be restorable",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(restoredTerminalPanelId!)),
+        JSON.stringify([tabId]),
+        "future terminal panel should automatically host the background SSH tab",
+      );
+    },
+  );
+
+  await runCase(
+    "background SSH tab stays hidden from future linked non-terminal panels",
+    async () => {
+      const store = new AppStore();
+      store.settings = {
+        connections: {
+          ssh: [
+            {
+              id: "ssh-entry",
+              name: "Deploy Host",
+              host: "deploy.example.test",
+              port: 22,
+              username: "deploy",
+              authMethod: "password",
+              password: "secret",
+            },
+          ],
+          proxies: [],
+          tunnels: [],
+        },
+      } as any;
+      (store.layout as any).saveLayoutDebounced = () => {};
+      store.layout.setViewport(1400, 900);
+
+      const initialTerminalPanelId = store.layout.getPrimaryPanelId("terminal");
+      assertCondition(
+        Boolean(initialTerminalPanelId),
+        "default main layout should start with a terminal panel",
+      );
+      store.layout.removePanel(initialTerminalPanelId!);
+      const initialChatPanelId = store.layout.getPrimaryPanelId("chat");
+      if (initialChatPanelId) {
+        store.layout.removePanel(initialChatPanelId);
+      }
+      assertEqual(
+        store.layout.getPrimaryPanelId("terminal"),
+        null,
+        "test setup should remove terminal panels before background creation",
+      );
+      assertEqual(
+        store.layout.getPrimaryPanelId("filesystem"),
+        null,
+        "test setup should not have a filesystem panel before background creation",
+      );
+      assertEqual(
+        store.layout.getPrimaryPanelId("monitor"),
+        null,
+        "test setup should not have a monitor panel before background creation",
+      );
+
+      const tabId = store.createSshTab("ssh-entry", undefined, {
+        ensurePanel: false,
+        attachToPanel: false,
+        startRuntime: false,
+      });
+      assertCondition(Boolean(tabId), "background SSH tab should be created");
+      assertCondition(
+        store.getLayoutBindableTabIds("terminal").includes(tabId!),
+        "background SSH tab should remain eligible for a future terminal panel",
+      );
+      assertCondition(
+        !store.getLayoutBindableTabIds("filesystem").includes(tabId!),
+        "background SSH tab should be hidden from future filesystem panels",
+      );
+      assertCondition(
+        !store.getLayoutBindableTabIds("monitor").includes(tabId!),
+        "background SSH tab should be hidden from future monitor panels",
+      );
+
+      const filesystemPanelId =
+        store.layout.ensurePrimaryPanelForKind("filesystem");
+      const monitorPanelId = store.layout.ensurePrimaryPanelForKind("monitor");
+      assertCondition(
+        Boolean(filesystemPanelId),
+        "future filesystem panel should be creatable",
+      );
+      assertCondition(
+        Boolean(monitorPanelId),
+        "future monitor panel should be creatable",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(filesystemPanelId!)),
+        JSON.stringify([]),
+        "future filesystem panel should not auto-host a background SSH tab",
+      );
+      assertEqual(
+        JSON.stringify(store.layout.getPanelTabIds(monitorPanelId!)),
+        JSON.stringify([]),
+        "future monitor panel should not auto-host a background SSH tab",
+      );
+    },
+  );
+
+  await runCase(
+    "terminal title uniqueness preserves numeric suffixes in user titles",
+    () => {
+      const store = new AppStore();
+      (store as any).terminalTabs = [
+        {
+          id: "gpu-root",
+          title: "GPU",
+          config: {
+            type: "ssh",
+            id: "gpu-root",
+            title: "GPU",
+            cols: 80,
+            rows: 24,
+          },
+          capabilities: { supportsFilesystem: true, supportsMonitor: true },
+          runtimeState: "ready",
+        },
+        {
+          id: "gpu-a",
+          title: "GPU (8)",
+          config: {
+            type: "ssh",
+            id: "gpu-a",
+            title: "GPU (8)",
+            cols: 80,
+            rows: 24,
+          },
+          capabilities: { supportsFilesystem: true, supportsMonitor: true },
+          runtimeState: "ready",
+        },
+      ];
+
+      assertEqual(
+        store.getUniqueTitle("GPU (8)"),
+        "GPU (8) (1)",
+        "numeric suffixes in user-provided terminal titles should be preserved",
+      );
+    },
+  );
+
+  await runCase(
     "collectPersistedChatInventoryState preserves focused chat active tab",
     async () => {
       const store = new AppStore();
@@ -1165,6 +1787,64 @@ const run = async (): Promise<void> => {
   );
 
   await runCase(
+    "reconcileTerminalTabs keeps display titles unique across duplicate backend titles",
+    () => {
+      const store = new AppStore();
+      (store.layout as any).getPanelsWithMissingTabBindings = () => [];
+      (store.layout as any).pinPanelsAsRestorePlaceholder = () => {};
+      (store.layout as any).syncPanelBindings = () => {};
+
+      const duplicatePayload = {
+        terminals: [
+          {
+            id: "local-a",
+            title: "Local (1)",
+            type: "local",
+            cols: 80,
+            rows: 24,
+            runtimeState: "ready",
+          },
+          {
+            id: "local-b",
+            title: "Local (1)",
+            type: "local",
+            cols: 80,
+            rows: 24,
+            runtimeState: "ready",
+          },
+          {
+            id: "local-c",
+            title: "Local (3)",
+            type: "local",
+            cols: 80,
+            rows: 24,
+            runtimeState: "ready",
+          },
+        ],
+      } as any;
+
+      store.reconcileTerminalTabs(duplicatePayload);
+      assertEqual(
+        JSON.stringify(store.terminalTabs.map((tab) => tab.title)),
+        JSON.stringify(["Local (1)", "Local (1) (1)", "Local (3)"]),
+        "duplicate backend terminal titles should keep user numeric suffixes intact",
+      );
+
+      store.reconcileTerminalTabs(duplicatePayload);
+      assertEqual(
+        JSON.stringify(store.terminalTabs.map((tab) => tab.title)),
+        JSON.stringify(["Local (1)", "Local (1) (1)", "Local (3)"]),
+        "repeated duplicate backend snapshots should keep stable display titles",
+      );
+      assertEqual(
+        JSON.stringify(store.terminalTabs.map((tab) => tab.config.title)),
+        JSON.stringify(["Local (1)", "Local (1) (1)", "Local (3)"]),
+        "terminal configs should carry the unique display title",
+      );
+    },
+  );
+
+  await runCase(
     "AppStore bootstrap should buffer ui updates emitted during chat hydration",
     async () => {
       const layoutTree = buildPersistedTree({
@@ -1393,6 +2073,109 @@ const run = async (): Promise<void> => {
           JSON.stringify(store.getOwnedTabIds("filesystem")),
           JSON.stringify(["term-a"]),
           "detached bootstrap should restore file-capable terminal visibility for filesystem panels",
+        );
+      } finally {
+        (WINDOW_CONTEXT as any).role = originalContext.role;
+        (WINDOW_CONTEXT as any).detachedStateToken =
+          originalContext.detachedStateToken;
+        (WINDOW_CONTEXT as any).sourceClientId = originalContext.sourceClientId;
+        (globalThis as any).window = originalWindow;
+      }
+    },
+  );
+
+  await runCase(
+    "detached bootstrap materializes terminal snapshots before backend runtime exists",
+    async () => {
+      const originalWindow = (globalThis as any).window;
+      const originalContext = {
+        role: WINDOW_CONTEXT.role,
+        detachedStateToken: WINDOW_CONTEXT.detachedStateToken,
+        sourceClientId: WINDOW_CONTEXT.sourceClientId,
+      };
+      const localStorageState = new Map<string, string>();
+      const sessionStorageState = new Map<string, string>();
+      const token = "detached-ssh-bootstrap";
+      const detachedLayoutTree: LayoutTree = {
+        schemaVersion: 2,
+        root: {
+          type: "panel",
+          id: "node-terminal",
+          panel: { id: "panel-terminal-detached", kind: "terminal" },
+        },
+        focusedPanelId: "panel-terminal-detached",
+        panelTabs: {
+          "panel-terminal-detached": {
+            tabIds: ["ssh-detached"],
+            activeTabId: "ssh-detached",
+          },
+        },
+      };
+
+      try {
+        installBootstrapWindowMock(buildPersistedTree(), {
+          terminalListPayload: { terminals: [] },
+        });
+        (globalThis as any).window.localStorage =
+          createStorage(localStorageState);
+        (globalThis as any).window.sessionStorage =
+          createStorage(sessionStorageState);
+        stashDetachedWindowState(token, {
+          sourceClientId: "win-main",
+          layoutTree: detachedLayoutTree,
+          createdAt: 123,
+          terminalTabs: [
+            {
+              id: "ssh-detached",
+              title: "Deploy Host",
+              config: {
+                type: "ssh",
+                id: "ssh-detached",
+                title: "Deploy Host",
+                cols: 120,
+                rows: 32,
+                host: "deploy.example.test",
+                port: 22,
+                username: "deploy",
+                authMethod: "password",
+              } as any,
+              connectionRef: { type: "ssh", entryId: "ssh-entry" },
+              runtimeState: "initializing",
+            },
+          ],
+        });
+        (WINDOW_CONTEXT as any).role = "detached";
+        (WINDOW_CONTEXT as any).detachedStateToken = token;
+        (WINDOW_CONTEXT as any).sourceClientId = "win-main";
+
+        const store = new AppStore();
+        (store.layout as any).bootstrap = () => {};
+        (store.layout as any).syncPanelBindings = () => {};
+        (store as any).loadTools = async () => {};
+        (store as any).loadSkills = async () => {};
+        (store as any).loadMemory = async () => {};
+        (store as any).loadCommandPolicyLists = async () => {};
+        (store as any).loadAccessTokens = async () => {};
+        (store as any).loadVersionState = async () => {};
+        (store as any).loadMobileWebStatus = async () => {};
+        (store as any).checkVersion = async () => {};
+
+        await store.bootstrap();
+
+        assertEqual(
+          JSON.stringify(store.getOwnedTabIds("terminal")),
+          JSON.stringify(["ssh-detached"]),
+          "detached bootstrap should expose the transferred SSH terminal tab",
+        );
+        assertEqual(
+          store.activeTerminalId,
+          "ssh-detached",
+          "detached bootstrap should activate the transferred SSH terminal tab",
+        );
+        assertEqual(
+          (store.terminalTabs[0]?.config as any).host,
+          "deploy.example.test",
+          "detached bootstrap should preserve the SSH config needed to create the runtime",
         );
       } finally {
         (WINDOW_CONTEXT as any).role = originalContext.role;
@@ -1854,6 +2637,22 @@ const run = async (): Promise<void> => {
     "ensureTabInventoryEntry materializes missing terminal inventory for cross-window drops",
     async () => {
       const store = new AppStore();
+      (store as any).terminalTabs = [
+        {
+          id: "term-existing",
+          title: "Remote Terminal",
+          config: {
+            type: "local",
+            id: "term-existing",
+            title: "Remote Terminal",
+            cols: 80,
+            rows: 24,
+          },
+          capabilities: { supportsFilesystem: true, supportsMonitor: true },
+          connectionRef: { type: "local" },
+          runtimeState: "ready",
+        },
+      ];
       (store.layout as any).syncPanelBindings = () => {};
 
       store.ensureTabInventoryEntry("terminal", "term-remote-new", {
@@ -1875,6 +2674,19 @@ const run = async (): Promise<void> => {
       assertCondition(
         store.getOwnedTabIds("terminal").includes("term-remote-new"),
         "terminal drop target should seed missing terminal inventory before backend onTabsUpdated arrives",
+      );
+      const materialized = store.terminalTabs.find(
+        (tab) => tab.id === "term-remote-new",
+      );
+      assertEqual(
+        materialized?.title,
+        "Remote Terminal (1)",
+        "transferred terminal placeholder should receive a unique title",
+      );
+      assertEqual(
+        materialized?.config.title,
+        "Remote Terminal (1)",
+        "transferred terminal placeholder config should use the unique title",
       );
       assertCondition(
         store.getOwnedTabIds("filesystem").includes("term-remote-new"),

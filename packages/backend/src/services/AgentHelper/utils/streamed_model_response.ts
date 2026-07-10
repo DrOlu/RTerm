@@ -109,6 +109,36 @@ export function isEmptyMalformedToolCallFinish(
   return !contentText.trim();
 }
 
+export function isEmptyUnusableModelResponse(
+  response: any,
+  rawChunks: any[],
+): boolean {
+  if (!response) return false;
+  if (hasAnyToolCallPayload(response, rawChunks)) return false;
+  if (hasToolCallFinishReason(response, rawChunks)) return false;
+
+  const contentText = extractContentText(response);
+  if (contentText.trim()) return false;
+
+  const finishReasons = getFinishReasons(response, rawChunks);
+  if (finishReasons.length === 0) return true;
+
+  return finishReasons.some((reason) => {
+    const normalized = String(reason || "")
+      .trim()
+      .toLowerCase();
+    return normalized.length > 0 && !normalized.includes("tool_calls");
+  });
+}
+
+export function describeStreamedResponseFinish(
+  response: any,
+  rawChunks: any[],
+): string {
+  const reasons = Array.from(new Set(getFinishReasons(response, rawChunks)));
+  return reasons.length > 0 ? reasons.join(", ") : "unknown";
+}
+
 export function hasEmptyMalformedToolCallFinishFlag(message: any): boolean {
   return !!message?.additional_kwargs?.[EMPTY_MALFORMED_TOOL_CALL_FINISH_KEY];
 }
@@ -164,6 +194,24 @@ function getRawFinishReason(rawChunk: any): string | undefined {
     .find((reason: any) => hasNonEmptyString(reason));
 }
 
+function getFinishReasons(response: any, rawChunks: any[]): string[] {
+  const candidates = [
+    response?.response_metadata?.finish_reason,
+    response?.response_metadata?.finishReason,
+    response?.generationInfo?.finish_reason,
+    response?.generationInfo?.finishReason,
+    ...rawChunks.flatMap((chunk) =>
+      Array.isArray(chunk?.choices)
+        ? chunk.choices.map(
+            (choice: any) => choice?.finish_reason ?? choice?.finishReason,
+          )
+        : [],
+    ),
+  ];
+
+  return candidates.filter(hasNonEmptyString);
+}
+
 function getMessageType(message: any): string {
   const type =
     typeof message?._getType === "function"
@@ -189,21 +237,9 @@ function normalizeTotalTokens(usage: any): number | null {
 }
 
 function hasToolCallFinishReason(response: any, rawChunks: any[]): boolean {
-  const finishReasons = [
-    response?.response_metadata?.finish_reason,
-    response?.response_metadata?.finishReason,
-    response?.generationInfo?.finish_reason,
-    response?.generationInfo?.finishReason,
-    ...rawChunks.flatMap((chunk) =>
-      Array.isArray(chunk?.choices)
-        ? chunk.choices.map(
-            (choice: any) => choice?.finish_reason ?? choice?.finishReason,
-          )
-        : [],
-    ),
-  ];
-
-  return finishReasons.some((reason) => reason === "tool_calls");
+  return getFinishReasons(response, rawChunks).some((reason) =>
+    String(reason).includes("tool_calls"),
+  );
 }
 
 function hasAnyToolCallPayload(response: any, rawChunks: any[]): boolean {

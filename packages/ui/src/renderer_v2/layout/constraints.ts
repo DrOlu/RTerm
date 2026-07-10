@@ -37,14 +37,16 @@ const PANEL_MIN_WIDTH_PX: Record<PanelKind, number> = {
   terminal: 160,
   filesystem: 160,
   fileEditor: 160,
-  monitor: 170
+  monitor: 170,
+  listPanel: 128
 }
 
 const PANEL_MIN_HEIGHT_PX: Record<Exclude<PanelKind, 'chat'>, number> = {
   terminal: 90,
   filesystem: 90,
   fileEditor: 90,
-  monitor: 120
+  monitor: 120,
+  listPanel: 120
 }
 
 const MIN_SIZE_PERCENTAGE_EPSILON = 0.000001

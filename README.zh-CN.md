@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#核心能力)
 
 [English README](./README.md) | 中文 README  
-最新发布说明：[`changelogs/v1.5.3.md`](./changelogs/v1.5.3.md)
+最新发布说明：[`changelogs/v1.6.0.md`](./changelogs/v1.6.0.md)
 
 如果有任何建议或者问题，欢迎在 [GitHub Discussions](https://github.com/MrOrangeJJ/RTerm/discussions) 中提交。
 
@@ -23,7 +23,10 @@
 > **v1.4.0 升级提示**：从 1.4.0 以下版本升级后的首次启动可能会短暂阻塞，因为 RTerm 会把旧的 JSON 历史迁移到 SQLite，并写入带时间戳的备份文件。v1.4.3 无需额外迁移步骤。
 
 <p align="center">
-  <img src="./demo_imgs/demo.png" width="100%">
+  <img src="./demo_imgs/v1.6.0_dark.png" width="100%" alt="GyShell 深色主题演示">
+</p>
+<p align="center">
+  <img src="./demo_imgs/v1.6.0_light.png" width="100%" alt="GyShell 浅色主题演示">
 </p>
 <p align="center">
   <video controls width="100%" src="https://github.com/user-attachments/assets/f9daf884-bda0-4a58-8a6d-934db0eddeb5"></video>
@@ -40,6 +43,7 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 - **持续执行闭环**：读取输出 -> 判断状态 -> 继续推进。
 - **天然可干预**：你可以随时接管，不打断工作流。
 - **多标签并行调度**：编译、看日志、修复可跨标签协同。
+- **全局 Tab 清单**：通过专门的列表面板扫描、恢复、拖动、关闭和创建 terminal/chat tab。
 - **工作区可恢复**：terminal tab、面板布局和已保存布局槽位可跨重启恢复，快速续作。
 - **可拆分的多窗口工作区**：面板可独立成子窗口，标签和整块面板都能跨窗口移动。
 - **自适应的面板标签显示**：窄 header 下可切成紧凑选择器，宽空间下保留完整标签栏。
@@ -50,7 +54,7 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 - **桌面端内置 Mobile Web 发布能力**：可直接在桌面设置中对局域网发布移动端页面并复制访问链接。
 - **多端同语义**：桌面端、TUI、Mobile Web 共用统一网关模型。
 - **Profile Lock 安全性**：会话繁忙期间锁定模型配置，保证行为一致。
-- **长上下文质量保障**：`memory.md` + 智能压缩链路让长会话依然可控可用。
+- **长上下文质量保障**：`memory.md` + 智能压缩摘要 + 可见边界 + 确定性兜底恢复让长会话依然清晰可控。
 - **工具能力原生化**：Skills、MCP、内置工具是运行时一等能力。
 
 ### 一屏速览
@@ -61,20 +65,24 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 - **面向多设备协作**：桌面端 + TUI + Mobile Web 共用网关语义。
 - **面向多模态执行**：单轮里可组合文字与图片输入，直接推进真实任务。
 
-## v1.5.3 关键亮点
+## v1.6.0 关键亮点
 
-- **已保存工作区布局槽位**
-  - 可从 Rail 保存最多 3 个编号工作区布局，点击即可恢复，右键可覆盖或删除；已保存布局会保留 v2 分屏树、panel tab 绑定、活跃 tab，以及兼容用的旧布局投影
-- **Agent Setting 配置档**
-  - 可保存最多 5 套完整 Agent 运行配置，覆盖模型 Profile、命令策略、内置工具、MCP servers、Skills、memory、递归限制和 workflow experimental flags；应用配置档后也会切到对应的 profile-scoped `memory.md`
-- **更完整的 Mobile Web 远程操控**
-  - Mobile Web 现在有更清晰的会话状态、待审批跳转 badge、分支与回滚操作、任务完成 toast、更稳的重连逻辑，以及 Skills、Tools、Agent Setting Profiles 等设置子页面
-- **移动端只读终端控制**
-  - Mobile Web 可轮询终端输出尾部、显示未读输出提示、创建本地或已保存 SSH terminal tab、关闭 tab（保护最后一个）、刷新输出，并重连已退出的 SSH tab
-- **桌面 `gyll` CLI/TUI 已废弃**
-  - 桌面安装包不再内置或安装 `gyll` / `gyll-tui`；启动时只会清理包含旧版 `GYLL_BIN` 标记的桌面端 launcher，保留无关文件和 shell profile PATH block
-- **字体与可读性打磨**
-  - 渲染层改回原生字体平滑，xterm 显式设置普通/粗体字重，让终端和小字号 UI 的显示更稳定
+- **全局 Tab List 面板**
+  - 新增 `TAB LIST` 面板，用垂直清单展示 terminal 和 chat tab，包含数量、状态点、按最近更新时间排序、拖拽、关闭，以及快速创建 chat、本地 terminal、已保存 SSH terminal
+- **默认工作区布局更新**
+  - 新的主布局默认左侧为列表面板，中间为聊天，右侧为终端，让多 tab 工作区一打开就更容易扫描
+- **更可预测的后台 terminal tab**
+  - 从列表面板创建的本地和 SSH tab 都可以在后台启动，继续出现在全局 terminal 清单中，按需绑定到 terminal panel，并且不会意外切换关联的文件系统或监控 panel
+- **可见的上下文压缩边界**
+  - 长对话现在会在真实保留历史切点持久化并渲染 `[CTX COMPACTED]` 标记，桌面端、mobile-web 和 TUI 保持一致
+- **确定性压缩兜底**
+  - 当 compaction 模型失败或返回空摘要时，GyShell 可以用本地确定性 digest 恢复，保留受保护尾部，并在可用时导出更早的精确历史供按需查看
+- **更稳的模型空流恢复**
+  - 空内容、非工具调用的 provider stream 结束会进入正常重试路径，不再静默结束；有效的空工具调用结束仍会继续路由执行
+- **终端清单稳定性**
+  - terminal 标题在重复 backend snapshot、并发创建、用户显式数字后缀和 detached-window 转移场景下都保持唯一且稳定
+- **内置 Mobile Web 产物刷新**
+  - Electron 打包内置的 mobile-web 产物已重新生成，因此桌面构建直接托管的移动端页面会包含本次更新
 
 ---
 
@@ -86,7 +94,7 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 - 基于终端上下文和选中资源的上下文感知。
 - 支持按 Profile 分配 `Global`、`Thinking`、`Action`、`Compaction` 四类模型角色。
 - 支持可复用 Agent Setting 配置档，保存模型 Profile、安全策略、工具、Skills、memory、递归和实验 workflow flags。
-- 长会话智能压缩与独立压缩模型链路。
+- 长会话智能压缩、独立压缩模型链路、可见的 `[CTX COMPACTED]` 压缩边界标记，以及模型压缩不可用时的确定性兜底恢复。
 - 会话与 UI 历史改为基于 SQLite 持久化，并支持从旧 JSON 存储自动做一次迁移。
 - 支持基于当前 tab 最近上下文生成命令草稿，并保留”先粘贴、再由你决定是否执行”的控制权。
 - 后台（nowait）命令完成后会自动通知 Agent，无需轮询即可形成异步闭环。
@@ -118,6 +126,7 @@ RTerm 的定位是“运行在真实终端中的持续执行系统”：
 ### 工作区与监控
 
 - 面板可拆到独立子窗口，标签和整块面板都能跨窗口移动。
+- 可通过全局 Tab List 面板扫描 terminal/chat 清单、恢复未托管 tab、跨布局目标拖动 tab、关闭 tab，并创建新的 chat、本地 terminal 或 SSH tab，且不会强制打开 terminal panel。
 - 可保存最多 3 个工作区布局槽位，并从 Rail 快速恢复。
 - 可选在任意对话会话运行期间保持电脑唤醒，运行结束后自动解除系统睡眠阻止。
 - 聊天 tab 会在会话繁忙时显示运行中指示器，与终端 tab 的运行状态圆点一致。
@@ -241,7 +250,7 @@ RTerm 采用严格分层：
 
 ## 延伸阅读
 
-- 发布说明：`changelogs/v1.5.3.md`
+- 发布说明：`changelogs/v1.6.0.md`
 - 构建与打包命令矩阵：`docs/build-commands.md`
 - Monorepo 边界与运行链路：`docs/monorepo-architecture.md`
 

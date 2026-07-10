@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#key-capabilities)
 
 English README | [中文 README](./README.zh-CN.md)  
-Latest release notes: [`changelogs/v1.5.4.md`](./changelogs/v1.5.4.md)
+Latest release notes: [`changelogs/v1.6.0.md`](./changelogs/v1.6.0.md)
 
 If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/RTerm/discussions).
 
@@ -23,7 +23,10 @@ Usage guides:
 > **v1.4.0 upgrade note**: the first launch after upgrading from a pre-1.4.0 version may briefly block while RTerm migrates legacy JSON history into SQLite and writes timestamped backup files. v1.4.3 has no additional migration step.
 
 <p align="center">
-  <img src="./demo_imgs/demo.png" width="100%">
+  <img src="./demo_imgs/v1.6.0_dark.png" width="100%" alt="GyShell dark theme demo">
+</p>
+<p align="center">
+  <img src="./demo_imgs/v1.6.0_light.png" width="100%" alt="GyShell light theme demo">
 </p>
 <p align="center">
   <video controls width="100%" src="https://github.com/user-attachments/assets/f9daf884-bda0-4a58-8a6d-934db0eddeb5"></video>
@@ -40,6 +43,7 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - **Persistent execution loop**: observe output -> reason -> continue.
 - **Human-in-the-loop by design**: intervene anytime without breaking flow.
 - **Multi-tab orchestration**: compile, inspect logs, and run fixes in parallel tabs.
+- **Global tab inventory**: scan, reopen, drag, close, and create terminal/chat tabs from a dedicated list panel.
 - **Workspace persistence**: terminal tabs, panel layout, and saved layout slots can survive restarts and restore quickly.
 - **Detachable multi-window workspace**: peel panels into sub-windows and move tabs or whole panels across windows.
 - **Adaptive panel tab display**: keep full tab strips or switch to a compact selector for narrow panel headers.
@@ -51,7 +55,7 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - **Built-in mobile-web delivery**: desktop can publish the mobile-web companion directly over your LAN with copyable access links.
 - **Cross-surface runtime model**: desktop, TUI, and mobile-web share one gateway semantics.
 - **Profile lock safety**: busy sessions pin active model profile for consistency.
-- **Long-horizon context quality**: memory.md + compaction summary pipeline keeps long sessions useful.
+- **Long-horizon context quality**: memory.md + compaction summaries + visible boundaries + deterministic fallback recovery keep long sessions understandable.
 - **Tooling-native workflow**: skills, MCP servers, and built-in tools are runtime primitives.
 
 ### At a Glance
@@ -62,24 +66,24 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - **For multi-device flow**: desktop + TUI + mobile-web with shared gateway semantics.
 - **For multimodal workflows**: text and image inputs can be combined in one execution turn.
 
-## v1.5.4 Key Highlights
+## v1.6.0 Key Highlights
 
-- **Terminal-aware tool safety**
-  - agent tools now report explicit `terminal_status`, avoid running commands or filesystem operations through disconnected tabs, and can reconnect eligible SSH tabs with `reconnect_terminal_tab`
-- **SSH keepalive for remote terminals**
-  - direct and jump-host SSH connections now use protocol keepalive probes to reduce silent idle disconnects
-- **Clearer file mutation tools**
-  - model-facing file mutation is split into `write_file` for full writes and `edit_file` for exact replacements, while the Settings capability remains the single `create_or_edit` toggle
-- **Pass Chat mentions**
-  - the desktop `@` picker can reference a previous chat, exporting it as a private local Markdown file that the agent can inspect on demand without treating it as a new instruction source
-- **Mobile-web long chat responsiveness**
-  - long mobile conversations avoid rerendering the whole message timeline while you type in the composer
-- **Transfer panel stability**
-  - the file transfer panel now separates current-tab, background, and recent tasks, adds summary counts, and keeps agent-origin transfers visible even when they are not tied to the active tab
-- **Dynamic saved layouts and floating-menu polish**
-  - active saved layout slots now update as you continue editing them, and compact tab / `@` mention suggestion menus fit and scroll correctly near viewport edges
-- **Clearer mention labels**
-  - terminal, skill, file, and pass-chat mentions now use distinct visual tones in the desktop composer, chat, queue cards, and suggestion menu
+- **Global Tab List panel**
+  - a new `TAB LIST` panel shows terminal and chat tabs as a vertical workspace inventory, with counts, status dots, latest-first ordering, drag/drop support, close actions, and quick creation for chat, local terminal, and saved-SSH terminal tabs
+- **Default workspace refresh**
+  - new main layouts start with the list panel on the left, chat in the center, and terminal on the right, making tab-heavy sessions easier to scan immediately
+- **More predictable background terminal tabs**
+  - local and SSH tabs created from the list panel can start in the background, stay visible in the global terminal inventory, bind to terminal panels when appropriate, and no longer unexpectedly take over linked filesystem or monitor panels
+- **Visible compaction boundaries**
+  - long chats now persist and render a `[CTX COMPACTED]` marker at the actual retained-history cutoff across desktop, mobile-web, and TUI clients
+- **Deterministic compaction fallback**
+  - when the compaction model fails or returns an empty summary, GyShell can recover with a local deterministic digest while preserving the protected tail and exporting exact older history for on-demand inspection when available
+- **Safer stream recovery**
+  - empty non-tool provider stream finishes now retry through the normal path instead of silently ending a run with no answer, while valid empty tool-call finishes remain routable
+- **Terminal inventory stability**
+  - terminal titles stay unique and stable across duplicate backend snapshots, concurrent terminal creation, explicit numeric suffixes, and detached-window terminal transfers
+- **Mobile-web runtime refresh**
+  - Electron-packaged mobile-web assets were regenerated so desktop builds serve the updated client without requiring a separate mobile-web development server
 
 ---
 
@@ -91,7 +95,7 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - Context-aware responses from terminal state and selected resources.
 - Per-profile model routing for `Global`, `Thinking`, `Action`, and `Compaction` roles.
 - Reusable Agent Setting profiles for model profile, security policy, tools, skills, memory, recursion, and experimental workflow flags.
-- Long-session context quality with dedicated compaction models and dynamic compaction summaries.
+- Long-session context quality with dedicated compaction models, dynamic summaries, visible `[CTX COMPACTED]` boundary markers, and deterministic fallback recovery when model compaction is unavailable.
 - SQLite-backed conversation history with automatic one-time migration from legacy JSON storage.
 - AI-assisted terminal command drafting from recent tab context, with paste-before-run control.
 - Background (nowait) commands automatically notify the agent on completion, so the agent can close the loop without polling.
@@ -126,6 +130,7 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 ### Workspace + Monitoring
 
 - Detach panels into dedicated sub-windows and move tabs or whole panels across windows.
+- Use the global Tab List panel to scan terminal/chat inventory, restore unhosted tabs, drag tabs across layout targets, close tabs, and create new chat/local/SSH tabs without forcing a terminal panel to appear.
 - Save up to three workspace layout slots and restore them from the rail.
 - Optionally keep the computer awake while any chat session is running, with the system-sleep block released automatically when runs finish.
 - Chat tabs show a running indicator while a session is busy, mirroring terminal tab runtime-state dots.
@@ -241,7 +246,7 @@ See:
 
 ## Read More
 
-- Release notes: `changelogs/v1.5.4.md`
+- Release notes: `changelogs/v1.6.0.md`
 - Build matrix and packaging: `docs/build-commands.md`
 - Monorepo boundaries and runtime flow: `docs/monorepo-architecture.md`
 

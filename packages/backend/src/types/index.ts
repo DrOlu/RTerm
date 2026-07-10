@@ -454,6 +454,7 @@ export type AgentEventType =
   | 'error'
   | 'debug_history'
   | 'user_input'
+  | 'compaction_boundary'
   | 'tokens_count'
 
 export interface AgentEvent {
@@ -484,6 +485,10 @@ export interface AgentEvent {
   modelName?: string
   totalTokens?: number
   maxTokens?: number
+  boundaryTargetMessageId?: string
+  boundaryPreviousMessageId?: string
+  summaryMessageId?: string
+  protectedNormalRounds?: number
 }
 
 // ============ Resource Monitor Types ============

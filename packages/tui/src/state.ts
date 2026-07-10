@@ -45,6 +45,30 @@ export function applyUiUpdate(
       }
       break;
     }
+    case "INSERT_MESSAGE": {
+      const msg = update.message;
+      const anchorIndex = findInsertAnchorIndex(session, update);
+      if (anchorIndex < 0) break;
+      const existingIndex = session.messages.findIndex(
+        (item) => item.id === msg.id,
+      );
+      if (existingIndex >= 0) {
+        session.messages.splice(existingIndex, 1);
+      }
+      const adjustedAnchorIndex =
+        existingIndex >= 0 && existingIndex < anchorIndex
+          ? anchorIndex - 1
+          : anchorIndex;
+      session.messages.splice(
+        update.placement === "after"
+          ? adjustedAnchorIndex + 1
+          : adjustedAnchorIndex,
+        0,
+        msg,
+      );
+      session.messages = normalizeCompactionBoundaryMessages(session.messages);
+      break;
+    }
     case "REMOVE_MESSAGE": {
       session.messages = session.messages.filter(
         (item) => item.id !== update.messageId,
@@ -100,13 +124,106 @@ export function applyUiUpdate(
         (item) => item.backendMessageId === update.messageId,
       );
       if (index >= 0) {
-        session.messages = session.messages.slice(0, index);
+        session.messages = normalizeCompactionBoundaryMessages(
+          session.messages.slice(0, index),
+        );
       }
       session.isThinking = false;
       session.isBusy = false;
       break;
     }
   }
+}
+
+function findInsertAnchorIndex(
+  session: SessionState,
+  update: {
+    anchorMessageId?: string;
+    anchorBackendMessageId?: string;
+  },
+): number {
+  if (typeof update.anchorMessageId === "string") {
+    const byUiId = session.messages.findIndex(
+      (item) => item.id === update.anchorMessageId,
+    );
+    if (byUiId >= 0) return byUiId;
+  }
+
+  if (typeof update.anchorBackendMessageId === "string") {
+    return session.messages.findIndex(
+      (item) => item.backendMessageId === update.anchorBackendMessageId,
+    );
+  }
+
+  return -1;
+}
+
+function normalizeBoundaryBackendId(value: unknown): string {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : "";
+}
+
+function normalizeCompactionBoundaryMessages(
+  messages: ChatMessage[],
+): ChatMessage[] {
+  const boundaries = messages.filter(
+    (message) => message.type === "compaction_boundary",
+  );
+  if (boundaries.length === 0) return messages;
+
+  const baseMessages = messages.filter(
+    (message) => message.type !== "compaction_boundary",
+  );
+  const normalized = [...baseMessages];
+  const seenKeys = new Set<string>();
+
+  boundaries.forEach((boundary) => {
+    const targetBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundaryTargetBackendMessageId,
+    );
+    const previousBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundaryPreviousBackendMessageId,
+    );
+    const summaryBackendId = normalizeBoundaryBackendId(
+      boundary.metadata?.compactionBoundarySummaryBackendMessageId,
+    );
+    const key =
+      summaryBackendId ||
+      targetBackendId ||
+      previousBackendId ||
+      boundary.backendMessageId ||
+      boundary.id;
+    if (seenKeys.has(key)) return;
+
+    const normalizedBoundary = {
+      ...boundary,
+      role: "system",
+      content: "",
+      streaming: false,
+    } satisfies ChatMessage;
+
+    if (targetBackendId) {
+      const targetIndex = normalized.findIndex(
+        (message) => message.backendMessageId === targetBackendId,
+      );
+      if (targetIndex < 0) return;
+      normalized.splice(targetIndex, 0, normalizedBoundary);
+      seenKeys.add(key);
+      return;
+    }
+
+    if (previousBackendId) {
+      const previousIndex = normalized.findIndex(
+        (message) => message.backendMessageId === previousBackendId,
+      );
+      if (previousIndex < 0) return;
+      normalized.splice(previousIndex + 1, 0, normalizedBoundary);
+      seenKeys.add(key);
+    }
+  });
+
+  return normalized;
 }
 
 export function findLatestPendingAsk(
@@ -164,6 +281,10 @@ export function compactMessageSummary(
       ? ` (${message.metadata.subToolHint})`
       : "";
     return `${title}${hint}`;
+  }
+
+  if (message.type === "compaction_boundary") {
+    return "[CTX COMPACTED]";
   }
 
   if (message.type === "ask") {

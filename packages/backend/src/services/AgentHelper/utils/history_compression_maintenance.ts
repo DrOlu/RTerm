@@ -8,28 +8,6 @@ export interface HistoryMutationResult {
   changed: boolean
 }
 
-export function clearAllCompressionArtifacts(messages: BaseMessage[]): HistoryMutationResult {
-  let changed = false
-  const nextMessages: BaseMessage[] = []
-
-  for (const message of messages) {
-    if (TokenManager.hasLastCompactionFlag(message)) {
-      changed = true
-      continue
-    }
-
-    if (!TokenManager.hasPruneLabel(message)) {
-      nextMessages.push(message)
-      continue
-    }
-
-    changed = true
-    nextMessages.push(cloneWithoutPruneFlag(message))
-  }
-
-  return changed ? { messages: nextMessages, changed: true } : { messages, changed: false }
-}
-
 export function sanitizeCompressionAfterRollback(
   messages: BaseMessage[],
   options?: { pruneToolWindow?: number; protectedNormalRounds?: number }

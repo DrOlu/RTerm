@@ -1751,6 +1751,7 @@ function labelForMessage(message: ChatMessage): string {
   if (message.type === "file_edit") return "PATCH";
   if (message.type === "reasoning") return "THINK";
   if (message.type === "compaction") return "COMPACT";
+  if (message.type === "compaction_boundary") return "CTX";
   if (message.type === "sub_tool") return "STEP";
   return "AI";
 }
@@ -1788,6 +1789,7 @@ function textColorForMessage(message: ChatMessage): RGBA {
   if (
     message.type === "reasoning" ||
     message.type === "compaction" ||
+    message.type === "compaction_boundary" ||
     message.type === "sub_tool" ||
     message.type === "tool_call"
   )
@@ -2096,6 +2098,10 @@ function messageBodyLines(message: ChatMessage): string[] {
       return [`[COMPACT] ${truncateLine(`${title} | ${summary}`, 180)}`];
     if (output) return [`[COMPACT] ${truncateLine(output, 180)}`];
     return [`[COMPACT] ${title}`];
+  }
+
+  if (message.type === "compaction_boundary") {
+    return ["[CTX COMPACTED]"];
   }
 
   if (message.type === "sub_tool") {

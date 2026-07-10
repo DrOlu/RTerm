@@ -225,6 +225,22 @@ const AgentTurnBubble = React.memo(function AgentTurnBubble({
   );
 });
 
+const BoundaryMarker = React.memo(function BoundaryMarker() {
+  return (
+    <article className="bubble-row boundary">
+      <div
+        className="mobile-compaction-boundary"
+        role="note"
+        aria-label="Context compacted"
+      >
+        <span className="mobile-compaction-boundary-line" aria-hidden="true" />
+        <span className="mobile-compaction-boundary-label">[CTX COMPACTED]</span>
+        <span className="mobile-compaction-boundary-line" aria-hidden="true" />
+      </div>
+    </article>
+  );
+});
+
 export function areMessageListPropsEqual(
   previous: MessageListProps,
   next: MessageListProps,
@@ -273,6 +289,9 @@ const MessageListInner: React.FC<MessageListProps> = ({
                 branchDisabled={branchDisabled}
               />
             );
+          }
+          if (item.kind === "boundary") {
+            return <BoundaryMarker key={item.id} />;
           }
           return (
             <AgentTurnBubble

@@ -1,4 +1,8 @@
-import { compactMessageSummary } from "./state";
+import {
+  applyUiUpdate,
+  compactMessageSummary,
+  createSessionState,
+} from "./state";
 import type { ChatMessage } from "./protocol";
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
@@ -26,6 +30,19 @@ const makeTextMessage = (content: string): ChatMessage => ({
   type: "text",
   content,
   timestamp: 1,
+});
+
+const makeStoredMessage = (
+  id: string,
+  backendMessageId: string,
+  content: string,
+): ChatMessage => ({
+  id,
+  role: "assistant",
+  type: "text",
+  content,
+  timestamp: 1,
+  backendMessageId,
 });
 
 runCase(
@@ -80,6 +97,57 @@ runCase(
       ),
       "@Pass Chat: Previous Chat",
       "pass-chat mention should normalize",
+    );
+  },
+);
+
+runCase(
+  "TUI INSERT_MESSAGE keeps compaction boundary markers anchored after previous messages",
+  () => {
+    const session = createSessionState("s1");
+    const previous = makeStoredMessage(
+      "assistant-1",
+      "backend-assistant-1",
+      "done",
+    );
+    const next = makeStoredMessage("assistant-2", "backend-assistant-2", "next");
+    const boundary: ChatMessage = {
+      id: "boundary-1",
+      role: "system",
+      type: "compaction_boundary",
+      content: "stale content should be cleared",
+      timestamp: 2,
+      backendMessageId: "backend-boundary-1",
+      streaming: true,
+      metadata: {
+        compactionBoundaryPreviousBackendMessageId: previous.backendMessageId,
+        compactionBoundarySummaryBackendMessageId: "backend-summary-1",
+      },
+    };
+    session.messages.push(previous, next);
+
+    applyUiUpdate(session, {
+      type: "INSERT_MESSAGE",
+      sessionId: session.id,
+      message: boundary,
+      anchorBackendMessageId: previous.backendMessageId,
+      placement: "after",
+    });
+
+    assertEqual(
+      session.messages.map((message) => message.id).join(","),
+      "assistant-1,boundary-1,assistant-2",
+      "previous-anchor boundary should remain after its previous message",
+    );
+    assertEqual(
+      compactMessageSummary(session.messages[1], true),
+      "[CTX COMPACTED]",
+      "TUI boundary summary should remain visible after normalization",
+    );
+    assertEqual(
+      session.messages[1]?.streaming,
+      false,
+      "stored boundary marker must not stay streaming",
     );
   },
 );
