@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#key-capabilities)
 
 English README | [中文 README](./README.zh-CN.md)  
-Latest release notes: [`changelogs/v1.5.5.md`](./changelogs/v1.5.5.md)
+Latest release notes: [`changelogs/v1.6.0.md`](./changelogs/v1.6.0.md)
 
 If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/GyShell/discussions).
 
@@ -23,10 +23,10 @@ Usage guides:
 > **v1.4.0 upgrade note**: the first launch after upgrading from a pre-1.4.0 version may briefly block while GyShell migrates legacy JSON history into SQLite and writes timestamped backup files. v1.4.3 has no additional migration step.
 
 <p align="center">
-  <img src="./demo_imgs/v1.5.5_dark.png" width="100%" alt="GyShell dark theme demo">
+  <img src="./demo_imgs/v1.6.0_dark.png" width="100%" alt="GyShell dark theme demo">
 </p>
 <p align="center">
-  <img src="./demo_imgs/v1.5.5_light.png" width="100%" alt="GyShell light theme demo">
+  <img src="./demo_imgs/v1.6.0_light.png" width="100%" alt="GyShell light theme demo">
 </p>
 <p align="center">
   <video controls width="100%" src="https://github.com/user-attachments/assets/f9daf884-bda0-4a58-8a6d-934db0eddeb5"></video>
@@ -66,7 +66,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - **For multi-device flow**: desktop + TUI + mobile-web with shared gateway semantics.
 - **For multimodal workflows**: text and image inputs can be combined in one execution turn.
 
-## v1.5.5 Key Highlights
+## v1.6.0 Key Highlights
 
 - **Global Tab List panel**
   - a new `TAB LIST` panel shows terminal and chat tabs as a vertical workspace inventory, with counts, status dots, latest-first ordering, drag/drop support, close actions, and quick creation for chat, local terminal, and saved-SSH terminal tabs
@@ -246,7 +246,7 @@ See:
 
 ## Read More
 
-- Release notes: `changelogs/v1.5.5.md`
+- Release notes: `changelogs/v1.6.0.md`
 - Build matrix and packaging: `docs/build-commands.md`
 - Monorepo boundaries and runtime flow: `docs/monorepo-architecture.md`
 

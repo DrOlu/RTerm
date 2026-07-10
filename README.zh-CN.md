@@ -7,7 +7,7 @@
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#核心能力)
 
 [English README](./README.md) | 中文 README  
-最新发布说明：[`changelogs/v1.5.5.md`](./changelogs/v1.5.5.md)
+最新发布说明：[`changelogs/v1.6.0.md`](./changelogs/v1.6.0.md)
 
 如果有任何建议或者问题，欢迎在 [GitHub Discussions](https://github.com/MrOrangeJJ/GyShell/discussions) 中提交。
 
@@ -23,10 +23,10 @@
 > **v1.4.0 升级提示**：从 1.4.0 以下版本升级后的首次启动可能会短暂阻塞，因为 GyShell 会把旧的 JSON 历史迁移到 SQLite，并写入带时间戳的备份文件。v1.4.3 无需额外迁移步骤。
 
 <p align="center">
-  <img src="./demo_imgs/v1.5.5_dark.png" width="100%" alt="GyShell 深色主题演示">
+  <img src="./demo_imgs/v1.6.0_dark.png" width="100%" alt="GyShell 深色主题演示">
 </p>
 <p align="center">
-  <img src="./demo_imgs/v1.5.5_light.png" width="100%" alt="GyShell 浅色主题演示">
+  <img src="./demo_imgs/v1.6.0_light.png" width="100%" alt="GyShell 浅色主题演示">
 </p>
 <p align="center">
   <video controls width="100%" src="https://github.com/user-attachments/assets/f9daf884-bda0-4a58-8a6d-934db0eddeb5"></video>
@@ -65,7 +65,7 @@ GyShell 的定位是“运行在真实终端中的持续执行系统”：
 - **面向多设备协作**：桌面端 + TUI + Mobile Web 共用网关语义。
 - **面向多模态执行**：单轮里可组合文字与图片输入，直接推进真实任务。
 
-## v1.5.5 关键亮点
+## v1.6.0 关键亮点
 
 - **全局 Tab List 面板**
   - 新增 `TAB LIST` 面板，用垂直清单展示 terminal 和 chat tab，包含数量、状态点、按最近更新时间排序、拖拽、关闭，以及快速创建 chat、本地 terminal、已保存 SSH terminal
@@ -241,7 +241,7 @@ GyShell 采用严格分层：
 
 ## 延伸阅读
 
-- 发布说明：`changelogs/v1.5.5.md`
+- 发布说明：`changelogs/v1.6.0.md`
 - 构建与打包命令矩阵：`docs/build-commands.md`
 - Monorepo 边界与运行链路：`docs/monorepo-architecture.md`
 
