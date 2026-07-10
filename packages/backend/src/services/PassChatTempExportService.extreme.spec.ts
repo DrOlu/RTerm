@@ -75,3 +75,116 @@ await runCase(
     }
   },
 );
+
+await runCase(
+  "pass-chat temp export can disable cleanup for durable references",
+  async () => {
+    const baseDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "gyshell-pass-chat-export-durable-"),
+    );
+    try {
+      const service = new PassChatTempExportService({
+        baseDir,
+        maxFiles: null,
+      });
+
+      for (let index = 0; index < 5; index += 1) {
+        await service.exportMarkdown({
+          sessionId: `session-${index}`,
+          title: `Durable Chat ${index}`,
+          markdown: `# Durable Chat ${index}\n${index}`,
+        });
+      }
+
+      const files = await fs.readdir(baseDir);
+      assert.equal(files.length, 5);
+      assert.ok(files.every((name) => name.startsWith("pass-chat_")));
+    } finally {
+      await fs.rm(baseDir, { recursive: true, force: true });
+    }
+  },
+);
+
+await runCase(
+  "pass-chat durable grouped exports clean up by session",
+  async () => {
+    const baseDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), "gyshell-pass-chat-export-grouped-"),
+    );
+    try {
+      const service = new PassChatTempExportService({
+        baseDir,
+        maxFiles: null,
+        groupBySession: true,
+      });
+      const firstPath = await service.exportMarkdown({
+        sessionId: "session-a",
+        title: "A",
+        markdown: "# A\none",
+      });
+      const secondPath = await service.exportMarkdown({
+        sessionId: "session-a",
+        title: "A",
+        markdown: "# A\ntwo",
+      });
+      const otherPath = await service.exportMarkdown({
+        sessionId: "session-b",
+        title: "B",
+        markdown: "# B\n",
+      });
+
+      assert.match(
+        path.basename(firstPath),
+        /^pass-chat_[a-f0-9]{12}_[a-f0-9]{12}\.md$/,
+      );
+      assert.ok(!path.basename(firstPath).includes("session-a"));
+      assert.equal(service.readManagedMarkdownSync(firstPath), "# A\none");
+      assert.equal(
+        service.readManagedMarkdownForSessionSync(firstPath, "session-a"),
+        "# A\none",
+      );
+      assert.equal(
+        service.readManagedMarkdownForSessionSync(firstPath, "session-b"),
+        null,
+      );
+      assert.equal(
+        service.isManagedExportPathForSession(firstPath, "session-a"),
+        true,
+      );
+      assert.equal(
+        service.isManagedExportPathForSession(firstPath, "session-b"),
+        false,
+      );
+      assert.equal(
+        service.readManagedMarkdownSync(path.join(baseDir, "not-managed.md")),
+        null,
+      );
+
+      const outsidePath = path.join(baseDir, "..", "outside.md");
+      await fs.writeFile(outsidePath, "outside", "utf8");
+      assert.equal(service.readManagedMarkdownSync(outsidePath), null);
+
+      const symlinkPath = path.join(
+        baseDir,
+        "pass-chat_aaaaaaaaaaaa_bbbbbbbbbbbb.md",
+      );
+      try {
+        await fs.symlink(outsidePath, symlinkPath);
+        assert.equal(service.readManagedMarkdownSync(symlinkPath), null);
+      } catch {
+        // Some filesystems or test environments do not allow symlink creation.
+      }
+
+      service.deleteManagedExportPathForSession(firstPath, "session-b");
+      assert.ok((await fs.stat(firstPath)).isFile());
+
+      service.deleteExportsForSession("session-a");
+
+      await assert.rejects(() => fs.stat(firstPath));
+      await assert.rejects(() => fs.stat(secondPath));
+      assert.ok((await fs.stat(otherPath)).isFile());
+    } finally {
+      await fs.rm(baseDir, { recursive: true, force: true });
+    }
+  },
+);
