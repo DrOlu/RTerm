@@ -55,7 +55,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - **Built-in mobile-web delivery**: desktop can publish the mobile-web companion directly over your LAN with copyable access links.
 - **Cross-surface runtime model**: desktop, TUI, and mobile-web share one gateway semantics.
 - **Profile lock safety**: busy sessions pin active model profile for consistency.
-- **Long-horizon context quality**: memory.md + compaction summaries + visible compaction boundaries keep long sessions understandable.
+- **Long-horizon context quality**: memory.md + compaction summaries + visible boundaries + deterministic fallback recovery keep long sessions understandable.
 - **Tooling-native workflow**: skills, MCP servers, and built-in tools are runtime primitives.
 
 ### At a Glance
@@ -72,10 +72,12 @@ GyShell is built for **persistent execution in your real terminal runtime**:
   - a new `TAB LIST` panel shows terminal and chat tabs as a vertical workspace inventory, with counts, status dots, latest-first ordering, drag/drop support, close actions, and quick creation for chat, local terminal, and saved-SSH terminal tabs
 - **Default workspace refresh**
   - new main layouts start with the list panel on the left, chat in the center, and terminal on the right, making tab-heavy sessions easier to scan immediately
-- **More predictable background SSH tabs**
-  - SSH tabs created from the list panel stay visible in the global terminal inventory, bind to terminal panels when appropriate, and no longer unexpectedly take over linked filesystem or monitor panels
+- **More predictable background terminal tabs**
+  - local and SSH tabs created from the list panel can start in the background, stay visible in the global terminal inventory, bind to terminal panels when appropriate, and no longer unexpectedly take over linked filesystem or monitor panels
 - **Visible compaction boundaries**
   - long chats now persist and render a `[CTX COMPACTED]` marker at the actual retained-history cutoff across desktop, mobile-web, and TUI clients
+- **Deterministic compaction fallback**
+  - when the compaction model fails or returns an empty summary, GyShell can recover with a local deterministic digest while preserving the protected tail and exporting exact older history for on-demand inspection when available
 - **Safer stream recovery**
   - empty non-tool provider stream finishes now retry through the normal path instead of silently ending a run with no answer, while valid empty tool-call finishes remain routable
 - **Terminal inventory stability**
@@ -93,7 +95,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 - Context-aware responses from terminal state and selected resources.
 - Per-profile model routing for `Global`, `Thinking`, `Action`, and `Compaction` roles.
 - Reusable Agent Setting profiles for model profile, security policy, tools, skills, memory, recursion, and experimental workflow flags.
-- Long-session context quality with dedicated compaction models, dynamic compaction summaries, and visible `[CTX COMPACTED]` boundary markers.
+- Long-session context quality with dedicated compaction models, dynamic summaries, visible `[CTX COMPACTED]` boundary markers, and deterministic fallback recovery when model compaction is unavailable.
 - SQLite-backed conversation history with automatic one-time migration from legacy JSON storage.
 - AI-assisted terminal command drafting from recent tab context, with paste-before-run control.
 - Background (nowait) commands automatically notify the agent on completion, so the agent can close the loop without polling.
@@ -128,7 +130,7 @@ GyShell is built for **persistent execution in your real terminal runtime**:
 ### Workspace + Monitoring
 
 - Detach panels into dedicated sub-windows and move tabs or whole panels across windows.
-- Use the global Tab List panel to scan terminal/chat inventory, restore unhosted tabs, drag tabs across layout targets, close tabs, and create new chat/local/SSH tabs.
+- Use the global Tab List panel to scan terminal/chat inventory, restore unhosted tabs, drag tabs across layout targets, close tabs, and create new chat/local/SSH tabs without forcing a terminal panel to appear.
 - Save up to three workspace layout slots and restore them from the rail.
 - Optionally keep the computer awake while any chat session is running, with the system-sleep block released automatically when runs finish.
 - Chat tabs show a running indicator while a session is busy, mirroring terminal tab runtime-state dots.
