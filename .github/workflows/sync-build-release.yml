@@ -155,10 +155,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
       - run: npm install
       - run: npm run dist:mac
         env:
@@ -189,10 +185,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
       - run: npm install
         continue-on-error: true
       - name: Remove canvas (fails without dev headers)
@@ -238,10 +230,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
       - run: npm install || true
       - run: rm -rf node_modules/canvas
       - run: npm run dist:linux
@@ -274,10 +262,6 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
       - run: npm install || true
       - run: rm -rf node_modules/canvas
       - run: npm run dist:linux-arm64
