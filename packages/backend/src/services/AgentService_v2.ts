@@ -42,6 +42,7 @@ import {
   readFileSchema,
   writeStdinSchema,
   reconnectTerminalTabSchema,
+  openTerminalTabSchema,
   editFileSchema,
   writeAndEditSchema,
   writeFileSchema,
@@ -235,6 +236,7 @@ const FALLBACK_COMPACTION_TITLE_MAX_CHARS = 240;
 const SINGLE_CALL_TOOL_BOUNDARY_NAMES = new Set([
   "exec_command",
   "reconnect_terminal_tab",
+  "open_terminal_tab",
 ]);
 
 function clipTextMiddle(input: string, maxChars: number): string {
@@ -823,6 +825,7 @@ export class AgentService_v2 {
               typeof terminalService.isTerminalReconnectable === "function"
                 ? terminalService.isTerminalReconnectable(terminalId)
                 : false,
+            savedSshConnections: this.settings?.connections?.ssh ?? [],
           },
         );
       }
@@ -1696,6 +1699,20 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "open_terminal_tab": {
+          try {
+            const validatedArgs = openTerminalTabSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.openTerminalTab(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for open_terminal_tab: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "wait": {
           try {
             const validatedArgs = waitSchema.parse(toolCall.args || {});
@@ -2500,6 +2517,9 @@ export class AgentService_v2 {
       commandPolicyService: this.commandPolicyService,
       commandPolicyMode: this.settings?.commandPolicyMode || "standard",
       agentRunId,
+      savedSshConnections: this.settings?.connections?.ssh ?? [],
+      savedProxies: this.settings?.connections?.proxies ?? [],
+      savedTunnels: this.settings?.connections?.tunnels ?? [],
       waitForQueuedInsertion: this.queuedInsertionAvailabilityWaiter
         ? (signal) =>
             agentRunId

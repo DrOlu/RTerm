@@ -116,6 +116,15 @@ export interface SSHConnectionEntry {
   tunnelIds?: string[]
   /** Optional jump host configuration for this SSH connection */
   jumpHost?: SSHConnectionEntry
+  /**
+   * SSH algorithm/key-exchange preset. `legacy`/`cisco` broaden the
+   * negotiated algorithms for devices (e.g. older Cisco IOS) that only
+   * support diffie-hellman-group1-sha1, ssh-rsa, aes*-cbc, hmac-sha1.
+   * `modern` (default) keeps ssh2's strict defaults.
+   */
+  algorithmsPreset?: 'modern' | 'legacy' | 'cisco'
+  /** TERM value requested for the remote shell/PTY (e.g. `vt100` for some network equipment). */
+  termType?: string
 }
 
 export interface ProxyEntry {
@@ -279,6 +288,22 @@ export interface SSHConnectionConfig extends BaseConnectionConfig {
   tunnels?: TunnelEntry[]
   /** Optional jump host configuration for this SSH connection */
   jumpHost?: SSHConnectionConfig
+  /**
+   * SSH algorithm/key-exchange preset. The Node `ssh2` library ships with
+   * modern, strict defaults (curve25519, rsa-sha2-256/512, aes*-gcm). Many
+   * legacy devices — notably older Cisco IOS/IOS-XE routers and switches —
+   * only offer legacy algorithms (diffie-hellman-group1-sha1, ssh-rsa,
+   * aes*-cbc, hmac-sha1), which fail handshake negotiation with the strict
+   * defaults. `legacy`/`cisco` broaden the negotiated set for those targets;
+   * `modern` (default) leaves ssh2 defaults in place.
+   */
+  algorithmsPreset?: 'modern' | 'legacy' | 'cisco'
+  /**
+   * TERM value requested for the remote shell/PTY. Some legacy network
+   * equipment expects `vt100` and misbehaves with the default `xterm`.
+   * Leave unset to use the harness default.
+   */
+  termType?: string
 }
 
 export interface GenericConnectionConfig extends BaseConnectionConfig {

@@ -40,6 +40,103 @@ const SSH_CONNECT_READY_TIMEOUT_MS = 20_000;
 const SSH_KEEPALIVE_INTERVAL_MS = 30_000;
 const SSH_KEEPALIVE_COUNT_MAX = 3;
 
+// ---------------------------------------------------------------------------
+// SSH algorithm presets
+// ---------------------------------------------------------------------------
+// The Node `ssh2` library ships with modern, strict algorithm defaults
+// (curve25519-sha256, rsa-sha2-256/512, chacha20-poly1305@openssh.com,
+// aes*-gcm). Many legacy network devices — most notably older Cisco IOS /
+// IOS-XE routers and switches — only offer legacy algorithms and abort the
+// handshake with "no matching key exchange / host key / cipher" errors
+// before auth is ever attempted.
+//
+// These presets broaden the negotiated sets for such targets. They are kept
+// deliberately permissive: the operator opts in per-connection via
+// `SSHConnectionConfig.algorithmsPreset`. `modern` (the default) is omitted
+// entirely so ssh2's built-in defaults apply unchanged.
+//
+// Algorithm names follow the ssh2 `ConnectConfig.algorithms` shape
+// (https://github.com/mscdex/ssh2#client-methods). Order matters: ssh2
+// walks the list in order and picks the first the server also advertises,
+// so modern/strong entries are listed first even in the legacy sets.
+const LEGACY_ALGORITHMS = {
+  kex: [
+    'curve25519-sha256',
+    'curve25519-sha256@libssh.org',
+    'ecdh-sha2-nistp256',
+    'ecdh-sha2-nistp384',
+    'ecdh-sha2-nistp521',
+    'diffie-hellman-group14-sha256',
+    'diffie-hellman-group14-sha1',
+    'diffie-hellman-group1-sha1',
+  ],
+  serverHostKey: [
+    'rsa-sha2-512',
+    'rsa-sha2-256',
+    'ssh-rsa',
+    'ssh-ed25519',
+    'ecdsa-sha2-nistp256',
+    'ssh-dss',
+  ],
+  cipher: [
+    'aes128-ctr',
+    'aes192-ctr',
+    'aes256-ctr',
+    'aes128-gcm',
+    'aes256-gcm',
+    'aes128-cbc',
+    '3des-cbc',
+    'aes192-cbc',
+    'aes256-cbc',
+  ],
+  hmac: [
+    'hmac-sha2-256',
+    'hmac-sha2-512',
+    'hmac-sha1',
+    'hmac-sha1-96',
+    'hmac-md5',
+    'hmac-md5-96',
+  ],
+};
+
+// The `cisco` preset is a focused subset of LEGACY_ALGORITHMS restricted to
+// the algorithms old Cisco IOS images actually advertise (DH group 1/14 with
+// SHA-1, ssh-rsa host keys, CBC ciphers, hmac-sha1). It avoids offering
+// algorithms the target can't use while still keeping the modern entries
+// first for any newer image that happens to support them.
+const CISCO_ALGORITHMS = {
+  kex: [
+    'diffie-hellman-group14-sha1',
+    'diffie-hellman-group14-sha256',
+    'diffie-hellman-group1-sha1',
+    'curve25519-sha256',
+    'curve25519-sha256@libssh.org',
+    'ecdh-sha2-nistp256',
+    'ecdh-sha2-nistp384',
+    'ecdh-sha2-nistp521',
+  ],
+  serverHostKey: ['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512', 'ssh-ed25519', 'ssh-dss'],
+  cipher: [
+    'aes128-cbc',
+    'aes192-cbc',
+    'aes256-cbc',
+    '3des-cbc',
+    'aes128-ctr',
+    'aes192-ctr',
+    'aes256-ctr',
+  ],
+  hmac: ['hmac-sha1', 'hmac-sha1-96', 'hmac-sha2-256', 'hmac-sha2-512', 'hmac-md5'],
+};
+
+function resolveSshAlgorithms(
+  preset: SSHConnectionConfig['algorithmsPreset'],
+): ssh2.ConnectConfig['algorithms'] | undefined {
+  if (preset === 'legacy') return LEGACY_ALGORITHMS as ssh2.ConnectConfig['algorithms'];
+  if (preset === 'cisco') return CISCO_ALGORITHMS as ssh2.ConnectConfig['algorithms'];
+  // 'modern' / undefined → ssh2 built-in defaults
+  return undefined;
+}
+
 interface TerminalWindowSize {
   cols: number;
   rows: number;
@@ -121,6 +218,7 @@ export class SSHBackend implements TerminalBackend {
     sshConfig: SSHConnectionConfig,
     sock?: ssh2.ConnectConfig["sock"],
   ): ssh2.ConnectConfig {
+    const algorithms = resolveSshAlgorithms(sshConfig.algorithmsPreset);
     return {
       host: sshConfig.host,
       port: sshConfig.port,
@@ -128,6 +226,7 @@ export class SSHBackend implements TerminalBackend {
       readyTimeout: SSH_CONNECT_READY_TIMEOUT_MS,
       keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
       keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
+      ...(algorithms ? { algorithms } : {}),
       ...(sock ? { sock } : {}),
     };
   }
@@ -1469,7 +1568,7 @@ export class SSHBackend implements TerminalBackend {
         });
         client.shell(
           {
-            term: "xterm-256color",
+            term: config.termType || "xterm-256color",
             cols: initialWindowSize.cols,
             rows: initialWindowSize.rows,
           },

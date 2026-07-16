@@ -3,7 +3,7 @@ import {
   SystemMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import type { TerminalTab } from "../../types";
+import type { TerminalTab, SSHConnectionEntry } from "../../types";
 import { z } from "zod";
 
 /**
@@ -198,6 +198,12 @@ export const RECONNECT_TERMINAL_TAB_DESCRIPTION = [
   "This preserves the same terminal tab id and retained output buffer. It does not recreate tabs that were closed by the user, and it only supports disconnected SSH tabs.",
   "After reconnect succeeds, verify the remote working directory and environment before continuing.",
 ].join("\n");
+export const OPEN_TERMINAL_TAB_DESCRIPTION = [
+  "Open a new SSH terminal tab from a saved connection defined in the Connections panel, so you can then operate on that server with exec_command / read_terminal_tab / write_stdin.",
+  "Pass the exact Name or ID of the saved SSH connection (as shown in Connections, or as listed under Saved SSH Connections in the system info). The tool looks it up, materialises the connection (including any saved proxy, jump host, tunnels, and the algorithm preset), and starts the SSH handshake in the background.",
+  "The new tab starts in the initializing state. It is immediately addressable by its Name via the other terminal tools. If a tab for that connection is already open, the tool reports the existing tab instead of opening a duplicate.",
+  "Prefer this over asking the user to click Connect: only use it when the user asks you to connect to a named server, or when a task requires a server that has no open tab yet. The tool does not create or edit saved connections; it only opens existing ones.",
+].join("\n");
 export const COPY_BETWEEN_TABS_DESCRIPTION = [
   "Start an asynchronous file copy between two different terminal tabs on different machines. Use this only for cross-terminal-tab file transfer; do not use it for copying within one tab or between two tabs connected to the same machine.",
   "If either source or target terminal is disconnected or not ready, this tool returns an explicit terminal_status for that side and does not start a transfer.",
@@ -238,6 +244,10 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "reconnect_terminal_tab",
     description: RECONNECT_TERMINAL_TAB_DESCRIPTION,
+  },
+  {
+    name: "open_terminal_tab",
+    description: OPEN_TERMINAL_TAB_DESCRIPTION,
   },
   {
     name: "create_or_edit",
@@ -323,7 +333,10 @@ export const COMPACTION_SUMMARY_SCHEMA = z.object({
 export function createSystemInfoPromptText(
   tabs: TerminalTab[],
   sessionId: string,
-  options?: { isTerminalReconnectable?: (terminalId: string) => boolean },
+  options?: {
+    isTerminalReconnectable?: (terminalId: string) => boolean;
+    savedSshConnections?: readonly SSHConnectionEntry[];
+  },
 ): string {
   const tabInfos = tabs
     .map((t) => {
@@ -344,7 +357,24 @@ export function createSystemInfoPromptText(
     })
     .join("\n");
 
-  const sysInfoText = `${SYS_INFO_MARKER}\nYour sessionId for this conversation is ${sessionId}\nAvailable Terminal Tabs:\n${tabInfos}`;
+  const saved = options?.savedSshConnections ?? [];
+  const savedBlock =
+    saved.length > 0
+      ? saved
+          .map(
+            (c) =>
+              `- Name: ${c.name || c.id}, ID: ${c.id}, Host: ${c.host}:${c.port}, User: ${c.username}` +
+              (c.algorithmsPreset && c.algorithmsPreset !== "modern"
+                ? `, Algorithms: ${c.algorithmsPreset}`
+                : ""),
+          )
+          .join("\n")
+      : "";
+  const savedSection = savedBlock
+    ? `\nSaved SSH Connections (open with the open_terminal_tab tool by Name or ID):\n${savedBlock}`
+    : "";
+
+  const sysInfoText = `${SYS_INFO_MARKER}\nYour sessionId for this conversation is ${sessionId}\nAvailable Terminal Tabs:\n${tabInfos}${savedSection}`;
   return sysInfoText;
 }
 
@@ -352,7 +382,10 @@ export function prependSystemInfoToUserInput(
   userInputContent: string,
   tabs: TerminalTab[],
   sessionId: string,
-  options?: { isTerminalReconnectable?: (terminalId: string) => boolean },
+  options?: {
+    isTerminalReconnectable?: (terminalId: string) => boolean;
+    savedSshConnections?: readonly SSHConnectionEntry[];
+  },
 ): string {
   const systemInfoText = createSystemInfoPromptText(tabs, sessionId, options);
   return `${systemInfoText}\n\n${userInputContent}`;

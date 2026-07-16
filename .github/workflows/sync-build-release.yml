@@ -10,6 +10,14 @@ on:
         required: false
         default: "false"
         type: string
+      release_mode:
+        description: "sync = version tracks upstream; feature = keep our local version.json (for our own feature releases)"
+        required: false
+        default: "sync"
+        type: choice
+        options:
+          - sync
+          - feature
 
 concurrency:
   group: rterm-sync-build
@@ -43,6 +51,17 @@ jobs:
           CURRENT_VERSION=$(jq -r '.version' version.json 2>/dev/null || echo "0.0.0")
           echo "current_version=$CURRENT_VERSION"
 
+          # In feature release mode we ship OUR local version (already bumped
+          # in-tree). Skip the upstream version comparison entirely and never
+          # clobber version.json/package.json with upstream's number.
+          if [ "${{ inputs.release_mode }}" = "feature" ]; then
+            echo "Feature release mode: building and releasing v$CURRENT_VERSION as-is"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            echo "skip_upstream_merge=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           UPSTREAM_LATEST=$(curl -sL "https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/latest" \
             | jq -r '.tag_name // "0.0.0"' | sed 's/^v//')
           echo "upstream_latest=$UPSTREAM_LATEST"
@@ -73,7 +92,7 @@ jobs:
           fi
 
       - name: Merge upstream changes
-        if: steps.check.outputs.should_build == 'true'
+        if: steps.check.outputs.should_build == 'true' && steps.check.outputs.skip_upstream_merge != 'true'
         run: |
           git config user.name "RTerm Sync Bot"
           git config user.email "rterm-bot@hyperspace.ng"
@@ -90,6 +109,13 @@ jobs:
       - name: Apply rebrand
         if: steps.check.outputs.should_build == 'true'
         run: |
+          # In feature release mode the rebrand + version clobber must NOT
+          # run: our version.json/package.json already hold the correct local
+          # version and our code changes are committed in-tree.
+          if [ "${{ inputs.release_mode }}" = "feature" ]; then
+            echo "Feature release mode: skipping rebrand + version clobber"
+            exit 0
+          fi
           chmod +x scripts/rebrand.sh 2>/dev/null || true
           if [ -f "scripts/rebrand.sh" ]; then
             bash scripts/rebrand.sh
@@ -295,7 +321,12 @@ jobs:
           body: |
             RTerm v${{ steps.version.outputs.version }} — AI-Native Terminal App by Hyperspace Technologies
 
-            Synced from upstream GyShell v${{ steps.version.outputs.version }}.
+            Synced from upstream GyShell, with RTerm-specific enhancements.
+
+            ## What's new in RTerm v1.6.1
+
+            - **Legacy / Cisco SSH support.** New *Algorithms* preset (Modern / Legacy / Cisco) and optional *TERM* type field on saved SSH connections. Older network gear (Cisco IOS/IOS-XE, legacy switches/routers) that only offers `diffie-hellman-group1-sha1`, `ssh-rsa`, `aes*-cbc`, `hmac-sha1` now connects successfully instead of failing the SSH handshake. Select **Algorithms: Cisco / Network gear** (or **Legacy**) in the Connections panel.
+            - **`open_terminal_tab` agent tool.** The AI agent can now open a new SSH terminal tab from a saved connection by Name or ID, instead of only operating on already-open tabs. Saved SSH connections are surfaced to the agent in the system info. Duplicate-open is detected and reported. Enables fully autonomous "connect to server X and run …" workflows.
 
             ## Downloads
 

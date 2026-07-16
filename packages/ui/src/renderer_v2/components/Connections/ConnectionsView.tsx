@@ -313,6 +313,40 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                       />
                     </div>
 
+                    {/* SSH algorithms / TERM preset for legacy network equipment.
+                        Older Cisco IOS/IOS-XE (and similar) only offer legacy
+                        algorithms (DH group1/14-SHA1, ssh-rsa, aes*-cbc,
+                        hmac-sha1) and reject ssh2's modern strict defaults at
+                        handshake. `cisco`/`legacy` broaden the negotiated set.
+                        Some images also require TERM=vt100 instead of xterm. */}
+                    <div className="editor-row">
+                      <span className="editor-icon">
+                        <Shield size={16} strokeWidth={2} />
+                      </span>
+                      <Select
+                        className="editor-select"
+                        value={draft.algorithmsPreset ?? 'modern'}
+                        onChange={(val) => setDraft({ ...draft, algorithmsPreset: val === 'modern' ? undefined : val })}
+                        options={[
+                          { value: 'modern', label: 'Algorithms: Modern (default)' },
+                          { value: 'legacy', label: 'Algorithms: Legacy' },
+                          { value: 'cisco', label: 'Algorithms: Cisco / Network gear' }
+                        ]}
+                      />
+                    </div>
+
+                    <div className="editor-row">
+                      <span className="editor-icon">
+                        <Server size={16} strokeWidth={2} />
+                      </span>
+                      <input
+                        className="editor-input"
+                        placeholder="TERM (default: xterm-256color)"
+                        value={draft.termType ?? ''}
+                        onChange={(e) => setDraft({ ...draft, termType: e.target.value || undefined })}
+                      />
+                    </div>
+
                     <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}>
                       <span className="editor-icon" style={{ marginTop: 6 }}>
                         <Waypoints size={16} strokeWidth={2} />

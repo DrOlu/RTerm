@@ -6,6 +6,8 @@ import {
   formatTerminalUnavailableForTool,
   resolveTerminalForTool
 } from './terminal_runtime_guard'
+import type { SSHConnectionEntry, SSHConnectionConfig, ProxyEntry, TunnelEntry } from '../../../types'
+import { randomUUID } from 'node:crypto'
 
 // --- Schemas ---
 
@@ -46,6 +48,84 @@ export const writeStdinSchema = z
 export const reconnectTerminalTabSchema = z.object({
   tabIdOrName: z.string().describe('The ID or Name of the disconnected SSH terminal tab to reconnect')
 })
+
+export const openTerminalTabSchema = z.object({
+  /**
+   * Name or id of a saved SSH connection from the Connections panel
+   * (backend settings `connections.ssh`). The tool looks it up by `id` or
+   * `name`, materialises a fresh `ssh` TerminalConfig, and asks
+   * TerminalService to create the tab. The new tab appears in the workspace
+   * like any user-opened tab and is immediately usable by other terminal
+   * tools via its tab id/title.
+   */
+  connectionNameOrId: z
+    .string()
+    .describe('The Name or ID of a saved SSH connection to open as a new terminal tab')
+})
+
+/**
+ * Resolve a saved SSH connection entry by id or name from the connections
+ * available in the execution context. Returns the first match, preferring an
+ * exact `id` match over a `name` match when both happen to collide.
+ */
+function resolveSavedSshConnection(
+  context: Pick<ToolExecutionContext, 'savedSshConnections'>,
+  nameOrId: string,
+): SSHConnectionEntry | undefined {
+  const list = context.savedSshConnections
+  if (!list || list.length === 0) return undefined
+  const byId = list.find((c) => c.id === nameOrId)
+  if (byId) return byId
+  const normalised = nameOrId.trim().toLowerCase()
+  return list.find(
+    (c) => (c.name ?? '').trim().toLowerCase() === normalised
+  )
+}
+
+/**
+ * Materialise a live `ssh` TerminalConfig from a saved SSH connection entry.
+ * Mirrors the conversion the UI performs in
+ * `AppStore.toTerminalConfig` for saved SSH connections: resolves `proxyId` →
+ * `ProxyEntry` and `tunnelIds` → `TunnelEntry[]` against the supplied
+ * connections list, allocates a fresh tab id, and carries forward the
+ * algorithm preset / TERM type so legacy devices (e.g. Cisco) connect.
+ */
+function sshEntryToTerminalConfig(
+  entry: SSHConnectionEntry,
+  opts: {
+    proxies: readonly ProxyEntry[]
+    tunnels: readonly TunnelEntry[]
+    title: string
+  },
+): SSHConnectionConfig {
+  const proxy = entry.proxyId
+    ? (opts.proxies.find((p) => p.id === entry.proxyId) as ProxyEntry | undefined)
+    : undefined
+  const tunnels = (entry.tunnelIds ?? [])
+    .map((id) => opts.tunnels.find((t) => t.id === id))
+    .filter((t): t is TunnelEntry => Boolean(t))
+  const jumpHost = entry.jumpHost as SSHConnectionConfig | undefined
+  return {
+    type: 'ssh',
+    id: `ssh-${randomUUID()}`,
+    title: opts.title,
+    cols: 80,
+    rows: 24,
+    host: entry.host,
+    port: entry.port,
+    username: entry.username,
+    authMethod: entry.authMethod,
+    password: entry.password,
+    privateKey: entry.privateKey,
+    privateKeyPath: entry.privateKeyPath,
+    passphrase: entry.passphrase,
+    proxy,
+    tunnels,
+    jumpHost,
+    algorithmsPreset: entry.algorithmsPreset,
+    termType: entry.termType,
+  }
+}
 
 // --- Constants ---
 
@@ -694,6 +774,97 @@ Reconnect was requested, but the terminal is still initializing after ${Math.flo
     const snapshot = terminalService.getTerminalRuntimeSnapshot(terminal.id)
     const status = snapshot ? `\n${formatTerminalStatusHeader(snapshot)}` : ''
     return finish(`Reconnect failed: ${message}${status}`)
+  }
+}
+
+export async function openTerminalTab(
+  args: z.infer<typeof openTerminalTabSchema>,
+  context: ToolExecutionContext
+): Promise<string> {
+  const { connectionNameOrId } = args
+  const { terminalService, sessionId, messageId, sendEvent } = context
+
+  abortIfNeeded(context.signal)
+
+  const notFound = (reason: string): string => {
+    sendEvent(sessionId, {
+      messageId,
+      type: 'tool_call',
+      toolName: 'open_terminal_tab',
+      input: JSON.stringify(args),
+      output: reason,
+    })
+    return reason
+  }
+
+  const entry = resolveSavedSshConnection(context, connectionNameOrId)
+  if (!entry) {
+    const available = (context.savedSshConnections ?? [])
+      .map((c) => c.name || c.id)
+      .filter(Boolean)
+    const hint =
+      available.length > 0
+        ? ` Available saved SSH connections: ${available.join(', ')}.`
+        : ' No saved SSH connections are configured in Connections.'
+    return notFound(
+      `No saved SSH connection found for "${connectionNameOrId}".${hint} Open the Connections panel and save the server first, or pass the exact Name/ID shown there.`
+    )
+  }
+
+  // Bail out if a tab for this saved connection is already live or connecting.
+  // resolveTerminal matches by tab id or tab title; the UI sets the tab title to
+  // the connection name (or user@host), so this catches the common double-open.
+  const existingByTitle = terminalService.resolveTerminal(
+    entry.name || `${entry.username}@${entry.host}`
+  )
+  if (existingByTitle.bestMatch) {
+    const snapshot = terminalService.getTerminalRuntimeSnapshot(existingByTitle.bestMatch.id)
+    const status = snapshot ? `\n${formatTerminalStatusHeader(snapshot)}` : ''
+    return notFound(
+      `A terminal tab for saved connection "${entry.name || entry.id}" is already open${status}`
+    )
+  }
+
+  sendEvent(sessionId, {
+    messageId,
+    type: 'sub_tool_started',
+    toolName: 'open_terminal_tab',
+    title: `Open ${entry.name || entry.host}`,
+    hint: `${entry.username}@${entry.host}:${entry.port}`,
+    input: JSON.stringify(args),
+  })
+
+  const finish = (output: string): string => {
+    sendEvent(sessionId, { messageId, type: 'sub_tool_delta', outputDelta: output })
+    sendEvent(sessionId, { messageId, type: 'sub_tool_finished' })
+    return output
+  }
+
+  try {
+    const config = sshEntryToTerminalConfig(entry, {
+      proxies: context.savedProxies ?? [],
+      tunnels: context.savedTunnels ?? [],
+      title: entry.name || `${entry.username}@${entry.host}`,
+    })
+    // TerminalService.createTerminal accepts a complete TerminalConfig and
+    // kicks off the SSH handshake in the background; the tab exists
+    // immediately in the "initializing" state. proxyId/tunnelIds are
+    // resolved against savedProxies/savedTunnels here, mirroring the UI's
+    // AppStore.toTerminalConfig wiring.
+    const tab = await terminalService.createTerminal(config)
+    // createTerminal is async but the SSH handshake continues in the
+    // background; the tab exists immediately in the "initializing" state.
+    const snapshot = terminalService.getTerminalRuntimeSnapshot(tab.id)
+    const status = snapshot ? `\n${formatTerminalStatusHeader(snapshot)}` : ''
+    return finish(
+      `Opened a new SSH terminal tab for saved connection "${entry.name || entry.id}"${status}`
+    )
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    return finish(`Failed to open terminal tab for "${entry.name || entry.id}": ${message}`)
   }
 }
 
