@@ -88,6 +88,13 @@ function pickBackendSnapshot(raw: unknown): Partial<BackendSettings> {
     models: raw.models,
     connections: raw.connections,
     tools: raw.tools,
+    // automation (groups, scripts, scheduled tasks, templates, device memory)
+    // and sessionLogging are first-class persisted settings — they must survive
+    // migration. Omitting them here wiped the whole automation block (and the
+    // session-logging flag) on every save/load, so groups/tasks disappeared
+    // after a restart.
+    automation: raw.automation,
+    sessionLogging: raw.sessionLogging,
     gateway: raw.gateway,
     layout: raw.layout,
     recursionLimit: raw.recursionLimit,
