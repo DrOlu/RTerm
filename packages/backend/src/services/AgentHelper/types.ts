@@ -2,6 +2,7 @@ import type { TerminalService } from '../TerminalService'
 import type { FileTransferService } from '../FileTransferService'
 import type { CommandPolicyMode } from '../CommandPolicy/CommandPolicyService'
 import type { ICommandPolicyRuntime, IConnectionManagerRuntime } from '../runtimeContracts'
+import type { AutomationManager } from '../automation/AutomationManager'
 import type { SSHConnectionEntry, ProxyEntry, TunnelEntry, WinRMConnectionEntry } from '../../types'
 import type {
   QueuedAgentInsertionInput,
@@ -26,6 +27,9 @@ export interface ToolExecutionContext {
    * (tests that don't exercise connection mutation) can omit it.
    */
   connectionManager?: IConnectionManagerRuntime
+  /** Optional automation store (groups, device memory, scripts, scheduled tasks,
+   * templates) backing the automation agent tools. */
+  automationManager?: AutomationManager
   agentRunId?: string
   /**
    * Saved SSH connections from backend settings (`connections.ssh`).

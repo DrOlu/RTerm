@@ -29,6 +29,9 @@ import { TerminalStateStore } from "../../services/terminal/TerminalStateStore";
 import { createAutoTerminalConfig } from "../../services/terminal/terminalConnectionSupport";
 import { TerminalCommandDraftService } from "../../services/TerminalCommandDraftService";
 import { ConnectionManager } from "../../services/ConnectionManager";
+import { AutomationManager } from "../../services/automation/AutomationManager";
+import { SessionLogService } from "../../services/automation/sessionLogService";
+import { SchedulerService } from "../../services/automation/schedulerService";
 import { HistoryStorageMigration } from "../../services/history/HistoryStorageMigration";
 import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
 import { AgentSettingProfileService } from "../../services/AgentSettingProfileService";
@@ -177,6 +180,40 @@ export async function startGyBackend(): Promise<void> {
         gatewayService.broadcastRaw("settings:updated", next),
     }),
   );
+
+  // Automation subsystems (local-only Netcatty/NetStacks parity): connection
+  // groups, per-device memory, saved scripts, scheduled tasks, config
+  // templates. Mutations persist to settings.automation + broadcast so the UI
+  // refreshes. (The agent tools read this via ToolExecutionContext.automationManager.)
+  const automationManager = new AutomationManager({
+    getSettings: () => settingsService.getSettings(),
+    setSettings: (patch) => settingsService.setSettings(patch),
+    onSettingsChanged: (next) => agentService.updateSettings(next),
+    broadcastSettings: (next) =>
+      gatewayService.broadcastRaw("settings:updated", next),
+  });
+  agentService.setAutomationManager(automationManager);
+
+  // Session logging: record terminal output per session to disk when enabled.
+  if (settingsService.getSettings().sessionLogging?.enabled) {
+    const logDir = path.join(
+      (process.env.GYSHELL_STORE_DIR || ""),
+      "session-logs",
+    );
+    terminalService.setSessionLogger(new SessionLogService({ logDir }));
+  }
+
+  // Scheduled-task scheduler: evaluate due tasks on a per-minute tick. The
+  // runner is a no-op stub here (full runner wiring requires opening tabs,
+  // which needs the gateway session context); it marks the task as run.
+  const scheduler = new SchedulerService({
+    getTasks: () => automationManager.listScheduledTasks(),
+    run: (task) => {
+      console.log(`[scheduler] due task: ${task.name} (${task.cron})`);
+      automationManager.markScheduledTaskRun(task.id);
+    },
+  });
+  scheduler.start();
 
   if (
     bootstrapLocalTerminal &&

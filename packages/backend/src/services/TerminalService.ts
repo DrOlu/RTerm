@@ -26,6 +26,7 @@ import {
 import { NodePtyBackend } from './NodePtyBackend'
 import { SSHBackend } from './SSHBackend'
 import { WinRMBackend } from './WinRMBackend'
+import { SerialBackend } from './SerialBackend'
 import { escapeShellPathList } from './ShellUtility'
 import { TerminalStateStore, type PersistedTerminalRecord } from './terminal/TerminalStateStore'
 import { v4 as uuidv4 } from 'uuid'
@@ -206,12 +207,21 @@ export class TerminalService {
   private syntheticCommandQuietWindowMs = 1000
   private readonly terminalIdsBeingKilled = new Set<string>()
   private readonly terminalClosedListeners = new Set<TerminalClosedListener>()
+  /** Optional session logger (records terminal output to disk per session). */
+  private sessionLogger: import('./automation/sessionLogService').SessionLogService | null = null
+  private readonly sessionLogStarted = new Set<string>()
 
   constructor(options?: TerminalServiceOptions) {
     this.backends.set('local', new NodePtyBackend())
     this.backends.set('ssh', new SSHBackend())
     this.backends.set('winrm', new WinRMBackend())
+    this.backends.set('serial', new SerialBackend())
     this.terminalStateStore = options?.terminalStateStore ?? null
+  }
+
+  /** Wire a session logger to record terminal output per session (Netcatty logs). */
+  setSessionLogger(logger: import('./automation/sessionLogService').SessionLogService | null): void {
+    this.sessionLogger = logger
   }
 
   setRawEventPublisher(publisher: RawEventPublisher): void {
@@ -778,6 +788,16 @@ export class TerminalService {
   private handleData(terminalId: string, data: string): void {
     const sanitizedData = stripInternalControlMarkers(data)
     const tab = this.terminals.get(terminalId)
+    // Session logging (records raw terminal output per session to disk).
+    if (this.sessionLogger && tab) {
+      if (!this.sessionLogStarted.has(terminalId)) {
+        this.sessionLogStarted.add(terminalId)
+        const cfg = this.terminalConfigs.get(terminalId)
+        this.sessionLogger.start(terminalId, { title: tab.title || terminalId, type: tab.type })
+        void cfg
+      }
+      this.sessionLogger.write(terminalId, sanitizedData)
+    }
     if (tab) {
       let shouldPublishTabsChanged = false
 
@@ -1106,7 +1126,14 @@ export class TerminalService {
 
   private handleExit(terminalId: string, code: number): void {
     const tab = this.terminals.get(terminalId)
-    
+
+    // Flush the session log to the index when a session ends (so closed
+    // sessions appear in the log viewer immediately).
+    if (this.sessionLogger && this.sessionLogStarted.has(terminalId)) {
+      this.sessionLogger.stop(terminalId)
+      this.sessionLogStarted.delete(terminalId)
+    }
+
     // Mark active task as aborted if terminal exits unexpectedly
     const activeTaskId = this.activeTaskByTerminal.get(terminalId)
     if (activeTaskId) {
@@ -1226,7 +1253,13 @@ export class TerminalService {
       } finally {
         this.terminalIdsBeingKilled.delete(terminalId)
       }
-      
+      // Flush the session log to the index synchronously on kill so closed
+      // sessions appear in the log viewer immediately (onExit is async).
+      if (this.sessionLogger && this.sessionLogStarted.has(terminalId)) {
+        this.sessionLogger.stop(terminalId)
+        this.sessionLogStarted.delete(terminalId)
+      }
+
       const headless = this.headlessPtys.get(terminalId)
       if (headless) {
         headless.dispose()

@@ -31,9 +31,18 @@ export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
   connections: {
     ssh: [],
     winrm: [],
+    serial: [],
     proxies: [],
     tunnels: [],
   },
+  automation: {
+    groups: [],
+    deviceMemory: [],
+    scripts: [],
+    scheduledTasks: [],
+    templates: [],
+  },
+  sessionLogging: { enabled: false },
   gateway: {
     ws: {
       access: "localhost",

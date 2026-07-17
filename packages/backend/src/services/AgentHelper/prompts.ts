@@ -242,6 +242,38 @@ export const COLLECT_FACTS_DESCRIPTION = [
   "Use this to build a structured fleet inventory or to understand what each open tab is before running targeted commands. Each template command is policy-checked. For deeper per-target data, follow up with run_fleet_command or exec_command.",
 ].join("\n");
 
+export const MANAGE_DEVICE_MEMORY_DESCRIPTION = [
+  "Per-device memory: record and recall role, standing instructions, and dated incident history for a host (local only — not shared across a team). This is the device-knowledge layer that survives engineer turnover.",
+  "action=\"get\" returns memory for a host. action=\"upsert\" sets role/standingInstructions. action=\"add_incident\" appends a dated incident (summary/resolution/ticketId) — use this after fixing an issue so the next engineer walks into context. action=\"list\" lists all hosts with memory; action=\"delete\" removes it.",
+  "Standing instructions are injected into the agent's context for that host on future turns, so it troubleshoots with the full backstory. Ticket ids (ServiceNow/Jira) are stored verbatim.",
+].join("\n");
+
+export const MANAGE_SCRIPT_DESCRIPTION = [
+  "Create, update, delete, or list saved scripts (reusable commands runnable on one or more open tabs). A script is a name + a command body (+ optional target scope/tags).",
+  "Use this to capture repeatable ops as named snippets. To actually RUN a saved script on open tabs, use run_fleet_command or exec_command with the script's command body (the script store is the library; the terminal tools are the executor).",
+].join("\n");
+
+export const MANAGE_GROUP_DESCRIPTION = [
+  "Create, update, delete, or list connection groups (folders) for organizing saved SSH/WinRM connections in a tree. Children of a deleted group are reparented to root.",
+  "After creating a group, assign a saved connection to it by setting the connection's groupId via manage_ssh_connection.update (or the Connections panel). Groups are for organization and targeting (scheduled tasks / fleet ops can scope by groupId).",
+].join("\n");
+
+export const MANAGE_SCHEDULED_TASK_DESCRIPTION = [
+  "Create, update, delete, or list cron-scheduled tasks that run a saved script (scriptId) or an inline command on a target scope (groupId / tags / explicit targets) on a schedule.",
+  "Provide a standard 5-field cron expression (e.g. '0 2 * * *' = 2am daily, '*/15 * * * *' = every 15 min). Tasks are evaluated by the local scheduler; the task's lastRunAt is updated on each run. Set enabled=false to pause.",
+].join("\n");
+
+export const MANAGE_TEMPLATE_DESCRIPTION = [
+  "Create, version, and render parameterized configuration templates using a Jinja-subset engine ({{ var }}, | default/upper/lower/length, {% for item in list %}, {% for k,v in obj.items() %}, {% if %}/{% elif %}/{% else %}). Network-config-as-code.",
+  "action=\"create\" stores name + body + declared variables. action=\"render\" previews the rendered output with given `values` (defaults applied). action=\"version\" saves a versioned render AND returns a diff against the previous version for review/rollback. action=\"list\"/\"update\"/\"delete\" manage templates.",
+  "After rendering + approving a template, deploy it to a device tab with exec_command (send the rendered text as the command body). Templates are the source; the terminal tools apply them.",
+].join("\n");
+
+export const IMPORT_PUTTY_DESCRIPTION = [
+  "Import saved PuTTY sessions from a Windows Registry .reg export into RTerm's saved SSH connections. Only ssh-protocol sessions with a HostName are imported; serial/raw/telnet sessions are skipped, and duplicate names are not re-imported.",
+  "Provide the full contents of the .reg file as `regContent`. The tool creates the connections via the connection manager so they appear in the Connections panel immediately. Open them with open_terminal_tab by Name.",
+].join("\n");
+
 export const PROBE_CONNECTIVITY_DESCRIPTION = [
   "Probe reachability of a SAVED SSH connection: open a fresh tab for it (or reuse an already-open one), wait for it to become ready or exit, then report REACHABLE/UNREACHABLE, the detected OS class, the terminal status header, and the initial login banner.",
   "This is the building block for autonomous operations — \"is host X up?\", \"what OS is on this box?\", pre-change sanity checks. It never sends commands beyond what the shell's own login produces.",
@@ -327,6 +359,30 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "probe_connectivity",
     description: PROBE_CONNECTIVITY_DESCRIPTION,
+  },
+  {
+    name: "manage_device_memory",
+    description: MANAGE_DEVICE_MEMORY_DESCRIPTION,
+  },
+  {
+    name: "manage_script",
+    description: MANAGE_SCRIPT_DESCRIPTION,
+  },
+  {
+    name: "manage_group",
+    description: MANAGE_GROUP_DESCRIPTION,
+  },
+  {
+    name: "manage_scheduled_task",
+    description: MANAGE_SCHEDULED_TASK_DESCRIPTION,
+  },
+  {
+    name: "manage_template",
+    description: MANAGE_TEMPLATE_DESCRIPTION,
+  },
+  {
+    name: "import_putty",
+    description: IMPORT_PUTTY_DESCRIPTION,
   },
 ];
 

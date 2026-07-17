@@ -13,7 +13,7 @@ export interface KnownTerminalConnectionTypeDefinition {
   capabilities: TerminalConnectionCapabilities
 }
 
-export const KNOWN_TERMINAL_CONNECTION_TYPES = ['local', 'ssh', 'winrm'] as const
+export const KNOWN_TERMINAL_CONNECTION_TYPES = ['local', 'ssh', 'winrm', 'serial'] as const
 
 export type KnownTerminalConnectionType =
   (typeof KNOWN_TERMINAL_CONNECTION_TYPES)[number]
@@ -58,6 +58,17 @@ const KNOWN_TERMINAL_CONNECTION_TYPE_DEFINITIONS: Record<
     iconKind: 'remote',
     // WinRM v1 is scoped to command execution + the fleet tools, rendered as
     // a command/response log (not a PTY). No file panel / monitor over WinRM.
+    capabilities: {
+      supportsFilesystem: false,
+      supportsMonitor: false,
+    },
+  },
+  serial: {
+    type: 'serial',
+    idPrefix: 'serial',
+    defaultTitle: 'Serial',
+    iconKind: 'remote',
+    // Serial console is a live byte-stream PTY (no filesystem/monitor).
     capabilities: {
       supportsFilesystem: false,
       supportsMonitor: false,

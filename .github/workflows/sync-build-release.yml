@@ -350,6 +350,20 @@ jobs:
 
             Synced from upstream GyShell, with RTerm-specific enhancements.
 
+            ## What's new in RTerm v1.7.2
+
+            Netcatty + NetStacks parity — a full local-only automation & knowledge layer, plus serial console and PuTTY import. No server required.
+
+            - **Connection groups / folders.** Organize saved SSH/WinRM connections into a tree (parent/child); children of a deleted group reparent to root. New `manage_group` agent tool + `groupId` on connection entries.
+            - **Per-device memory.** Record role, standing instructions, and dated incident history per host (with ticket ids). Standing instructions are injected into the agent's context for that host on future turns. `manage_device_memory` agent tool (get/upsert/add_incident/list/delete).
+            - **Saved scripts / snippets.** A reusable command library. `manage_script` tool (create/update/delete/list); run a saved script's body on open tabs via `run_fleet_command`/`exec_command`.
+            - **Scheduled tasks (cron).** Create cron-scheduled tasks that run a saved script or inline command on a target scope. A local per-minute scheduler evaluates due tasks. `manage_scheduled_task` tool (5-field cron, retry, enable/disable).
+            - **Config templates (Jinja-subset).** Parameterized network config templates with `{{ var | default/upper/lower/length }}`, `{% for %}`, `{% if %}/{% elif %}/{% else %}`. `manage_template` tool: create → render (preview) → version (saves a versioned render + returns a diff vs the previous version for review/rollback). Dependency-free renderer.
+            - **Session logging.** Record terminal output per session to disk (Netcatty "connection logs"). New `SessionLogService` wired into the terminal data path; an index lists recorded sessions with start/end/bytes. Enable via `sessionLogging.enabled`.
+            - **Serial console connections.** New `serial` terminal type (`/dev/ttyUSB0`, COM3, baud/parity/flow-control) presented as a live PTY tab. Lazy-loads the `serialport` npm module (clear error if not installed); backend logic unit-tested with a mock transport (no serial hardware needed).
+            - **PuTTY import.** `import_putty` agent tool parses a Windows .reg PuTTY session export into saved SSH connections (ssh-protocol only, duplicate names skipped).
+            - **Per-connection `notes` + `groupId` fields** on SSH and WinRM entries.
+
             ## What's new in RTerm v1.7.1
 
             - **WinRM (Windows Remote Management) connectivity.** Connect to Windows servers over WS-Management on port 5985 (HTTP) / 5986 (HTTPS) with Basic auth, alongside SSH. Add WinRM connections from the Connections panel (new **WinRM** section) or with the new `manage_winrm_connection` agent tool, open a tab, and run PowerShell/cmd commands via `exec_command` / `run_fleet_command` / `collect_facts`.

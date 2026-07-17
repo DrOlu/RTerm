@@ -52,6 +52,12 @@ import {
   readFileTransferStatusSchema,
   manageSshConnectionSchema,
   manageWinrmConnectionSchema,
+  manageDeviceMemorySchema,
+  manageScriptSchema,
+  manageGroupSchema,
+  manageScheduledTaskSchema,
+  manageTemplateSchema,
+  importPuttySchema,
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -246,10 +252,16 @@ const SINGLE_CALL_TOOL_BOUNDARY_NAMES = new Set([
   // Spawns a new terminal tab → the agent must re-read system info next round
   // to discover the freshly-opened tab.
   "probe_connectivity",
-  // Mutates the saved-connection list shown in system info → the agent must
-  // re-read system info next round to see the updated connection list.
+  // Mutate-visible-list tools: the agent must re-read system info next round
+  // to see the updated connection/list state.
   "manage_ssh_connection",
   "manage_winrm_connection",
+  "manage_group",
+  "manage_device_memory",
+  "manage_script",
+  "manage_scheduled_task",
+  "manage_template",
+  "import_putty",
 ]);
 
 function clipTextMiddle(input: string, maxChars: number): string {
@@ -307,6 +319,8 @@ export class AgentService_v2 {
   /** Optional connection manager that lets agent tools mutate saved SSH
    * connections (manage_ssh_connection). Wired from the runtime owner. */
   private connectionManager?: IConnectionManagerRuntime;
+  /** Optional automation store backing the automation agent tools. */
+  private automationManager?: import("./automation/AutomationManager").AutomationManager;
   private mcpToolService: IMcpRuntime;
   private skillService: ISkillRuntime;
   private memoryService: IMemoryRuntime;
@@ -387,6 +401,12 @@ export class AgentService_v2 {
    * connections + notify the UI. Optional; only needed in full runtimes. */
   setConnectionManager(manager: IConnectionManagerRuntime): void {
     this.connectionManager = manager;
+  }
+
+  /** Wire the automation store (groups, device memory, scripts, scheduled
+   * tasks, templates) backing the automation agent tools. */
+  setAutomationManager(manager: import("./automation/AutomationManager").AutomationManager): void {
+    this.automationManager = manager;
   }
 
   setFeedbackWaiter(
@@ -1764,6 +1784,60 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "manage_device_memory": {
+          try {
+            const validatedArgs = manageDeviceMemorySchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageDeviceMemory(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_device_memory: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_script": {
+          try {
+            const validatedArgs = manageScriptSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageScript(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_script: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_group": {
+          try {
+            const validatedArgs = manageGroupSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageGroup(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_group: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_scheduled_task": {
+          try {
+            const validatedArgs = manageScheduledTaskSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageScheduledTask(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_scheduled_task: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_template": {
+          try {
+            const validatedArgs = manageTemplateSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageTemplate(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_template: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "import_putty": {
+          try {
+            const validatedArgs = importPuttySchema.parse(toolCall.args || {});
+            result = await toolImplementations.importPutty(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for import_putty: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "run_fleet_command": {
           try {
             const validatedArgs = runFleetCommandSchema.parse(
@@ -2610,6 +2684,7 @@ export class AgentService_v2 {
       commandPolicyService: this.commandPolicyService,
       commandPolicyMode: this.settings?.commandPolicyMode || "standard",
       connectionManager: this.connectionManager,
+      automationManager: this.automationManager,
       agentRunId,
       savedSshConnections: this.settings?.connections?.ssh ?? [],
       savedWinrmConnections: this.settings?.connections?.winrm ?? [],

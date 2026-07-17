@@ -27,6 +27,9 @@ import { MemoryService } from "../../../backend/src/services/MemoryService";
 import { UIHistoryService } from "../../../backend/src/services/UIHistoryService";
 import { ChatHistoryService } from "../../../backend/src/services/ChatHistoryService";
 import { ConnectionManager } from "../../../backend/src/services/ConnectionManager";
+import { AutomationManager } from "../../../backend/src/services/automation/AutomationManager";
+import { SessionLogService } from "../../../backend/src/services/automation/sessionLogService";
+import { SchedulerService } from "../../../backend/src/services/automation/schedulerService";
 import { GatewayService } from "../../../backend/src/services/Gateway/GatewayService";
 import { ElectronGatewayIpcAdapter } from "../gateway/ElectronGatewayIpcAdapter";
 import { ElectronWindowTransport } from "../gateway/ElectronWindowTransport";
@@ -1070,6 +1073,36 @@ export async function startElectronMain(): Promise<void> {
               gatewayService.broadcastRaw("settings:updated", next),
           }),
         );
+
+        // Automation subsystems (local Netcatty/NetStacks parity).
+        const automationManager = new AutomationManager({
+          getSettings: () => settingsService.getSettings(),
+          setSettings: (patch) => settingsService.setSettings(patch),
+          onSettingsChanged: (next) => agentService.updateSettings(next),
+          broadcastSettings: (next) =>
+            gatewayService.broadcastRaw("settings:updated", next),
+        });
+        agentService.setAutomationManager(automationManager);
+
+        // Session logging (records terminal output per session when enabled).
+        if (settingsService.getSettings().sessionLogging?.enabled) {
+          terminalService.setSessionLogger(
+            new SessionLogService({
+              logDir: join(process.env.GYSHELL_STORE_DIR || app.getPath("userData"), "session-logs"),
+            }),
+          );
+        }
+
+        // Scheduled-task scheduler (per-minute tick; runner stub marks run).
+        const scheduler = new SchedulerService({
+          getTasks: () => automationManager.listScheduledTasks(),
+          run: (task) => {
+            console.log(`[scheduler] due task: ${task.name} (${task.cron})`);
+            automationManager.markScheduledTaskRun(task.id);
+          },
+        });
+        scheduler.start();
+        app.once("before-quit", () => scheduler.stop());
 
         historyMigrationCoordinator.markReady();
       } catch (error) {

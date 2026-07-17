@@ -125,6 +125,25 @@ export interface SSHConnectionEntry {
   algorithmsPreset?: 'modern' | 'legacy' | 'cisco'
   /** TERM value requested for the remote shell/PTY (e.g. `vt100` for some network equipment). */
   termType?: string
+  /** Optional group/folder id this connection belongs to (see automation.groups). */
+  groupId?: string
+  /** Free-form operator notes for this connection (per-device knowledge). */
+  notes?: string
+}
+
+/** Saved serial console connection entry. */
+export interface SerialConnectionEntry {
+  id: string
+  name: string
+  /** OS path to the serial device, e.g. /dev/ttyUSB0 or COM3. */
+  path: string
+  baudRate: number
+  dataBits?: 5 | 6 | 7 | 8
+  parity?: 'none' | 'even' | 'odd'
+  stopBits?: 1 | 2
+  flowControl?: 'none' | 'xon/xoff' | 'rts/cts'
+  groupId?: string
+  notes?: string
 }
 
 /** Saved WinRM connection entry (Connections panel / manage_winrm_connection).
@@ -140,6 +159,121 @@ export interface WinRMConnectionEntry {
   auth?: 'basic' | 'negotiate'
   domain?: string
   rejectUnauthorized?: boolean
+  /** Optional group/folder id this connection belongs to (see automation.groups). */
+  groupId?: string
+  /** Free-form operator notes for this connection. */
+  notes?: string
+}
+
+// ============ Automation Types (Netcatty/NetStacks parity, local-only) ============
+
+/** A folder/group of saved connections (ssh + winrm). Tree via parentId. */
+export interface GroupEntry {
+  id: string
+  name: string
+  /** Parent group id; undefined/null = top-level. */
+  parentId?: string | null
+  /** Optional color/icon hint for the UI. */
+  color?: string
+  notes?: string
+}
+
+/** A per-device memory record (local only — no server sharing). Keyed by host. */
+export interface DeviceMemoryEntry {
+  /** The host (or host:port) this memory belongs to. */
+  host: string
+  /** Operator role/criticality label. */
+  role?: string
+  /** Standing instructions (always injected into agent context for this host). */
+  standingInstructions?: string
+  /** Dated incident/repair history. */
+  incidents: DeviceIncident[]
+}
+
+export interface DeviceIncident {
+  /** ISO timestamp. */
+  at: string
+  /** Short summary, e.g. "BGP peer flapping". */
+  summary: string
+  /** Root cause / resolution notes. */
+  resolution?: string
+  /** Linked ticket id (ServiceNow/Jira), optional. */
+  ticketId?: string
+}
+
+/** A saved script/snippet runnable on one or more open tabs. */
+export interface ScriptEntry {
+  id: string
+  name: string
+  /** The command(s) to run. Multi-line scripts are joined and sent per target. */
+  command: string
+  /** Optional description. */
+  description?: string
+  /** Target scope: explicit saved-connection names, or group id, or tag. */
+  targets?: string[]
+  groupId?: string
+  /** Tags for filtering/targeting. */
+  tags?: string[]
+  /** Creation + last-modified timestamps. */
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** A cron-scheduled task that runs a saved script (or raw command). */
+export interface ScheduledTaskEntry {
+  id: string
+  name: string
+  /** Standard 5-field cron expression. */
+  cron: string
+  /** What to run: a saved script id, or an inline command. */
+  scriptId?: string
+  command?: string
+  /** Target scope: group id, tags, or explicit connection names. */
+  groupId?: string
+  tags?: string[]
+  targets?: string[]
+  /** Retry config. */
+  retryAttempts?: number
+  retryDelaySeconds?: number
+  enabled: boolean
+  /** ISO timestamp of last run, for the UI. */
+  lastRunAt?: string
+}
+
+/** A versioned, parameterized configuration template (Jinja-subset render). */
+export interface ConfigTemplateEntry {
+  id: string
+  name: string
+  /** Jinja-subset body: {{ var }}, {% for %}, {% if %}, filters (default,upper,lower). */
+  body: string
+  /** Declared variables (name + optional default) for the render form. */
+  variables: ConfigTemplateVariable[]
+  /** Ordered list of saved rendered versions (newest last) for diff/rollback. */
+  versions: ConfigTemplateVersion[]
+  updatedAt?: string
+}
+
+export interface ConfigTemplateVariable {
+  name: string
+  defaultValue?: string
+  description?: string
+}
+
+export interface ConfigTemplateVersion {
+  /** ISO timestamp. */
+  at: string
+  /** Rendered output. */
+  rendered: string
+  /** Variables used for this render (snapshot). */
+  variables: Record<string, unknown>
+}
+
+export interface AutomationSettings {
+  groups: GroupEntry[]
+  deviceMemory: DeviceMemoryEntry[]
+  scripts: ScriptEntry[]
+  scheduledTasks: ScheduledTaskEntry[]
+  templates: ConfigTemplateEntry[]
 }
 
 export interface ProxyEntry {
@@ -215,6 +349,7 @@ export interface BackendSettings {
   connections: {
     ssh: SSHConnectionEntry[]
     winrm: WinRMConnectionEntry[]
+    serial: SerialConnectionEntry[]
     proxies: ProxyEntry[]
     tunnels: TunnelEntry[]
   }
@@ -259,6 +394,15 @@ export interface BackendSettings {
   debugMode?: boolean
   /** Experimental feature switches */
   experimental?: ExperimentalFlags
+
+  /**
+   * Automation subsystems (Netcatty/NetStacks-parity features that don't need
+   * a server): connection groups, per-device memory, saved scripts/snippets,
+   * scheduled tasks, and config templates. All local, single-user.
+   */
+  automation?: AutomationSettings
+  /** Session logging (record terminal output to disk per session). */
+  sessionLogging?: { enabled: boolean }
 
   /** WebSocket gateway exposure policy */
   gateway: {

@@ -1,0 +1,131 @@
+import { AutomationManager } from './AutomationManager'
+import type { AutomationSettings } from '../../types'
+
+function makeManager(initial?: Partial<AutomationSettings>) {
+  let settings: any = {
+    automation: {
+      groups: [], deviceMemory: [], scripts: [], scheduledTasks: [], templates: [],
+      ...initial,
+    },
+    connections: { ssh: [], winrm: [], serial: [], proxies: [], tunnels: [] },
+  }
+  const calls: any[] = []
+  const m = new AutomationManager({
+    getSettings: () => settings,
+    setSettings: (patch) => {
+      calls.push(patch)
+      settings = {
+        ...settings,
+        ...patch,
+        automation: patch.automation ?? settings.automation,
+      }
+    },
+    onSettingsChanged: (s) => { calls.push(['changed', s]) },
+    broadcastSettings: (s) => { calls.push(['broadcast', s]) },
+  })
+  return { m, getSettings: () => settings, calls }
+}
+
+const cases: Array<{ name: string; run: () => void }> = []
+function test(n: string, r: () => void) { cases.push({ name: n, run: r }) }
+
+test('groups: create/list/update/delete with reparent', () => {
+  const { m } = makeManager()
+  const g1 = m.createGroup('Data Center')
+  const g2 = m.createGroup('East', g1.id)
+  if (m.listGroups().length !== 2) throw new Error('count')
+  m.updateGroup({ ...g2, name: 'DC-East' })
+  if (m.listGroups().find((g) => g.id === g2.id)?.name !== 'DC-East') throw new Error('rename')
+  m.deleteGroup(g1.id)
+  // g2 was child of g1 -> reparented to root
+  if (m.listGroups().find((g) => g.id === g2.id)?.parentId !== null) throw new Error('reparent')
+})
+
+test('device memory: upsert + addIncident + get', () => {
+  const { m } = makeManager()
+  m.upsertDeviceMemory({ host: '10.0.0.1', role: 'core-router', standingInstructions: 'never reload', incidents: [] })
+  const inc = m.addIncident('10.0.0.1', { summary: 'BGP flap', resolution: 'fixed ACL', ticketId: 'INC-1' })
+  if (!inc.at) throw new Error('incident should get timestamp')
+  const mem = m.getDeviceMemory('10.0.0.1')
+  if (mem?.incidents.length !== 1) throw new Error('incident count')
+  if (mem?.incidents[0].ticketId !== 'INC-1') throw new Error('ticket')
+  // upsert update path
+  m.upsertDeviceMemory({ host: '10.0.0.1', role: 'core-router', incidents: [] })
+  if (m.getDeviceMemory('10.0.0.1')?.incidents.length !== 1) throw new Error('upsert should preserve incidents')
+  if (m.deleteDeviceMemory('10.0.0.1') !== true) throw new Error('delete true')
+  if (m.deleteDeviceMemory('10.0.0.1') !== false) throw new Error('delete false on missing')
+})
+
+test('scripts: create/update/delete with timestamps', () => {
+  const { m } = makeManager()
+  const s = m.createScript({ name: 'show-version', command: 'show version' })
+  if (!s.id || !s.createdAt) throw new Error('id/timestamps')
+  const u = m.updateScript({ ...s, command: 'show version | include Version' })
+  if (u.command !== 'show version | include Version') throw new Error('update')
+  if (u.updatedAt === s.createdAt) throw new Error('updatedAt should change')
+  if (m.deleteScript(s.id) !== true) throw new Error('delete')
+  if (m.listScripts().length !== 0) throw new Error('empty after delete')
+})
+
+test('scheduled tasks: create/update/delete/markRun', () => {
+  const { m } = makeManager()
+  const t = m.createScheduledTask({ name: 'backup', cron: '0 2 * * *', scriptId: 's1', enabled: true })
+  if (m.listScheduledTasks().length !== 1) throw new Error('count')
+  m.updateScheduledTask({ ...t, enabled: false })
+  if (m.listScheduledTasks()[0].enabled !== false) throw new Error('disable')
+  m.markScheduledTaskRun(t.id)
+  if (!m.listScheduledTasks()[0].lastRunAt) throw new Error('lastRunAt')
+  m.deleteScheduledTask(t.id)
+  if (m.listScheduledTasks().length !== 0) throw new Error('deleted')
+})
+
+test('templates: create/update/saveVersion/diff/delete', () => {
+  const { m } = makeManager()
+  const t = m.createTemplate({ name: 'iface', body: 'interface {{ name }}', variables: [{ name: 'name' }] })
+  if (t.versions.length !== 0) throw new Error('starts with 0 versions')
+  const v1 = m.saveTemplateVersion(t.id, 'interface G0/0', { name: 'G0/0' })
+  const v2 = m.saveTemplateVersion(t.id, 'interface G0/1', { name: 'G0/1' })
+  const stored = m.listTemplates().find((x) => x.id === t.id)!
+  if (stored.versions.length !== 2) throw new Error('2 versions')
+  if (stored.versions[1].rendered !== 'interface G0/1') throw new Error('latest version')
+  m.updateTemplate({ id: t.id, body: 'interface {{ name | upper }}' })
+  if (m.listTemplates()[0].body !== 'interface {{ name | upper }}') throw new Error('update body')
+  m.deleteTemplate(t.id)
+  if (m.listTemplates().length !== 0) throw new Error('deleted')
+  void v1; void v2
+})
+
+test('throws on update of missing id (groups/scripts/tasks/templates)', () => {
+  const { m } = makeManager()
+  let threw = 0
+  try { m.updateGroup({ id: 'x', name: 'y' }) } catch { threw++ }
+  try { m.updateScript({ id: 'x' } as any) } catch { threw++ }
+  try { m.updateScheduledTask({ id: 'x', name: 'x', cron: '* * * * *', enabled: true } as any) } catch { threw++ }
+  try { m.updateTemplate({ id: 'x' }) } catch { threw++ }
+  if (threw !== 4) throw new Error(`expected 4 throws, got ${threw}`)
+})
+
+test('broadcast is invoked on mutation', () => {
+  const { m, calls } = makeManager()
+  m.createGroup('x')
+  if (!calls.some((c) => Array.isArray(c) && c[0] === 'broadcast')) throw new Error('expected broadcast call')
+})
+
+test('missing automation block defaults to empty safely', () => {
+  let settings: any = {} // no automation key
+  const m = new AutomationManager({ getSettings: () => settings, setSettings: (p) => { settings = { ...settings, ...p } } })
+  if (m.listGroups().length !== 0) throw new Error('empty default')
+  m.createGroup('g')
+  if (m.listGroups().length !== 1) throw new Error('create after default')
+})
+
+function main() {
+  let pass = 0, fail = 0
+  for (const c of cases) {
+    try { c.run(); pass++; console.log(`PASS ${c.name}`) }
+    catch (e: any) { fail++; console.log(`FAIL ${c.name}: ${e?.message ?? e}`) }
+  }
+  console.log(`\n${pass}/${cases.length} passed, ${fail} failed`)
+  if (fail > 0) process.exit(1)
+}
+void main()

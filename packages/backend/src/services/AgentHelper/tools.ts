@@ -54,6 +54,14 @@ import {
   collectFacts,
   probeConnectivity
 } from './tools/fleet_tools'
+import {
+  manageDeviceMemorySchema, manageDeviceMemory,
+  manageScriptSchema, manageScript,
+  manageGroupSchema, manageGroup,
+  manageScheduledTaskSchema, manageScheduledTask,
+  manageTemplateSchema, manageTemplate,
+  importPuttySchema, importPutty,
+} from './tools/automation_tools'
 import { 
   skillToolSchema, 
   buildSkillToolDescription,
@@ -87,6 +95,10 @@ export {
   collectFactsSchema,
   probeConnectivitySchema,
 } from './tools/fleet_tools'
+export {
+  manageDeviceMemorySchema, manageScriptSchema, manageGroupSchema,
+  manageScheduledTaskSchema, manageTemplateSchema, importPuttySchema,
+} from './tools/automation_tools'
 export { skillToolSchema, createSkillSchema, buildSkillToolDescription } from './tools/skill_tools'
 
 export { BUILTIN_TOOL_INFO } from './prompts'
@@ -195,6 +207,36 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'probe_connectivity',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'probe_connectivity')?.description ?? '',
       schema: probeConnectivitySchema
+    },
+    {
+      name: 'manage_device_memory',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_device_memory')?.description ?? '',
+      schema: manageDeviceMemorySchema
+    },
+    {
+      name: 'manage_script',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_script')?.description ?? '',
+      schema: manageScriptSchema
+    },
+    {
+      name: 'manage_group',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_group')?.description ?? '',
+      schema: manageGroupSchema
+    },
+    {
+      name: 'manage_scheduled_task',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_scheduled_task')?.description ?? '',
+      schema: manageScheduledTaskSchema
+    },
+    {
+      name: 'manage_template',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_template')?.description ?? '',
+      schema: manageTemplateSchema
+    },
+    {
+      name: 'import_putty',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'import_putty')?.description ?? '',
+      schema: importPuttySchema
     }
   ].map((tool) => convertToOpenAITool(tool))
 }
@@ -219,6 +261,12 @@ export const toolImplementations = {
   runFleetCommand,
   collectFacts,
   probeConnectivity,
+  manageDeviceMemory,
+  manageScript,
+  manageGroup,
+  manageScheduledTask,
+  manageTemplate,
+  importPutty,
   writeFile,
   editFile,
   writeAndEdit,
