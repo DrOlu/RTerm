@@ -66,13 +66,12 @@ jobs:
           # Version-based triggering breaks as soon as our local version runs
           # ahead of upstream's (e.g. our 1.6.3 vs their 1.6.0): their next few
           # releases would compare lower/equal and silently never sync.
-          # NOTE: RTerm has NO shared git history with GyShell (it began as a
-          # squashed snapshot), so ancestry checks / plain merges don't work.
-          # We track the last-synced upstream SHA in .github/last-upstream-sync
-          # and apply upstream deltas as a 3-way patch (see merge step).
+          # Our history now contains upstream's history (one-time linking merge
+          # with --allow-unrelated-histories), so ancestry answers "do we have
+          # their HEAD yet?". An upstream SHA we've never fetched fails the
+          # ancestry test, which correctly counts as new commits.
           UPSTREAM_SHA=$(git ls-remote "https://github.com/${{ env.UPSTREAM_REPO }}.git" "refs/heads/${{ env.UPSTREAM_BRANCH }}" | cut -f1)
           echo "upstream_sha=$UPSTREAM_SHA"
-          echo "upstream_sha=$UPSTREAM_SHA" >> $GITHUB_OUTPUT
           if [ -z "$UPSTREAM_SHA" ]; then
             echo "Could not resolve upstream HEAD; skipping build"
             echo "should_build=false" >> $GITHUB_OUTPUT
@@ -80,9 +79,7 @@ jobs:
             exit 0
           fi
 
-          LAST_SYNCED_SHA=$(cat .github/last-upstream-sync 2>/dev/null || echo "")
-          echo "last_synced_sha=$LAST_SYNCED_SHA"
-          if [ "$UPSTREAM_SHA" = "$LAST_SYNCED_SHA" ]; then
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD 2>/dev/null; then
             NEW_COMMITS=false
           else
             NEW_COMMITS=true
@@ -136,38 +133,19 @@ jobs:
           git remote add upstream "https://github.com/${{ env.UPSTREAM_REPO }}.git"
           git fetch upstream ${{ env.UPSTREAM_BRANCH }}
 
-          UPSTREAM_SHA="${{ steps.check.outputs.upstream_sha }}"
-          LAST_SYNCED_SHA=$(cat .github/last-upstream-sync 2>/dev/null || echo "")
-
-          # RTerm and GyShell have unrelated git histories (RTerm started as a
-          # squashed snapshot), so `git merge` refuses to run. Instead, apply
-          # upstream's delta since the last sync as a 3-way patch: our custom
-          # commits stay untouched except where upstream edited the same lines,
-          # and those conflicts are resolved keep-ours.
-          if [ -n "$LAST_SYNCED_SHA" ] && git cat-file -e "$LAST_SYNCED_SHA" 2>/dev/null; then
-            git diff --binary "$LAST_SYNCED_SHA" "upstream/${{ env.UPSTREAM_BRANCH }}" > /tmp/upstream-delta.patch
-            if [ -s /tmp/upstream-delta.patch ]; then
-              echo "Applying upstream delta $LAST_SYNCED_SHA..$UPSTREAM_SHA ($(wc -c < /tmp/upstream-delta.patch) bytes)"
-              git apply --3way --binary /tmp/upstream-delta.patch || true
-              CONFLICTED=$(git diff --name-only --diff-filter=U)
-              if [ -n "$CONFLICTED" ]; then
-                echo "::warning::Upstream sync conflicts resolved keep-ours in: $CONFLICTED"
-                echo "$CONFLICTED" | while read -r file; do
-                  git checkout --ours "$file" 2>/dev/null || true
-                  git add "$file"
-                done
-              fi
-              git add -A
-            else
-              echo "Upstream delta is empty (tree content unchanged)"
-            fi
-          else
-            echo "::warning::No valid last-synced SHA recorded; recording upstream HEAD without applying changes. Verify tree parity manually."
-          fi
-
-          echo "$UPSTREAM_SHA" > .github/last-upstream-sync
-          git add .github/last-upstream-sync
-          git commit -m "chore: sync upstream GyShell ${LAST_SYNCED_SHA:-unknown}..${UPSTREAM_SHA}" --allow-empty
+          # Histories were linked by a one-time merge with
+          # --allow-unrelated-histories, so this is a normal merge now.
+          # -X ours: where upstream edited the same lines we customized, keep
+          # ours; everything else from upstream flows in.
+          git merge "upstream/${{ env.UPSTREAM_BRANCH }}" -X ours --no-edit --allow-unrelated-histories || {
+            CONFLICTED=$(git diff --name-only --diff-filter=U)
+            echo "::warning::Upstream sync conflicts resolved keep-ours in: $CONFLICTED"
+            echo "$CONFLICTED" | while read -r file; do
+              git checkout --ours "$file" 2>/dev/null || true
+              git add "$file"
+            done
+            git commit --no-edit || git commit -m "chore: merge upstream GyShell (resolve conflicts keep-ours)"
+          }
 
       - name: Apply rebrand
         if: steps.check.outputs.should_build == 'true'
