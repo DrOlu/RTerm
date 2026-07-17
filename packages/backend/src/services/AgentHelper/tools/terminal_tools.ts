@@ -68,7 +68,7 @@ export const openTerminalTabSchema = z.object({
  * available in the execution context. Returns the first match, preferring an
  * exact `id` match over a `name` match when both happen to collide.
  */
-function resolveSavedSshConnection(
+export function resolveSavedSshConnection(
   context: Pick<ToolExecutionContext, 'savedSshConnections'>,
   nameOrId: string,
 ): SSHConnectionEntry | undefined {
@@ -90,7 +90,7 @@ function resolveSavedSshConnection(
  * connections list, allocates a fresh tab id, and carries forward the
  * algorithm preset / TERM type so legacy devices (e.g. Cisco) connect.
  */
-function sshEntryToTerminalConfig(
+export function sshEntryToTerminalConfig(
   entry: SSHConnectionEntry,
   opts: {
     proxies: readonly ProxyEntry[]
@@ -871,7 +871,7 @@ export async function openTerminalTab(
 
 // --- Internal Helpers ---
 
-async function checkCommandPolicy(
+export async function checkCommandPolicy(
   command: string,
   toolName: string,
   context: ToolExecutionContext
@@ -899,7 +899,7 @@ async function checkCommandPolicy(
   return { allowed: true, message: '' }
 }
 
-function abortIfNeeded(signal?: AbortSignal): void {
+export function abortIfNeeded(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new Error('AbortError')
   }
@@ -922,7 +922,7 @@ async function waitForReconnectTerminalState(
   return terminalService.getTerminalRuntimeSnapshot(terminalId)
 }
 
-function isAbortError(error: unknown): boolean {
+export function isAbortError(error: unknown): boolean {
   if (!error) return false
   if (error instanceof Error) {
     return error.name === 'AbortError' || error.message === 'AbortError'
@@ -930,7 +930,7 @@ function isAbortError(error: unknown): boolean {
   return false
 }
 
-function waitWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+export function waitWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error('AbortError'))

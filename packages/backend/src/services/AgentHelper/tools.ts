@@ -38,6 +38,18 @@ import {
   copyBetweenTabs,
   readFileTransferStatus
 } from './tools/file_transfer_tools'
+import {
+  manageSshConnectionSchema,
+  manageSshConnection
+} from './tools/connection_tools'
+import {
+  runFleetCommandSchema,
+  collectFactsSchema,
+  probeConnectivitySchema,
+  runFleetCommand,
+  collectFacts,
+  probeConnectivity
+} from './tools/fleet_tools'
 import { 
   skillToolSchema, 
   buildSkillToolDescription,
@@ -64,6 +76,12 @@ export {
 export { readFileSchema } from './tools/read_tools'
 export { waitSchema, waitTerminalIdleSchema } from './tools/wait_tools'
 export { copyBetweenTabsSchema, readFileTransferStatusSchema } from './tools/file_transfer_tools'
+export { manageSshConnectionSchema } from './tools/connection_tools'
+export {
+  runFleetCommandSchema,
+  collectFactsSchema,
+  probeConnectivitySchema,
+} from './tools/fleet_tools'
 export { skillToolSchema, createSkillSchema, buildSkillToolDescription } from './tools/skill_tools'
 
 export { BUILTIN_TOOL_INFO } from './prompts'
@@ -147,6 +165,26 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'read_file_transfer_status',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'read_file_transfer_status')?.description ?? '',
       schema: readFileTransferStatusSchema
+    },
+    {
+      name: 'manage_ssh_connection',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_ssh_connection')?.description ?? '',
+      schema: manageSshConnectionSchema
+    },
+    {
+      name: 'run_fleet_command',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'run_fleet_command')?.description ?? '',
+      schema: runFleetCommandSchema
+    },
+    {
+      name: 'collect_facts',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'collect_facts')?.description ?? '',
+      schema: collectFactsSchema
+    },
+    {
+      name: 'probe_connectivity',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'probe_connectivity')?.description ?? '',
+      schema: probeConnectivitySchema
     }
   ].map((tool) => convertToOpenAITool(tool))
 }
@@ -166,6 +204,10 @@ export const toolImplementations = {
   waitTerminalIdle,
   copyBetweenTabs,
   readFileTransferStatus,
+  manageSshConnection,
+  runFleetCommand,
+  collectFacts,
+  probeConnectivity,
   writeFile,
   editFile,
   writeAndEdit,

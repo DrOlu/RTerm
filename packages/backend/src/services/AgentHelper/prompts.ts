@@ -214,6 +214,34 @@ export const COPY_BETWEEN_TABS_DESCRIPTION = [
 export const READ_FILE_TRANSFER_STATUS_DESCRIPTION =
   "Read progress and final status for file transfer tasks started by copy_between_tabs. Use transferId to inspect one transfer, or omit it to list active transfers for this agent run.";
 
+export const MANAGE_SSH_CONNECTION_DESCRIPTION = [
+  "Create, update, delete, or list saved SSH connections (the same list the Connections panel manages). This is how you provision a server before connecting to it.",
+  "action=\"create\" adds a new connection from a `connection` object (needs at least name, host, username; port defaults to 22, authMethod to \"password\"). Names must be unique. Use algorithmsPreset=\"cisco\" for IOS/IOS-XE network gear, \"legacy\" for other old devices, or omit it for normal Linux/Windows servers. Use termType=\"vt100\" for some network equipment.",
+  "action=\"update\" edits an existing connection by `id`, applying only the `connection` fields you provide. action=\"delete\" removes a connection by `id`. action=\"list\" returns every saved connection with its id, name, host, user, and preset.",
+  "After create/update, open a terminal tab for the new/changed connection with open_terminal_tab using its Name. Mutations persist to backend settings and the Connections panel refreshes immediately.",
+  "Guardrails still apply: this tool only manages saved connection metadata; it never sends credentials over the network. The actual SSH connection happens via open_terminal_tab + exec_command, which enforce the command policy.",
+].join("\n");
+
+export const RUN_FLEET_COMMAND_DESCRIPTION = [
+  "Run the SAME command on many OPEN terminal tabs at once and return one structured, machine-parseable <fleet_results> block with per-target status (OK/FAIL), exit code, and output.",
+  "`targets` is a list of Names or IDs of tabs that are already open (open them first with open_terminal_tab). Duplicates are ignored. The command is policy-checked once for the whole fleet, then fanned out in parallel.",
+  "Use this for fleet operations: \"show version on all core switches\", \"free -m on every web node\", \"systemctl status nginx across the web farm\". To target a subset, pass their tab names. To act on the results, read the per-target sections in the returned block.",
+  "Do NOT use this for a single target — use exec_command instead. Do NOT use it to open connections — use open_terminal_tab first.",
+].join("\n");
+
+export const COLLECT_FACTS_DESCRIPTION = [
+  "Inventory one or more OPEN terminal tabs: run a small per-OS fact template (hostname, OS/version, uptime, interfaces) on each target in parallel and return a structured <inventory> JSON block.",
+  "`targets` is optional; omit it to inventory ALL currently-open tabs. `defaultClass` (\"network\" | \"linux\" | \"windows\") is a hint for tabs whose OS the backend could not auto-detect (e.g. raw-shell Cisco tabs report no remoteOs).",
+  "Use this to build a structured fleet inventory or to understand what each open tab is before running targeted commands. Each template command is policy-checked. For deeper per-target data, follow up with run_fleet_command or exec_command.",
+].join("\n");
+
+export const PROBE_CONNECTIVITY_DESCRIPTION = [
+  "Probe reachability of a SAVED SSH connection: open a fresh tab for it (or reuse an already-open one), wait for it to become ready or exit, then report REACHABLE/UNREACHABLE, the detected OS class, the terminal status header, and the initial login banner.",
+  "This is the building block for autonomous operations — \"is host X up?\", \"what OS is on this box?\", pre-change sanity checks. It never sends commands beyond what the shell's own login produces.",
+  "Pass the saved connection's Name or ID. Use `defaultClass` (\"network\"|\"linux\"|\"windows\") to classify raw-shell network tabs. The probed tab stays open afterward — operate on it with exec_command or run_fleet_command.",
+].join("\n");
+
+
 export interface BuiltInToolInfo {
   name: string;
   description: string;
@@ -272,6 +300,22 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     description: READ_FILE_TRANSFER_STATUS_DESCRIPTION,
     defaultEnabled: false,
     experimental: true,
+  },
+  {
+    name: "manage_ssh_connection",
+    description: MANAGE_SSH_CONNECTION_DESCRIPTION,
+  },
+  {
+    name: "run_fleet_command",
+    description: RUN_FLEET_COMMAND_DESCRIPTION,
+  },
+  {
+    name: "collect_facts",
+    description: COLLECT_FACTS_DESCRIPTION,
+  },
+  {
+    name: "probe_connectivity",
+    description: PROBE_CONNECTIVITY_DESCRIPTION,
   },
 ];
 

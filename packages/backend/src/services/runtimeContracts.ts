@@ -134,6 +134,27 @@ export interface IGatewayTerminalRuntime {
   getAllTerminals(): TerminalTab[];
 }
 
+/**
+ * Mutates saved SSH connections in backend settings and notifies subscribers
+ * (the agent runtime + the UI) so both reflect the change immediately.
+ * Used by the `manage_ssh_connection` agent tool so the agent can provision,
+ * edit, and remove saved connections the same way the Connections panel does.
+ */
+export interface IConnectionManagerRuntime {
+  /** Snapshot of saved SSH connections (latest from settings). */
+  listSsh(): readonly import("../types").SSHConnectionEntry[];
+  /** Create a new saved connection; returns the stored entry (with assigned id). */
+  createSsh(
+    entry: import("../types").SSHConnectionEntry,
+  ): import("../types").SSHConnectionEntry;
+  /** Replace an existing saved connection (matched by id); throws if missing. */
+  updateSsh(
+    entry: import("../types").SSHConnectionEntry,
+  ): import("../types").SSHConnectionEntry;
+  /** Delete a saved connection by id; returns true if something was removed. */
+  deleteSsh(id: string): boolean;
+}
+
 export interface IAgentRuntime {
   setEventPublisher(
     publisher: (sessionId: string, event: AgentEvent) => void,

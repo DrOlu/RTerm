@@ -26,6 +26,7 @@ import { SkillService } from "../../../backend/src/services/SkillService";
 import { MemoryService } from "../../../backend/src/services/MemoryService";
 import { UIHistoryService } from "../../../backend/src/services/UIHistoryService";
 import { ChatHistoryService } from "../../../backend/src/services/ChatHistoryService";
+import { ConnectionManager } from "../../../backend/src/services/ConnectionManager";
 import { GatewayService } from "../../../backend/src/services/Gateway/GatewayService";
 import { ElectronGatewayIpcAdapter } from "../gateway/ElectronGatewayIpcAdapter";
 import { ElectronWindowTransport } from "../gateway/ElectronWindowTransport";
@@ -1056,6 +1057,19 @@ export async function startElectronMain(): Promise<void> {
         // Update agent with current settings
         const settings = settingsService.getSettings();
         agentService.updateSettings(settings);
+
+        // Wire the connection manager so the `manage_ssh_connection` agent tool
+        // can create/update/delete saved SSH connections (persisted via the
+        // settings service, agent runtime refreshed, UI broadcast live).
+        agentService.setConnectionManager(
+          new ConnectionManager({
+            getSettings: () => settingsService.getSettings(),
+            setSettings: (patch) => settingsService.setSettings(patch),
+            onSettingsChanged: (next) => agentService.updateSettings(next),
+            broadcastSettings: (next) =>
+              gatewayService.broadcastRaw("settings:updated", next),
+          }),
+        );
 
         historyMigrationCoordinator.markReady();
       } catch (error) {

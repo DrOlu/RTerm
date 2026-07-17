@@ -1,7 +1,7 @@
 import type { TerminalService } from '../TerminalService'
 import type { FileTransferService } from '../FileTransferService'
 import type { CommandPolicyMode } from '../CommandPolicy/CommandPolicyService'
-import type { ICommandPolicyRuntime } from '../runtimeContracts'
+import type { ICommandPolicyRuntime, IConnectionManagerRuntime } from '../runtimeContracts'
 import type { SSHConnectionEntry, ProxyEntry, TunnelEntry } from '../../types'
 import type {
   QueuedAgentInsertionInput,
@@ -18,6 +18,14 @@ export interface ToolExecutionContext {
   waitForFeedback?: (messageId: string, timeoutMs?: number) => Promise<any | null>
   commandPolicyService: ICommandPolicyRuntime
   commandPolicyMode: CommandPolicyMode
+  /**
+   * Mutates saved SSH connections in backend settings + notifies the UI/agent.
+   * Used by the `manage_ssh_connection` tool so the agent can provision,
+   * edit, and remove saved connections (the key that unlocks autonomous
+   * "connect to server X" workflows). Optional so non-production contexts
+   * (tests that don't exercise connection mutation) can omit it.
+   */
+  connectionManager?: IConnectionManagerRuntime
   agentRunId?: string
   /**
    * Saved SSH connections from backend settings (`connections.ssh`).

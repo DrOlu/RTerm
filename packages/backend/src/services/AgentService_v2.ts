@@ -50,9 +50,14 @@ import {
   waitTerminalIdleSchema,
   copyBetweenTabsSchema,
   readFileTransferStatusSchema,
+  manageSshConnectionSchema,
+  runFleetCommandSchema,
+  collectFactsSchema,
+  probeConnectivitySchema,
   toolImplementations,
   buildSkillToolDescription,
 } from "./AgentHelper/tools";
+import type { IConnectionManagerRuntime } from "./runtimeContracts";
 import type { ToolExecutionContext } from "./AgentHelper/types";
 import {
   EDIT_FILE_TOOL_NAME,
@@ -237,6 +242,12 @@ const SINGLE_CALL_TOOL_BOUNDARY_NAMES = new Set([
   "exec_command",
   "reconnect_terminal_tab",
   "open_terminal_tab",
+  // Spawns a new terminal tab → the agent must re-read system info next round
+  // to discover the freshly-opened tab.
+  "probe_connectivity",
+  // Mutates the saved-connection list shown in system info → the agent must
+  // re-read system info next round to see the updated connection list.
+  "manage_ssh_connection",
 ]);
 
 function clipTextMiddle(input: string, maxChars: number): string {
@@ -291,6 +302,9 @@ export class AgentService_v2 {
   private terminalService: TerminalService;
   private chatHistoryService: IChatHistoryRuntime;
   private commandPolicyService: ICommandPolicyRuntime;
+  /** Optional connection manager that lets agent tools mutate saved SSH
+   * connections (manage_ssh_connection). Wired from the runtime owner. */
+  private connectionManager?: IConnectionManagerRuntime;
   private mcpToolService: IMcpRuntime;
   private skillService: ISkillRuntime;
   private memoryService: IMemoryRuntime;
@@ -365,6 +379,12 @@ export class AgentService_v2 {
 
   setEventPublisher(publisher: (sessionId: string, event: any) => void): void {
     this.helpers.setEventPublisher(publisher);
+  }
+
+  /** Wire the connection manager so `manage_ssh_connection` can mutate saved
+   * connections + notify the UI. Optional; only needed in full runtimes. */
+  setConnectionManager(manager: IConnectionManagerRuntime): void {
+    this.connectionManager = manager;
   }
 
   setFeedbackWaiter(
@@ -1713,6 +1733,62 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "manage_ssh_connection": {
+          try {
+            const validatedArgs = manageSshConnectionSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.manageSshConnection(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for manage_ssh_connection: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "run_fleet_command": {
+          try {
+            const validatedArgs = runFleetCommandSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.runFleetCommand(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for run_fleet_command: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "collect_facts": {
+          try {
+            const validatedArgs = collectFactsSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.collectFacts(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for collect_facts: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "probe_connectivity": {
+          try {
+            const validatedArgs = probeConnectivitySchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.probeConnectivity(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for probe_connectivity: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "wait": {
           try {
             const validatedArgs = waitSchema.parse(toolCall.args || {});
@@ -2516,6 +2592,7 @@ export class AgentService_v2 {
       waitForFeedback: this.waitForFeedback ?? undefined,
       commandPolicyService: this.commandPolicyService,
       commandPolicyMode: this.settings?.commandPolicyMode || "standard",
+      connectionManager: this.connectionManager,
       agentRunId,
       savedSshConnections: this.settings?.connections?.ssh ?? [],
       savedProxies: this.settings?.connections?.proxies ?? [],

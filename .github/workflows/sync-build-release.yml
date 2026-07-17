@@ -350,6 +350,17 @@ jobs:
 
             Synced from upstream GyShell, with RTerm-specific enhancements.
 
+            ## What's new in RTerm v1.7.0
+
+            RTerm 1.7.0 turns the agent into a true data-center operator. Four new agent tools compose with the existing terminal/file/guardrail tools so you can provision, connect, inventory, and command whole fleets from a single chat — across Linux servers, Windows servers, and Cisco/legacy network gear.
+
+            - **`manage_ssh_connection`** — Create, update, delete, or list saved SSH connections the same way the Connections panel does. The agent can now provision a server end-to-end: "set up my core switch at 10.0.0.1, user admin, Cisco preset, vt100" → it creates the connection, then opens a tab for it. Mutations persist to backend settings and the Connections panel refreshes live; duplicate names are rejected so `open_terminal_tab` name-matching stays unambiguous.
+            - **`run_fleet_command`** — Run the same command on many open tabs at once and get one structured, machine-parseable `<fleet_results>` block (per-target OK/FAIL, exit code, output). "show version on all core switches", "free -m on every web node", "systemctl status nginx across the farm". The command is policy-checked once for the whole fleet, then fanned out in parallel; duplicates and not-ready tabs are handled gracefully.
+            - **`collect_facts`** — Inventory one or more open tabs (or all of them) with a small per-OS fact template (hostname, OS/version, uptime, interfaces) and return a structured `<inventory>` JSON block. A `defaultClass` hint (network/linux/windows) classifies raw-shell Cisco tabs that report no OS.
+            - **`probe_connectivity`** — Probe a saved connection's reachability: open a fresh tab (or reuse an open one), wait for ready/exit, and report REACHABLE/UNREACHABLE plus the detected OS class, status header, and login banner. The building block for autonomous ops and pre-change sanity checks.
+
+            All four go through the existing command-policy guardrails (allow/deny/ask + approval) and the shell-integration command tracking, so fleet ops are as safe as single-tab ops. Saved connections surfaced to the agent in system info now drive the whole lifecycle.
+
             ## What's new in RTerm v1.6.3
 
             - **Fix: Algorithms preset + TERM actually reach the SSH backend.** In v1.6.1/v1.6.2, connecting from the Connections panel dropped the *Algorithms* and *TERM* fields when building the runtime config, so Cisco/legacy raw-shell mode never engaged (SFTP warning + hang at "Opening interactive shell..." persisted). The saved connection's `algorithmsPreset` and `termType` are now forwarded, so **Algorithms: Cisco / Network gear + TERM: vt100** works as intended.

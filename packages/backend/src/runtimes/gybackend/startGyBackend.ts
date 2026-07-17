@@ -28,6 +28,7 @@ import { ImageAttachmentService } from "../../services/ImageAttachmentService";
 import { TerminalStateStore } from "../../services/terminal/TerminalStateStore";
 import { createAutoTerminalConfig } from "../../services/terminal/terminalConnectionSupport";
 import { TerminalCommandDraftService } from "../../services/TerminalCommandDraftService";
+import { ConnectionManager } from "../../services/ConnectionManager";
 import { HistoryStorageMigration } from "../../services/history/HistoryStorageMigration";
 import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
 import { AgentSettingProfileService } from "../../services/AgentSettingProfileService";
@@ -162,6 +163,20 @@ export async function startGyBackend(): Promise<void> {
   agentService.updateSettings(settingsService.getSettings());
   await skillService.reload();
   await mcpToolService.reloadAll();
+
+  // Wire the connection manager so the `manage_ssh_connection` agent tool can
+  // create/update/delete saved SSH connections. Mutations persist via the
+  // settings service, refresh the agent runtime, and broadcast `settings:updated`
+  // so the UI's Connections panel refreshes live.
+  agentService.setConnectionManager(
+    new ConnectionManager({
+      getSettings: () => settingsService.getSettings(),
+      setSettings: (patch) => settingsService.setSettings(patch),
+      onSettingsChanged: (next) => agentService.updateSettings(next),
+      broadcastSettings: (next) =>
+        gatewayService.broadcastRaw("settings:updated", next),
+    }),
+  );
 
   if (
     bootstrapLocalTerminal &&
