@@ -24,7 +24,6 @@
     "@types/ws": "^8.18.1",
     "@opentui/core": "0.1.73",
     "@opentui/solid": "0.1.73",
-    "bun": "^1.3.9",
     "esbuild": "^0.25.9",
     "solid-js": "1.9.9",
     "typescript": "^5.3.3",
