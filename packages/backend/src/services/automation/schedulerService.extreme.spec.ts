@@ -1,8 +1,8 @@
 import { parseCron, matchesCron, nextRunUtc, SchedulerService } from './schedulerService'
 import type { ScheduledTaskEntry } from '../../types'
 
-const cases: Array<{ name: string; run: () => void }> = []
-function test(n: string, r: () => void) { cases.push({ name: n, run: r }) }
+const cases: Array<{ name: string; run: () => void | Promise<void> }> = []
+function test(n: string, r: () => void | Promise<void>) { cases.push({ name: n, run: r }) }
 
 test('parseCron wildcard expands to full range', () => {
   const s = parseCron('* * * * *')
@@ -52,7 +52,7 @@ test('nextRunUtc rolls to next day', () => {
 
 test('SchedulerService fires due tasks within a tick window', async () => {
   // Fix: every minute at hour 12, minute 0.
-  let calls = 0
+  let calls: number = 0
   let nowMs = Date.UTC(2026, 0, 1, 11, 59, 0)
   const tasks: ScheduledTaskEntry[] = [
     { id: 't1', name: 'noon', cron: '0 12 * * *', enabled: true },
@@ -73,7 +73,7 @@ test('SchedulerService fires due tasks within a tick window', async () => {
 })
 
 test('SchedulerService skips disabled tasks', async () => {
-  let calls = 0
+  let calls: number = 0
   let nowMs = Date.UTC(2026, 0, 1, 12, 0, 30)
   const tasks: ScheduledTaskEntry[] = [
     { id: 't1', name: 'noon', cron: '0 12 * * *', enabled: false },
@@ -84,7 +84,7 @@ test('SchedulerService skips disabled tasks', async () => {
 })
 
 test('SchedulerService fires multiple tasks due same minute', async () => {
-  let calls = 0
+  let calls: number = 0
   let nowMs = Date.UTC(2026, 0, 1, 12, 0, 30)
   const tasks: ScheduledTaskEntry[] = [
     { id: 'a', name: 'a', cron: '0 12 * * *', enabled: true },
@@ -95,16 +95,63 @@ test('SchedulerService fires multiple tasks due same minute', async () => {
   if (calls !== 2) throw new Error(`expected 2 calls, got ${calls}`)
 })
 
+test('first tick of a fresh service fires only the current minute (no epoch replay)', async () => {
+  // Regression: lastTickMs used to start at 0, so the first tick walked every
+  // minute since 1970 — a */1 task would be "due" ~29 million times.
+  let calls: number = 0
+  const nowMs = Date.UTC(2026, 0, 1, 12, 0, 30)
+  const tasks: ScheduledTaskEntry[] = [
+    { id: 'a', name: 'a', cron: '*/1 * * * *', enabled: true },
+  ]
+  const sched = new SchedulerService({ getTasks: () => tasks, run: () => { calls++ }, now: () => new Date(nowMs) })
+  await sched.tick()
+  if (calls !== 1) throw new Error(`expected exactly 1 firing on first tick, got ${calls}`)
+})
+
+test('catch-up after sleep fires each task at most once per tick', async () => {
+  // Machine slept for 3 hours: a */1 task has ~180 due minutes in the window,
+  // but burst-firing it 180 times in a tight loop is dangerous (non-idempotent
+  // commands). It must fire exactly once.
+  let calls: number = 0
+  let nowMs = Date.UTC(2026, 0, 1, 12, 0, 30)
+  const tasks: ScheduledTaskEntry[] = [
+    { id: 'a', name: 'a', cron: '*/1 * * * *', enabled: true },
+  ]
+  const sched = new SchedulerService({ getTasks: () => tasks, run: () => { calls++ }, now: () => new Date(nowMs) })
+  await sched.tick() // first tick: current minute only
+  if (calls !== 1) throw new Error(`expected 1 firing on first tick, got ${calls}`)
+  // Sleep 3 hours, then tick again.
+  nowMs += 3 * 60 * 60 * 1000
+  await sched.tick()
+  const catchUpFirings = calls - 1
+  if (catchUpFirings !== 1) throw new Error(`expected exactly 1 catch-up firing after sleep, got ${catchUpFirings}`)
+})
+
+test('exact minute-boundary ticks do not double-fire a minute', async () => {
+  let calls: number = 0
+  let nowMs = Date.UTC(2026, 0, 1, 12, 0, 0) // exactly on the boundary
+  const tasks: ScheduledTaskEntry[] = [
+    { id: 'a', name: 'a', cron: '*/1 * * * *', enabled: true },
+  ]
+  const sched = new SchedulerService({ getTasks: () => tasks, run: () => { calls++ }, now: () => new Date(nowMs) })
+  await sched.tick() // evaluates 12:00
+  if (calls !== 1) throw new Error(`expected 1 firing, got ${calls}`)
+  nowMs = Date.UTC(2026, 0, 1, 12, 1, 0) // next tick also exactly on a boundary
+  await sched.tick() // must evaluate 12:01 only, not re-fire 12:00
+  const total: number = calls
+  if (total !== 2) throw new Error(`expected 2 firings total, got ${total}`)
+})
+
 test('invalid cron (4 fields) throws', () => {
   let threw = false
   try { parseCron('* * * *') } catch { threw = true }
   if (!threw) throw new Error('expected throw for 4 fields')
 })
 
-function main() {
+async function main() {
   let pass = 0, fail = 0
   for (const c of cases) {
-    try { c.run(); pass++; console.log(`PASS ${c.name}`) }
+    try { await c.run(); pass++; console.log(`PASS ${c.name}`) }
     catch (e: any) { fail++; console.log(`FAIL ${c.name}: ${e?.message ?? e}`) }
   }
   console.log(`\n${pass}/${cases.length} passed, ${fail} failed`)

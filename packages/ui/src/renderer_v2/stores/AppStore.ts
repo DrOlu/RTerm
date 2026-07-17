@@ -3259,7 +3259,22 @@ export class AppStore {
 
   private async saveAutomationSlice(patch: Partial<AppSettings["automation"]>): Promise<void> {
     const current = this.settings ?? (await this.fetchCombinedSettings());
-    const next = { ...(current.automation ?? { groups: [], deviceMemory: [], scripts: [], scheduledTasks: [], templates: [] }), ...patch };
+    // Deep-plain everything: `current.automation` is a MobX observable tree and
+    // patch payloads may contain observable entries (from edited settings state).
+    // MobX proxies cannot survive structured clone over IPC ("An object could
+    // not be cloned"), so strip them before persisting. Note: toJS alone does
+    // NOT recurse into observables nested inside plain objects/arrays, so the
+    // merged payload must go through a JSON round-trip to be clone-safe.
+    const base = toJS(
+      current.automation ?? {
+        groups: [],
+        deviceMemory: [],
+        scripts: [],
+        scheduledTasks: [],
+        templates: [],
+      },
+    );
+    const next = JSON.parse(JSON.stringify({ ...base, ...patch }));
     runInAction(() => {
       if (this.settings) this.settings.automation = next as any;
     });
@@ -3338,7 +3353,9 @@ export class AppStore {
     // parser mirroring the backend logic (the backend tool is agent-only).
     const imported = parsePuttyRegClient(regContent);
     let count = 0;
-    const nextSsh = (current.connections.ssh ?? []).slice();
+    // toJS each entry: slice() of the observable settings array keeps MobX
+    // proxies, which fail structured clone when sent over IPC.
+    const nextSsh = (current.connections.ssh ?? []).slice().map((x) => toJS(x));
     for (const e of imported) {
       if (existing.has(e.name)) continue;
       nextSsh.push(e as any);

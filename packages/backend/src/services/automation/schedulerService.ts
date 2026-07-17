@@ -12,6 +12,18 @@ import type { ScheduledTaskEntry } from '../../types'
  * The SchedulerService keeps a single setInterval tick (per-minute) and calls
  * the supplied runner callback for each due task. It is fully fakeable: pass a
  * clock function + runner in tests instead of using real time.
+ *
+ * Safety semantics:
+ * - A fresh service has no catch-up window: the first tick evaluates only the
+ *   current minute. (Previously `lastTickMs` started at 0, so a first tick
+ *   walked minute-by-minute from the 1970 epoch — firing matching tasks
+ *   millions of times and spinning the CPU.)
+ * - Each task fires at most once per tick, even if several of its due minutes
+ *   fall inside the catch-up window (e.g. after the machine slept). Burst-firing
+ *   a missed task N times in a tight loop is almost never what an operator
+ *   wants and is dangerous for non-idempotent commands.
+ * - The catch-up window is capped (default 24h) so a long hibernation cannot
+ *   produce an unbounded replay.
  */
 
 export function parseCron(expr: string): number[][] {
@@ -113,6 +125,11 @@ export class SchedulerService {
     if (this.timer) return
     this.lastTickMs = this.opts.now().getTime()
     this.timer = setInterval(() => this.tick(), this.opts.intervalMs)
+    // Let the process exit even if the scheduler is still running (Node only).
+    const t: unknown = this.timer
+    if (t && typeof (t as { unref?: () => void }).unref === 'function') {
+      ;(t as { unref: () => void }).unref()
+    }
   }
   stop(): void {
     if (this.timer) { clearInterval(this.timer); this.timer = null }
@@ -121,20 +138,38 @@ export class SchedulerService {
   async tick(): Promise<void> {
     const now = this.opts.now()
     const nowMs = now.getTime()
-    // Walk minute by minute from lastTick to now so we never skip a firing.
-    let cur = new Date(Math.ceil(this.lastTickMs / 60000) * 60000)
+    if (this.lastTickMs <= 0) {
+      // First tick of a fresh service: evaluate only the current minute.
+      // (Initialising lastTickMs to 0 used to replay every minute since the
+      // 1970 epoch — a CPU-spinning, task-flooding bug.) Kept 1ms before the
+      // minute boundary so the walk below still considers the current minute.
+      this.lastTickMs = nowMs - (nowMs % 60_000) - 1
+    }
+    // Walk minute by minute from lastTick to now so we never skip a firing,
+    // but cap the catch-up window and fire each task at most once per tick.
+    const maxCatchupMs = 24 * 60 * 60 * 1000
+    const windowStartMs = Math.max(this.lastTickMs, nowMs - maxCatchupMs)
+    const fired = new Set<string>()
+    // An exactly-aligned window start means that minute was already evaluated
+    // by the previous tick (the walk is inclusive), so begin one minute later.
+    const firstMinuteMs =
+      windowStartMs % 60_000 === 0
+        ? windowStartMs + 60_000
+        : Math.ceil(windowStartMs / 60_000) * 60_000
+    let cur = new Date(firstMinuteMs)
     while (cur.getTime() <= nowMs) {
       for (const task of this.opts.getTasks()) {
-        if (!task.enabled) continue
+        if (!task.enabled || fired.has(task.id)) continue
         try {
           if (matchesCron(task.cron, cur)) {
+            fired.add(task.id)
             await this.opts.run(task, new Date(cur))
           }
         } catch {
           // A bad task should not crash the scheduler.
         }
       }
-      cur = new Date(cur.getTime() + 60000)
+      cur = new Date(cur.getTime() + 60_000)
     }
     this.lastTickMs = nowMs
   }

@@ -32,6 +32,7 @@ import { ConnectionManager } from "../../services/ConnectionManager";
 import { AutomationManager } from "../../services/automation/AutomationManager";
 import { SessionLogService } from "../../services/automation/sessionLogService";
 import { SchedulerService } from "../../services/automation/schedulerService";
+import { executeScheduledTask } from "../../services/automation/scheduledTaskRunner";
 import { HistoryStorageMigration } from "../../services/history/HistoryStorageMigration";
 import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
 import { AgentSettingProfileService } from "../../services/AgentSettingProfileService";
@@ -205,14 +206,42 @@ export async function startGyBackend(): Promise<void> {
     agentService.setSessionLogger(sessionLogger);
   }
 
-  // Scheduled-task scheduler: evaluate due tasks on a per-minute tick. The
-  // runner is a no-op stub here (full runner wiring requires opening tabs,
-  // which needs the gateway session context); it marks the task as run.
+  // Scheduled-task scheduler: evaluate due tasks on a per-minute tick and
+  // actually execute them — resolve the command (inline or saved script),
+  // open a short-lived headless session per target (SSH/WinRM/serial, or the
+  // local shell when no scope is set), run to completion, tear down. Session
+  // output is captured by the regular session-logging wiring when enabled.
   const scheduler = new SchedulerService({
     getTasks: () => automationManager.listScheduledTasks(),
-    run: (task) => {
+    run: async (task) => {
       console.log(`[scheduler] due task: ${task.name} (${task.cron})`);
-      automationManager.markScheduledTaskRun(task.id);
+      try {
+        const outcomes = await executeScheduledTask(
+          {
+            terminalService,
+            automationManager,
+            getSettings: () => settingsService.getSettings(),
+            onLog: (line) => console.log(line),
+          },
+          task,
+        );
+        const failed = outcomes.filter((o) => !o.ok);
+        for (const f of failed) {
+          console.warn(
+            `[scheduler] task "${task.name}" target ${f.target} failed: ${f.error ?? "unknown"}`,
+          );
+        }
+        console.log(
+          `[scheduler] task "${task.name}" finished: ${outcomes.length - failed.length}/${outcomes.length} target(s) ok`,
+        );
+      } catch (error) {
+        console.warn(
+          `[scheduler] task "${task.name}" could not run:`,
+          error instanceof Error ? error.message : error,
+        );
+      } finally {
+        automationManager.markScheduledTaskRun(task.id);
+      }
     },
   });
   scheduler.start();

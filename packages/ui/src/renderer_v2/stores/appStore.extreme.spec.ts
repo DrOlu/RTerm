@@ -4142,6 +4142,109 @@ const run = async (): Promise<void> => {
       );
     },
   );
+
+  await runCase(
+    "automation saves send structured-clone-safe plain payloads over IPC",
+    async () => {
+      // Regression: saveGroup/saveScript/saveScheduledTask/saveTemplate used to
+      // forward MobX observable settings state straight into
+      // window.gyshell.settings.set, which throws "An object could not be
+      // cloned" when the preload bridge structured-clones the payload.
+      const calls: unknown[] = [];
+      const originalWindow = (globalThis as any).window;
+      (globalThis as any).window = {
+        gyshell: {
+          settings: {
+            set: async (patch: unknown) => {
+              // Simulate the IPC structured clone boundary.
+              calls.push(structuredClone(patch));
+            },
+          },
+        },
+      };
+      try {
+        const store = new AppStore();
+        // Assigning through the observable `settings` field makes the whole
+        // tree deeply observable — exactly like the real hydrated store.
+        (store as any).settings = {
+          automation: {
+            groups: [{ id: "grp-1", name: "Core", parentId: null }],
+            deviceMemory: [],
+            scripts: [],
+            scheduledTasks: [],
+            templates: [],
+          },
+        };
+
+        await store.saveGroup({ id: "grp-2", name: "Edge", parentId: null } as any);
+        await store.saveScript({
+          id: "scr-1",
+          name: "backup",
+          command: "show run",
+        } as any);
+        await store.saveScheduledTask({
+          id: "sch-1",
+          name: "nightly",
+          cron: "0 2 * * *",
+          command: "show run",
+          enabled: true,
+        } as any);
+        await store.saveTemplate({
+          id: "tpl-1",
+          name: "base",
+          body: "hostname {{hostname}}",
+          variables: [],
+          versions: [],
+        } as any);
+
+        assertEqual(calls.length, 4, "all four automation saves should reach IPC");
+        for (const call of calls) {
+          const automation = (call as any).automation;
+          assertCondition(automation, "IPC payload should contain automation");
+          assertCondition(
+            !isObservable(automation),
+            "automation payload must not be a MobX observable",
+          );
+          for (const key of [
+            "groups",
+            "deviceMemory",
+            "scripts",
+            "scheduledTasks",
+            "templates",
+          ]) {
+            const list = automation[key];
+            assertCondition(Array.isArray(list), `${key} should be an array`);
+            assertCondition(
+              !isObservableArray(list),
+              `${key} must not be an observable array`,
+            );
+            for (const entry of list) {
+              assertCondition(
+                !isObservable(entry),
+                `${key} entries must be plain objects`,
+              );
+            }
+          }
+        }
+        const last = (calls[3] as any).automation;
+        assertEqual(last.groups.length, 2, "group should have been appended");
+        assertEqual(last.scripts.length, 1, "script should have been appended");
+        assertEqual(
+          last.scheduledTasks.length,
+          1,
+          "scheduled task should have been appended",
+        );
+        assertEqual(last.templates.length, 1, "template should have been appended");
+        assertEqual(
+          last.templates[0].body,
+          "hostname {{hostname}}",
+          "template body should survive the plain conversion",
+        );
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+    },
+  );
 };
 
 void run()
