@@ -2877,6 +2877,8 @@ export class AppStore {
       privateKey: entry.privateKey,
       privateKeyPath: entry.privateKeyPath,
       passphrase: entry.passphrase,
+      algorithmsPreset: (entry as any).algorithmsPreset,
+      termType: (entry as any).termType,
       proxy,
       tunnels,
       jumpHost,

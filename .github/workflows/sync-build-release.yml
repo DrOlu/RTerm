@@ -309,6 +309,10 @@ jobs:
 
             Synced from upstream GyShell, with RTerm-specific enhancements.
 
+            ## What's new in RTerm v1.6.3
+
+            - **Fix: Algorithms preset + TERM actually reach the SSH backend.** In v1.6.1/v1.6.2, connecting from the Connections panel dropped the *Algorithms* and *TERM* fields when building the runtime config, so Cisco/legacy raw-shell mode never engaged (SFTP warning + hang at "Opening interactive shell..." persisted). The saved connection's `algorithmsPreset` and `termType` are now forwarded, so **Algorithms: Cisco / Network gear + TERM: vt100** works as intended.
+
             ## What's new in RTerm v1.6.2
 
             - **Fix: Cisco / legacy SSH interactive shell now opens.** On v1.6.1 the connection succeeded but the shell hung at "Opening interactive shell..." because ssh2 sent `env` channel requests that Cisco IOS doesn't acknowledge, and the POSIX shell-integration injection (`base64`/`eval`) produced garbage on a network OS. The `cisco` and `legacy` presets now use a **raw-shell mode**: no `env` requests, no SFTP init, no OS-detection exec probes, and no shell-integration injection — the device's prompt streams straight through. Set **Algorithms: Cisco / Network gear** (or **Legacy**) and **TERM: vt100** in the Connections panel.
