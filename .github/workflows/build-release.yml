@@ -1,197 +1,47 @@
-name: Sync Build and Release
+name: Build and Release
 
 on:
-  schedule:
-    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       force:
-        description: "Force build even if no upstream changes"
+        description: "Force a build/release of the current version on main"
         required: false
-        default: "false"
+        default: "true"
         type: string
-      release_mode:
-        description: "sync = version tracks upstream; feature = keep our local version.json (for our own feature releases)"
-        required: false
-        default: "sync"
-        type: choice
-        options:
-          - sync
-          - feature
 
 concurrency:
-  group: rterm-sync-build
+  group: rterm-build
   cancel-in-progress: false
 
 env:
   NODE_VERSION: "20"
-  UPSTREAM_REPO: "MrOrangeJJ/GyShell"
-  UPSTREAM_BRANCH: "main"
 
 permissions:
   contents: write
 
 jobs:
-  sync:
-    name: Sync from upstream GyShell
+  prepare:
+    name: Prepare
     runs-on: ubuntu-latest
     outputs:
-      should_build: ${{ steps.check.outputs.should_build }}
-      new_version: ${{ steps.check.outputs.new_version }}
+      should_build: "true"
+      new_version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout RTerm
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: main
           token: ${{ secrets.PAT_TOKEN }}
-
-      - name: Check upstream changes
-        id: check
+      - name: Read version
+        id: version
         run: |
-          CURRENT_VERSION=$(jq -r '.version' version.json 2>/dev/null || echo "0.0.0")
-          echo "current_version=$CURRENT_VERSION"
-
-          # In feature release mode we ship OUR local version (already bumped
-          # in-tree). Skip the upstream comparison entirely and never
-          # clobber version.json/package.json with upstream's number.
-          if [ "${{ inputs.release_mode }}" = "feature" ]; then
-            echo "Feature release mode: building and releasing v$CURRENT_VERSION as-is"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-            echo "skip_upstream_merge=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # --- Trigger: new upstream COMMITS, not release version.
-          # Version-based triggering breaks as soon as our local version runs
-          # ahead of upstream's (e.g. our 1.6.3 vs their 1.6.0): their next few
-          # releases would compare lower/equal and silently never sync.
-          # Our history now contains upstream's history (one-time linking merge
-          # with --allow-unrelated-histories), so ancestry answers "do we have
-          # their HEAD yet?". An upstream SHA we've never fetched fails the
-          # ancestry test, which correctly counts as new commits.
-          UPSTREAM_SHA=$(git ls-remote "https://github.com/${{ env.UPSTREAM_REPO }}.git" "refs/heads/${{ env.UPSTREAM_BRANCH }}" | cut -f1)
-          echo "upstream_sha=$UPSTREAM_SHA"
-          if [ -z "$UPSTREAM_SHA" ]; then
-            echo "Could not resolve upstream HEAD; skipping build"
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          if git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD 2>/dev/null; then
-            NEW_COMMITS=false
-          else
-            NEW_COMMITS=true
-          fi
-          echo "new_upstream_commits=$NEW_COMMITS"
-
-          # --- Version: never regress. Take upstream's release number if it is
-          # higher than ours; otherwise bump our patch so the new sync release
-          # gets a fresh tag.
-          UPSTREAM_LATEST=$(curl -sL "https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/latest" \
-            | jq -r '.tag_name // "0.0.0"' | sed 's/^v//')
-          echo "upstream_latest=$UPSTREAM_LATEST"
-
-          CURRENT_PADDED=$(printf "%03d%03d%03d" $(echo "$CURRENT_VERSION" | tr '.' ' '))
-          UPSTREAM_PADDED=$(printf "%03d%03d%03d" $(echo "$UPSTREAM_LATEST" | tr '.' ' '))
-
-          if [ "$UPSTREAM_PADDED" -gt "$CURRENT_PADDED" ]; then
-            SYNC_VERSION="$UPSTREAM_LATEST"
-          else
-            SYNC_VERSION="$(echo "$CURRENT_VERSION" | cut -d. -f1).$(echo "$CURRENT_VERSION" | cut -d. -f2).$(( $(echo "$CURRENT_VERSION" | cut -d. -f3) + 1 ))"
-          fi
-
-          if [ "$NEW_COMMITS" = "true" ]; then
-            echo "New upstream commits detected → syncing as v$SYNC_VERSION"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "new_version=$SYNC_VERSION" >> $GITHUB_OUTPUT
-          elif [ "$UPSTREAM_PADDED" -gt "$CURRENT_PADDED" ]; then
-            # Upstream tagged a newer release from commits we already merged:
-            # adopt their number so we stay aligned.
-            echo "Upstream released v$UPSTREAM_LATEST from already-merged commits → rebuilding"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "new_version=$UPSTREAM_LATEST" >> $GITHUB_OUTPUT
-          elif [ "${{ inputs.force }}" = "true" ]; then
-            # Force rebuild with nothing new: re-release the CURRENT version
-            # (release step is idempotent), never regress to upstream's number.
-            echo "Force build requested (no upstream changes) → re-releasing v$CURRENT_VERSION"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-            echo "skip_upstream_merge=true" >> $GITHUB_OUTPUT
-          else
-            echo "No new upstream commits (current: v$CURRENT_VERSION, upstream release: v$UPSTREAM_LATEST)"
-            echo "should_build=false" >> $GITHUB_OUTPUT
-            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Merge upstream changes
-        if: steps.check.outputs.should_build == 'true' && steps.check.outputs.skip_upstream_merge != 'true'
-        run: |
-          git config user.name "RTerm Sync Bot"
-          git config user.email "rterm-bot@hyperspace.ng"
-          git remote add upstream "https://github.com/${{ env.UPSTREAM_REPO }}.git"
-          git fetch upstream ${{ env.UPSTREAM_BRANCH }}
-
-          # Histories were linked by a one-time merge with
-          # --allow-unrelated-histories, so this is a normal merge now.
-          # -X ours: where upstream edited the same lines we customized, keep
-          # ours; everything else from upstream flows in.
-          git merge "upstream/${{ env.UPSTREAM_BRANCH }}" -X ours --no-edit --allow-unrelated-histories || {
-            CONFLICTED=$(git diff --name-only --diff-filter=U)
-            echo "::warning::Upstream sync conflicts resolved keep-ours in: $CONFLICTED"
-            echo "$CONFLICTED" | while read -r file; do
-              git checkout --ours "$file" 2>/dev/null || true
-              git add "$file"
-            done
-            git commit --no-edit || git commit -m "chore: merge upstream GyShell (resolve conflicts keep-ours)"
-          }
-
-      - name: Apply rebrand
-        if: steps.check.outputs.should_build == 'true'
-        run: |
-          # Ensure git identity exists even when the "Merge upstream changes"
-          # step is skipped (e.g. force=true with no new upstream commits).
-          git config user.name "RTerm Sync Bot"
-          git config user.email "rterm-bot@hyperspace.ng"
-          # In feature release mode the rebrand + version clobber must NOT
-          # run: our version.json/package.json already hold the correct local
-          # version and our code changes are committed in-tree.
-          if [ "${{ inputs.release_mode }}" = "feature" ]; then
-            echo "Feature release mode: skipping rebrand + version clobber"
-            exit 0
-          fi
-          chmod +x scripts/rebrand.sh 2>/dev/null || true
-          if [ -f "scripts/rebrand.sh" ]; then
-            bash scripts/rebrand.sh
-          fi
-          # Restore RTerm icons (overwritten by upstream merge)
-          if [ -d "scripts/rterm-icons" ]; then
-            cp -f scripts/rterm-icons/icon.png apps/electron/materials/icon.png
-            cp -f scripts/rterm-icons/icon.icns apps/electron/materials/icon.icns
-            cp -f scripts/rterm-icons/icon.ico apps/electron/materials/icon.ico
-            for size in 16x16 32x32 48x48 64x64 128x128 256x256 512x512; do
-              cp -f scripts/rterm-icons/${size}.png apps/electron/materials/icons/${size}.png 2>/dev/null || true
-            done
-            cp -f scripts/rterm-icons/mobile-web-icon.png apps/electron/mobile-web-runtime/icon.png 2>/dev/null || true
-            cp -f scripts/rterm-icons/mobile-web-public-icon.png apps/mobile-web/public/icon.png 2>/dev/null || true
-            echo "Restored RTerm icons from scripts/rterm-icons/"
-          fi
-          jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' version.json > version.json.tmp && mv version.json.tmp version.json
-          jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
-          jq --arg v "${{ steps.check.outputs.new_version }}" '.version = $v | .name = "rterm" | .packages[""].version = $v | .packages[""].name = "rterm"' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
-          git add -A
-          git diff --cached --stat
-          git commit -m "chore: sync from GyShell v${{ steps.check.outputs.new_version }} and rebrand" --allow-empty
-
-      - name: Push changes
-        if: steps.check.outputs.should_build == 'true'
-        run: git push origin main
+          VERSION=$(jq -r '.version' version.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building and releasing RTerm v$VERSION from main (no upstream sync — RTerm is now maintained independently)."
 
   build-mac:
     name: Build macOS ARM64
-    needs: sync
-    if: needs.sync.outputs.should_build == 'true'
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -220,8 +70,8 @@ jobs:
 
   build-win:
     name: Build Windows x64
-    needs: sync
-    if: needs.sync.outputs.should_build == 'true'
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -261,8 +111,8 @@ jobs:
 
   build-linux-x64:
     name: Build Linux x64
-    needs: sync
-    if: needs.sync.outputs.should_build == 'true'
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -293,8 +143,8 @@ jobs:
 
   build-linux-arm64:
     name: Build Linux ARM64
-    needs: sync
-    if: needs.sync.outputs.should_build == 'true'
+    needs: prepare
+    if: needs.prepare.outputs.should_build == 'true'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -324,8 +174,8 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [sync, build-mac, build-win, build-linux-x64, build-linux-arm64]
-    if: needs.sync.outputs.should_build == 'true'
+    needs: [prepare, build-mac, build-win, build-linux-x64, build-linux-arm64]
+    if: needs.prepare.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -353,6 +203,11 @@ jobs:
             RTerm v${{ steps.version.outputs.version }} — AI-Native Terminal App by Hyperspace Technologies
 
             Synced from upstream GyShell, with RTerm-specific enhancements.
+
+            ## What's new in RTerm v1.7.6
+
+            - **No more upstream sync.** RTerm is now maintained independently — the GitHub Actions workflow no longer pulls from GyShell upstream or rebrands. The Build and Release workflow simply builds and releases the version on `main`. (You update RTerm yourself from now on.)
+            - **PuTTY import button is always visible** in the Connections → SSH section header (was hidden when existing connections were present).
 
             ## What's new in RTerm v1.7.4
 
