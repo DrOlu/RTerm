@@ -137,6 +137,24 @@ function resolveSshAlgorithms(
   return undefined;
 }
 
+/**
+ * `cisco` and `legacy` presets enable a "raw shell" mode for network gear
+ * and old boxes that don't run a POSIX shell. These devices:
+ *  - don't support SFTP subsystem (Cisco IOS has none), so skip SFTP init,
+ *  - don't understand `uname -s` / `cmd.exe` exec probes, so skip OS detection,
+ *  - don't support `env` channel requests, so the ssh2 shell() call must omit
+ *    the `env` option (otherwise the shell request hangs waiting for an ack
+ *    that never comes),
+ *  - have no `base64`/`eval`/POSIX shell, so the GyShell shell-integration
+ *    injection would spam garbage at the device's prompt. Skip it and treat
+ *    the shell as ready as soon as the stream opens.
+ */
+function isRawShellPreset(
+  preset: SSHConnectionConfig['algorithmsPreset'],
+): boolean {
+  return preset === 'cisco' || preset === 'legacy';
+}
+
 interface TerminalWindowSize {
   cols: number;
   rows: number;
@@ -1505,6 +1523,10 @@ export class SSHBackend implements TerminalBackend {
         console.log(
           `[SSH] Connection ready for ${sshConfig.host}:${sshConfig.port}`,
         );
+        // Cisco/legacy network gear uses a raw shell: skip SFTP, OS-detection
+        // exec probes, env passing, and shell-integration injection (see
+        // isRawShellPreset).
+        const rawShell = isRawShellPreset(sshConfig.algorithmsPreset);
         try {
           emit("\x1b[36m▹ Setting up port forwards...\x1b[0m\r\n");
           console.log(`[SSH] Setting up port forwards...`);
@@ -1515,48 +1537,59 @@ export class SSHBackend implements TerminalBackend {
           // We continue anyway to allow shell access
         }
 
-        try {
-          emit("\x1b[36m▹ Detecting remote OS...\x1b[0m\r\n");
-          console.log(`[SSH] Detecting remote OS...`);
-          const uname = await this.execCollect(client, "uname -s");
-          const u = (uname.stdout || uname.stderr || "").toLowerCase();
-          if (u.includes("linux") || u.includes("darwin")) {
-            instance.remoteOs = "unix";
-          }
-        } catch {
-          // ignore
-        }
-        if (!instance.remoteOs) {
+        if (rawShell) {
+          // Network gear (Cisco IOS/IOS-XE, etc.) has no POSIX shell, no SFTP
+          // subsystem, and doesn't answer `uname -s`. Treat it as a generic
+          // non-Windows host and skip the exec probes + SFTP init entirely —
+          // those either hang or emit confusing warnings on these devices.
+          instance.remoteOs = "unix";
+          console.log(
+            `[SSH] Raw-shell preset (${sshConfig.algorithmsPreset}) — skipping OS-detection exec probes and SFTP init.`,
+          );
+        } else {
           try {
-            const ver = await this.execCollect(client, "cmd.exe /c ver");
-            const v = (ver.stdout || ver.stderr || "").toLowerCase();
-            if (v.includes("windows")) instance.remoteOs = "windows";
+            emit("\x1b[36m▹ Detecting remote OS...\x1b[0m\r\n");
+            console.log(`[SSH] Detecting remote OS...`);
+            const uname = await this.execCollect(client, "uname -s");
+            const u = (uname.stdout || uname.stderr || "").toLowerCase();
+            if (u.includes("linux") || u.includes("darwin")) {
+              instance.remoteOs = "unix";
+            }
           } catch {
             // ignore
           }
-        }
-        if (!instance.remoteOs) instance.remoteOs = "unix";
-        console.log(`[SSH] Remote OS detected: ${instance.remoteOs}`);
+          if (!instance.remoteOs) {
+            try {
+              const ver = await this.execCollect(client, "cmd.exe /c ver");
+              const v = (ver.stdout || ver.stderr || "").toLowerCase();
+              if (v.includes("windows")) instance.remoteOs = "windows";
+            } catch {
+              // ignore
+            }
+          }
+          if (!instance.remoteOs) instance.remoteOs = "unix";
+          console.log(`[SSH] Remote OS detected: ${instance.remoteOs}`);
 
-        try {
-          emit("\x1b[36m▹ Initializing SFTP channel...\x1b[0m\r\n");
-          await this.initializeSftp(instance);
-          emit("\x1b[32m✔ SFTP channel ready.\x1b[0m\r\n");
-        } catch (error: any) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          instance.sftpInitError = message;
-          // Keep interactive shell usable even when SFTP is unavailable.
-          emit(
-            `\x1b[33m⚠ SFTP unavailable: ${message}. File panel features may be limited.\x1b[0m\r\n`,
-          );
-        }
-
-        if (instance.remoteOs === "windows") {
           try {
-            await this.bootstrapWindowsSession(instance);
-          } catch {
-            instance.commandTrackingMode = "shell-integration";
+            emit("\x1b[36m▹ Initializing SFTP channel...\x1b[0m\r\n");
+            await this.initializeSftp(instance);
+            emit("\x1b[32m✔ SFTP channel ready.\x1b[0m\r\n");
+          } catch (error: any) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            instance.sftpInitError = message;
+            // Keep interactive shell usable even when SFTP is unavailable.
+            emit(
+              `\x1b[33m⚠ SFTP unavailable: ${message}. File panel features may be limited.\x1b[0m\r\n`,
+            );
+          }
+
+          if (instance.remoteOs === "windows") {
+            try {
+              await this.bootstrapWindowsSession(instance);
+            } catch {
+              instance.commandTrackingMode = "shell-integration";
+            }
           }
         }
 
@@ -1572,14 +1605,19 @@ export class SSHBackend implements TerminalBackend {
             cols: initialWindowSize.cols,
             rows: initialWindowSize.rows,
           },
-          {
-            // Fix for Chinese characters rendering issues in packaged apps
-            // Setting LC_ALL and LANG to UTF-8 ensures the remote shell uses UTF-8 encoding
-            env: {
-              LC_ALL: "en_US.UTF-8",
-              LANG: "en_US.UTF-8",
-            },
-          },
+          rawShell
+            ? // Cisco/legacy devices don't acknowledge `env` channel requests,
+              // which hangs the shell open. Send only pty-req + shell by
+              // passing an empty options object (no env to negotiate).
+              {}
+            : {
+                // Fix for Chinese characters rendering issues in packaged apps
+                // Setting LC_ALL and LANG to UTF-8 ensures the remote shell uses UTF-8 encoding
+                env: {
+                  LC_ALL: "en_US.UTF-8",
+                  LANG: "en_US.UTF-8",
+                },
+              },
           (err, stream) => {
             if (err) {
               console.error(`[SSH] Failed to open shell:`, err);
@@ -1591,6 +1629,30 @@ export class SSHBackend implements TerminalBackend {
             }
             instance.stream = stream;
             this.applyRequestedWindowSize(instance);
+
+            if (rawShell) {
+              // Raw-shell mode (Cisco/legacy network gear): no POSIX shell means
+              // no shell-integration injection and no GYSHELL_READY_MARKER to
+              // wait for. Declare the shell ready immediately and stream device
+              // output verbatim to the terminal.
+              instance.initializationState = "ready";
+              instance.isInitializing = false;
+              emit("\x1b[32m✔ Shell ready.\x1b[0m\r\n");
+              console.log(
+                `[SSH] Raw-shell mode: shell ready immediately (preset=${sshConfig.algorithmsPreset}).`,
+              );
+              stream.on("data", (data: Buffer) => {
+                const chunk = data.toString();
+                const sanitizedChunk = this.stripReadyMarker(chunk);
+                this.consumeOscMarkers(instance, sanitizedChunk);
+                if (sanitizedChunk) emit(sanitizedChunk);
+              });
+              stream.on("close", async (code: number) => {
+                emitExit(typeof code === "number" ? code : 0);
+              });
+              return;
+            }
+
             emit("\x1b[36m▹ Initializing shell integration...\x1b[0m\r\n");
             console.log(
               `[SSH] Shell stream opened. Starting robust initialization...`,

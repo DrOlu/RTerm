@@ -309,6 +309,10 @@ jobs:
 
             Synced from upstream GyShell, with RTerm-specific enhancements.
 
+            ## What's new in RTerm v1.6.2
+
+            - **Fix: Cisco / legacy SSH interactive shell now opens.** On v1.6.1 the connection succeeded but the shell hung at "Opening interactive shell..." because ssh2 sent `env` channel requests that Cisco IOS doesn't acknowledge, and the POSIX shell-integration injection (`base64`/`eval`) produced garbage on a network OS. The `cisco` and `legacy` presets now use a **raw-shell mode**: no `env` requests, no SFTP init, no OS-detection exec probes, and no shell-integration injection — the device's prompt streams straight through. Set **Algorithms: Cisco / Network gear** (or **Legacy**) and **TERM: vt100** in the Connections panel.
+
             ## What's new in RTerm v1.6.1
 
             - **Legacy / Cisco SSH support.** New *Algorithms* preset (Modern / Legacy / Cisco) and optional *TERM* type field on saved SSH connections. Older network gear (Cisco IOS/IOS-XE, legacy switches/routers) that only offers `diffie-hellman-group1-sha1`, `ssh-rsa`, `aes*-cbc`, `hmac-sha1` now connects successfully instead of failing the SSH handshake. Select **Algorithms: Cisco / Network gear** (or **Legacy**) in the Connections panel.
