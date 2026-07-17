@@ -5,6 +5,7 @@ import type { AppStore } from '../../stores/AppStore'
 import { PortForwardType, type TunnelEntry } from '../../lib/ipcTypes'
 import './connections.scss'
 import { ConfirmDialog } from '../Common/ConfirmDialog'
+import { toastStore } from '../Common/ToastStore'
 
 import { Select } from '../../platform/Select'
 import {
@@ -68,7 +69,14 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
 
   async function saveDraft() {
     if (!draft) return
-    await sectionDefinition.saveDraft(store, draft)
+    try {
+      await sectionDefinition.saveDraft(store, draft)
+      toastStore.push({ title: 'Saved', message: `${section} connection saved`, kind: 'success' })
+      setEditingId(null)
+      setDraft(null)
+    } catch (e: any) {
+      toastStore.push({ title: 'Save failed', message: e?.message ?? 'Could not save', kind: 'danger' })
+    }
   }
 
   async function deleteCurrent() {
@@ -90,6 +98,7 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
           if (!deleteConfirm) return
           const { section: sec, id } = deleteConfirm
           await getConnectionManagerSectionDefinition(sec).deleteEntry(store, id)
+          toastStore.push({ title: 'Deleted', message: `${sec} entry removed`, kind: 'danger' })
           setDeleteConfirm(null)
           setEditingId(null)
           setDraft(null)

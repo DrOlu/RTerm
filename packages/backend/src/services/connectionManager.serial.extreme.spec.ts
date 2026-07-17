@@ -1,5 +1,5 @@
 import { ConnectionManager } from './ConnectionManager'
-import type { SerialConnectionEntry } from '../../types'
+import type { SerialConnectionEntry } from '../types'
 
 function makeManager() {
   let settings: any = {

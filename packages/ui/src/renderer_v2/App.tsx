@@ -5,8 +5,11 @@ import { TopBar } from "./components/TopBar/TopBar";
 import { SettingsView } from "./components/Settings/SettingsView";
 import { ConnectionsView } from "./components/Connections/ConnectionsView";
 import { ConfirmDialog } from "./components/Common/ConfirmDialog";
+import { ToastStack } from "./components/Common/ToastStack";
+import { CommandPalette } from "./components/Common/CommandPalette";
 import { LayoutWorkspace } from "./components/Layout/LayoutWorkspace";
 import { shouldShowHistoryMigrationOverlay } from "./lib/historyMigrationOverlay";
+import { toastStore } from "./components/Common/ToastStore";
 import "./styles/app.scss";
 
 const store = new AppStore();
@@ -14,6 +17,48 @@ const store = new AppStore();
 export const App: React.FC = observer(() => {
   React.useEffect(() => {
     store.bootstrap();
+  }, []);
+
+  // Global keyboard shortcut: Cmd/Ctrl+K opens the command palette.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        (window as any).__rtermTogglePalette?.();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // PuTTY import hook: the command palette (and a future menu item) dispatches
+  // a custom event; here we trigger a hidden file picker and import the file.
+  React.useEffect(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".reg,.txt";
+    input.style.display = "none";
+    const handler = async () => {
+      input.value = "";
+      input.click();
+    };
+    const onChange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      try {
+        const n = await store.importPuttySessions(text);
+        toastStore.push({ title: n > 0 ? "PuTTY import" : "PuTTY import", message: n > 0 ? `Imported ${n} SSH connection(s).` : "No new SSH sessions found.", kind: n > 0 ? "success" : "default" });
+      } catch (e: any) {
+        toastStore.push({ title: "Import failed", message: e?.message ?? "Could not parse file.", kind: "danger" });
+      }
+    };
+    document.addEventListener("rterm:putty-import", handler);
+    input.addEventListener("change", onChange);
+    return () => {
+      document.removeEventListener("rterm:putty-import", handler);
+      input.removeEventListener("change", onChange);
+    };
   }, []);
 
   React.useEffect(() => {
@@ -181,6 +226,9 @@ export const App: React.FC = observer(() => {
           </div>
         ) : null}
       </div>
+      {/* Visual enhancements (1.7.4): toast notifications + command palette */}
+      <ToastStack />
+      <CommandPalette store={store} />
     </div>
   );
 });

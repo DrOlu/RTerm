@@ -350,6 +350,22 @@ jobs:
 
             Synced from upstream GyShell, with RTerm-specific enhancements.
 
+            ## What's new in RTerm v1.7.4
+
+            A visual polish + new app icon. Same engine, much better feel.
+
+            - **New app icon** across macOS / Windows / Linux (and the CI rebrand-restore now keeps the new icon set).
+            - **Command palette (⌘/Ctrl+K)** — fuzzy "do anything" launcher: open any saved SSH/WinRM/Serial connection, open the Connections/Settings panels, toggle session logging, or trigger PuTTY import, all from one keyboard-first overlay.
+            - **Toast notifications** — consistent bottom-right toasts for save/delete/import with optional undo, replacing silent inline messages.
+            - **Cohesive motion language** — a shared easing + duration token set, boot fade-in, and hover transitions across tabs/rows/cards.
+            - **Ambient depth** — a faint theme-tinted radial background behind the app for depth without distraction.
+            - **Themed overlay scrollbars** — thin, auto-hiding, themed everywhere.
+            - **Connection tab status pills + type tints** — colored left-border stripe per connection type (SSH/WinRM/Serial/Local/exited).
+            - **Split-pane visible grab handles** on hover.
+            - **Focus-visible rings** across all interactives (accessibility).
+            - **Reduced-motion support** — `prefers-reduced-motion` disables animations.
+            - **CSS scaffolding** for exit-code badges, fleet results tables, device-memory cards, empty-state illustrations, and approval modals (ready to wire into components).
+
             ## What's new in RTerm v1.7.3
 
             Closes every usability gap from 1.7.2: all automation features are now fully usable via the agent AND the Connections panel, plus improved chat rendering.
