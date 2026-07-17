@@ -45,14 +45,14 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.PAT_TOKEN }}
 
-      - name: Check upstream version
+      - name: Check upstream changes
         id: check
         run: |
           CURRENT_VERSION=$(jq -r '.version' version.json 2>/dev/null || echo "0.0.0")
           echo "current_version=$CURRENT_VERSION"
 
           # In feature release mode we ship OUR local version (already bumped
-          # in-tree). Skip the upstream version comparison entirely and never
+          # in-tree). Skip the upstream comparison entirely and never
           # clobber version.json/package.json with upstream's number.
           if [ "${{ inputs.release_mode }}" = "feature" ]; then
             echo "Feature release mode: building and releasing v$CURRENT_VERSION as-is"
@@ -62,31 +62,68 @@ jobs:
             exit 0
           fi
 
+          # --- Trigger: new upstream COMMITS, not release version.
+          # Version-based triggering breaks as soon as our local version runs
+          # ahead of upstream's (e.g. our 1.6.3 vs their 1.6.0): their next few
+          # releases would compare lower/equal and silently never sync.
+          # NOTE: RTerm has NO shared git history with GyShell (it began as a
+          # squashed snapshot), so ancestry checks / plain merges don't work.
+          # We track the last-synced upstream SHA in .github/last-upstream-sync
+          # and apply upstream deltas as a 3-way patch (see merge step).
+          UPSTREAM_SHA=$(git ls-remote "https://github.com/${{ env.UPSTREAM_REPO }}.git" "refs/heads/${{ env.UPSTREAM_BRANCH }}" | cut -f1)
+          echo "upstream_sha=$UPSTREAM_SHA"
+          echo "upstream_sha=$UPSTREAM_SHA" >> $GITHUB_OUTPUT
+          if [ -z "$UPSTREAM_SHA" ]; then
+            echo "Could not resolve upstream HEAD; skipping build"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          LAST_SYNCED_SHA=$(cat .github/last-upstream-sync 2>/dev/null || echo "")
+          echo "last_synced_sha=$LAST_SYNCED_SHA"
+          if [ "$UPSTREAM_SHA" = "$LAST_SYNCED_SHA" ]; then
+            NEW_COMMITS=false
+          else
+            NEW_COMMITS=true
+          fi
+          echo "new_upstream_commits=$NEW_COMMITS"
+
+          # --- Version: never regress. Take upstream's release number if it is
+          # higher than ours; otherwise bump our patch so the new sync release
+          # gets a fresh tag.
           UPSTREAM_LATEST=$(curl -sL "https://api.github.com/repos/${{ env.UPSTREAM_REPO }}/releases/latest" \
             | jq -r '.tag_name // "0.0.0"' | sed 's/^v//')
           echo "upstream_latest=$UPSTREAM_LATEST"
 
-          CURRENT_MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
-          CURRENT_MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
-          CURRENT_PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+          CURRENT_PADDED=$(printf "%03d%03d%03d" $(echo "$CURRENT_VERSION" | tr '.' ' '))
+          UPSTREAM_PADDED=$(printf "%03d%03d%03d" $(echo "$UPSTREAM_LATEST" | tr '.' ' '))
 
-          UPSTREAM_MAJOR=$(echo "$UPSTREAM_LATEST" | cut -d. -f1)
-          UPSTREAM_MINOR=$(echo "$UPSTREAM_LATEST" | cut -d. -f2)
-          UPSTREAM_PATCH=$(echo "$UPSTREAM_LATEST" | cut -d. -f3)
-
-          CURRENT_PADDED=$(printf "%03d%03d%03d" "$CURRENT_MAJOR" "$CURRENT_MINOR" "$CURRENT_PATCH")
-          UPSTREAM_PADDED=$(printf "%03d%03d%03d" "$UPSTREAM_MAJOR" "$UPSTREAM_MINOR" "$UPSTREAM_PATCH")
-
-          if [ "${{ inputs.force }}" = "true" ]; then
-            echo "Force build requested"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "new_version=$UPSTREAM_LATEST" >> $GITHUB_OUTPUT
-          elif [ "$UPSTREAM_PADDED" -gt "$CURRENT_PADDED" ]; then
-            echo "New upstream version: $CURRENT_VERSION → $UPSTREAM_LATEST"
-            echo "should_build=true" >> $GITHUB_OUTPUT
-            echo "new_version=$UPSTREAM_LATEST" >> $GITHUB_OUTPUT
+          if [ "$UPSTREAM_PADDED" -gt "$CURRENT_PADDED" ]; then
+            SYNC_VERSION="$UPSTREAM_LATEST"
           else
-            echo "No new upstream version (current: $CURRENT_VERSION, upstream: $UPSTREAM_LATEST)"
+            SYNC_VERSION="$(echo "$CURRENT_VERSION" | cut -d. -f1).$(echo "$CURRENT_VERSION" | cut -d. -f2).$(( $(echo "$CURRENT_VERSION" | cut -d. -f3) + 1 ))"
+          fi
+
+          if [ "$NEW_COMMITS" = "true" ]; then
+            echo "New upstream commits detected → syncing as v$SYNC_VERSION"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "new_version=$SYNC_VERSION" >> $GITHUB_OUTPUT
+          elif [ "$UPSTREAM_PADDED" -gt "$CURRENT_PADDED" ]; then
+            # Upstream tagged a newer release from commits we already merged:
+            # adopt their number so we stay aligned.
+            echo "Upstream released v$UPSTREAM_LATEST from already-merged commits → rebuilding"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "new_version=$UPSTREAM_LATEST" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.force }}" = "true" ]; then
+            # Force rebuild with nothing new: re-release the CURRENT version
+            # (release step is idempotent), never regress to upstream's number.
+            echo "Force build requested (no upstream changes) → re-releasing v$CURRENT_VERSION"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+            echo "skip_upstream_merge=true" >> $GITHUB_OUTPUT
+          else
+            echo "No new upstream commits (current: v$CURRENT_VERSION, upstream release: v$UPSTREAM_LATEST)"
             echo "should_build=false" >> $GITHUB_OUTPUT
             echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           fi
@@ -98,13 +135,39 @@ jobs:
           git config user.email "rterm-bot@hyperspace.ng"
           git remote add upstream "https://github.com/${{ env.UPSTREAM_REPO }}.git"
           git fetch upstream ${{ env.UPSTREAM_BRANCH }}
-          git merge upstream/${{ env.UPSTREAM_BRANCH }} -X ours --no-edit || {
-            git diff --name-only --diff-filter=U | while read file; do
-              git checkout --ours "$file"
-              git add "$file"
-            done
-            git commit --no-edit -m "chore: merge upstream GyShell (resolve conflicts)"
-          }
+
+          UPSTREAM_SHA="${{ steps.check.outputs.upstream_sha }}"
+          LAST_SYNCED_SHA=$(cat .github/last-upstream-sync 2>/dev/null || echo "")
+
+          # RTerm and GyShell have unrelated git histories (RTerm started as a
+          # squashed snapshot), so `git merge` refuses to run. Instead, apply
+          # upstream's delta since the last sync as a 3-way patch: our custom
+          # commits stay untouched except where upstream edited the same lines,
+          # and those conflicts are resolved keep-ours.
+          if [ -n "$LAST_SYNCED_SHA" ] && git cat-file -e "$LAST_SYNCED_SHA" 2>/dev/null; then
+            git diff --binary "$LAST_SYNCED_SHA" "upstream/${{ env.UPSTREAM_BRANCH }}" > /tmp/upstream-delta.patch
+            if [ -s /tmp/upstream-delta.patch ]; then
+              echo "Applying upstream delta $LAST_SYNCED_SHA..$UPSTREAM_SHA ($(wc -c < /tmp/upstream-delta.patch) bytes)"
+              git apply --3way --binary /tmp/upstream-delta.patch || true
+              CONFLICTED=$(git diff --name-only --diff-filter=U)
+              if [ -n "$CONFLICTED" ]; then
+                echo "::warning::Upstream sync conflicts resolved keep-ours in: $CONFLICTED"
+                echo "$CONFLICTED" | while read -r file; do
+                  git checkout --ours "$file" 2>/dev/null || true
+                  git add "$file"
+                done
+              fi
+              git add -A
+            else
+              echo "Upstream delta is empty (tree content unchanged)"
+            fi
+          else
+            echo "::warning::No valid last-synced SHA recorded; recording upstream HEAD without applying changes. Verify tree parity manually."
+          fi
+
+          echo "$UPSTREAM_SHA" > .github/last-upstream-sync
+          git add .github/last-upstream-sync
+          git commit -m "chore: sync upstream GyShell ${LAST_SYNCED_SHA:-unknown}..${UPSTREAM_SHA}" --allow-empty
 
       - name: Apply rebrand
         if: steps.check.outputs.should_build == 'true'
