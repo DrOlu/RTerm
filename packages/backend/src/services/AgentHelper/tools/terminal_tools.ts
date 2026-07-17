@@ -6,7 +6,7 @@ import {
   formatTerminalUnavailableForTool,
   resolveTerminalForTool
 } from './terminal_runtime_guard'
-import type { SSHConnectionEntry, SSHConnectionConfig, ProxyEntry, TunnelEntry, WinRMConnectionEntry, WinRMConnectionConfig } from '../../../types'
+import type { SSHConnectionEntry, SSHConnectionConfig, ProxyEntry, TunnelEntry, WinRMConnectionEntry, WinRMConnectionConfig, SerialConnectionEntry } from '../../../types'
 import { randomUUID } from 'node:crypto'
 
 // --- Schemas ---
@@ -159,6 +159,39 @@ export function winrmEntryToTerminalConfig(
     auth: entry.auth,
     domain: entry.domain,
     rejectUnauthorized: entry.rejectUnauthorized,
+  }
+}
+
+/** Resolve a saved serial connection by id or (case-insensitive) name. */
+export function resolveSavedSerialConnection(
+  context: Pick<ToolExecutionContext, 'savedSerialConnections'>,
+  nameOrId: string,
+): SerialConnectionEntry | undefined {
+  const list = context.savedSerialConnections
+  if (!list || list.length === 0) return undefined
+  const byId = list.find((c) => c.id === nameOrId)
+  if (byId) return byId
+  const normalised = nameOrId.trim().toLowerCase()
+  return list.find((c) => (c.name ?? '').trim().toLowerCase() === normalised)
+}
+
+/** Materialise a live `serial` TerminalConfig from a saved serial entry. */
+export function serialEntryToTerminalConfig(
+  entry: SerialConnectionEntry,
+  opts: { title: string },
+): import('../../../services/SerialBackend').SerialConnectionConfig {
+  return {
+    type: 'serial',
+    id: `serial-${randomUUID()}`,
+    title: opts.title,
+    cols: 80,
+    rows: 24,
+    path: entry.path,
+    baudRate: entry.baudRate,
+    dataBits: entry.dataBits,
+    parity: entry.parity,
+    stopBits: entry.stopBits,
+    flowControl: entry.flowControl,
   }
 }
 
@@ -834,22 +867,26 @@ export async function openTerminalTab(
 
   const sshEntry = resolveSavedSshConnection(context, connectionNameOrId)
   const winrmEntry = !sshEntry ? resolveSavedWinrmConnection(context, connectionNameOrId) : undefined
+  const serialEntry = !sshEntry && !winrmEntry ? resolveSavedSerialConnection(context, connectionNameOrId) : undefined
 
-  if (!sshEntry && !winrmEntry) {
+  if (!sshEntry && !winrmEntry && !serialEntry) {
     const sshNames = (context.savedSshConnections ?? []).map((c) => c.name || c.id).filter(Boolean)
     const winrmNames = (context.savedWinrmConnections ?? []).map((c) => c.name || c.id).filter(Boolean)
+    const serialNames = (context.savedSerialConnections ?? []).map((c) => c.name || c.id).filter(Boolean)
     const parts: string[] = []
     if (sshNames.length) parts.push(`SSH: ${sshNames.join(', ')}`)
     if (winrmNames.length) parts.push(`WinRM: ${winrmNames.join(', ')}`)
-    const hint = parts.length ? ` Available saved connections — ${parts.join('; ')}.` : ' No saved SSH/WinRM connections are configured in Connections.'
+    if (serialNames.length) parts.push(`Serial: ${serialNames.join(', ')}`)
+    const hint = parts.length ? ` Available saved connections — ${parts.join('; ')}.` : ' No saved SSH/WinRM/Serial connections are configured in Connections.'
     return notFound(
-      `No saved SSH or WinRM connection found for "${connectionNameOrId}".${hint} Save the connection first (manage_ssh_connection / manage_winrm_connection), or pass the exact Name/ID shown there.`
+      `No saved SSH, WinRM, or Serial connection found for "${connectionNameOrId}".${hint} Save the connection first (manage_ssh_connection / manage_winrm_connection / manage_serial_connection), or pass the exact Name/ID shown there.`
     )
   }
 
-  const entry = (sshEntry ?? winrmEntry) as SSHConnectionEntry | WinRMConnectionEntry
   const isWinrm = Boolean(winrmEntry)
-  const displayName = entry.name || (isWinrm ? `${entry.username}@${entry.host}` : `${(sshEntry as SSHConnectionEntry).username}@${(sshEntry as SSHConnectionEntry).host}`)
+  const isSerial = Boolean(serialEntry)
+  const entry = (sshEntry ?? winrmEntry ?? serialEntry) as { name: string; id: string; username?: string; host?: string; port?: number; path?: string; baudRate?: number }
+  const displayName = entry.name || (isSerial ? serialEntry!.path : `${entry.username}@${entry.host}`)
 
   // Bail out if a tab for this saved connection is already live or connecting.
   // resolveTerminal matches by tab id or tab title; the UI sets the tab title to
@@ -867,8 +904,8 @@ export async function openTerminalTab(
     messageId,
     type: 'sub_tool_started',
     toolName: 'open_terminal_tab',
-    title: `Open ${entry.name || entry.host}`,
-    hint: `${entry.username}@${entry.host}:${entry.port}`,
+    title: `Open ${entry.name || (isSerial ? serialEntry!.path : entry.host)}`,
+    hint: isSerial ? `${serialEntry!.path} @ ${serialEntry!.baudRate}` : `${entry.username}@${entry.host}:${entry.port}`,
     input: JSON.stringify(args),
   })
 
@@ -879,20 +916,23 @@ export async function openTerminalTab(
   }
 
   try {
-    const config = isWinrm
-      ? winrmEntryToTerminalConfig(winrmEntry!, { title: displayName })
-      : sshEntryToTerminalConfig(sshEntry!, {
-          proxies: context.savedProxies ?? [],
-          tunnels: context.savedTunnels ?? [],
-          title: displayName,
-        })
+    const config = isSerial
+      ? serialEntryToTerminalConfig(serialEntry!, { title: displayName })
+      : isWinrm
+        ? winrmEntryToTerminalConfig(winrmEntry!, { title: displayName })
+        : sshEntryToTerminalConfig(sshEntry!, {
+            proxies: context.savedProxies ?? [],
+            tunnels: context.savedTunnels ?? [],
+            title: displayName,
+          })
     // TerminalService.createTerminal accepts a complete TerminalConfig and
     // kicks off the connection in the background; the tab exists immediately
-    // (initializing for ssh, ready/exited for winrm after its probe).
-    const tab = await terminalService.createTerminal(config)
+    // (initializing for ssh, ready/exited for winrm after its probe, ready for
+    // serial once the port opens).
+    const tab = await terminalService.createTerminal(config as any)
     const snapshot = terminalService.getTerminalRuntimeSnapshot(tab.id)
     const status = snapshot ? `\n${formatTerminalStatusHeader(snapshot)}` : ''
-    const kindLabel = isWinrm ? 'WinRM' : 'SSH'
+    const kindLabel = isSerial ? 'Serial' : isWinrm ? 'WinRM' : 'SSH'
     return finish(
       `Opened a new ${kindLabel} terminal tab for saved connection "${entry.name || entry.id}"${status}`
     )

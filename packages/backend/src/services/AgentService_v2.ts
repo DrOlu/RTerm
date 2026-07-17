@@ -52,6 +52,9 @@ import {
   readFileTransferStatusSchema,
   manageSshConnectionSchema,
   manageWinrmConnectionSchema,
+  manageSerialConnectionSchema,
+  listSessionLogsSchema,
+  readSessionLogSchema,
   manageDeviceMemorySchema,
   manageScriptSchema,
   manageGroupSchema,
@@ -256,6 +259,7 @@ const SINGLE_CALL_TOOL_BOUNDARY_NAMES = new Set([
   // to see the updated connection/list state.
   "manage_ssh_connection",
   "manage_winrm_connection",
+  "manage_serial_connection",
   "manage_group",
   "manage_device_memory",
   "manage_script",
@@ -321,6 +325,8 @@ export class AgentService_v2 {
   private connectionManager?: IConnectionManagerRuntime;
   /** Optional automation store backing the automation agent tools. */
   private automationManager?: import("./automation/AutomationManager").AutomationManager;
+  /** Optional session-log handle for list_session_logs / read_session_log. */
+  private sessionLogger?: { list(): import("./automation/sessionLogService").SessionLogRecord[]; read(sessionId: string): string };
   private mcpToolService: IMcpRuntime;
   private skillService: ISkillRuntime;
   private memoryService: IMemoryRuntime;
@@ -407,6 +413,11 @@ export class AgentService_v2 {
    * tasks, templates) backing the automation agent tools. */
   setAutomationManager(manager: import("./automation/AutomationManager").AutomationManager): void {
     this.automationManager = manager;
+  }
+
+  /** Wire a session-log handle so list_session_logs / read_session_log work. */
+  setSessionLogger(logger: { list(): import("./automation/sessionLogService").SessionLogRecord[]; read(sessionId: string): string } | null): void {
+    this.sessionLogger = logger ?? undefined;
   }
 
   setFeedbackWaiter(
@@ -1784,6 +1795,48 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "manage_serial_connection": {
+          try {
+            const validatedArgs = manageSerialConnectionSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.manageSerialConnection(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for manage_serial_connection: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "list_session_logs": {
+          try {
+            const validatedArgs = listSessionLogsSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.listSessionLogs(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for list_session_logs: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "read_session_log": {
+          try {
+            const validatedArgs = readSessionLogSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.readSessionLog(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for read_session_log: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "manage_device_memory": {
           try {
             const validatedArgs = manageDeviceMemorySchema.parse(toolCall.args || {});
@@ -2685,9 +2738,11 @@ export class AgentService_v2 {
       commandPolicyMode: this.settings?.commandPolicyMode || "standard",
       connectionManager: this.connectionManager,
       automationManager: this.automationManager,
+      sessionLogger: this.sessionLogger,
       agentRunId,
       savedSshConnections: this.settings?.connections?.ssh ?? [],
       savedWinrmConnections: this.settings?.connections?.winrm ?? [],
+      savedSerialConnections: this.settings?.connections?.serial ?? [],
       savedProxies: this.settings?.connections?.proxies ?? [],
       savedTunnels: this.settings?.connections?.tunnels ?? [],
       waitForQueuedInsertion: this.queuedInsertionAvailabilityWaiter

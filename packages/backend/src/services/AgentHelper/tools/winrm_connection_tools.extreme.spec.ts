@@ -23,6 +23,21 @@ class FakeCM implements IConnectionManagerRuntime {
     this.winrm = this.winrm.filter((e) => e.id !== id)
     return this.winrm.length < b
   }
+  // Serial stubs (satisfy the interface).
+  serialList: import('../../../types').SerialConnectionEntry[] = []
+  listSerial(): readonly import('../../../types').SerialConnectionEntry[] { return this.serialList }
+  createSerial(e: import('../../../types').SerialConnectionEntry) { this.serialList = [...this.serialList, e]; return e }
+  updateSerial(e: import('../../../types').SerialConnectionEntry) {
+    const i = this.serialList.findIndex((x) => x.id === e.id)
+    if (i === -1) throw new Error(`No saved serial connection with id "${e.id}" to update.`)
+    const n = this.serialList.slice(); n[i] = { ...this.serialList[i], ...e }
+    this.serialList = n; return n[i]
+  }
+  deleteSerial(id: string): boolean {
+    const b = this.serialList.length
+    this.serialList = this.serialList.filter((e) => e.id !== id)
+    return this.serialList.length < b
+  }
 }
 
 function ctx(m: FakeCM): ToolExecutionContext {

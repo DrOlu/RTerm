@@ -200,7 +200,9 @@ export async function startGyBackend(): Promise<void> {
       (process.env.GYSHELL_STORE_DIR || ""),
       "session-logs",
     );
-    terminalService.setSessionLogger(new SessionLogService({ logDir }));
+    const sessionLogger = new SessionLogService({ logDir });
+    terminalService.setSessionLogger(sessionLogger);
+    agentService.setSessionLogger(sessionLogger);
   }
 
   // Scheduled-task scheduler: evaluate due tasks on a per-minute tick. The

@@ -1,6 +1,6 @@
 import React from 'react'
 import { observer } from 'mobx-react-lite'
-import { ArrowLeft, KeyRound, LockKeyhole, MonitorCog, Pencil, Plus, Save, Server, Shield, Trash2, Waypoints } from 'lucide-react'
+import { ArrowLeft, KeyRound, LockKeyhole, MonitorCog, Cable, FolderTree, Pencil, Plus, Save, Server, Shield, Trash2, Waypoints, Upload } from 'lucide-react'
 import type { AppStore } from '../../stores/AppStore'
 import { PortForwardType, type TunnelEntry } from '../../lib/ipcTypes'
 import './connections.scss'
@@ -22,9 +22,27 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
   )
   const ssh = store.settings?.connections?.ssh ?? []
   const winrm = store.settings?.connections?.winrm ?? []
+  const serial = store.settings?.connections?.serial ?? []
+  const groups = store.settings?.automation?.groups ?? []
+  const scripts = store.settings?.automation?.scripts ?? []
+  const scheduledTasks = store.settings?.automation?.scheduledTasks ?? []
+  const templates = store.settings?.automation?.templates ?? []
 
   const proxies = store.settings?.connections?.proxies ?? []
   const tunnels = store.settings?.connections?.tunnels ?? []
+  const groupsList = groups
+
+  // PuTTY import file picker
+  const puttyInputRef = React.useRef<HTMLInputElement>(null)
+  const [puttyMsg, setPuttyMsg] = React.useState<string | null>(null)
+  async function handlePuttyFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const text = await file.text()
+    const n = await store.importPuttySessions(text)
+    setPuttyMsg(n > 0 ? `Imported ${n} SSH connection(s) from PuTTY.` : 'No new SSH sessions found in the file.')
+    e.target.value = ''
+  }
 
   const [editingId, setEditingId] = React.useState<string | null>(null)
 
@@ -90,9 +108,19 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                 ? t.connections.ssh
                 : item.labelKey === 'winrm'
                   ? (t.connections as any).winrm ?? 'WinRM'
-                  : item.labelKey === 'proxy'
-                    ? t.connections.proxy
-                    : t.connections.tunnels
+                  : item.labelKey === 'serial'
+                    ? (t.connections as any).serial ?? 'Serial'
+                    : item.labelKey === 'proxy'
+                      ? t.connections.proxy
+                      : item.labelKey === 'tunnels'
+                        ? t.connections.tunnels
+                        : item.labelKey === 'groups'
+                          ? (t.connections as any).groups ?? 'Groups'
+                          : item.labelKey === 'scripts'
+                            ? (t.connections as any).scripts ?? 'Scripts'
+                            : item.labelKey === 'scheduledTasks'
+                              ? (t.connections as any).scheduledTasks ?? 'Scheduled Tasks'
+                              : (t.connections as any).templates ?? 'Templates'
             return (
               <div
                 key={item.id}
@@ -350,6 +378,33 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                       />
                     </div>
 
+                    <div className="editor-row">
+                      <span className="editor-icon"><FolderTree size={16} strokeWidth={2} /></span>
+                      <Select
+                        className="editor-select"
+                        value={draft.groupId ?? ''}
+                        onChange={(val) => setDraft({ ...draft, groupId: val || undefined })}
+                        options={[{ value: '', label: 'Group: (none)' }, ...groupsList.map((g: any) => ({ value: g.id, label: `Group: ${g.name}` }))]}
+                      />
+                    </div>
+                    <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}>
+                      <span className="editor-icon" style={{ marginTop: 6 }}><Pencil size={16} strokeWidth={2} /></span>
+                      <textarea
+                        className="editor-input"
+                        style={{ minHeight: 48, resize: 'vertical' }}
+                        placeholder="Notes (per-device knowledge)"
+                        value={draft.notes ?? ''}
+                        onChange={(e) => setDraft({ ...draft, notes: e.target.value || undefined })}
+                      />
+                    </div>
+                    {ssh.length === 0 && (
+                      <div className="editor-row" style={{ justifyContent: 'flex-end' }}>
+                        <button className="icon-btn-sm" title="Import PuTTY sessions" onClick={() => puttyInputRef.current?.click()}><Upload size={14} /></button>
+                        <input ref={puttyInputRef} type="file" accept=".reg,.txt" style={{ display: 'none' }} onChange={handlePuttyFile} />
+                      </div>
+                    )}
+                    {puttyMsg && section === 'ssh' && <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: '4px 0' }}>{puttyMsg}</div>}
+
                     <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}>
                       <span className="editor-icon" style={{ marginTop: 6 }}>
                         <Waypoints size={16} strokeWidth={2} />
@@ -476,6 +531,167 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                       <button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button>
                       <button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} strokeWidth={2} /></button>
                     </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {section === 'serial' ? (
+          <>
+            <div className="connections-header">
+              <div className="connections-title">{(t.connections as any).serial ?? 'Serial'}</div>
+              <div className="connections-actions">
+                <button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}><Plus size={16} strokeWidth={2} /></button>
+              </div>
+            </div>
+            <div className="connections-split">
+              <div className="connections-table">
+                <div className="connections-row header"><div className="connections-row-main header-main"><div>{t.common.name}</div><div>Path</div><div>Baud</div><div></div></div><div className="row-icon header-icon" /></div>
+                {serial.map((c) => (
+                  <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}><div>{c.name}</div><div>{c.path}</div><div>{c.baudRate}</div><div></div></button>
+                    <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
+                  </div>
+                ))}
+                {!serial.length ? <div className="connections-empty">No serial connections yet. (Requires the `serialport` npm package.)</div> : null}
+              </div>
+              <div className="connections-editor">
+                {!draft ? <div className="editor-empty">{t.common.selectOrCreate}</div> : (
+                  <div className="editor-card">
+                    <div className="editor-row"><span className="editor-icon"><Cable size={16} strokeWidth={2} /></span><input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><Cable size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Device path (/dev/ttyUSB0 or COM3)" value={draft.path ?? ''} onChange={(e) => setDraft({ ...draft, path: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><Cable size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Baud rate" value={String(draft.baudRate ?? 9600)} onChange={(e) => setDraft({ ...draft, baudRate: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={String(draft.parity ?? 'none')} onChange={(val) => setDraft({ ...draft, parity: val })} options={[{value:'none',label:'Parity: none'},{value:'even',label:'Parity: even'},{value:'odd',label:'Parity: odd'}]} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={String(draft.flowControl ?? 'none')} onChange={(val) => setDraft({ ...draft, flowControl: val })} options={[{value:'none',label:'Flow: none'},{value:'xon/xoff',label:'Flow: XON/XOFF'},{value:'rts/cts',label:'Flow: RTS/CTS'}]} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><FolderTree size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.groupId ?? ''} onChange={(val) => setDraft({ ...draft, groupId: val || undefined })} options={[{value:'',label:'Group: (none)'}, ...groupsList.map((g:any)=>({value:g.id,label:`Group: ${g.name}`}))]} />
+                    </div>
+                    <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}><span className="editor-icon" style={{ marginTop: 6 }}><Pencil size={16} strokeWidth={2} /></span><textarea className="editor-input" style={{ minHeight: 48, resize: 'vertical' }} placeholder="Notes" value={draft.notes ?? ''} onChange={(e) => setDraft({ ...draft, notes: e.target.value || undefined })} /></div>
+                    <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {section === 'groups' ? (
+          <>
+            <div className="connections-header">
+              <div className="connections-title">{(t.connections as any).groups ?? 'Groups'}</div>
+              <div className="connections-actions"><button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}><Plus size={16} strokeWidth={2} /></button></div>
+            </div>
+            <div className="connections-split">
+              <div className="connections-table">
+                <div className="connections-row header"><div className="connections-row-main header-main"><div>{t.common.name}</div><div>Parent</div></div><div className="row-icon header-icon" /></div>
+                {groups.map((c) => (
+                  <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}><div>{c.name}</div><div>{groups.find((g:any)=>g.id===c.parentId)?.name ?? '—'}</div></button>
+                    <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
+                  </div>
+                ))}
+                {!groups.length ? <div className="connections-empty">No groups yet. Assign connections to a group via their Group selector.</div> : null}
+              </div>
+              <div className="connections-editor">
+                {!draft ? <div className="editor-empty">{t.common.selectOrCreate}</div> : (
+                  <div className="editor-card">
+                    <div className="editor-row"><span className="editor-icon"><FolderTree size={16} strokeWidth={2} /></span><input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><FolderTree size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.parentId ?? ''} onChange={(val) => setDraft({ ...draft, parentId: val || null })} options={[{value:'',label:'Parent: (root)'}, ...groups.filter((g:any)=>g.id!==draft.id).map((g:any)=>({value:g.id,label:`Parent: ${g.name}`}))]} />
+                    </div>
+                    <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {section === 'scripts' ? (
+          <>
+            <div className="connections-header"><div className="connections-title">{(t.connections as any).scripts ?? 'Scripts'}</div><div className="connections-actions"><button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}><Plus size={16} strokeWidth={2} /></button></div></div>
+            <div className="connections-split">
+              <div className="connections-table">
+                <div className="connections-row header"><div className="connections-row-main header-main"><div>{t.common.name}</div><div>Command</div></div><div className="row-icon header-icon" /></div>
+                {scripts.map((c) => (
+                  <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}><div>{c.name}</div><div>{(c.command||'').split('\n')[0].slice(0,40)}</div></button>
+                    <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
+                  </div>
+                ))}
+                {!scripts.length ? <div className="connections-empty">No scripts yet. Run a script's command on open tabs via run_fleet_command.</div> : null}
+              </div>
+              <div className="connections-editor">
+                {!draft ? <div className="editor-empty">{t.common.selectOrCreate}</div> : (
+                  <div className="editor-card">
+                    <div className="editor-row"><span className="editor-icon"><Waypoints size={16} strokeWidth={2} /></span><input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
+                    <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}><span className="editor-icon" style={{ marginTop: 6 }}><Waypoints size={16} strokeWidth={2} /></span><textarea className="editor-input" style={{ minHeight: 72, resize: 'vertical' }} placeholder="Command(s)" value={draft.command ?? ''} onChange={(e) => setDraft({ ...draft, command: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><Pencil size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Description" value={draft.description ?? ''} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></div>
+                    <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {section === 'scheduledTasks' ? (
+          <>
+            <div className="connections-header"><div className="connections-title">{(t.connections as any).scheduledTasks ?? 'Scheduled Tasks'}</div><div className="connections-actions"><button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}><Plus size={16} strokeWidth={2} /></button></div></div>
+            <div className="connections-split">
+              <div className="connections-table">
+                <div className="connections-row header"><div className="connections-row-main header-main"><div>{t.common.name}</div><div>Cron</div><div>On</div></div><div className="row-icon header-icon" /></div>
+                {scheduledTasks.map((c) => (
+                  <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}><div>{c.name}</div><div>{c.cron}</div><div>{c.enabled ? '✓' : '✗'}</div></button>
+                    <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
+                  </div>
+                ))}
+                {!scheduledTasks.length ? <div className="connections-empty">No scheduled tasks yet. Use cron syntax (e.g. 0 2 * * *).</div> : null}
+              </div>
+              <div className="connections-editor">
+                {!draft ? <div className="editor-empty">{t.common.selectOrCreate}</div> : (
+                  <div className="editor-card">
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span><input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Cron (e.g. 0 2 * * *)" value={draft.cron ?? ''} onChange={(e) => setDraft({ ...draft, cron: e.target.value })} /></div>
+                    <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}><span className="editor-icon" style={{ marginTop: 6 }}><Waypoints size={16} strokeWidth={2} /></span><textarea className="editor-input" style={{ minHeight: 60, resize: 'vertical' }} placeholder="Command (or a saved script id via the agent)" value={draft.command ?? ''} onChange={(e) => setDraft({ ...draft, command: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.enabled ? 'on' : 'off'} onChange={(val) => setDraft({ ...draft, enabled: val === 'on' })} options={[{value:'on',label:'Enabled'},{value:'off',label:'Disabled'}]} />
+                    </div>
+                    <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {section === 'templates' ? (
+          <>
+            <div className="connections-header"><div className="connections-title">{(t.connections as any).templates ?? 'Templates'}</div><div className="connections-actions"><button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}><Plus size={16} strokeWidth={2} /></button></div></div>
+            <div className="connections-split">
+              <div className="connections-table">
+                <div className="connections-row header"><div className="connections-row-main header-main"><div>{t.common.name}</div><div>Versions</div></div><div className="row-icon header-icon" /></div>
+                {templates.map((c) => (
+                  <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}><div>{c.name}</div><div>{c.versions?.length ?? 0}</div></button>
+                    <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
+                  </div>
+                ))}
+                {!templates.length ? <div className="connections-empty">No templates yet. Use Jinja-subset syntax ({`{{ var }}`}, {`{% for %}`}, {`{% if %}`}). Render/preview via the agent (manage_template).</div> : null}
+              </div>
+              <div className="connections-editor">
+                {!draft ? <div className="editor-empty">{t.common.selectOrCreate}</div> : (
+                  <div className="editor-card">
+                    <div className="editor-row"><span className="editor-icon"><Server size={16} strokeWidth={2} /></span><input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
+                    <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}><span className="editor-icon" style={{ marginTop: 6 }}><Server size={16} strokeWidth={2} /></span><textarea className="editor-input" style={{ minHeight: 96, resize: 'vertical', fontFamily: 'monospace' }} placeholder="Template body (Jinja-subset)" value={draft.body ?? ''} onChange={(e) => setDraft({ ...draft, body: e.target.value })} /></div>
+                    <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
                   </div>
                 )}
               </div>

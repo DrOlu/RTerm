@@ -64,6 +64,8 @@ interface BackendSettings {
       tunnelIds?: string[];
       algorithmsPreset?: "modern" | "legacy" | "cisco";
       termType?: string;
+      groupId?: string;
+      notes?: string;
     }>;
     winrm: Array<{
       id: string;
@@ -76,6 +78,20 @@ interface BackendSettings {
       auth?: "basic" | "negotiate";
       domain?: string;
       rejectUnauthorized?: boolean;
+      groupId?: string;
+      notes?: string;
+    }>;
+    serial: Array<{
+      id: string;
+      name: string;
+      path: string;
+      baudRate: number;
+      dataBits?: 5 | 6 | 7 | 8;
+      parity?: "none" | "even" | "odd";
+      stopBits?: 1 | 2;
+      flowControl?: "none" | "xon/xoff" | "rts/cts";
+      groupId?: string;
+      notes?: string;
     }>;
     proxies: Array<{
       id: string;
@@ -97,6 +113,14 @@ interface BackendSettings {
       viaConnectionId?: string;
     }>;
   };
+  automation?: {
+    groups: Array<{ id: string; name: string; parentId?: string | null; color?: string; notes?: string }>;
+    deviceMemory: Array<{ host: string; role?: string; standingInstructions?: string; incidents: Array<{ at: string; summary: string; resolution?: string; ticketId?: string }> }>;
+    scripts: Array<{ id: string; name: string; command: string; description?: string; targets?: string[]; groupId?: string; tags?: string[]; createdAt?: string; updatedAt?: string }>;
+    scheduledTasks: Array<{ id: string; name: string; cron: string; scriptId?: string; command?: string; groupId?: string; tags?: string[]; targets?: string[]; retryAttempts?: number; retryDelaySeconds?: number; enabled: boolean; lastRunAt?: string }>;
+    templates: Array<{ id: string; name: string; body: string; variables: Array<{ name: string; defaultValue?: string; description?: string }>; versions: Array<{ at: string; rendered: string; variables: Record<string, unknown> }>; updatedAt?: string }>;
+  };
+  sessionLogging?: { enabled: boolean };
   model: string;
   baseUrl: string;
   apiKey: string;

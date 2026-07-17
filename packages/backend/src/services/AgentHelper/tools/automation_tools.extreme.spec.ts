@@ -17,6 +17,10 @@ class FakeCM {
   createWinrm(e: any) { this.winrm.push(e); return e }
   updateWinrm() { return {} as any }
   deleteWinrm() { return false }
+  listSerial(): readonly import('../../../types').SerialConnectionEntry[] { return [] }
+  createSerial(e: import('../../../types').SerialConnectionEntry) { return e }
+  updateSerial(e: import('../../../types').SerialConnectionEntry) { return e }
+  deleteSerial() { return false }
 }
 
 function ctx(automation?: AutomationManager, cm?: FakeCM): ToolExecutionContext {

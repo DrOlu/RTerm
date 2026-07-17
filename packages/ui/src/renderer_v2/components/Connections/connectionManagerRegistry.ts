@@ -1,12 +1,12 @@
-import { Server, Shield, Waypoints, MonitorCog, type LucideIcon } from 'lucide-react'
+import { Server, Shield, Waypoints, MonitorCog, Cable, FolderTree, type LucideIcon } from 'lucide-react'
 import type { AppStore } from '../../stores/AppStore'
 import { PortForwardType } from '../../lib/ipcTypes'
 
-export type ConnectionsSection = 'ssh' | 'winrm' | 'proxies' | 'tunnels'
+export type ConnectionsSection = 'ssh' | 'winrm' | 'serial' | 'proxies' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates'
 
 export interface ConnectionManagerSectionDefinition {
   id: ConnectionsSection
-  labelKey: 'ssh' | 'winrm' | 'proxy' | 'tunnels'
+  labelKey: 'ssh' | 'winrm' | 'serial' | 'proxy' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates'
   icon: LucideIcon
   getEntries: (store: AppStore) => any[]
   createDraft: () => any
@@ -79,6 +79,105 @@ export const CONNECTION_MANAGER_SECTIONS: readonly ConnectionManagerSectionDefin
       },
       deleteEntry: async (store, id) => {
         await store.deleteWinrmConnection(id)
+      },
+    }),
+    createSectionDefinition({
+      id: 'serial',
+      labelKey: 'serial',
+      icon: Cable,
+      getEntries: (store) => store.settings?.connections?.serial ?? [],
+      createDraft: () => ({
+        id: `serial-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+        name: '',
+        path: '/dev/ttyUSB0',
+        baudRate: 9600,
+        dataBits: 8,
+        parity: 'none',
+        stopBits: 1,
+        flowControl: 'none',
+      }),
+      saveDraft: async (store, draft) => {
+        await store.saveSerialConnection({
+          ...draft,
+          baudRate: Number(draft.baudRate) || 9600,
+        })
+      },
+      deleteEntry: async (store, id) => {
+        await store.deleteSerialConnection(id)
+      },
+    }),
+    createSectionDefinition({
+      id: 'groups',
+      labelKey: 'groups',
+      icon: FolderTree,
+      getEntries: (store) => store.settings?.automation?.groups ?? [],
+      createDraft: () => ({
+        id: `grp-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+        name: '',
+        parentId: null,
+      }),
+      saveDraft: async (store, draft) => {
+        await store.saveGroup(draft)
+      },
+      deleteEntry: async (store, id) => {
+        await store.deleteGroup(id)
+      },
+    }),
+    createSectionDefinition({
+      id: 'scripts',
+      labelKey: 'scripts',
+      icon: Waypoints,
+      getEntries: (store) => store.settings?.automation?.scripts ?? [],
+      createDraft: () => ({
+        id: `scr-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+        name: '',
+        command: '',
+        description: '',
+        tags: [],
+      }),
+      saveDraft: async (store, draft) => {
+        await store.saveScript(draft)
+      },
+      deleteEntry: async (store, id) => {
+        await store.deleteScript(id)
+      },
+    }),
+    createSectionDefinition({
+      id: 'scheduledTasks',
+      labelKey: 'scheduledTasks',
+      icon: Shield,
+      getEntries: (store) => store.settings?.automation?.scheduledTasks ?? [],
+      createDraft: () => ({
+        id: `sch-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+        name: '',
+        cron: '0 2 * * *',
+        command: '',
+        enabled: true,
+      }),
+      saveDraft: async (store, draft) => {
+        await store.saveScheduledTask(draft)
+      },
+      deleteEntry: async (store, id) => {
+        await store.deleteScheduledTask(id)
+      },
+    }),
+    createSectionDefinition({
+      id: 'templates',
+      labelKey: 'templates',
+      icon: Server,
+      getEntries: (store) => store.settings?.automation?.templates ?? [],
+      createDraft: () => ({
+        id: `tpl-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+        name: '',
+        body: '',
+        variables: [],
+        versions: [],
+      }),
+      saveDraft: async (store, draft) => {
+        await store.saveTemplate(draft)
+      },
+      deleteEntry: async (store, id) => {
+        await store.deleteTemplate(id)
       },
     }),
     createSectionDefinition({

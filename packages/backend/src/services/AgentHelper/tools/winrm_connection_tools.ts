@@ -29,6 +29,8 @@ const winrmConnectionFieldsSchema = z.object({
     .boolean()
     .optional()
     .describe('For https with self-signed certs, set false to skip cert verification.'),
+  groupId: z.string().optional().describe('ID of a saved group/folder (create one with manage_group).'),
+  notes: z.string().optional().describe('Free-form operator notes for this connection.'),
 })
 
 export const manageWinrmConnectionSchema = z.object({
@@ -67,13 +69,16 @@ function toEntry(fields: z.infer<typeof winrmConnectionFieldsSchema>, id: string
     auth: fields.auth,
     domain: fields.domain,
     rejectUnauthorized: fields.rejectUnauthorized,
+    groupId: fields.groupId,
+    notes: fields.notes,
   }
 }
 
 function summarize(entry: WinRMConnectionEntry): string {
   const proto = entry.transport ?? (entry.port === 5986 ? 'https' : 'http')
   const dom = entry.domain ? `${entry.domain}\\` : ''
-  return `${entry.name} (id=${entry.id}, ${dom}${entry.username}@${entry.host}:${entry.port} ${proto})`
+  const grp = entry.groupId ? `, group=${entry.groupId}` : ''
+  return `${entry.name} (id=${entry.id}, ${dom}${entry.username}@${entry.host}:${entry.port} ${proto}${grp})`
 }
 
 export async function manageWinrmConnection(

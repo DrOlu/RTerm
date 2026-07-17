@@ -9,8 +9,10 @@ import {
   checkCommandPolicy,
   resolveSavedSshConnection,
   resolveSavedWinrmConnection,
+  resolveSavedSerialConnection,
   sshEntryToTerminalConfig,
   winrmEntryToTerminalConfig,
+  serialEntryToTerminalConfig,
   abortIfNeeded,
   isAbortError,
   waitWithSignal,
@@ -374,14 +376,16 @@ export async function probeConnectivity(
 
   const sshEntry = resolveSavedSshConnection(context, connectionNameOrId)
   const winrmEntry = !sshEntry ? resolveSavedWinrmConnection(context, connectionNameOrId) : undefined
-  if (!sshEntry && !winrmEntry) {
+  const serialEntry = !sshEntry && !winrmEntry ? resolveSavedSerialConnection(context, connectionNameOrId) : undefined
+  if (!sshEntry && !winrmEntry && !serialEntry) {
     return finish(
-      `No saved SSH or WinRM connection found for "${connectionNameOrId}". Use manage_ssh_connection / manage_winrm_connection action="list" to see saved connections.`,
+      `No saved SSH, WinRM, or Serial connection found for "${connectionNameOrId}". Use manage_ssh_connection / manage_winrm_connection / manage_serial_connection action="list" to see saved connections.`,
     )
   }
   const isWinrm = Boolean(winrmEntry)
-  const entry = (sshEntry ?? winrmEntry) as { name: string; username: string; host: string; port: number }
-  const displayName = entry.name || `${entry.username}@${entry.host}`
+  const isSerial = Boolean(serialEntry)
+  const entry = (sshEntry ?? winrmEntry ?? serialEntry) as { name: string; username: string; host: string; port: number; path?: string; baudRate?: number }
+  const displayName = entry.name || (isSerial ? entry.path! : `${entry.username}@${entry.host}`)
 
   // Reuse an already-open tab for this connection if present (don't stack tabs).
   const existing = terminalService.resolveTerminal(displayName)
@@ -394,14 +398,16 @@ export async function probeConnectivity(
     reused = true
   } else {
     try {
-      const config = isWinrm
-        ? winrmEntryToTerminalConfig(winrmEntry!, { title: displayName })
-        : sshEntryToTerminalConfig(sshEntry!, {
-            proxies: context.savedProxies ?? [],
-            tunnels: context.savedTunnels ?? [],
-            title: displayName,
-          })
-      tab = await terminalService.createTerminal(config)
+      const config = isSerial
+        ? serialEntryToTerminalConfig(serialEntry!, { title: displayName })
+        : isWinrm
+          ? winrmEntryToTerminalConfig(winrmEntry!, { title: displayName })
+          : sshEntryToTerminalConfig(sshEntry!, {
+              proxies: context.savedProxies ?? [],
+              tunnels: context.savedTunnels ?? [],
+              title: displayName,
+            })
+      tab = await terminalService.createTerminal(config as any)
       tabId = tab.id
     } catch (error) {
       if (isAbortError(error)) throw error
@@ -438,8 +444,9 @@ export async function probeConnectivity(
       ? 'UNREACHABLE (session exited)'
       : 'REACHABLE'
 
+  const targetDesc = isSerial ? `${entry.path} @ ${entry.baudRate} baud` : `${entry.username}@${entry.host}:${entry.port}`
   return finish(
-    `Probe of "${entry.name}" (${entry.username}@${entry.host}:${entry.port}): ${verdict}\n` +
+    `Probe of "${entry.name}" (${targetDesc}): ${verdict}\n` +
       `class=${klass}, state=${snapshot.runtimeState}${reused ? ', tab=reused' : ', tab=opened'}\n` +
       `${status}\n` +
       `Initial banner:\n<terminal_content>\n${truncateForFleet(banner, 1500)}\n</terminal_content>`,

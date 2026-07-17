@@ -163,6 +163,16 @@ export interface IConnectionManagerRuntime {
     entry: import("../types").WinRMConnectionEntry,
   ): import("../types").WinRMConnectionEntry;
   deleteWinrm(id: string): boolean;
+
+  /** Saved serial console connections (/dev/ttyUSB0, COM3, etc.). */
+  listSerial(): readonly import("../types").SerialConnectionEntry[];
+  createSerial(
+    entry: import("../types").SerialConnectionEntry,
+  ): import("../types").SerialConnectionEntry;
+  updateSerial(
+    entry: import("../types").SerialConnectionEntry,
+  ): import("../types").SerialConnectionEntry;
+  deleteSerial(id: string): boolean;
 }
 
 export interface IAgentRuntime {

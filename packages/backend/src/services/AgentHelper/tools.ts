@@ -47,6 +47,14 @@ import {
   manageWinrmConnection
 } from './tools/winrm_connection_tools'
 import {
+  manageSerialConnectionSchema,
+  manageSerialConnection
+} from './tools/serial_connection_tools'
+import {
+  listSessionLogsSchema, readSessionLogSchema,
+  listSessionLogs, readSessionLog,
+} from './tools/session_log_tools'
+import {
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -90,6 +98,8 @@ export { waitSchema, waitTerminalIdleSchema } from './tools/wait_tools'
 export { copyBetweenTabsSchema, readFileTransferStatusSchema } from './tools/file_transfer_tools'
 export { manageSshConnectionSchema } from './tools/connection_tools'
 export { manageWinrmConnectionSchema } from './tools/winrm_connection_tools'
+export { manageSerialConnectionSchema } from './tools/serial_connection_tools'
+export { listSessionLogsSchema, readSessionLogSchema } from './tools/session_log_tools'
 export {
   runFleetCommandSchema,
   collectFactsSchema,
@@ -194,6 +204,21 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: manageWinrmConnectionSchema
     },
     {
+      name: 'manage_serial_connection',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_serial_connection')?.description ?? '',
+      schema: manageSerialConnectionSchema
+    },
+    {
+      name: 'list_session_logs',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'list_session_logs')?.description ?? '',
+      schema: listSessionLogsSchema
+    },
+    {
+      name: 'read_session_log',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'read_session_log')?.description ?? '',
+      schema: readSessionLogSchema
+    },
+    {
       name: 'run_fleet_command',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'run_fleet_command')?.description ?? '',
       schema: runFleetCommandSchema
@@ -258,6 +283,9 @@ export const toolImplementations = {
   readFileTransferStatus,
   manageSshConnection,
   manageWinrmConnection,
+  manageSerialConnection,
+  listSessionLogs,
+  readSessionLog,
   runFleetCommand,
   collectFacts,
   probeConnectivity,

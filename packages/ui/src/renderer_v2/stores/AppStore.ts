@@ -68,6 +68,71 @@ const upsertById = <T extends { id: string }>(list: T[], entry: T): T[] => {
 const removeById = <T extends { id: string }>(list: T[], id: string): T[] =>
   list.filter((x) => x.id !== id);
 
+/** Client-side mirror of the backend puttyImport parser. Parses a Windows .reg
+ * PuTTY session export into SSH connection entries (ssh-protocol only, with a
+ * HostName). Used by the Connections-panel import button. */
+function parsePuttyRegClient(regContent: string): Array<{
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  authMethod: "password";
+  notes: string;
+}> {
+  const out: Array<{ id: string; name: string; host: string; port: number; username: string; authMethod: "password"; notes: string }> = [];
+  const lines = regContent.split(/\r?\n/);
+  let current: { name: string; v: Record<string, unknown> } | null = null;
+  const decode = (n: string) => {
+    const last = n.split("\\").pop() ?? n;
+    try { return decodeURIComponent(last); } catch { return last; }
+  };
+  for (const line of lines) {
+    const header = line.match(/^\[.*?\\Software\\SimonTatham\\PuTTY\\Sessions\\(.+)\]$/i);
+    if (header) {
+      if (current) {
+        const v = current.v;
+        if ((String(v.Protocol ?? "ssh")).toLowerCase() === "ssh" && v.HostName) {
+          out.push({
+            id: `putty-${current.name.replace(/[^a-z0-9_-]+/gi, "_")}`,
+            name: current.name,
+            host: String(v.HostName).trim(),
+            port: typeof v.PortNumber === "number" && v.PortNumber > 0 ? v.PortNumber : 22,
+            username: String(v.UserName ?? "").trim(),
+            authMethod: "password",
+            notes: "Imported from PuTTY session",
+          });
+        }
+      }
+      current = { name: decode(header[1]), v: {} };
+      continue;
+    }
+    if (/^\[/.test(line)) { current = null; continue; }
+    if (!current) continue;
+    const m = line.match(/^"([^"]+)"=(?:"([^"]*)"|(dword):([0-9a-fA-F]+))$/);
+    if (m) {
+      if (m[2] !== undefined) current.v[m[1]] = m[2];
+      else if (m[3] === "dword") current.v[m[1]] = parseInt(m[4], 16);
+    }
+  }
+  // flush the last session
+  if (current) {
+    const v = current.v;
+    if ((String(v.Protocol ?? "ssh")).toLowerCase() === "ssh" && v.HostName) {
+      out.push({
+        id: `putty-${current.name.replace(/[^a-z0-9_-]+/gi, "_")}`,
+        name: current.name,
+        host: String(v.HostName).trim(),
+        port: typeof v.PortNumber === "number" && v.PortNumber > 0 ? v.PortNumber : 22,
+        username: String(v.UserName ?? "").trim(),
+        authMethod: "password",
+        notes: "Imported from PuTTY session",
+      });
+    }
+  }
+  return out;
+}
+
 const normalizeTerminalTitle = (value: unknown, fallback: string): string => {
   const title = String(value || "").trim();
   return title || fallback;
@@ -437,6 +502,18 @@ export class AppStore {
       deleteSshConnection: action,
       saveWinrmConnection: action,
       deleteWinrmConnection: action,
+      saveSerialConnection: action,
+      deleteSerialConnection: action,
+      saveGroup: action,
+      deleteGroup: action,
+      saveScript: action,
+      deleteScript: action,
+      saveScheduledTask: action,
+      deleteScheduledTask: action,
+      saveTemplate: action,
+      deleteTemplate: action,
+      setSessionLoggingEnabled: action,
+      importPuttySessions: action,
       reconnectTerminal: action,
       closeTab: action,
       setActiveTerminal: action,
@@ -3088,6 +3165,192 @@ export class AppStore {
       }
     });
     await window.gyshell.settings.set({ connections: nextConnections });
+  }
+
+  async saveSerialConnection(
+    entry: AppSettings["connections"]["serial"][number],
+  ): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const plainEntry = toJS(entry);
+    const list = (current.connections.serial ?? []).slice().map((x) => toJS(x));
+    const nextList = upsertById(list, plainEntry);
+    const nextConnections = { ...toJS(current.connections), serial: nextList };
+    runInAction(() => {
+      if (this.settings) {
+        this.settings.connections.serial = nextList as any;
+      }
+    });
+    await window.gyshell.settings.set({ connections: nextConnections });
+  }
+
+  async deleteSerialConnection(id: string): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = removeById(current.connections.serial ?? [], id).map((x) => toJS(x));
+    const nextConnections = { ...toJS(current.connections), serial: list };
+    runInAction(() => {
+      if (this.settings) {
+        this.settings.connections.serial = list as any;
+      }
+    });
+    await window.gyshell.settings.set({ connections: nextConnections });
+  }
+
+  createSerialTab(
+    entryId: string,
+    targetPanelId?: string,
+    options?: { ensurePanel?: boolean; attachToPanel?: boolean; startRuntime?: boolean },
+  ): string | null {
+    const entry = this.settings?.connections?.serial?.find((x) => x.id === entryId);
+    if (!entry) {
+      console.warn("Serial entry not found", entryId);
+      return null;
+    }
+    const id = `serial-${uuidv4()}`;
+    const baseTitle = entry.name || entry.path;
+    const title = this.getUniqueTitle(baseTitle);
+    const cfg: TerminalConfig = {
+      type: "serial",
+      id,
+      title,
+      cols: 80,
+      rows: 24,
+      path: entry.path,
+      baudRate: entry.baudRate,
+      dataBits: entry.dataBits,
+      parity: entry.parity,
+      stopBits: entry.stopBits,
+      flowControl: entry.flowControl,
+    } as any;
+    const tab: TerminalTabModel = {
+      id,
+      title,
+      config: cfg,
+      capabilities: resolveTerminalConnectionCapabilities(cfg),
+      connectionRef: { type: "serial", entryId },
+      runtimeState: "initializing",
+    };
+    this.terminalTabs.push(tab);
+    this.terminalTabsHydrated = true;
+    this.activeTerminalId = id;
+    this.unsuppressTabs("terminal", [id], { syncLayout: false });
+    if (options?.attachToPanel !== false) {
+      this.showTabsInLayout("terminal", [id]);
+    }
+    if (options?.startRuntime === true) {
+      void this.startTerminalRuntime(tab);
+    }
+    const shouldEnsurePanel = options?.ensurePanel !== false;
+    const resolvedPanelId =
+      options?.attachToPanel !== false
+        ? targetPanelId ||
+          this.layout.getPrimaryPanelId("terminal") ||
+          (shouldEnsurePanel ? this.layout.ensurePrimaryPanelForKind("terminal") : null) ||
+          undefined
+        : undefined;
+    if (resolvedPanelId) {
+      this.layout.attachTabToPanel("terminal", id, resolvedPanelId);
+    } else {
+      this.layout.syncPanelBindings();
+    }
+    return id;
+  }
+
+  // --- Automation: groups, scripts, scheduled tasks, templates ---
+
+  private async saveAutomationSlice(patch: Partial<AppSettings["automation"]>): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const next = { ...(current.automation ?? { groups: [], deviceMemory: [], scripts: [], scheduledTasks: [], templates: [] }), ...patch };
+    runInAction(() => {
+      if (this.settings) this.settings.automation = next as any;
+    });
+    await window.gyshell.settings.set({ automation: next } as any);
+  }
+
+  async saveGroup(group: NonNullable<AppSettings["automation"]>["groups"][number]): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.groups ?? []).slice();
+    const idx = list.findIndex((g) => g.id === group.id);
+    const next = idx === -1 ? [...list, group] : list.map((g) => (g.id === group.id ? { ...g, ...group } : g));
+    await this.saveAutomationSlice({ groups: next });
+  }
+
+  async deleteGroup(id: string): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.groups ?? []).filter((g) => g.id !== id).map((g) => (g.parentId === id ? { ...g, parentId: null } : g));
+    await this.saveAutomationSlice({ groups: list });
+  }
+
+  async saveScript(script: NonNullable<AppSettings["automation"]>["scripts"][number]): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.scripts ?? []).slice();
+    const idx = list.findIndex((s) => s.id === script.id);
+    const next = idx === -1 ? [...list, script] : list.map((s) => (s.id === script.id ? { ...s, ...script } : s));
+    await this.saveAutomationSlice({ scripts: next });
+  }
+
+  async deleteScript(id: string): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.scripts ?? []).filter((s) => s.id !== id);
+    await this.saveAutomationSlice({ scripts: list });
+  }
+
+  async saveScheduledTask(task: NonNullable<AppSettings["automation"]>["scheduledTasks"][number]): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.scheduledTasks ?? []).slice();
+    const idx = list.findIndex((t) => t.id === task.id);
+    const next = idx === -1 ? [...list, task] : list.map((t) => (t.id === task.id ? { ...t, ...task } : t));
+    await this.saveAutomationSlice({ scheduledTasks: next });
+  }
+
+  async deleteScheduledTask(id: string): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.scheduledTasks ?? []).filter((t) => t.id !== id);
+    await this.saveAutomationSlice({ scheduledTasks: list });
+  }
+
+  async saveTemplate(tpl: NonNullable<AppSettings["automation"]>["templates"][number]): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.templates ?? []).slice();
+    const idx = list.findIndex((t) => t.id === tpl.id);
+    const next = idx === -1 ? [...list, tpl] : list.map((t) => (t.id === tpl.id ? { ...t, ...tpl } : t));
+    await this.saveAutomationSlice({ templates: next });
+  }
+
+  async deleteTemplate(id: string): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.templates ?? []).filter((t) => t.id !== id);
+    await this.saveAutomationSlice({ templates: list });
+  }
+
+  async setSessionLoggingEnabled(enabled: boolean): Promise<void> {
+    const next = { enabled };
+    runInAction(() => {
+      if (this.settings) this.settings.sessionLogging = next as any;
+    });
+    await window.gyshell.settings.set({ sessionLogging: next } as any);
+  }
+
+  /** Parse a PuTTY .reg export and import its SSH sessions as saved connections. */
+  async importPuttySessions(regContent: string): Promise<number> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const existing = new Set((current.connections.ssh ?? []).map((e: any) => e.name));
+    // Reuse the backend putty import by parsing client-side via a tiny inline
+    // parser mirroring the backend logic (the backend tool is agent-only).
+    const imported = parsePuttyRegClient(regContent);
+    let count = 0;
+    const nextSsh = (current.connections.ssh ?? []).slice();
+    for (const e of imported) {
+      if (existing.has(e.name)) continue;
+      nextSsh.push(e as any);
+      existing.add(e.name);
+      count++;
+    }
+    const nextConnections = { ...toJS(current.connections), ssh: nextSsh };
+    runInAction(() => {
+      if (this.settings) this.settings.connections.ssh = nextSsh as any;
+    });
+    await window.gyshell.settings.set({ connections: nextConnections });
+    return count;
   }
 
   async saveModel(model: ModelDefinition): Promise<void> {

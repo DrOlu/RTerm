@@ -350,6 +350,15 @@ jobs:
 
             Synced from upstream GyShell, with RTerm-specific enhancements.
 
+            ## What's new in RTerm v1.7.3
+
+            Closes every usability gap from 1.7.2: all automation features are now fully usable via the agent AND the Connections panel, plus improved chat rendering.
+
+            - **Every feature is now agent-usable.** `manage_ssh_connection` / `manage_winrm_connection` now accept `groupId` + `notes` (create a connection *and* put it in a folder in one call). New `manage_serial_connection` tool for serial console connections. New `list_session_logs` + `read_session_log` tools to review recorded sessions. `open_terminal_tab` and `probe_connectivity` now resolve Serial saved connections too.
+            - **Every feature is now UI-usable.** The Connections panel gains new sections: **Serial** (path/baud/parity/flow), **Groups** (folder tree with parent selector), **Scripts**, **Scheduled Tasks**, and **Templates** (Jinja-subset body editor). Each SSH/WinRM/Serial editor gains a **Group** selector and a **Notes** textarea. A **PuTTY import** button parses a `.reg` file into SSH connections. The terminal **+** menu lists serial connections alongside SSH/WinRM.
+            - **Improved chat rendering.** Raw HTML now renders inline (rehype-raw), images render with lazy loading, fenced code blocks carry language classes (enabling future syntax highlighting), and ` ```mermaid ` blocks render as a styled source preview with a Mermaid badge.
+            - Runtime: `AutomationManager` + `SessionLogService` wired into both runtimes; the session logger is exposed to the agent for list/read; serial ConnectionManager CRUD added.
+
             ## What's new in RTerm v1.7.2
 
             Netcatty + NetStacks parity — a full local-only automation & knowledge layer, plus serial console and PuTTY import. No server required.

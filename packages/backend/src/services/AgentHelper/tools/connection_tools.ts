@@ -54,6 +54,14 @@ const sshConnectionFieldsSchema = z.object({
     .string()
     .optional()
     .describe('TERM value for the remote PTY (e.g. "vt100" for some network equipment).'),
+  groupId: z
+    .string()
+    .optional()
+    .describe('ID of a saved group/folder to organize this connection in (create one with manage_group).'),
+  notes: z
+    .string()
+    .optional()
+    .describe('Free-form operator notes for this connection (per-device knowledge).'),
 })
 
 export const manageSshConnectionSchema = z.object({
@@ -112,13 +120,16 @@ function toEntry(
     tunnelIds: fields.tunnelIds,
     algorithmsPreset: fields.algorithmsPreset,
     termType: fields.termType,
+    groupId: fields.groupId,
+    notes: fields.notes,
   }
 }
 
 function summarize(entry: SSHConnectionEntry): string {
   const preset = entry.algorithmsPreset ? `, preset=${entry.algorithmsPreset}` : ''
   const term = entry.termType ? `, TERM=${entry.termType}` : ''
-  return `${entry.name} (id=${entry.id}, ${entry.username}@${entry.host}:${entry.port}, auth=${entry.authMethod}${preset}${term})`
+  const grp = entry.groupId ? `, group=${entry.groupId}` : ''
+  return `${entry.name} (id=${entry.id}, ${entry.username}@${entry.host}:${entry.port}, auth=${entry.authMethod}${preset}${term}${grp})`
 }
 
 export async function manageSshConnection(

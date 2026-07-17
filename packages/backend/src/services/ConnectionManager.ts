@@ -1,4 +1,4 @@
-import type { SSHConnectionEntry, WinRMConnectionEntry } from '../types'
+import type { SSHConnectionEntry, WinRMConnectionEntry, SerialConnectionEntry } from '../types'
 import type { IConnectionManagerRuntime } from './runtimeContracts'
 
 /**
@@ -34,12 +34,13 @@ export class ConnectionManager implements IConnectionManagerRuntime {
   }
 
   private commit(nextList: SSHConnectionEntry[]): SSHConnectionEntry[] {
-    // Preserve winrm/proxies/tunnels by merging only the ssh slice.
+    // Preserve winrm/serial/proxies/tunnels by merging only the ssh slice.
     const settings = this.opts.getSettings()
     this.opts.setSettings({
       connections: {
         ssh: nextList,
         winrm: settings?.connections?.winrm ?? [],
+        serial: settings?.connections?.serial ?? [],
         proxies: settings?.connections?.proxies ?? [],
         tunnels: settings?.connections?.tunnels ?? [],
       },
@@ -94,12 +95,13 @@ export class ConnectionManager implements IConnectionManagerRuntime {
   }
 
   private commitWinrm(nextList: WinRMConnectionEntry[]): WinRMConnectionEntry[] {
-    // Preserve ssh/proxies/tunnels by merging only the winrm slice.
+    // Preserve ssh/serial/proxies/tunnels by merging only the winrm slice.
     const settings = this.opts.getSettings()
     this.opts.setSettings({
       connections: {
         ssh: settings?.connections?.ssh ?? [],
         winrm: nextList,
+        serial: settings?.connections?.serial ?? [],
         proxies: settings?.connections?.proxies ?? [],
         tunnels: settings?.connections?.tunnels ?? [],
       },
@@ -135,6 +137,60 @@ export class ConnectionManager implements IConnectionManagerRuntime {
     const next = list.filter((e) => e.id !== id)
     if (next.length === list.length) return false
     this.commitWinrm(next)
+    return true
+  }
+
+  // --- Serial ---
+
+  private currentSerialList(): SerialConnectionEntry[] {
+    const settings = this.opts.getSettings()
+    return Array.isArray(settings?.connections?.serial)
+      ? (settings.connections.serial as SerialConnectionEntry[])
+      : []
+  }
+
+  private commitSerial(nextList: SerialConnectionEntry[]): SerialConnectionEntry[] {
+    const settings = this.opts.getSettings()
+    this.opts.setSettings({
+      connections: {
+        ssh: settings?.connections?.ssh ?? [],
+        winrm: settings?.connections?.winrm ?? [],
+        serial: nextList,
+        proxies: settings?.connections?.proxies ?? [],
+        tunnels: settings?.connections?.tunnels ?? [],
+      },
+    })
+    const next = this.opts.getSettings()
+    this.opts.onSettingsChanged?.(next)
+    this.opts.broadcastSettings?.(next)
+    return nextList
+  }
+
+  listSerial(): readonly SerialConnectionEntry[] {
+    return this.currentSerialList()
+  }
+
+  createSerial(entry: SerialConnectionEntry): SerialConnectionEntry {
+    const stored = { ...entry, id: entry.id || `serial-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` }
+    this.commitSerial([...this.currentSerialList(), stored])
+    return stored
+  }
+
+  updateSerial(entry: SerialConnectionEntry): SerialConnectionEntry {
+    const list = this.currentSerialList()
+    const idx = list.findIndex((e) => e.id === entry.id)
+    if (idx === -1) throw new Error(`No saved serial connection with id "${entry.id}" to update.`)
+    const next = list.slice()
+    next[idx] = { ...list[idx], ...entry, id: entry.id }
+    this.commitSerial(next)
+    return next[idx]
+  }
+
+  deleteSerial(id: string): boolean {
+    const list = this.currentSerialList()
+    const next = list.filter((e) => e.id !== id)
+    if (next.length === list.length) return false
+    this.commitSerial(next)
     return true
   }
 }

@@ -3,7 +3,8 @@ import type { FileTransferService } from '../FileTransferService'
 import type { CommandPolicyMode } from '../CommandPolicy/CommandPolicyService'
 import type { ICommandPolicyRuntime, IConnectionManagerRuntime } from '../runtimeContracts'
 import type { AutomationManager } from '../automation/AutomationManager'
-import type { SSHConnectionEntry, ProxyEntry, TunnelEntry, WinRMConnectionEntry } from '../../types'
+import type { SessionLogRecord } from '../automation/sessionLogService'
+import type { SSHConnectionEntry, ProxyEntry, TunnelEntry, WinRMConnectionEntry, SerialConnectionEntry } from '../../types'
 import type {
   QueuedAgentInsertionInput,
   RunBackgroundExecCommandInput,
@@ -30,6 +31,8 @@ export interface ToolExecutionContext {
   /** Optional automation store (groups, device memory, scripts, scheduled tasks,
    * templates) backing the automation agent tools. */
   automationManager?: AutomationManager
+  /** Optional session-log handle so the agent can list/read recorded sessions. */
+  sessionLogger?: { list(): SessionLogRecord[]; read(sessionId: string): string }
   agentRunId?: string
   /**
    * Saved SSH connections from backend settings (`connections.ssh`).
@@ -41,6 +44,8 @@ export interface ToolExecutionContext {
   savedSshConnections?: readonly SSHConnectionEntry[]
   /** Saved WinRM connections (Windows servers over WS-Management). */
   savedWinrmConnections?: readonly WinRMConnectionEntry[]
+  /** Saved serial console connections. */
+  savedSerialConnections?: readonly SerialConnectionEntry[]
   /** Saved proxies/tunnels from backend settings, used to resolve a saved
    * SSH connection's `proxyId` / `tunnelIds` when materialising a live
    * TerminalConfig (mirrors the UI's AppStore.toTerminalConfig wiring). */

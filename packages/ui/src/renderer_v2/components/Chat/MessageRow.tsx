@@ -3,6 +3,7 @@ import { observer } from "mobx-react-lite";
 import { Check, Copy, CornerUpLeft, GitBranch } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import type { AppStore } from "../../stores/AppStore";
 import type { ChatMessage } from "../../stores/ChatStore";
 import { renderMentionContent } from "../../lib/MentionParser";
@@ -412,10 +413,17 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
             {msg.role === "assistant" ? (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeRaw]}
                 components={{
                   pre: ({ children, ...props }) => {
                     const codeText = extractNodeText(children);
                     const feedbackKey = `code:${codeText.length}:${codeText.slice(0, 32)}`;
+                    // Detect a mermaid fenced block (```mermaid) for styled preview.
+                    const isMermaid =
+                      typeof codeText === "string" &&
+                      /(^|\n)```mermaid/.test(codeText) === false &&
+                      false; // mermaid source is captured by the `code` renderer below
+                    void isMermaid;
                     return (
                       <div className="markdown-pre-wrap">
                         <pre {...props}>{children}</pre>
@@ -438,8 +446,31 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
                       </div>
                     );
                   },
+                  code: ({ className, children, ...props }) => {
+                    const text = String(children ?? "");
+                    const langMatch = /language-(\w+)/.exec(className ?? "");
+                    const lang = langMatch?.[1] ?? "";
+                    // Mermaid fenced blocks render as a styled source preview.
+                    if (lang === "mermaid") {
+                      return (
+                        <div className="markdown-mermaid-block">
+                          <div className="markdown-mermaid-badge">Mermaid</div>
+                          <pre className="markdown-mermaid-source">{text.replace(/\n$/, "")}</pre>
+                          <div className="markdown-mermaid-hint">Diagram source (rendering requires the mermaid library).</div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <code className={className ? `markdown-code ${className}` : "markdown-code"} {...props}>
+                        {children}
+                      </code>
+                    );
+                  },
                   a: ({ node, ...props }) => (
                     <a {...props} target="_blank" rel="noopener noreferrer" />
+                  ),
+                  img: ({ node, ...props }) => (
+                    <img {...props} loading="lazy" style={{ maxWidth: "100%", borderRadius: 6 }} />
                   ),
                 }}
               >

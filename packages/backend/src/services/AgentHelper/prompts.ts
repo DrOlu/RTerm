@@ -222,6 +222,17 @@ export const MANAGE_SSH_CONNECTION_DESCRIPTION = [
   "Guardrails still apply: this tool only manages saved connection metadata; it never sends credentials over the network. The actual SSH connection happens via open_terminal_tab + exec_command, which enforce the command policy.",
 ].join("\n");
 
+export const MANAGE_SERIAL_CONNECTION_DESCRIPTION = [
+  "Create, update, delete, or list saved serial console connections (/dev/ttyUSB0, COM3, …) — the Netcatty serial feature. A serial connection is a live byte-stream PTY (unlike WinRM): open a tab and interact via write_stdin / read_terminal_tab.",
+  "action=\"create\" needs name + path + baudRate (default 9600); optional dataBits/parity/stopBits/flowControl, groupId, notes. Requires the `serialport` npm package to be installed in RTerm (clear error otherwise). After create, open a tab with open_terminal_tab by Name.",
+  "action=\"update\"/\"delete\"/\"list\" work like the other connection tools. Use this for Cisco console ports, out-of-band management, and any device reachable over a serial line.",
+].join("\n");
+
+export const LIST_SESSION_LOGS_DESCRIPTION =
+  "List recorded terminal sessions (Netcatty \"connection logs\"). Sessions are recorded to disk when sessionLogging.enabled is on. Returns each session's id, title, type, start/end time, and byte size. Use read_session_log with a sessionId to read the full output.";
+export const READ_SESSION_LOG_DESCRIPTION =
+  "Read the full recorded output of a terminal session by its sessionId (from list_session_logs). Useful for reviewing what happened on a connection after the fact — troubleshooting context, audit, training.";
+
 export const MANAGE_WINRM_CONNECTION_DESCRIPTION = [
   "Create, update, delete, or list saved WinRM connections (Windows Remote Management, WS-Management 5985/5986) — the Windows counterpart of manage_ssh_connection. Use this to provision a Windows server before connecting to it.",
   "action=\"create\" adds a new connection from a `connection` object (needs name, host, username, password; port defaults to 5985). v1 implements Basic auth over HTTP(5985)/HTTPS(5986). Set transport=\"https\" + rejectUnauthorized=false for 5986 with self-signed certs; set domain for DOMAIN\\user.",
@@ -347,6 +358,18 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "manage_winrm_connection",
     description: MANAGE_WINRM_CONNECTION_DESCRIPTION,
+  },
+  {
+    name: "manage_serial_connection",
+    description: MANAGE_SERIAL_CONNECTION_DESCRIPTION,
+  },
+  {
+    name: "list_session_logs",
+    description: LIST_SESSION_LOGS_DESCRIPTION,
+  },
+  {
+    name: "read_session_log",
+    description: READ_SESSION_LOG_DESCRIPTION,
   },
   {
     name: "run_fleet_command",

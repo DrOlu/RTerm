@@ -1,12 +1,12 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { Laptop, MonitorCog, Plus, Server } from "lucide-react";
+import { Laptop, MonitorCog, Cable, Plus, Server } from "lucide-react";
 import type { AppStore } from "../../stores/AppStore";
 import { resolveFloatingMenuPlacement } from "../../lib/menuPlacement";
 import { isLinux, isWindows } from "../../platform/platform";
 
 export interface TerminalAddButtonCreateContext {
-  type: "local" | "ssh" | "winrm";
+  type: "local" | "ssh" | "winrm" | "serial";
 }
 
 interface TerminalAddButtonProps {
@@ -242,6 +242,41 @@ export const TerminalAddButton: React.FC<TerminalAddButtonProps> = ({
                 >
                   <MonitorCog size={14} strokeWidth={2} />
                   <span>{entry.name || `${entry.username}@${entry.host}`}</span>
+                </button>
+              ))}
+
+              {store.settings?.connections?.serial?.length ? (
+                <div className="tab-menu-sep" />
+              ) : null}
+              {store.settings?.connections?.serial?.map((entry) => (
+                <button
+                  key={entry.id}
+                  className="tab-menu-item"
+                  onClick={() => {
+                    const serialTargetPanelId = createSshInBackground
+                      ? undefined
+                      : resolvedTargetPanelId;
+                    const tabId = store.createSerialTab(
+                      entry.id,
+                      serialTargetPanelId,
+                      createSshInBackground
+                        ? {
+                            ensurePanel: false,
+                            attachToPanel: false,
+                            startRuntime: true,
+                          }
+                        : {
+                            ensurePanel: ensurePanelOnCreate,
+                          },
+                    );
+                    if (tabId) {
+                      onTabCreated?.(tabId, { type: "serial" });
+                    }
+                    setOpen(false);
+                  }}
+                >
+                  <Cable size={14} strokeWidth={2} />
+                  <span>{entry.name || entry.path}</span>
                 </button>
               ))}
 

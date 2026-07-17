@@ -1086,11 +1086,11 @@ export async function startElectronMain(): Promise<void> {
 
         // Session logging (records terminal output per session when enabled).
         if (settingsService.getSettings().sessionLogging?.enabled) {
-          terminalService.setSessionLogger(
-            new SessionLogService({
-              logDir: join(process.env.GYSHELL_STORE_DIR || app.getPath("userData"), "session-logs"),
-            }),
-          );
+          const sessionLogger = new SessionLogService({
+            logDir: join(process.env.GYSHELL_STORE_DIR || app.getPath("userData"), "session-logs"),
+          });
+          terminalService.setSessionLogger(sessionLogger);
+          agentService.setSessionLogger(sessionLogger);
         }
 
         // Scheduled-task scheduler (per-minute tick; runner stub marks run).

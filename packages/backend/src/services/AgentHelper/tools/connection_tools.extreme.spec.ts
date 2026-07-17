@@ -57,6 +57,21 @@ class FakeConnectionManager implements IConnectionManagerRuntime {
     this.winrmList = this.winrmList.filter((e) => e.id !== id)
     return this.winrmList.length < b
   }
+  // Serial stubs (not exercised by this spec; satisfy the interface).
+  serialList: import('../../../types').SerialConnectionEntry[] = []
+  listSerial(): readonly import('../../../types').SerialConnectionEntry[] { return this.serialList }
+  createSerial(e: import('../../../types').SerialConnectionEntry) { this.serialList = [...this.serialList, e]; return e }
+  updateSerial(e: import('../../../types').SerialConnectionEntry) {
+    const i = this.serialList.findIndex((x) => x.id === e.id)
+    if (i === -1) throw new Error(`No saved serial connection with id "${e.id}" to update.`)
+    const n = this.serialList.slice(); n[i] = { ...this.serialList[i], ...e }
+    this.serialList = n; return n[i]
+  }
+  deleteSerial(id: string): boolean {
+    const b = this.serialList.length
+    this.serialList = this.serialList.filter((e) => e.id !== id)
+    return this.serialList.length < b
+  }
 }
 
 function makeContext(
@@ -83,13 +98,15 @@ test('create adds a connection and returns a usable Name', async () => {
   const m = new FakeConnectionManager()
   const ctx = makeContext(m)
   const res = await manageSshConnection(
-    { action: 'create', connection: { name: 'core-sw', host: '10.0.0.1', port: 22, username: 'admin', authMethod: 'password', password: 'p', algorithmsPreset: 'cisco', termType: 'vt100' } },
+    { action: 'create', connection: { name: 'core-sw', host: '10.0.0.1', port: 22, username: 'admin', authMethod: 'password', password: 'p', algorithmsPreset: 'cisco', termType: 'vt100', groupId: 'g1', notes: 'core switch' } },
     ctx,
   )
   if (!res.includes('Created saved SSH connection')) throw new Error(`expected Created, got: ${res}`)
   if (m.list.length !== 1) throw new Error(`expected 1 entry, got ${m.list.length}`)
   if (m.list[0].algorithmsPreset !== 'cisco') throw new Error('preset not carried')
   if (m.list[0].termType !== 'vt100') throw new Error('termType not carried')
+  if (m.list[0].groupId !== 'g1') throw new Error('groupId not carried')
+  if (m.list[0].notes !== 'core switch') throw new Error('notes not carried')
   if (!res.includes('open_terminal_tab using Name "core-sw"')) throw new Error('missing open hint')
 })
 
