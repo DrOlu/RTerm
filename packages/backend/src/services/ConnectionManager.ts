@@ -1,4 +1,4 @@
-import type { SSHConnectionEntry } from '../types'
+import type { SSHConnectionEntry, WinRMConnectionEntry } from '../types'
 import type { IConnectionManagerRuntime } from './runtimeContracts'
 
 /**
@@ -34,7 +34,16 @@ export class ConnectionManager implements IConnectionManagerRuntime {
   }
 
   private commit(nextList: SSHConnectionEntry[]): SSHConnectionEntry[] {
-    this.opts.setSettings({ connections: { ssh: nextList } })
+    // Preserve winrm/proxies/tunnels by merging only the ssh slice.
+    const settings = this.opts.getSettings()
+    this.opts.setSettings({
+      connections: {
+        ssh: nextList,
+        winrm: settings?.connections?.winrm ?? [],
+        proxies: settings?.connections?.proxies ?? [],
+        tunnels: settings?.connections?.tunnels ?? [],
+      },
+    })
     const next = this.opts.getSettings()
     // Refresh the agent runtime first (so subsequent tool calls in the same
     // flow see the new list), then push to the UI.
@@ -72,6 +81,60 @@ export class ConnectionManager implements IConnectionManagerRuntime {
     const next = list.filter((e) => e.id !== id)
     if (next.length === list.length) return false
     this.commit(next)
+    return true
+  }
+
+  // --- WinRM ---
+
+  private currentWinrmList(): WinRMConnectionEntry[] {
+    const settings = this.opts.getSettings()
+    return Array.isArray(settings?.connections?.winrm)
+      ? (settings.connections.winrm as WinRMConnectionEntry[])
+      : []
+  }
+
+  private commitWinrm(nextList: WinRMConnectionEntry[]): WinRMConnectionEntry[] {
+    // Preserve ssh/proxies/tunnels by merging only the winrm slice.
+    const settings = this.opts.getSettings()
+    this.opts.setSettings({
+      connections: {
+        ssh: settings?.connections?.ssh ?? [],
+        winrm: nextList,
+        proxies: settings?.connections?.proxies ?? [],
+        tunnels: settings?.connections?.tunnels ?? [],
+      },
+    })
+    const next = this.opts.getSettings()
+    this.opts.onSettingsChanged?.(next)
+    this.opts.broadcastSettings?.(next)
+    return nextList
+  }
+
+  listWinrm(): readonly WinRMConnectionEntry[] {
+    return this.currentWinrmList()
+  }
+
+  createWinrm(entry: WinRMConnectionEntry): WinRMConnectionEntry {
+    const stored = { ...entry, id: entry.id || `winrm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` }
+    this.commitWinrm([...this.currentWinrmList(), stored])
+    return stored
+  }
+
+  updateWinrm(entry: WinRMConnectionEntry): WinRMConnectionEntry {
+    const list = this.currentWinrmList()
+    const idx = list.findIndex((e) => e.id === entry.id)
+    if (idx === -1) throw new Error(`No saved WinRM connection with id "${entry.id}" to update.`)
+    const next = list.slice()
+    next[idx] = { ...list[idx], ...entry, id: entry.id }
+    this.commitWinrm(next)
+    return next[idx]
+  }
+
+  deleteWinrm(id: string): boolean {
+    const list = this.currentWinrmList()
+    const next = list.filter((e) => e.id !== id)
+    if (next.length === list.length) return false
+    this.commitWinrm(next)
     return true
   }
 }

@@ -283,6 +283,7 @@ export const zh = {
   connections: {
     title: "连接管理",
     ssh: "SSH 连接",
+    winrm: "WinRM",
     proxy: "代理",
     tunnels: "隧道",
     newConnection: "新建连接",

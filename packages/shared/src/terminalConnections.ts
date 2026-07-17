@@ -13,7 +13,7 @@ export interface KnownTerminalConnectionTypeDefinition {
   capabilities: TerminalConnectionCapabilities
 }
 
-export const KNOWN_TERMINAL_CONNECTION_TYPES = ['local', 'ssh'] as const
+export const KNOWN_TERMINAL_CONNECTION_TYPES = ['local', 'ssh', 'winrm'] as const
 
 export type KnownTerminalConnectionType =
   (typeof KNOWN_TERMINAL_CONNECTION_TYPES)[number]
@@ -49,6 +49,18 @@ const KNOWN_TERMINAL_CONNECTION_TYPE_DEFINITIONS: Record<
     capabilities: {
       supportsFilesystem: true,
       supportsMonitor: true,
+    },
+  },
+  winrm: {
+    type: 'winrm',
+    idPrefix: 'winrm',
+    defaultTitle: 'WinRM',
+    iconKind: 'remote',
+    // WinRM v1 is scoped to command execution + the fleet tools, rendered as
+    // a command/response log (not a PTY). No file panel / monitor over WinRM.
+    capabilities: {
+      supportsFilesystem: false,
+      supportsMonitor: false,
     },
   },
 }

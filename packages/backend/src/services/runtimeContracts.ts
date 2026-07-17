@@ -153,6 +153,16 @@ export interface IConnectionManagerRuntime {
   ): import("../types").SSHConnectionEntry;
   /** Delete a saved connection by id; returns true if something was removed. */
   deleteSsh(id: string): boolean;
+
+  /** Saved WinRM connections (Windows servers over WS-Management 5985/5986). */
+  listWinrm(): readonly import("../types").WinRMConnectionEntry[];
+  createWinrm(
+    entry: import("../types").WinRMConnectionEntry,
+  ): import("../types").WinRMConnectionEntry;
+  updateWinrm(
+    entry: import("../types").WinRMConnectionEntry,
+  ): import("../types").WinRMConnectionEntry;
+  deleteWinrm(id: string): boolean;
 }
 
 export interface IAgentRuntime {

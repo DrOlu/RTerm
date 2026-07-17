@@ -127,6 +127,21 @@ export interface SSHConnectionEntry {
   termType?: string
 }
 
+/** Saved WinRM connection entry (Connections panel / manage_winrm_connection).
+ * Mirrors WinRMConnectionConfig minus runtime-only fields (id/title/cols/rows). */
+export interface WinRMConnectionEntry {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  password: string
+  transport?: 'http' | 'https'
+  auth?: 'basic' | 'negotiate'
+  domain?: string
+  rejectUnauthorized?: boolean
+}
+
 export interface ProxyEntry {
   id: string
   name: string
@@ -199,6 +214,7 @@ export interface BackendSettings {
   /** Saved connections (local is implicit, ssh is persisted) */
   connections: {
     ssh: SSHConnectionEntry[]
+    winrm: WinRMConnectionEntry[]
     proxies: ProxyEntry[]
     tunnels: TunnelEntry[]
   }
@@ -310,9 +326,32 @@ export interface GenericConnectionConfig extends BaseConnectionConfig {
   [key: string]: unknown
 }
 
+/** WinRM (Windows Remote Management) connection — WS-Management over
+ * HTTP(5985)/HTTPS(5986). Scoped to command execution + the fleet tools:
+ * the backend runs each command as a stateless create-shell→run→receive→
+ * delete cycle and renders the tab as a command/response log (no PTY). */
+export interface WinRMConnectionConfig extends BaseConnectionConfig {
+  type: 'winrm'
+  host: string
+  port: number
+  username: string
+  password: string
+  /** 'http' (5985) or 'https' (5986). Default derived from port. */
+  transport?: 'http' | 'https'
+  /** Auth scheme. v1 implements 'basic' (the common lab/non-domain path).
+   * 'negotiate'/'kerberos' are accepted for forward-compat but route to the
+   * same Basic header today. */
+  auth?: 'basic' | 'negotiate'
+  /** Optional Active Directory domain (prepended to username as DOMAIN\user). */
+  domain?: string
+  /** For HTTPS with self-signed certs, set false to skip cert verification. */
+  rejectUnauthorized?: boolean
+}
+
 export type TerminalConfig =
   | LocalConnectionConfig
   | SSHConnectionConfig
+  | WinRMConnectionConfig
   | GenericConnectionConfig
 
 export const isLocalConnectionConfig = (config: {
@@ -322,6 +361,10 @@ export const isLocalConnectionConfig = (config: {
 export const isSshConnectionConfig = (config: {
   type: string
 }): config is SSHConnectionConfig => config.type === 'ssh'
+
+export const isWinrmConnectionConfig = (config: {
+  type: string
+}): config is WinRMConnectionConfig => config.type === 'winrm'
 
 export interface TerminalTab {
   id: string
@@ -758,6 +801,19 @@ export interface TerminalSessionBackend {
     timeoutMs?: number,
     options?: TerminalExecOptions,
   ): Promise<{ stdout: string; stderr: string } | null>
+
+  /**
+   * Direct (non-streaming) command execution for backends that don't expose a
+   * real PTY / shell-integration markers — e.g. WinRM's request/response shell
+   * model. When present, TerminalService routes exec_command through this path
+   * instead of write+marker-tracking. Returns combined stdout/stderr + exit
+   * code. The service supplies the history_command_match_id (the taskId).
+   */
+  executeCommand?(
+    ptyId: string,
+    command: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }>
 
   /**
    * Capture backend-specific command tracking state before dispatching a command.

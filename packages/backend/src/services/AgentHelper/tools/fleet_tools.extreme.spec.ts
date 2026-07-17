@@ -233,7 +233,7 @@ test('probe_connectivity reports UNREACHABLE when session exits', async () => {
 
 test('probe_connectivity reports missing saved connection helpfully', async () => {
   const res = await probeConnectivity({ connectionNameOrId: 'nope' }, ctx(new FakeTerm()))
-  if (!res.includes('No saved SSH connection found')) throw new Error(`expected missing message, got: ${res}`)
+  if (!res.includes('No saved SSH or WinRM connection found')) throw new Error(`expected missing message, got: ${res}`)
 })
 
 async function main() {

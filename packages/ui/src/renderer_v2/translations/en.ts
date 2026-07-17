@@ -289,6 +289,7 @@ export const en = {
   connections: {
     title: "Connections",
     ssh: "SSH",
+    winrm: "WinRM",
     proxy: "Proxy",
     tunnels: "Tunnels",
     newConnection: "New Connection",

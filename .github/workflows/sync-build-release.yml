@@ -350,6 +350,14 @@ jobs:
 
             Synced from upstream GyShell, with RTerm-specific enhancements.
 
+            ## What's new in RTerm v1.7.1
+
+            - **WinRM (Windows Remote Management) connectivity.** Connect to Windows servers over WS-Management on port 5985 (HTTP) / 5986 (HTTPS) with Basic auth, alongside SSH. Add WinRM connections from the Connections panel (new **WinRM** section) or with the new `manage_winrm_connection` agent tool, open a tab, and run PowerShell/cmd commands via `exec_command` / `run_fleet_command` / `collect_facts`.
+            - **WinRM is scoped to command execution + the fleet tools**, rendered as a **command/response log** (not a full interactive PTY) — the right model for WinRM's request/response shell. No streaming stdin / interactive TUI (vim/top/Ctrl+C) over WinRM; everything else (guardrails, structured output, exit codes, fleet fan-out, fact inventory, connectivity probe) works on WinRM tabs just like SSH/Linux tabs.
+            - **`manage_winrm_connection` agent tool** — create / update / delete / list saved WinRM connections, the Windows counterpart of `manage_ssh_connection`. `open_terminal_tab` and `probe_connectivity` now resolve WinRM saved connections too; saved WinRM connections are surfaced to the agent in system info.
+            - **Dependency-free WS-Management transport** — the new `WinRMTransport` hand-implements the SOAP/WS-Man command cycle (Create shell → Command → Receive-with-CommandId → Delete) over Node's built-in http/https, with no new npm dependency. Verified end-to-end against a live Windows Server 2022 target.
+            - The agent's command path (`TerminalService.runCommandAndWait`) now routes through an optional backend `executeCommand` hook for non-PTY backends, so WinRM commands bypass the SSH-style marker tracking cleanly.
+
             ## What's new in RTerm v1.7.0
 
             RTerm 1.7.0 turns the agent into a true data-center operator. Four new agent tools compose with the existing terminal/file/guardrail tools so you can provision, connect, inventory, and command whole fleets from a single chat — across Linux servers, Windows servers, and Cisco/legacy network gear.

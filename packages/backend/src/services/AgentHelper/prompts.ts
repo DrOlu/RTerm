@@ -3,7 +3,7 @@ import {
   SystemMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import type { TerminalTab, SSHConnectionEntry } from "../../types";
+import type { TerminalTab, SSHConnectionEntry, WinRMConnectionEntry } from "../../types";
 import { z } from "zod";
 
 /**
@@ -222,6 +222,13 @@ export const MANAGE_SSH_CONNECTION_DESCRIPTION = [
   "Guardrails still apply: this tool only manages saved connection metadata; it never sends credentials over the network. The actual SSH connection happens via open_terminal_tab + exec_command, which enforce the command policy.",
 ].join("\n");
 
+export const MANAGE_WINRM_CONNECTION_DESCRIPTION = [
+  "Create, update, delete, or list saved WinRM connections (Windows Remote Management, WS-Management 5985/5986) — the Windows counterpart of manage_ssh_connection. Use this to provision a Windows server before connecting to it.",
+  "action=\"create\" adds a new connection from a `connection` object (needs name, host, username, password; port defaults to 5985). v1 implements Basic auth over HTTP(5985)/HTTPS(5986). Set transport=\"https\" + rejectUnauthorized=false for 5986 with self-signed certs; set domain for DOMAIN\\user.",
+  "action=\"update\" / \"delete\" / \"list\" work exactly like manage_ssh_connection but for WinRM entries.",
+  "After create, open a tab with open_terminal_tab (using the Name) and run PowerShell/cmd commands via exec_command. WinRM tabs are command/response mode — no interactive TUI (vim/top/Ctrl+C). Fleet tools (run_fleet_command, collect_facts) work on WinRM tabs too. Guardrails still apply.",
+].join("\n");
+
 export const RUN_FLEET_COMMAND_DESCRIPTION = [
   "Run the SAME command on many OPEN terminal tabs at once and return one structured, machine-parseable <fleet_results> block with per-target status (OK/FAIL), exit code, and output.",
   "`targets` is a list of Names or IDs of tabs that are already open (open them first with open_terminal_tab). Duplicates are ignored. The command is policy-checked once for the whole fleet, then fanned out in parallel.",
@@ -306,6 +313,10 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     description: MANAGE_SSH_CONNECTION_DESCRIPTION,
   },
   {
+    name: "manage_winrm_connection",
+    description: MANAGE_WINRM_CONNECTION_DESCRIPTION,
+  },
+  {
     name: "run_fleet_command",
     description: RUN_FLEET_COMMAND_DESCRIPTION,
   },
@@ -380,6 +391,7 @@ export function createSystemInfoPromptText(
   options?: {
     isTerminalReconnectable?: (terminalId: string) => boolean;
     savedSshConnections?: readonly SSHConnectionEntry[];
+    savedWinrmConnections?: readonly WinRMConnectionEntry[];
   },
 ): string {
   const tabInfos = tabs
@@ -418,7 +430,22 @@ export function createSystemInfoPromptText(
     ? `\nSaved SSH Connections (open with the open_terminal_tab tool by Name or ID):\n${savedBlock}`
     : "";
 
-  const sysInfoText = `${SYS_INFO_MARKER}\nYour sessionId for this conversation is ${sessionId}\nAvailable Terminal Tabs:\n${tabInfos}${savedSection}`;
+  const winrm = options?.savedWinrmConnections ?? [];
+  const winrmBlock =
+    winrm.length > 0
+      ? winrm
+          .map(
+            (c) =>
+              `- Name: ${c.name || c.id}, ID: ${c.id}, Host: ${c.host}:${c.port}, User: ${c.username}` +
+              (c.transport ? `, ${c.transport}` : ""),
+          )
+          .join("\n")
+      : "";
+  const winrmSection = winrmBlock
+    ? `\nSaved WinRM Connections (open with the open_terminal_tab tool by Name or ID; command/response mode):\n${winrmBlock}`
+    : "";
+
+  const sysInfoText = `${SYS_INFO_MARKER}\nYour sessionId for this conversation is ${sessionId}\nAvailable Terminal Tabs:\n${tabInfos}${savedSection}${winrmSection}`;
   return sysInfoText;
 }
 
@@ -429,6 +456,7 @@ export function prependSystemInfoToUserInput(
   options?: {
     isTerminalReconnectable?: (terminalId: string) => boolean;
     savedSshConnections?: readonly SSHConnectionEntry[];
+    savedWinrmConnections?: readonly WinRMConnectionEntry[];
   },
 ): string {
   const systemInfoText = createSystemInfoPromptText(tabs, sessionId, options);

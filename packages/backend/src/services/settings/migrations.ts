@@ -30,6 +30,7 @@ export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
   },
   connections: {
     ssh: [],
+    winrm: [],
     proxies: [],
     tunnels: [],
   },

@@ -51,6 +51,7 @@ import {
   copyBetweenTabsSchema,
   readFileTransferStatusSchema,
   manageSshConnectionSchema,
+  manageWinrmConnectionSchema,
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -248,6 +249,7 @@ const SINGLE_CALL_TOOL_BOUNDARY_NAMES = new Set([
   // Mutates the saved-connection list shown in system info → the agent must
   // re-read system info next round to see the updated connection list.
   "manage_ssh_connection",
+  "manage_winrm_connection",
 ]);
 
 function clipTextMiddle(input: string, maxChars: number): string {
@@ -846,6 +848,7 @@ export class AgentService_v2 {
                 ? terminalService.isTerminalReconnectable(terminalId)
                 : false,
             savedSshConnections: this.settings?.connections?.ssh ?? [],
+            savedWinrmConnections: this.settings?.connections?.winrm ?? [],
           },
         );
       }
@@ -1747,6 +1750,20 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "manage_winrm_connection": {
+          try {
+            const validatedArgs = manageWinrmConnectionSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.manageWinrmConnection(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for manage_winrm_connection: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "run_fleet_command": {
           try {
             const validatedArgs = runFleetCommandSchema.parse(
@@ -2595,6 +2612,7 @@ export class AgentService_v2 {
       connectionManager: this.connectionManager,
       agentRunId,
       savedSshConnections: this.settings?.connections?.ssh ?? [],
+      savedWinrmConnections: this.settings?.connections?.winrm ?? [],
       savedProxies: this.settings?.connections?.proxies ?? [],
       savedTunnels: this.settings?.connections?.tunnels ?? [],
       waitForQueuedInsertion: this.queuedInsertionAvailabilityWaiter

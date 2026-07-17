@@ -43,6 +43,10 @@ import {
   manageSshConnection
 } from './tools/connection_tools'
 import {
+  manageWinrmConnectionSchema,
+  manageWinrmConnection
+} from './tools/winrm_connection_tools'
+import {
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -77,6 +81,7 @@ export { readFileSchema } from './tools/read_tools'
 export { waitSchema, waitTerminalIdleSchema } from './tools/wait_tools'
 export { copyBetweenTabsSchema, readFileTransferStatusSchema } from './tools/file_transfer_tools'
 export { manageSshConnectionSchema } from './tools/connection_tools'
+export { manageWinrmConnectionSchema } from './tools/winrm_connection_tools'
 export {
   runFleetCommandSchema,
   collectFactsSchema,
@@ -172,6 +177,11 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: manageSshConnectionSchema
     },
     {
+      name: 'manage_winrm_connection',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_winrm_connection')?.description ?? '',
+      schema: manageWinrmConnectionSchema
+    },
+    {
       name: 'run_fleet_command',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'run_fleet_command')?.description ?? '',
       schema: runFleetCommandSchema
@@ -205,6 +215,7 @@ export const toolImplementations = {
   copyBetweenTabs,
   readFileTransferStatus,
   manageSshConnection,
+  manageWinrmConnection,
   runFleetCommand,
   collectFacts,
   probeConnectivity,

@@ -6,7 +6,7 @@ import {
   formatTerminalUnavailableForTool,
   resolveTerminalForTool
 } from './terminal_runtime_guard'
-import type { SSHConnectionEntry, SSHConnectionConfig, ProxyEntry, TunnelEntry } from '../../../types'
+import type { SSHConnectionEntry, SSHConnectionConfig, ProxyEntry, TunnelEntry, WinRMConnectionEntry, WinRMConnectionConfig } from '../../../types'
 import { randomUUID } from 'node:crypto'
 
 // --- Schemas ---
@@ -124,6 +124,41 @@ export function sshEntryToTerminalConfig(
     jumpHost,
     algorithmsPreset: entry.algorithmsPreset,
     termType: entry.termType,
+  }
+}
+
+/** Resolve a saved WinRM connection by id or (case-insensitive) name. */
+export function resolveSavedWinrmConnection(
+  context: Pick<ToolExecutionContext, 'savedWinrmConnections'>,
+  nameOrId: string,
+): WinRMConnectionEntry | undefined {
+  const list = context.savedWinrmConnections
+  if (!list || list.length === 0) return undefined
+  const byId = list.find((c) => c.id === nameOrId)
+  if (byId) return byId
+  const normalised = nameOrId.trim().toLowerCase()
+  return list.find((c) => (c.name ?? '').trim().toLowerCase() === normalised)
+}
+
+/** Materialise a live `winrm` TerminalConfig from a saved WinRM entry. */
+export function winrmEntryToTerminalConfig(
+  entry: WinRMConnectionEntry,
+  opts: { title: string },
+): WinRMConnectionConfig {
+  return {
+    type: 'winrm',
+    id: `winrm-${randomUUID()}`,
+    title: opts.title,
+    cols: 80,
+    rows: 24,
+    host: entry.host,
+    port: entry.port,
+    username: entry.username,
+    password: entry.password,
+    transport: entry.transport,
+    auth: entry.auth,
+    domain: entry.domain,
+    rejectUnauthorized: entry.rejectUnauthorized,
   }
 }
 
@@ -797,26 +832,29 @@ export async function openTerminalTab(
     return reason
   }
 
-  const entry = resolveSavedSshConnection(context, connectionNameOrId)
-  if (!entry) {
-    const available = (context.savedSshConnections ?? [])
-      .map((c) => c.name || c.id)
-      .filter(Boolean)
-    const hint =
-      available.length > 0
-        ? ` Available saved SSH connections: ${available.join(', ')}.`
-        : ' No saved SSH connections are configured in Connections.'
+  const sshEntry = resolveSavedSshConnection(context, connectionNameOrId)
+  const winrmEntry = !sshEntry ? resolveSavedWinrmConnection(context, connectionNameOrId) : undefined
+
+  if (!sshEntry && !winrmEntry) {
+    const sshNames = (context.savedSshConnections ?? []).map((c) => c.name || c.id).filter(Boolean)
+    const winrmNames = (context.savedWinrmConnections ?? []).map((c) => c.name || c.id).filter(Boolean)
+    const parts: string[] = []
+    if (sshNames.length) parts.push(`SSH: ${sshNames.join(', ')}`)
+    if (winrmNames.length) parts.push(`WinRM: ${winrmNames.join(', ')}`)
+    const hint = parts.length ? ` Available saved connections — ${parts.join('; ')}.` : ' No saved SSH/WinRM connections are configured in Connections.'
     return notFound(
-      `No saved SSH connection found for "${connectionNameOrId}".${hint} Open the Connections panel and save the server first, or pass the exact Name/ID shown there.`
+      `No saved SSH or WinRM connection found for "${connectionNameOrId}".${hint} Save the connection first (manage_ssh_connection / manage_winrm_connection), or pass the exact Name/ID shown there.`
     )
   }
+
+  const entry = (sshEntry ?? winrmEntry) as SSHConnectionEntry | WinRMConnectionEntry
+  const isWinrm = Boolean(winrmEntry)
+  const displayName = entry.name || (isWinrm ? `${entry.username}@${entry.host}` : `${(sshEntry as SSHConnectionEntry).username}@${(sshEntry as SSHConnectionEntry).host}`)
 
   // Bail out if a tab for this saved connection is already live or connecting.
   // resolveTerminal matches by tab id or tab title; the UI sets the tab title to
   // the connection name (or user@host), so this catches the common double-open.
-  const existingByTitle = terminalService.resolveTerminal(
-    entry.name || `${entry.username}@${entry.host}`
-  )
+  const existingByTitle = terminalService.resolveTerminal(displayName)
   if (existingByTitle.bestMatch) {
     const snapshot = terminalService.getTerminalRuntimeSnapshot(existingByTitle.bestMatch.id)
     const status = snapshot ? `\n${formatTerminalStatusHeader(snapshot)}` : ''
@@ -841,23 +879,22 @@ export async function openTerminalTab(
   }
 
   try {
-    const config = sshEntryToTerminalConfig(entry, {
-      proxies: context.savedProxies ?? [],
-      tunnels: context.savedTunnels ?? [],
-      title: entry.name || `${entry.username}@${entry.host}`,
-    })
+    const config = isWinrm
+      ? winrmEntryToTerminalConfig(winrmEntry!, { title: displayName })
+      : sshEntryToTerminalConfig(sshEntry!, {
+          proxies: context.savedProxies ?? [],
+          tunnels: context.savedTunnels ?? [],
+          title: displayName,
+        })
     // TerminalService.createTerminal accepts a complete TerminalConfig and
-    // kicks off the SSH handshake in the background; the tab exists
-    // immediately in the "initializing" state. proxyId/tunnelIds are
-    // resolved against savedProxies/savedTunnels here, mirroring the UI's
-    // AppStore.toTerminalConfig wiring.
+    // kicks off the connection in the background; the tab exists immediately
+    // (initializing for ssh, ready/exited for winrm after its probe).
     const tab = await terminalService.createTerminal(config)
-    // createTerminal is async but the SSH handshake continues in the
-    // background; the tab exists immediately in the "initializing" state.
     const snapshot = terminalService.getTerminalRuntimeSnapshot(tab.id)
     const status = snapshot ? `\n${formatTerminalStatusHeader(snapshot)}` : ''
+    const kindLabel = isWinrm ? 'WinRM' : 'SSH'
     return finish(
-      `Opened a new SSH terminal tab for saved connection "${entry.name || entry.id}"${status}`
+      `Opened a new ${kindLabel} terminal tab for saved connection "${entry.name || entry.id}"${status}`
     )
   } catch (error) {
     if (isAbortError(error)) {

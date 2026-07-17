@@ -8,7 +8,9 @@ import {
 import {
   checkCommandPolicy,
   resolveSavedSshConnection,
+  resolveSavedWinrmConnection,
   sshEntryToTerminalConfig,
+  winrmEntryToTerminalConfig,
   abortIfNeeded,
   isAbortError,
   waitWithSignal,
@@ -370,17 +372,19 @@ export async function probeConnectivity(
     return output
   }
 
-  const entry = resolveSavedSshConnection(context, connectionNameOrId)
-  if (!entry) {
+  const sshEntry = resolveSavedSshConnection(context, connectionNameOrId)
+  const winrmEntry = !sshEntry ? resolveSavedWinrmConnection(context, connectionNameOrId) : undefined
+  if (!sshEntry && !winrmEntry) {
     return finish(
-      `No saved SSH connection found for "${connectionNameOrId}". Use manage_ssh_connection action="list" to see saved connections.`,
+      `No saved SSH or WinRM connection found for "${connectionNameOrId}". Use manage_ssh_connection / manage_winrm_connection action="list" to see saved connections.`,
     )
   }
+  const isWinrm = Boolean(winrmEntry)
+  const entry = (sshEntry ?? winrmEntry) as { name: string; username: string; host: string; port: number }
+  const displayName = entry.name || `${entry.username}@${entry.host}`
 
   // Reuse an already-open tab for this connection if present (don't stack tabs).
-  const existing = terminalService.resolveTerminal(
-    entry.name || `${entry.username}@${entry.host}`,
-  )
+  const existing = terminalService.resolveTerminal(displayName)
   let tabId: string
   let reused = false
   let tab: TerminalTab | undefined
@@ -390,11 +394,13 @@ export async function probeConnectivity(
     reused = true
   } else {
     try {
-      const config = sshEntryToTerminalConfig(entry, {
-        proxies: context.savedProxies ?? [],
-        tunnels: context.savedTunnels ?? [],
-        title: entry.name || `${entry.username}@${entry.host}`,
-      })
+      const config = isWinrm
+        ? winrmEntryToTerminalConfig(winrmEntry!, { title: displayName })
+        : sshEntryToTerminalConfig(sshEntry!, {
+            proxies: context.savedProxies ?? [],
+            tunnels: context.savedTunnels ?? [],
+            title: displayName,
+          })
       tab = await terminalService.createTerminal(config)
       tabId = tab.id
     } catch (error) {

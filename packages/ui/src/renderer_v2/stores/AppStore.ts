@@ -432,8 +432,11 @@ export class AppStore {
       bootstrap: action,
       createLocalTab: action,
       createSshTab: action,
+      createWinrmTab: action,
       saveSshConnection: action,
       deleteSshConnection: action,
+      saveWinrmConnection: action,
+      deleteWinrmConnection: action,
       reconnectTerminal: action,
       closeTab: action,
       setActiveTerminal: action,
@@ -2934,6 +2937,76 @@ export class AppStore {
     return id;
   }
 
+  createWinrmTab(
+    entryId: string,
+    targetPanelId?: string,
+    options?: {
+      ensurePanel?: boolean;
+      attachToPanel?: boolean;
+      startRuntime?: boolean;
+    },
+  ): string | null {
+    const entry = this.settings?.connections?.winrm?.find(
+      (x) => x.id === entryId,
+    );
+    if (!entry) {
+      console.warn("WinRM entry not found", entryId);
+      return null;
+    }
+    const id = `winrm-${uuidv4()}`;
+    const baseTitle = entry.name || `${entry.username}@${entry.host}`;
+    const title = this.getUniqueTitle(baseTitle);
+    const cfg: TerminalConfig = {
+      type: "winrm",
+      id,
+      title,
+      cols: 80,
+      rows: 24,
+      host: entry.host,
+      port: entry.port,
+      username: entry.username,
+      password: entry.password,
+      transport: entry.transport,
+      auth: entry.auth,
+      domain: entry.domain,
+      rejectUnauthorized: entry.rejectUnauthorized,
+    } as any;
+    const tab: TerminalTabModel = {
+      id,
+      title,
+      config: cfg,
+      capabilities: resolveTerminalConnectionCapabilities(cfg),
+      connectionRef: { type: "winrm", entryId },
+      runtimeState: "initializing",
+    };
+    this.terminalTabs.push(tab);
+    this.terminalTabsHydrated = true;
+    this.activeTerminalId = id;
+    this.unsuppressTabs("terminal", [id], { syncLayout: false });
+    const shouldAttachToPanel = options?.attachToPanel !== false;
+    if (shouldAttachToPanel) {
+      this.showTabsInLayout("terminal", [id]);
+    }
+    if (options?.startRuntime === true) {
+      void this.startTerminalRuntime(tab);
+    }
+    const shouldEnsurePanel = options?.ensurePanel !== false;
+    const resolvedPanelId = shouldAttachToPanel
+      ? targetPanelId ||
+        this.layout.getPrimaryPanelId("terminal") ||
+        (shouldEnsurePanel
+          ? this.layout.ensurePrimaryPanelForKind("terminal")
+          : null) ||
+        undefined
+      : undefined;
+    if (resolvedPanelId) {
+      this.layout.attachTabToPanel("terminal", id, resolvedPanelId);
+    } else {
+      this.layout.syncPanelBindings();
+    }
+    return id;
+  }
+
   private async startTerminalRuntime(tab: TerminalTabModel): Promise<void> {
     if (typeof window === "undefined") {
       return;
@@ -2984,6 +3057,34 @@ export class AppStore {
     runInAction(() => {
       if (this.settings) {
         this.settings.connections.ssh = list as any;
+      }
+    });
+    await window.gyshell.settings.set({ connections: nextConnections });
+  }
+
+  async saveWinrmConnection(
+    entry: AppSettings["connections"]["winrm"][number],
+  ): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const plainEntry = toJS(entry);
+    const list = (current.connections.winrm ?? []).slice().map((x) => toJS(x));
+    const nextList = upsertById(list, plainEntry);
+    const nextConnections = { ...toJS(current.connections), winrm: nextList };
+    runInAction(() => {
+      if (this.settings) {
+        this.settings.connections.winrm = nextList as any;
+      }
+    });
+    await window.gyshell.settings.set({ connections: nextConnections });
+  }
+
+  async deleteWinrmConnection(id: string): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = removeById(current.connections.winrm ?? [], id).map((x) => toJS(x));
+    const nextConnections = { ...toJS(current.connections), winrm: list };
+    runInAction(() => {
+      if (this.settings) {
+        this.settings.connections.winrm = list as any;
       }
     });
     await window.gyshell.settings.set({ connections: nextConnections });

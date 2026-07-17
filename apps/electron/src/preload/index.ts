@@ -62,6 +62,20 @@ interface BackendSettings {
       passphrase?: string;
       proxyId?: string;
       tunnelIds?: string[];
+      algorithmsPreset?: "modern" | "legacy" | "cisco";
+      termType?: string;
+    }>;
+    winrm: Array<{
+      id: string;
+      name: string;
+      host: string;
+      port: number;
+      username: string;
+      password: string;
+      transport?: "http" | "https";
+      auth?: "basic" | "negotiate";
+      domain?: string;
+      rejectUnauthorized?: boolean;
     }>;
     proxies: Array<{
       id: string;

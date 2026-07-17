@@ -2,7 +2,7 @@ import type { TerminalService } from '../TerminalService'
 import type { FileTransferService } from '../FileTransferService'
 import type { CommandPolicyMode } from '../CommandPolicy/CommandPolicyService'
 import type { ICommandPolicyRuntime, IConnectionManagerRuntime } from '../runtimeContracts'
-import type { SSHConnectionEntry, ProxyEntry, TunnelEntry } from '../../types'
+import type { SSHConnectionEntry, ProxyEntry, TunnelEntry, WinRMConnectionEntry } from '../../types'
 import type {
   QueuedAgentInsertionInput,
   RunBackgroundExecCommandInput,
@@ -35,6 +35,8 @@ export interface ToolExecutionContext {
    * via AgentService_v2.updateSettings → createExecutionContext.
    */
   savedSshConnections?: readonly SSHConnectionEntry[]
+  /** Saved WinRM connections (Windows servers over WS-Management). */
+  savedWinrmConnections?: readonly WinRMConnectionEntry[]
   /** Saved proxies/tunnels from backend settings, used to resolve a saved
    * SSH connection's `proxyId` / `tunnelIds` when materialising a live
    * TerminalConfig (mirrors the UI's AppStore.toTerminalConfig wiring). */

@@ -1,6 +1,6 @@
 import React from 'react'
 import { observer } from 'mobx-react-lite'
-import { ArrowLeft, KeyRound, LockKeyhole, Pencil, Plus, Save, Server, Shield, Trash2, Waypoints } from 'lucide-react'
+import { ArrowLeft, KeyRound, LockKeyhole, MonitorCog, Pencil, Plus, Save, Server, Shield, Trash2, Waypoints } from 'lucide-react'
 import type { AppStore } from '../../stores/AppStore'
 import { PortForwardType, type TunnelEntry } from '../../lib/ipcTypes'
 import './connections.scss'
@@ -21,6 +21,7 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
     [section],
   )
   const ssh = store.settings?.connections?.ssh ?? []
+  const winrm = store.settings?.connections?.winrm ?? []
 
   const proxies = store.settings?.connections?.proxies ?? []
   const tunnels = store.settings?.connections?.tunnels ?? []
@@ -87,9 +88,11 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
             const label =
               item.labelKey === 'ssh'
                 ? t.connections.ssh
-                : item.labelKey === 'proxy'
-                  ? t.connections.proxy
-                  : t.connections.tunnels
+                : item.labelKey === 'winrm'
+                  ? (t.connections as any).winrm ?? 'WinRM'
+                  : item.labelKey === 'proxy'
+                    ? t.connections.proxy
+                    : t.connections.tunnels
             return (
               <div
                 key={item.id}
@@ -382,6 +385,96 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                       >
                         <Trash2 size={16} strokeWidth={2} />
                       </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {section === 'winrm' ? (
+          <>
+            <div className="connections-header">
+              <div className="connections-title">{(t.connections as any).winrm ?? 'WinRM'}</div>
+              <div className="connections-actions">
+                <button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}>
+                  <Plus size={16} strokeWidth={2} />
+                </button>
+              </div>
+            </div>
+
+            <div className="connections-split">
+              <div className="connections-table">
+                <div className="connections-row header">
+                  <div className="connections-row-main header-main">
+                    <div>{t.common.name}</div>
+                    <div>{t.common.host}</div>
+                    <div>{t.common.port}</div>
+                    <div>{t.common.user}</div>
+                  </div>
+                  <div className="row-icon header-icon" aria-hidden="true" />
+                </div>
+                {winrm.map((c) => (
+                  <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}>
+                      <div>{c.name}</div>
+                      <div>{c.host}</div>
+                      <div>{c.port}</div>
+                      <div>{c.username}</div>
+                    </button>
+                    <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}>
+                      <Pencil size={14} strokeWidth={2} />
+                    </button>
+                  </div>
+                ))}
+                {!winrm.length ? <div className="connections-empty">No WinRM connections yet.</div> : null}
+              </div>
+
+              <div className="connections-editor">
+                {!draft ? (
+                  <div className="editor-empty">{t.common.selectOrCreate}</div>
+                ) : (
+                  <div className="editor-card">
+                    <div className="editor-row">
+                      <span className="editor-icon"><MonitorCog size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+                    </div>
+                    <div className="editor-row">
+                      <span className="editor-icon"><MonitorCog size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" placeholder={t.common.host} value={draft.host ?? ''} onChange={(e) => setDraft({ ...draft, host: e.target.value })} />
+                    </div>
+                    <div className="editor-row">
+                      <span className="editor-icon"><MonitorCog size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" placeholder={t.common.port} value={String(draft.port ?? 5985)} onChange={(e) => setDraft({ ...draft, port: e.target.value })} />
+                    </div>
+                    <div className="editor-row">
+                      <span className="editor-icon"><MonitorCog size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" placeholder={t.common.user} value={draft.username ?? ''} onChange={(e) => setDraft({ ...draft, username: e.target.value })} />
+                    </div>
+                    <div className="editor-row">
+                      <span className="editor-icon"><MonitorCog size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" type="password" placeholder={t.common.password ?? 'Password'} value={draft.password ?? ''} onChange={(e) => setDraft({ ...draft, password: e.target.value })} />
+                    </div>
+                    <div className="editor-row">
+                      <span className="editor-icon"><MonitorCog size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" placeholder="Domain (optional, e.g. CORP)" value={draft.domain ?? ''} onChange={(e) => setDraft({ ...draft, domain: e.target.value || undefined })} />
+                    </div>
+                    <div className="editor-row">
+                      <span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select
+                        className="editor-select"
+                        value={draft.transport ?? 'http'}
+                        onChange={(val) => setDraft({ ...draft, transport: val as 'http' | 'https', port: val === 'https' ? 5986 : 5985 })}
+                        options={[
+                          { value: 'http', label: 'Transport: HTTP (5985)' },
+                          { value: 'https', label: 'Transport: HTTPS (5986)' },
+                        ]}
+                      />
+                    </div>
+                    <div className="editor-actions">
+                      <button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button>
+                      <button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} strokeWidth={2} /></button>
                     </div>
                   </div>
                 )}

@@ -1,12 +1,12 @@
-import { Server, Shield, Waypoints, type LucideIcon } from 'lucide-react'
+import { Server, Shield, Waypoints, MonitorCog, type LucideIcon } from 'lucide-react'
 import type { AppStore } from '../../stores/AppStore'
 import { PortForwardType } from '../../lib/ipcTypes'
 
-export type ConnectionsSection = 'ssh' | 'proxies' | 'tunnels'
+export type ConnectionsSection = 'ssh' | 'winrm' | 'proxies' | 'tunnels'
 
 export interface ConnectionManagerSectionDefinition {
   id: ConnectionsSection
-  labelKey: 'ssh' | 'proxy' | 'tunnels'
+  labelKey: 'ssh' | 'winrm' | 'proxy' | 'tunnels'
   icon: LucideIcon
   getEntries: (store: AppStore) => any[]
   createDraft: () => any
@@ -54,6 +54,31 @@ export const CONNECTION_MANAGER_SECTIONS: readonly ConnectionManagerSectionDefin
       },
       deleteEntry: async (store, id) => {
         await store.deleteSshConnection(id)
+      },
+    }),
+    createSectionDefinition({
+      id: 'winrm',
+      labelKey: 'winrm',
+      icon: MonitorCog,
+      getEntries: (store) => store.settings?.connections?.winrm ?? [],
+      createDraft: () => ({
+        id: `winrm-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+        name: '',
+        host: '',
+        port: 5985,
+        username: 'Administrator',
+        password: '',
+        transport: 'http',
+        auth: 'basic',
+      }),
+      saveDraft: async (store, draft) => {
+        await store.saveWinrmConnection({
+          ...draft,
+          port: Number(draft.port) || 5985,
+        })
+      },
+      deleteEntry: async (store, id) => {
+        await store.deleteWinrmConnection(id)
       },
     }),
     createSectionDefinition({

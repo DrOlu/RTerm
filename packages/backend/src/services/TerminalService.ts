@@ -9,6 +9,7 @@ import type {
   TerminalCommandTrackingUpdate,
   TerminalExecOptions,
   TerminalFileSystemBackend,
+  TerminalSessionBackend,
   TerminalConfig,
   TerminalTab,
   CommandResult,
@@ -24,6 +25,7 @@ import {
 } from '../types'
 import { NodePtyBackend } from './NodePtyBackend'
 import { SSHBackend } from './SSHBackend'
+import { WinRMBackend } from './WinRMBackend'
 import { escapeShellPathList } from './ShellUtility'
 import { TerminalStateStore, type PersistedTerminalRecord } from './terminal/TerminalStateStore'
 import { v4 as uuidv4 } from 'uuid'
@@ -208,6 +210,7 @@ export class TerminalService {
   constructor(options?: TerminalServiceOptions) {
     this.backends.set('local', new NodePtyBackend())
     this.backends.set('ssh', new SSHBackend())
+    this.backends.set('winrm', new WinRMBackend())
     this.terminalStateStore = options?.terminalStateStore ?? null
   }
 
@@ -2131,6 +2134,36 @@ export class TerminalService {
     }
 
     const backend = this.getBackend(terminal.type)
+
+    // --- Direct (non-streaming) command execution path ---
+    // Backends that don't expose a real PTY / shell-integration markers (e.g.
+    // WinRM's request/response shell) implement `executeCommand`. Route through
+    // it directly instead of write + marker-tracking: run the command, then
+    // finalize the task with its output + exit code. waitForTask resolves when
+    // the task flips to 'finished'.
+    if (typeof (backend as TerminalSessionBackend).executeCommand === 'function') {
+      const execBackend = backend as TerminalSessionBackend
+      const execFn = execBackend.executeCommand
+      if (execFn) {
+        void execFn
+          .call(execBackend, terminal.ptyId, command)
+          .then((res: { stdout: string; stderr: string; exitCode: number }) => {
+            this.finalizeActiveTask(terminalId, {
+              exitCode: res.exitCode,
+              outputOverride: res.stdout + (res.stderr ? `\n${res.stderr}` : ''),
+            })
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err)
+            this.finalizeActiveTask(terminalId, {
+              exitCode: -1,
+              outputOverride: `Error: ${message}`,
+            })
+          })
+      }
+      return taskId
+    }
+
     const eol = terminal.remoteOs === 'windows' ? '\r' : '\n'
     let usedPromptFileDispatch = false
     if (

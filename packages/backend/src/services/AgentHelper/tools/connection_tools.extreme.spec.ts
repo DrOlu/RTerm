@@ -41,6 +41,22 @@ class FakeConnectionManager implements IConnectionManagerRuntime {
     if (removed) this.events.push(`delete:${id}`)
     return removed
   }
+
+  // WinRM stubs (not exercised by this spec; satisfy the interface).
+  winrmList: import('../../../types').WinRMConnectionEntry[] = []
+  listWinrm(): readonly import('../../../types').WinRMConnectionEntry[] { return this.winrmList }
+  createWinrm(e: import('../../../types').WinRMConnectionEntry) { this.winrmList = [...this.winrmList, e]; return e }
+  updateWinrm(e: import('../../../types').WinRMConnectionEntry) {
+    const i = this.winrmList.findIndex((x) => x.id === e.id)
+    if (i === -1) throw new Error(`No saved WinRM connection with id "${e.id}" to update.`)
+    const n = this.winrmList.slice(); n[i] = { ...this.winrmList[i], ...e }
+    this.winrmList = n; return n[i]
+  }
+  deleteWinrm(id: string): boolean {
+    const b = this.winrmList.length
+    this.winrmList = this.winrmList.filter((e) => e.id !== id)
+    return this.winrmList.length < b
+  }
 }
 
 function makeContext(
