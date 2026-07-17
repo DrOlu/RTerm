@@ -150,6 +150,10 @@ jobs:
       - name: Apply rebrand
         if: steps.check.outputs.should_build == 'true'
         run: |
+          # Ensure git identity exists even when the "Merge upstream changes"
+          # step is skipped (e.g. force=true with no new upstream commits).
+          git config user.name "RTerm Sync Bot"
+          git config user.email "rterm-bot@hyperspace.ng"
           # In feature release mode the rebrand + version clobber must NOT
           # run: our version.json/package.json already hold the correct local
           # version and our code changes are committed in-tree.
