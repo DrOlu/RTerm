@@ -35,13 +35,21 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
 
   // PuTTY import file picker
   const puttyInputRef = React.useRef<HTMLInputElement>(null)
-  const [puttyMsg, setPuttyMsg] = React.useState<string | null>(null)
+  const [puttyMsg] = React.useState<string | null>(null)
   async function handlePuttyFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     const text = await file.text()
-    const n = await store.importPuttySessions(text)
-    setPuttyMsg(n > 0 ? `Imported ${n} SSH connection(s) from PuTTY.` : 'No new SSH sessions found in the file.')
+    try {
+      const n = await store.importPuttySessions(text)
+      toastStore.push({
+        title: 'PuTTY import',
+        message: n > 0 ? `Imported ${n} SSH connection(s).` : 'No new SSH sessions found in the file.',
+        kind: n > 0 ? 'success' : 'default',
+      })
+    } catch (err: any) {
+      toastStore.push({ title: 'Import failed', message: err?.message ?? 'Could not parse file.', kind: 'danger' })
+    }
     e.target.value = ''
   }
 
@@ -154,6 +162,11 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
             <div className="connections-header">
               <div className="connections-title">{t.connections.ssh}</div>
               <div className="connections-actions">
+                {/* Import PuTTY sessions from a .reg export. Always visible. */}
+                <button className="icon-btn-sm" title="Import PuTTY sessions (.reg)" onClick={() => puttyInputRef.current?.click()}>
+                  <Upload size={16} strokeWidth={2} />
+                </button>
+                <input ref={puttyInputRef} type="file" accept=".reg,.txt" style={{ display: 'none' }} onChange={handlePuttyFile} />
                 {/* Add new remote connection (as requested: + placed inside SSH panel) */}
                 <button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}>
                   <Plus size={16} strokeWidth={2} />
@@ -406,12 +419,6 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                         onChange={(e) => setDraft({ ...draft, notes: e.target.value || undefined })}
                       />
                     </div>
-                    {ssh.length === 0 && (
-                      <div className="editor-row" style={{ justifyContent: 'flex-end' }}>
-                        <button className="icon-btn-sm" title="Import PuTTY sessions" onClick={() => puttyInputRef.current?.click()}><Upload size={14} /></button>
-                        <input ref={puttyInputRef} type="file" accept=".reg,.txt" style={{ display: 'none' }} onChange={handlePuttyFile} />
-                      </div>
-                    )}
                     {puttyMsg && section === 'ssh' && <div style={{ fontSize: 12, color: 'var(--fg-muted)', padding: '4px 0' }}>{puttyMsg}</div>}
 
                     <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}>
