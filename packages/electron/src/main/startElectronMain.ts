@@ -29,6 +29,7 @@ import { ChatHistoryService } from "../../../backend/src/services/ChatHistorySer
 import { ConnectionManager } from "../../../backend/src/services/ConnectionManager";
 import { AutomationManager } from "../../../backend/src/services/automation/AutomationManager";
 import { AgentRunLedger } from "../../../backend/src/services/agentRunLedger";
+import { ChangeLedger } from "../../../backend/src/services/changeLedger";
 import { SessionLogService } from "../../../backend/src/services/automation/sessionLogService";
 import { SchedulerService } from "../../../backend/src/services/automation/schedulerService";
 import { GatewayService } from "../../../backend/src/services/Gateway/GatewayService";
@@ -1090,6 +1091,9 @@ export async function startElectronMain(): Promise<void> {
         const agentRunLedger = new AgentRunLedger();
         agentRunLedger.markStaleRunsAborted(Date.now());
         agentService.setAgentRunLedger(agentRunLedger);
+        const changeLedger = new ChangeLedger();
+        changeLedger.markStaleChangesAborted(Date.now());
+        agentService.setChangeLedger(changeLedger);
         ipcMain.handle("agentRunLedger:list", (_e, filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
           agentRunLedger.listRuns(filter),
         );

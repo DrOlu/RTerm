@@ -34,6 +34,17 @@ const stepSchema = z.object({
   scriptId: z.string().optional().describe('Saved script id (kind=script; see manage_script).'),
   waitSeconds: z.number().positive().optional().describe('Pause length in seconds (kind=wait).'),
   onError: z.enum(['stop', 'continue']).optional().describe('Per-step failure policy (overrides the playbook default).'),
+  validate: z.object({
+    command: z.string().optional().describe('Inline check command (mutually exclusive with scriptId).'),
+    scriptId: z.string().optional().describe('Saved script used as the check.'),
+    expect: z.string().describe('Pattern the check output must contain/match.'),
+    expectMode: z.enum(['substring', 'regex']).optional().describe('Pattern interpretation (default substring).'),
+  }).optional().describe('Post-step validation: check runs after the step; a mismatch fails the step and triggers rollback.'),
+  rollback: z.object({
+    kind: z.enum(['command', 'script']),
+    command: z.string().optional().describe('Inline undo command (kind=command).'),
+    scriptId: z.string().optional().describe('Saved undo script id (kind=script).'),
+  }).optional().describe('Undo action executed (reverse step order) when a later step or validation fails.'),
 })
 
 export const managePlaybookSchema = z.object({
@@ -46,6 +57,7 @@ export const managePlaybookSchema = z.object({
   tags: z.array(z.string()).optional().describe('Target scope: run against connections with any of these tags.'),
   targets: z.array(z.string()).optional().describe('Target scope: explicit saved-connection names.'),
   onError: z.enum(['stop', 'continue']).optional().describe('Default failure policy for steps (default stop).'),
+  requireApproval: z.boolean().optional().describe('MOP mode: only runnable via an approved change record (manage_change plan → approve → run).'),
 })
 
 export const runPlaybookSchema = z.object({
@@ -80,10 +92,11 @@ export async function managePlaybook(
     if (!p) { const msg = `No playbook "${key}".`; emit(context, 'manage_playbook', args, msg); return msg }
     const steps = p.steps.map((s, i) => {
       const what = s.kind === 'wait' ? `wait ${s.waitSeconds}s` : s.kind === 'script' ? `script ${s.scriptId}` : (s.command ?? '').split('\n')[0]
-      return `  ${i + 1}. [${s.kind}] ${s.name ? `${s.name} — ` : ''}${what}${s.onError ? ` (onError=${s.onError})` : ''}`
+      const flags = [s.onError ? `onError=${s.onError}` : '', s.validate ? `validate:${s.validate.expectMode ?? 'substring'} "${s.validate.expect}"` : '', s.rollback ? 'rollback defined' : ''].filter(Boolean).join(', ')
+      return `  ${i + 1}. [${s.kind}] ${s.name ? `${s.name} — ` : ''}${what}${flags ? ` (${flags})` : ''}`
     }).join('\n')
     const scope = p.groupId ? `group=${p.groupId}` : p.targets?.length ? `targets=${p.targets.join(',')}` : p.tags?.length ? `tags=${p.tags.join(',')}` : 'local shell'
-    const msg = `Playbook "${p.name}" (id=${p.id})\nScope: ${scope}\nDefault onError: ${p.onError ?? 'stop'}\nSteps:\n${steps}`
+    const msg = `Playbook "${p.name}" (id=${p.id})\nScope: ${scope}\nDefault onError: ${p.onError ?? 'stop'}${p.requireApproval ? '\nMOP mode: requires an approved change record (manage_change) to run' : ''}\nSteps:\n${steps}`
     emit(context, 'manage_playbook', args, msg)
     return msg
   }
@@ -99,8 +112,9 @@ export async function managePlaybook(
         tags: args.tags,
         targets: args.targets,
         onError: args.onError,
+        requireApproval: args.requireApproval,
       })
-      const msg = `Created playbook "${p.name}" (id=${p.id}, ${p.steps.length} step(s)). Run it with run_playbook.`
+      const msg = `Created playbook "${p.name}" (id=${p.id}, ${p.steps.length} step(s)). ${p.requireApproval ? 'MOP mode: run it via manage_change (plan → approve → run).' : 'Run it with run_playbook.'}`
       emit(context, 'manage_playbook', args, msg)
       return msg
     } catch (error) {
@@ -122,6 +136,7 @@ export async function managePlaybook(
         ...(args.tags !== undefined ? { tags: args.tags } : {}),
         ...(args.targets !== undefined ? { targets: args.targets } : {}),
         ...(args.onError !== undefined ? { onError: args.onError } : {}),
+        ...(args.requireApproval !== undefined ? { requireApproval: args.requireApproval } : {}),
       })
       const msg = `Updated playbook "${p.name}" (${p.steps.length} step(s)).`
       emit(context, 'manage_playbook', args, msg)
@@ -157,6 +172,11 @@ export async function runPlaybook(
   const playbook = m.getPlaybook(key)
   if (!playbook) {
     const msg = `No playbook "${key}". Use manage_playbook action=list to see valid playbooks.`
+    emit(context, 'run_playbook', args, msg)
+    return msg
+  }
+  if (playbook.requireApproval) {
+    const msg = `Playbook "${playbook.name}" is in MOP mode (requireApproval). Run it through a change record: manage_change action=plan name="${playbook.name}" → approve → run.`
     emit(context, 'run_playbook', args, msg)
     return msg
   }

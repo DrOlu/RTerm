@@ -51,6 +51,19 @@ test('migrateBackendSettings preserves a persisted automation block (groups surv
           ],
           groupId: 'grp-1',
           onError: 'stop',
+          requireApproval: true,
+        },
+        {
+          id: 'pb-2',
+          name: 'core-mop',
+          steps: [
+            {
+              id: 'st-9', kind: 'command', command: 'apply acl', name: 'change',
+              validate: { command: 'show bgp', expect: 'Established', expectMode: 'substring' },
+              rollback: { kind: 'script', scriptId: 'scr-1' },
+            },
+          ],
+          targets: ['core-rtr-01'],
         },
       ],
     },
@@ -63,10 +76,14 @@ test('migrateBackendSettings preserves a persisted automation block (groups surv
   assertEqual(migrated.automation!.scheduledTasks.length, 1, 'scheduled tasks should survive migration')
   assertEqual(migrated.automation!.templates.length, 1, 'templates should survive migration')
   assertEqual(migrated.automation!.deviceMemory.length, 1, 'device memory should survive migration')
-  assertEqual(migrated.automation!.playbooks.length, 1, 'playbooks should survive migration')
+  assertEqual(migrated.automation!.playbooks.length, 2, 'playbooks should survive migration')
   assertEqual(migrated.automation!.playbooks[0].name, 'nightly-backup', 'playbook name should survive')
   assertEqual(migrated.automation!.playbooks[0].steps.length, 3, 'playbook steps should survive')
   assertEqual(migrated.automation!.playbooks[0].steps[1].scriptId, 'scr-1', 'playbook step script ref should survive')
+  assertEqual(migrated.automation!.playbooks[0].requireApproval, true, 'requireApproval should survive')
+  const mop = migrated.automation!.playbooks[1]
+  assertEqual(mop.steps[0].validate?.expect, 'Established', 'step validation should survive migration')
+  assertEqual(mop.steps[0].rollback?.scriptId, 'scr-1', 'step rollback should survive migration')
   assertEqual(
     migrated.automation!.scheduledTasks[0].cron,
     '0 2 * * *',

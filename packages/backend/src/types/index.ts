@@ -278,6 +278,33 @@ export interface AutomationSettings {
 }
 
 /** One step in a playbook — run sequentially on every resolved target. */
+/**
+ * Post-step validation: after a command/script step succeeds, run a check
+ * command (inline or saved script) whose output must match `expect`.
+ * A mismatch fails the step (triggering the playbook failure policy and,
+ * when rollbacks are defined, the automatic undo sequence).
+ */
+export interface PlaybookStepValidation {
+  /** Inline check command (mutually exclusive with scriptId). */
+  command?: string
+  /** Saved script id used as the check (mutually exclusive with command). */
+  scriptId?: string
+  /** Pattern the check output must contain/match. */
+  expect: string
+  /** How `expect` is interpreted (default substring). */
+  expectMode?: 'substring' | 'regex'
+}
+
+/** Undo action for a step. Executed in reverse step order when a later
+ * step (or its validation) fails, and first for the failed step itself. */
+export interface PlaybookStepRollback {
+  kind: 'command' | 'script'
+  /** Inline undo command (kind=command). */
+  command?: string
+  /** Saved script id (kind=script). */
+  scriptId?: string
+}
+
 export interface PlaybookStep {
   id: string
   /** Optional display name (e.g. "backup config"). */
@@ -297,6 +324,10 @@ export interface PlaybookStep {
   waitSeconds?: number
   /** Per-step failure policy; overrides the playbook-level onError. */
   onError?: 'stop' | 'continue'
+  /** Optional post-step validation (command/script steps only). */
+  validate?: PlaybookStepValidation
+  /** Optional undo action for the automatic rollback sequence. */
+  rollback?: PlaybookStepRollback
 }
 
 /**
@@ -317,6 +348,12 @@ export interface PlaybookEntry {
   targets?: string[]
   /** Default failure policy for steps that don't override it (default stop). */
   onError?: 'stop' | 'continue'
+  /**
+   * MOP mode: when true, this playbook may only run through an approved
+   * change record (manage_change plan → approve → run). Plain run_playbook
+   * calls are refused.
+   */
+  requireApproval?: boolean
   createdAt?: string
   updatedAt?: string
   /** ISO timestamp of last run, for the UI. */

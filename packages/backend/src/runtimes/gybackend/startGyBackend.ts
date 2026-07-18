@@ -31,6 +31,7 @@ import { TerminalCommandDraftService } from "../../services/TerminalCommandDraft
 import { ConnectionManager } from "../../services/ConnectionManager";
 import { AutomationManager } from "../../services/automation/AutomationManager";
 import { AgentRunLedger } from "../../services/agentRunLedger";
+import { ChangeLedger } from "../../services/changeLedger";
 import { SessionLogService } from "../../services/automation/sessionLogService";
 import { SchedulerService } from "../../services/automation/schedulerService";
 import { executeScheduledTask } from "../../services/automation/scheduledTaskRunner";
@@ -201,6 +202,9 @@ export async function startGyBackend(): Promise<void> {
   const agentRunLedger = new AgentRunLedger();
   agentRunLedger.markStaleRunsAborted(Date.now());
   agentService.setAgentRunLedger(agentRunLedger);
+  const changeLedger = new ChangeLedger();
+  changeLedger.markStaleChangesAborted(Date.now());
+  agentService.setChangeLedger(changeLedger);
 
   // Session logging: record terminal output per session to disk when enabled.
   if (settingsService.getSettings().sessionLogging?.enabled) {

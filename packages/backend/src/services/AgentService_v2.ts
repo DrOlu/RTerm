@@ -66,6 +66,7 @@ import {
   importPuttySchema,
   managePlaybookSchema,
   runPlaybookSchema,
+  manageChangeSchema,
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -335,6 +336,7 @@ export class AgentService_v2 {
   /** Optional run ledger — persisted audit + token-cost record of every
    * agent run (start/finish lifecycle + per-call token usage). */
   private agentRunLedger?: import("./agentRunLedger").AgentRunLedger;
+  private changeLedger?: import("./changeLedger").ChangeLedger;
   private mcpToolService: IMcpRuntime;
   private skillService: ISkillRuntime;
   private memoryService: IMemoryRuntime;
@@ -433,6 +435,9 @@ export class AgentService_v2 {
 
   /** Wire the persisted run ledger (audit + token cost) backing the
    * get_run_ledger tool. Every run() is recorded start-to-finish. */
+  setChangeLedger(ledger: import("./changeLedger").ChangeLedger | null): void {
+    this.changeLedger = ledger ?? undefined;
+  }
   setAgentRunLedger(ledger: import("./agentRunLedger").AgentRunLedger | null): void {
     this.agentRunLedger = ledger ?? undefined;
   }
@@ -1963,6 +1968,15 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "manage_change": {
+          try {
+            const validatedArgs = manageChangeSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageChange(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_change: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "run_fleet_command": {
           try {
             const validatedArgs = runFleetCommandSchema.parse(
@@ -2812,6 +2826,7 @@ export class AgentService_v2 {
       automationManager: this.automationManager,
       sessionLogger: this.sessionLogger,
       agentRunLedger: this.agentRunLedger,
+      changeLedger: this.changeLedger,
       agentRunId,
       savedSshConnections: this.settings?.connections?.ssh ?? [],
       savedWinrmConnections: this.settings?.connections?.winrm ?? [],

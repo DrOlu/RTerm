@@ -303,6 +303,24 @@ function normalizePlaybookSteps(steps: PlaybookStep[] | undefined): PlaybookStep
     if (s.onError && s.onError !== 'stop' && s.onError !== 'continue') {
       throw new Error(`Step ${idx + 1}: onError must be stop|continue`)
     }
+    if (s.validate) {
+      const v = s.validate
+      if (kind === 'wait') throw new Error(`Step ${idx + 1}: wait steps cannot have validation`)
+      const hasCmd = !!(v.command ?? '').trim()
+      const hasScript = !!(v.scriptId ?? '').trim()
+      if (hasCmd === hasScript) throw new Error(`Step ${idx + 1}: validation needs exactly one of command|scriptId`)
+      if (!(v.expect ?? '').length) throw new Error(`Step ${idx + 1}: validation needs a non-empty expect pattern`)
+      if (v.expectMode && v.expectMode !== 'substring' && v.expectMode !== 'regex') {
+        throw new Error(`Step ${idx + 1}: validation expectMode must be substring|regex`)
+      }
+    }
+    if (s.rollback) {
+      const r = s.rollback
+      if (kind === 'wait') throw new Error(`Step ${idx + 1}: wait steps cannot have a rollback action`)
+      if (r.kind !== 'command' && r.kind !== 'script') throw new Error(`Step ${idx + 1}: rollback kind must be command|script`)
+      if (r.kind === 'command' && !(r.command ?? '').trim()) throw new Error(`Step ${idx + 1}: rollback command steps need a non-empty command`)
+      if (r.kind === 'script' && !(r.scriptId ?? '').trim()) throw new Error(`Step ${idx + 1}: rollback script steps need a scriptId`)
+    }
     return { ...s, id: s.id || rid('st') }
   })
 }

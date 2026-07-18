@@ -78,6 +78,7 @@ import {
   managePlaybookSchema, managePlaybook,
   runPlaybookSchema, runPlaybook,
 } from './tools/playbook_tools'
+import { manageChangeSchema, manageChange } from './tools/change_tools'
 import { 
   skillToolSchema, 
   buildSkillToolDescription,
@@ -119,6 +120,7 @@ export {
   manageScheduledTaskSchema, manageTemplateSchema, importPuttySchema,
 } from './tools/automation_tools'
 export { managePlaybookSchema, runPlaybookSchema } from './tools/playbook_tools'
+export { manageChangeSchema } from './tools/change_tools'
 export { skillToolSchema, createSkillSchema, buildSkillToolDescription } from './tools/skill_tools'
 
 export { BUILTIN_TOOL_INFO } from './prompts'
@@ -289,6 +291,11 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: runPlaybookSchema
     },
     {
+      name: 'manage_change',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_change')?.description ?? '',
+      schema: manageChangeSchema
+    },
+    {
       name: 'import_putty',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'import_putty')?.description ?? '',
       schema: importPuttySchema
@@ -328,6 +335,7 @@ export const toolImplementations = {
   manageTemplate,
   managePlaybook,
   runPlaybook,
+  manageChange,
   importPutty,
   writeFile,
   editFile,

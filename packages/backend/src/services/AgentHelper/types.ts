@@ -40,6 +40,7 @@ export interface ToolExecutionContext {
   }
   /** Optional persisted run audit + token-cost ledger (get_run_ledger). */
   agentRunLedger?: Pick<AgentRunLedger, 'listRuns' | 'getRun' | 'summarize'>
+  changeLedger?: import('../changeLedger').ChangeLedger
   agentRunId?: string
   /**
    * Saved SSH connections from backend settings (`connections.ssh`).

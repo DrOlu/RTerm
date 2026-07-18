@@ -301,6 +301,15 @@ export const RUN_PLAYBOOK_DESCRIPTION = [
   "Session output is captured by session logging when enabled, so playbook runs are auditable via list_session_logs / search_session_logs. The run is also recorded in the playbook run history and stamped on the playbook (lastRunAt/lastRunOk).",
 ].join("\n");
 
+export const MANAGE_CHANGE_DESCRIPTION = [
+  "Drive a MOP-style change record through its full lifecycle: plan → approve → run → status/list. Every change is recorded durably in the change ledger (SQLite) with per-step execute/validate/rollback events.",
+  "action=\"plan\" (playbookId|name): resolves the target scope, snapshots it, and creates a change in status=planned. Present the plan to the operator.",
+  "action=\"approve\" (changeId, approvedBy?): records operator sign-off (planned → approved). NEVER approve without the operator's explicit confirmation in the conversation.",
+  "action=\"run\" (changeId): executes the playbook, requires status=approved. Steps with a validate block run a post-step check whose output must match expect (substring|regex); any step or validation failure stops that target and automatically executes rollback actions in reverse step order. Final status: committed | rolled_back | failed.",
+  "action=\"status\" (changeId) / action=\"list\" (status?, limit?): audit trail — who approved, what executed, what validation saw, whether rollback completed.",
+  "Playbooks in MOP mode (requireApproval=true) can ONLY run this way; plain run_playbook refuses them.",
+].join("\n");
+
 export const PROBE_CONNECTIVITY_DESCRIPTION = [
   "Probe reachability of a SAVED SSH connection: open a fresh tab for it (or reuse an already-open one), wait for it to become ready or exit, then report REACHABLE/UNREACHABLE, the detected OS class, the terminal status header, and the initial login banner.",
   "This is the building block for autonomous operations — \"is host X up?\", \"what OS is on this box?\", pre-change sanity checks. It never sends commands beyond what the shell's own login produces.",
@@ -438,6 +447,10 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "run_playbook",
     description: RUN_PLAYBOOK_DESCRIPTION,
+  },
+  {
+    name: "manage_change",
+    description: MANAGE_CHANGE_DESCRIPTION,
   },
 ];
 

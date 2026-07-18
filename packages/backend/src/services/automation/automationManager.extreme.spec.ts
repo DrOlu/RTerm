@@ -157,6 +157,44 @@ test('playbooks: validation rejects bad steps and missing name', () => {
   if (threw !== 6) throw new Error(`expected 6 throws, got ${threw}`)
 })
 
+test('playbooks: validate/rollback field validation (MOP fields)', () => {
+  const { m } = makeManager()
+  let threw = 0
+  const base = { id: '', kind: 'command' as const, command: 'x' }
+  // validate: needs exactly one of command|scriptId
+  try { m.createPlaybook({ name: 'x', steps: [{ ...base, validate: { expect: 'y' } }] }) } catch { threw++ }
+  try { m.createPlaybook({ name: 'x', steps: [{ ...base, validate: { command: 'c', scriptId: 's', expect: 'y' } }] }) } catch { threw++ }
+  // validate: empty expect
+  try { m.createPlaybook({ name: 'x', steps: [{ ...base, validate: { command: 'c', expect: '' } }] }) } catch { threw++ }
+  // validate: bad expectMode
+  try { m.createPlaybook({ name: 'x', steps: [{ ...base, validate: { command: 'c', expect: 'y', expectMode: 'fuzzy' as any } }] }) } catch { threw++ }
+  // validate on wait step
+  try { m.createPlaybook({ name: 'x', steps: [{ id: '', kind: 'wait', waitSeconds: 1, validate: { command: 'c', expect: 'y' } }] }) } catch { threw++ }
+  // rollback: bad kind
+  try { m.createPlaybook({ name: 'x', steps: [{ ...base, rollback: { kind: 'nope' as any, command: 'c' } }] }) } catch { threw++ }
+  // rollback: command kind without command
+  try { m.createPlaybook({ name: 'x', steps: [{ ...base, rollback: { kind: 'command' } }] }) } catch { threw++ }
+  // rollback: script kind without scriptId
+  try { m.createPlaybook({ name: 'x', steps: [{ ...base, rollback: { kind: 'script' } }] }) } catch { threw++ }
+  // rollback on wait step
+  try { m.createPlaybook({ name: 'x', steps: [{ id: '', kind: 'wait', waitSeconds: 1, rollback: { kind: 'command', command: 'c' } }] }) } catch { threw++ }
+  if (threw !== 9) throw new Error(`expected 9 throws, got ${threw}`)
+  // valid MOP step passes and round-trips with requireApproval
+  const pb = m.createPlaybook({
+    name: 'mop',
+    requireApproval: true,
+    steps: [{
+      id: '', kind: 'command', command: 'apply',
+      validate: { command: 'check', expect: 'ok', expectMode: 'regex' },
+      rollback: { kind: 'script', scriptId: 'scr-undo' },
+    }],
+  })
+  const got = m.getPlaybook(pb.id)!
+  if (got.requireApproval !== true) throw new Error('requireApproval should persist')
+  if (got.steps[0].validate?.expect !== 'ok') throw new Error('validate should persist')
+  if (got.steps[0].rollback?.scriptId !== 'scr-undo') throw new Error('rollback should persist')
+})
+
 test('playbooks: markPlaybookRun stamps last-run status', () => {
   const { m } = makeManager()
   const pb = m.createPlaybook({ name: 'pb', steps: [{ id: '', kind: 'command', command: 'x' }] })
