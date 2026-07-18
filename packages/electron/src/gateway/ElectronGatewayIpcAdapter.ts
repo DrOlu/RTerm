@@ -742,6 +742,13 @@ export class ElectronGatewayIpcAdapter {
     );
 
     ipcMain.handle(
+      "terminal:writeBroadcast",
+      async (_: any, terminalIds: string[], data: string) => {
+        return this.terminalService.writeBroadcast(terminalIds, data);
+      },
+    );
+
+    ipcMain.handle(
       "terminal:writePaths",
       async (_: any, terminalId: string, paths: string[]) => {
         this.terminalService.writePaths(terminalId, paths);

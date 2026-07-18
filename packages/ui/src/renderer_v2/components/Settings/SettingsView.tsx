@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowLeft,
@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   Database,
   GitBranch,
+  ScrollText,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { AppStore } from "../../stores/AppStore";
@@ -36,6 +37,98 @@ import { Select } from "../../platform/Select";
 import { ShortcutRecorder } from "./ShortcutRecorder";
 import { getDefaultCommandDraftShortcut } from "../../lib/commandDraftShortcut";
 import { AgentSettingRailControls } from "./AgentSettingRailControls";
+
+type LedgerRun = Awaited<ReturnType<Window["gyshell"]["agentRunLedger"]["list"]>>[number];
+type LedgerSummary = Awaited<ReturnType<Window["gyshell"]["agentRunLedger"]["summary"]>>;
+
+/** Run Ledger — the persisted audit + token-cost record of every agent run
+ * (SQLite-backed, survives restarts). Summary cards + per-model token usage
+ * + recent run history with status, duration, and token counts. */
+function RunLedgerPanel() {
+  const [runs, setRuns] = useState<LedgerRun[]>([]);
+  const [summary, setSummary] = useState<LedgerSummary | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [runList, sum] = await Promise.all([
+        window.gyshell.agentRunLedger.list({ limit: 50 }),
+        window.gyshell.agentRunLedger.summary({ sinceDays: 30 }),
+      ]);
+      setRuns(runList);
+      setSummary(sum);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const statusColor = (status: LedgerRun["status"]) =>
+    status === "completed" ? "var(--success, #4caf50)"
+    : status === "failed" ? "var(--error, #f44336)"
+    : status === "aborted" ? "var(--warning, #ff9800)"
+    : "var(--accent, #2196f3)";
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <div className="settings-section-title">
+          Run Ledger
+          <InfoTooltip content="Persisted audit + token-cost record of every agent run (last 30 days shown in the summary; table lists the 50 most recent runs). Stored locally in SQLite — survives restarts." />
+        </div>
+        <div className="settings-actions">
+          <button className="btn-icon-reload" onClick={() => void load()} title="Refresh" disabled={loading}>
+            {loading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+          </button>
+        </div>
+      </div>
+
+      {summary ? (
+        <div className="version-grid" style={{ marginBottom: 16 }}>
+          <div className="version-item"><span className="version-label">Runs (30d)</span><span className="version-value">{summary.totalRuns}</span></div>
+          <div className="version-item"><span className="version-label">Completed</span><span className="version-value">{summary.completedRuns}</span></div>
+          <div className="version-item"><span className="version-label">Failed</span><span className="version-value">{summary.failedRuns}</span></div>
+          <div className="version-item"><span className="version-label">Aborted</span><span className="version-value">{summary.abortedRuns}</span></div>
+          <div className="version-item"><span className="version-label">Prompt tokens</span><span className="version-value">{summary.promptTokens.toLocaleString()}</span></div>
+          <div className="version-item"><span className="version-label">Completion tokens</span><span className="version-value">{summary.completionTokens.toLocaleString()}</span></div>
+        </div>
+      ) : null}
+
+      {summary && summary.byModel.length ? (
+        <>
+          <div className="settings-subsection-header">Token usage by model (30d)</div>
+          <div className="connections-table" style={{ marginBottom: 16 }}>
+            <div className="connections-row header"><div className="connections-row-main header-main"><div>Model</div><div>Runs</div><div>Prompt</div><div>Completion</div></div></div>
+            {summary.byModel.map((m) => (
+              <div key={m.model} className="connections-row"><div className="connections-row-main"><div>{m.model}</div><div>{m.runs}</div><div>{m.promptTokens.toLocaleString()}</div><div>{m.completionTokens.toLocaleString()}</div></div></div>
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      <div className="settings-subsection-header">Recent runs</div>
+      <div className="connections-table">
+        <div className="connections-row header"><div className="connections-row-main header-main"><div>Started</div><div>Status</div><div>Model</div><div>Tokens (in/out)</div><div>Input</div></div></div>
+        {runs.map((r) => (
+          <div key={r.runId} className="connections-row" title={r.error ? `${r.runId} — ${r.error}` : r.runId}>
+            <div className="connections-row-main">
+              <div>{new Date(r.startedAt).toLocaleString()}</div>
+              <div><span style={{ color: statusColor(r.status), fontWeight: 600 }}>{r.status}</span>{r.endedAt ? ` · ${((r.endedAt - r.startedAt) / 1000).toFixed(1)}s` : ""}</div>
+              <div>{r.model ?? "—"}</div>
+              <div>{r.promptTokens.toLocaleString()} / {r.completionTokens.toLocaleString()}</div>
+              <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{r.inputPreview ?? "—"}</div>
+            </div>
+          </div>
+        ))}
+        {!runs.length && !loading ? <div className="connections-empty">No agent runs recorded yet. Runs are recorded automatically from the next agent task onward.</div> : null}
+      </div>
+    </>
+  );
+}
 
 function ThemeTile(props: {
   active?: boolean;
@@ -679,6 +772,11 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
             "accessTokens",
             <Key size={16} strokeWidth={2} />,
             t.settings.accessTokens,
+          )}
+          {renderNavItem(
+            "runLedger",
+            <ScrollText size={16} strokeWidth={2} />,
+            (t.settings as any).runLedger ?? "Run Ledger",
           )}
           {renderNavItem(
             "version",
@@ -2427,6 +2525,10 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
               </div>
             </>
           ) : null}
+
+            {store.settingsSection === "runLedger" ? (
+              <RunLedgerPanel />
+            ) : null}
 
             {store.settingsSection === "version" ? (
             <>

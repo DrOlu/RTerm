@@ -1204,6 +1204,24 @@ export class TerminalService {
     }
   }
 
+  /**
+   * Broadcast the same input to multiple terminals at once (Terminator /
+   * iTerm2-style "broadcast input"). Only terminals that currently exist and
+   * are writable receive the data; dead or unknown ids are skipped silently so
+   * a partially-closed group never throws. Returns the ids actually written.
+   */
+  writeBroadcast(terminalIds: string[], data: string): string[] {
+    const written: string[] = []
+    for (const id of terminalIds) {
+      const terminal = this.terminals.get(id)
+      if (!terminal || !this.canWriteToTerminal(terminal)) continue
+      const backend = this.getBackend(terminal.type)
+      backend.write(terminal.ptyId, data)
+      written.push(id)
+    }
+    return written
+  }
+
   writePaths(terminalId: string, paths: string[]): void {
     const terminal = this.terminals.get(terminalId)
     if (!terminal || paths.length === 0) return

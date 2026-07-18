@@ -3,7 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { SessionLogService } from '../../automation/sessionLogService'
 import type { ToolExecutionContext } from '../types'
-import { listSessionLogs, readSessionLog } from './session_log_tools'
+import { listSessionLogs, readSessionLog, searchSessionLogs } from './session_log_tools'
 
 const cases: Array<{ name: string; run: () => Promise<void> }> = []
 function test(n: string, r: () => Promise<void>) { cases.push({ name: n, run: r }) }
@@ -48,6 +48,30 @@ test('list/read without logger report unavailable', async () => {
   if (!r1.includes('not available')) throw new Error(r1)
   const r2 = await readSessionLog({ sessionId: 'x' }, ctxWithLogger(undefined))
   if (!r2.includes('not available')) throw new Error(r2)
+})
+
+test('search_session_logs finds matches across sessions and formats them', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rterm-slt-'))
+  const svc = new SessionLogService({ logDir: dir })
+  svc.start('a', { title: 'core-rtr-01', type: 'ssh' }); svc.write('a', 'up\n%BGP-5-ADJCHANGE down\n'); svc.stop('a')
+  svc.start('b', { title: 'edge-rtr-02', type: 'ssh' }); svc.write('b', 'nothing here\n'); svc.stop('b')
+  const res = await searchSessionLogs({ query: 'ADJCHANGE' }, ctxWithLogger(svc))
+  if (!res.includes('ADJCHANGE')) throw new Error(res)
+  if (!res.includes('core-rtr-01')) throw new Error('missing host context: ' + res)
+  if (!res.includes('line 2')) throw new Error('missing line number: ' + res)
+})
+
+test('search_session_logs reports no matches', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rterm-slt-'))
+  const svc = new SessionLogService({ logDir: dir })
+  svc.start('a', { title: 'h', type: 'ssh' }); svc.write('a', 'foo\n'); svc.stop('a')
+  const res = await searchSessionLogs({ query: 'zzz-not-present' }, ctxWithLogger(svc))
+  if (!res.includes('No matches')) throw new Error(res)
+})
+
+test('search_session_logs without logger reports unavailable', async () => {
+  const res = await searchSessionLogs({ query: 'x' }, ctxWithLogger(undefined))
+  if (!res.includes('not available')) throw new Error(res)
 })
 
 async function main() {

@@ -26,6 +26,45 @@ export interface SessionLogRecord {
   bytes: number
 }
 
+export interface SessionLogSearchOptions {
+  /** Restrict to a single sessionId. */
+  sessionId?: string
+  /** Restrict to sessions whose title/host contains this substring. */
+  host?: string
+  /** ISO date — only sessions started at/after this time. */
+  since?: string
+  /** ISO date — only sessions started at/before this time. */
+  until?: string
+  /** Treat query as a regular expression (default: literal substring). */
+  regex?: boolean
+  /** Case-sensitive matching (default: false). */
+  caseSensitive?: boolean
+  /** Max matching lines to return (default: 50). */
+  maxMatches?: number
+  /** Lines of surrounding context to include per match (default: 0). */
+  contextLines?: number
+}
+
+export interface SessionLogSearchMatch {
+  sessionId: string
+  title: string
+  type: string
+  startedAt: string
+  /** 1-based line number within the session log. */
+  line: number
+  /** The matched line (ANSI-stripped). */
+  text: string
+  contextBefore: string[]
+  contextAfter: string[]
+}
+
+export interface SessionLogSearchResult {
+  query: string
+  matches: SessionLogSearchMatch[]
+  sessionsSearched: number
+  totalMatches: number
+}
+
 export class SessionLogService {
   private readonly logDir: string
   private readonly active = new Map<string, { fd: number; record: SessionLogRecord }>()
@@ -106,6 +145,89 @@ export class SessionLogService {
     } catch {
       return ''
     }
+  }
+
+  /**
+   * Search all recorded session logs for a substring or regex.
+   * Returns matching lines with their session context, newest sessions first.
+   *
+   * The terminal transcript embeds ANSI escape sequences; matches are reported
+   * against the raw line (so control bytes in a line are tolerated) but the
+   * returned line text is stripped of ANSI codes for readability.
+   */
+  search(query: string, opts?: SessionLogSearchOptions): SessionLogSearchResult {
+    const out: SessionLogSearchResult = { query, matches: [], sessionsSearched: 0, totalMatches: 0 }
+    if (!query || !query.trim()) return out
+
+    // Build the matcher. Plain substring by default; regex when asked.
+    let test: (line: string) => boolean
+    if (opts?.regex) {
+      let re: RegExp
+      try {
+        re = new RegExp(query, opts.caseSensitive ? 'g' : 'gi')
+      } catch {
+        // Invalid regex — fall back to literal substring so the tool never throws.
+        const needle = opts.caseSensitive ? query : query.toLowerCase()
+        test = (line) => (opts.caseSensitive ? line : line.toLowerCase()).includes(needle)
+        return this.runSearch(test, query, opts, out)
+      }
+      test = (line) => { re.lastIndex = 0; return re.test(line) }
+    } else {
+      const needle = opts?.caseSensitive ? query : query.toLowerCase()
+      test = (line) => (opts?.caseSensitive ? line : line.toLowerCase()).includes(needle)
+    }
+    return this.runSearch(test, query, opts, out)
+  }
+
+  private runSearch(
+    test: (line: string) => boolean,
+    _query: string,
+    opts: SessionLogSearchOptions | undefined,
+    out: SessionLogSearchResult,
+  ): SessionLogSearchResult {
+    const maxMatches = Math.max(1, opts?.maxMatches ?? 50)
+    const contextLines = Math.max(0, opts?.contextLines ?? 0)
+    const records = this.list().filter((r) =>
+      (!opts?.sessionId || r.sessionId === opts.sessionId) &&
+      (!opts?.host || (r.title || '').toLowerCase().includes(opts.host.toLowerCase())),
+    )
+    const sinceMs = opts?.since ? Date.parse(opts.since) : NaN
+    const untilMs = opts?.until ? Date.parse(opts.until) : NaN
+
+    for (const rec of records) {
+      if (!Number.isNaN(sinceMs) && Date.parse(rec.startedAt) < sinceMs) continue
+      if (!Number.isNaN(untilMs) && Date.parse(rec.startedAt) > untilMs) continue
+      out.sessionsSearched++
+      const content = this.read(rec.sessionId)
+      if (!content) continue
+      const lines = content.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        if (out.totalMatches >= maxMatches) return out
+        if (!test(lines[i])) continue
+        const ctxBefore: string[] = []
+        const ctxAfter: string[] = []
+        for (let b = Math.max(0, i - contextLines); b < i; b++) ctxBefore.push(SessionLogService.stripAnsi(lines[b]))
+        for (let a = i + 1; a <= Math.min(lines.length - 1, i + contextLines); a++) ctxAfter.push(SessionLogService.stripAnsi(lines[a]))
+        out.matches.push({
+          sessionId: rec.sessionId,
+          title: rec.title,
+          type: rec.type,
+          startedAt: rec.startedAt,
+          line: i + 1,
+          text: SessionLogService.stripAnsi(lines[i]),
+          contextBefore: ctxBefore,
+          contextAfter: ctxAfter,
+        })
+        out.totalMatches++
+      }
+    }
+    return out
+  }
+
+  /** Remove ANSI/VT escape sequences so matched lines render readably. */
+  private static stripAnsi(input: string): string {
+    // eslint-disable-next-line no-control-regex
+    return input.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '').replace(/\r/g, '')
   }
 
   /** Delete a session log + index entry. */

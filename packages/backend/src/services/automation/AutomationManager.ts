@@ -7,6 +7,8 @@ import type {
   ScheduledTaskEntry,
   ConfigTemplateEntry,
   ConfigTemplateVersion,
+  PlaybookEntry,
+  PlaybookStep,
 } from '../../types'
 
 /**
@@ -49,7 +51,7 @@ export class AutomationManager {
     const s = this.opts.getSettings()
     const a = s?.automation
     if (!a || typeof a !== 'object') {
-      return { groups: [], deviceMemory: [], scripts: [], scheduledTasks: [], templates: [] }
+      return { groups: [], deviceMemory: [], scripts: [], scheduledTasks: [], templates: [], playbooks: [] }
     }
     return {
       groups: a.groups ?? [],
@@ -57,6 +59,7 @@ export class AutomationManager {
       scripts: a.scripts ?? [],
       scheduledTasks: a.scheduledTasks ?? [],
       templates: a.templates ?? [],
+      playbooks: a.playbooks ?? [],
     }
   }
 
@@ -235,4 +238,71 @@ export class AutomationManager {
     this.commit({ ...this.block(), templates: next })
     return version
   }
+
+  // --- Playbooks ---
+  listPlaybooks(): readonly PlaybookEntry[] { return this.block().playbooks }
+  getPlaybook(idOrName: string): PlaybookEntry | undefined {
+    const needle = idOrName.trim().toLowerCase()
+    return this.block().playbooks.find((p) => p.id === idOrName || p.name.trim().toLowerCase() === needle)
+  }
+  createPlaybook(p: Omit<PlaybookEntry, 'id' | 'createdAt' | 'updatedAt' | 'lastRunAt' | 'lastRunOk'>): PlaybookEntry {
+    if (!p.name?.trim()) throw new Error('Playbook name is required')
+    const ts = nowIso()
+    const steps = normalizePlaybookSteps(p.steps)
+    const entry: PlaybookEntry = { ...p, name: p.name.trim(), steps, id: rid('pb'), createdAt: ts, updatedAt: ts }
+    this.commit({ ...this.block(), playbooks: [...this.block().playbooks, entry] })
+    return entry
+  }
+  updatePlaybook(p: Partial<PlaybookEntry> & { id: string }): PlaybookEntry {
+    const list = this.block().playbooks
+    const i = list.findIndex((x) => x.id === p.id)
+    if (i === -1) throw new Error(`No playbook with id "${p.id}"`)
+    const next = list.slice()
+    const merged = { ...list[i], ...p, id: p.id }
+    if (p.steps) merged.steps = normalizePlaybookSteps(p.steps)
+    merged.updatedAt = bumpedAfter(list[i].updatedAt ?? list[i].createdAt)
+    next[i] = merged
+    this.commit({ ...this.block(), playbooks: next })
+    return next[i]
+  }
+  deletePlaybook(id: string): boolean {
+    const list = this.block().playbooks
+    const next = list.filter((p) => p.id !== id)
+    if (next.length === list.length) return false
+    this.commit({ ...this.block(), playbooks: next })
+    return true
+  }
+  /** Stamp last-run status onto the entry (called by the playbook runner). */
+  markPlaybookRun(id: string, ok: boolean): void {
+    const list = this.block().playbooks
+    const i = list.findIndex((x) => x.id === id)
+    if (i === -1) return
+    const next = list.slice()
+    next[i] = { ...list[i], lastRunAt: nowIso(), lastRunOk: ok }
+    this.commit({ ...this.block(), playbooks: next })
+  }
+}
+
+/** Validate + normalize playbook steps: assign ids, enforce kind requirements. */
+function normalizePlaybookSteps(steps: PlaybookStep[] | undefined): PlaybookStep[] {
+  if (!steps || steps.length === 0) throw new Error('A playbook needs at least one step')
+  return steps.map((s, idx) => {
+    const kind = s.kind
+    if (kind !== 'command' && kind !== 'script' && kind !== 'wait') {
+      throw new Error(`Step ${idx + 1}: kind must be command|script|wait`)
+    }
+    if (kind === 'command' && !(s.command ?? '').trim()) {
+      throw new Error(`Step ${idx + 1}: command steps need a non-empty command`)
+    }
+    if (kind === 'script' && !(s.scriptId ?? '').trim()) {
+      throw new Error(`Step ${idx + 1}: script steps need a scriptId`)
+    }
+    if (kind === 'wait' && !(typeof s.waitSeconds === 'number' && s.waitSeconds > 0)) {
+      throw new Error(`Step ${idx + 1}: wait steps need waitSeconds > 0`)
+    }
+    if (s.onError && s.onError !== 'stop' && s.onError !== 'continue') {
+      throw new Error(`Step ${idx + 1}: onError must be stop|continue`)
+    }
+    return { ...s, id: s.id || rid('st') }
+  })
 }

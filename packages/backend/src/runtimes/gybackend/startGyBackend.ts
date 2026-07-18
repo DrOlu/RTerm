@@ -30,6 +30,7 @@ import { createAutoTerminalConfig } from "../../services/terminal/terminalConnec
 import { TerminalCommandDraftService } from "../../services/TerminalCommandDraftService";
 import { ConnectionManager } from "../../services/ConnectionManager";
 import { AutomationManager } from "../../services/automation/AutomationManager";
+import { AgentRunLedger } from "../../services/agentRunLedger";
 import { SessionLogService } from "../../services/automation/sessionLogService";
 import { SchedulerService } from "../../services/automation/schedulerService";
 import { executeScheduledTask } from "../../services/automation/scheduledTaskRunner";
@@ -194,6 +195,12 @@ export async function startGyBackend(): Promise<void> {
       gatewayService.broadcastRaw("settings:updated", next),
   });
   agentService.setAutomationManager(automationManager);
+
+  // Agent run ledger: persisted audit + token-cost record of every agent run
+  // (SQLite, survives restarts). On boot, close out runs orphaned by a crash.
+  const agentRunLedger = new AgentRunLedger();
+  agentRunLedger.markStaleRunsAborted(Date.now());
+  agentService.setAgentRunLedger(agentRunLedger);
 
   // Session logging: record terminal output per session to disk when enabled.
   if (settingsService.getSettings().sessionLogging?.enabled) {

@@ -40,6 +40,19 @@ test('migrateBackendSettings preserves a persisted automation block (groups surv
       templates: [
         { id: 'tpl-1', name: 'base', body: 'hostname {{hostname}}', variables: [], versions: [] },
       ],
+      playbooks: [
+        {
+          id: 'pb-1',
+          name: 'nightly-backup',
+          steps: [
+            { id: 'st-1', kind: 'command', command: 'term length 0', name: 'prep' },
+            { id: 'st-2', kind: 'script', scriptId: 'scr-1', name: 'collect' },
+            { id: 'st-3', kind: 'wait', waitSeconds: 5 },
+          ],
+          groupId: 'grp-1',
+          onError: 'stop',
+        },
+      ],
     },
   }
 
@@ -50,6 +63,10 @@ test('migrateBackendSettings preserves a persisted automation block (groups surv
   assertEqual(migrated.automation!.scheduledTasks.length, 1, 'scheduled tasks should survive migration')
   assertEqual(migrated.automation!.templates.length, 1, 'templates should survive migration')
   assertEqual(migrated.automation!.deviceMemory.length, 1, 'device memory should survive migration')
+  assertEqual(migrated.automation!.playbooks.length, 1, 'playbooks should survive migration')
+  assertEqual(migrated.automation!.playbooks[0].name, 'nightly-backup', 'playbook name should survive')
+  assertEqual(migrated.automation!.playbooks[0].steps.length, 3, 'playbook steps should survive')
+  assertEqual(migrated.automation!.playbooks[0].steps[1].scriptId, 'scr-1', 'playbook step script ref should survive')
   assertEqual(
     migrated.automation!.scheduledTasks[0].cron,
     '0 2 * * *',

@@ -90,7 +90,7 @@ export function resolveScheduledTaskCommand(
   )
 }
 
-interface ResolvedTarget {
+export interface ResolvedTarget {
   name: string
   kind: 'ssh' | 'winrm' | 'serial'
   ssh?: SSHConnectionEntry
@@ -98,9 +98,16 @@ interface ResolvedTarget {
   serial?: SerialConnectionEntry
 }
 
-/** Resolve which saved connections a task should run against. */
+/** The targeting scope shared by scripts, scheduled tasks, and playbooks. */
+export interface TargetScope {
+  groupId?: string
+  tags?: string[]
+  targets?: string[]
+}
+
+/** Resolve which saved connections a scope should run against. */
 export function resolveScheduledTaskTargets(
-  task: ScheduledTaskEntry,
+  task: TargetScope,
   settings: BackendSettings,
 ): ResolvedTarget[] {
   const connections = settings.connections ?? {
@@ -147,7 +154,7 @@ export function resolveScheduledTaskTargets(
   return targets
 }
 
-function sshEntryToConfig(
+export function sshEntryToConfig(
   entry: SSHConnectionEntry,
   settings: BackendSettings,
 ): TerminalConfig {
@@ -177,7 +184,7 @@ function sshEntryToConfig(
   } as TerminalConfig
 }
 
-function winrmEntryToConfig(entry: WinRMConnectionEntry): TerminalConfig {
+export function winrmEntryToConfig(entry: WinRMConnectionEntry): TerminalConfig {
   return {
     type: 'winrm',
     id: `sch-${randomUUID()}`,
@@ -195,7 +202,7 @@ function winrmEntryToConfig(entry: WinRMConnectionEntry): TerminalConfig {
   } as TerminalConfig
 }
 
-function serialEntryToConfig(entry: SerialConnectionEntry): TerminalConfig {
+export function serialEntryToConfig(entry: SerialConnectionEntry): TerminalConfig {
   return {
     type: 'serial',
     id: `sch-${randomUUID()}`,

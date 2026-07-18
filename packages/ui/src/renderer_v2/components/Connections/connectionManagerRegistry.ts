@@ -2,11 +2,11 @@ import { Server, Shield, Waypoints, MonitorCog, Cable, FolderTree, type LucideIc
 import type { AppStore } from '../../stores/AppStore'
 import { PortForwardType } from '../../lib/ipcTypes'
 
-export type ConnectionsSection = 'ssh' | 'winrm' | 'serial' | 'proxies' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates'
+export type ConnectionsSection = 'ssh' | 'winrm' | 'serial' | 'proxies' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates' | 'playbooks'
 
 export interface ConnectionManagerSectionDefinition {
   id: ConnectionsSection
-  labelKey: 'ssh' | 'winrm' | 'serial' | 'proxy' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates'
+  labelKey: 'ssh' | 'winrm' | 'serial' | 'proxy' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates' | 'playbooks'
   icon: LucideIcon
   getEntries: (store: AppStore) => any[]
   createDraft: () => any
@@ -178,6 +178,25 @@ export const CONNECTION_MANAGER_SECTIONS: readonly ConnectionManagerSectionDefin
       },
       deleteEntry: async (store, id) => {
         await store.deleteTemplate(id)
+      },
+    }),
+    createSectionDefinition({
+      id: 'playbooks',
+      labelKey: 'playbooks',
+      icon: Waypoints,
+      getEntries: (store) => store.settings?.automation?.playbooks ?? [],
+      createDraft: () => ({
+        id: `pb-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+        name: '',
+        description: '',
+        steps: [],
+        onError: 'stop',
+      }),
+      saveDraft: async (store, draft) => {
+        await store.savePlaybook(draft)
+      },
+      deleteEntry: async (store, id) => {
+        await store.deletePlaybook(id)
       },
     }),
     createSectionDefinition({

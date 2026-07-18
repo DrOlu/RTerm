@@ -27,6 +27,7 @@ import {
   matchesCommandDraftShortcut,
 } from "../../lib/commandDraftShortcut";
 import { isTerminalTrackedByBackend } from "./runtimeRetention";
+import { broadcastStore } from "../../stores/BroadcastStore";
 import { resolveTerminalSize } from "./terminalDimensions";
 import {
   mergeTerminalRefitRequests,
@@ -381,6 +382,9 @@ const createRuntime = (
 
   const inputDisposable = term.onData((data) => {
     window.gyshell.terminal.write(config.id, data);
+    // Broadcast input: if this terminal is in the active broadcast group, fan
+    // the same keystrokes out to every other active member.
+    broadcastStore.fanOut(config.id, data);
   });
 
   const selectionDisposable = term.onSelectionChange(() => {

@@ -3,7 +3,8 @@ import type { FileTransferService } from '../FileTransferService'
 import type { CommandPolicyMode } from '../CommandPolicy/CommandPolicyService'
 import type { ICommandPolicyRuntime, IConnectionManagerRuntime } from '../runtimeContracts'
 import type { AutomationManager } from '../automation/AutomationManager'
-import type { SessionLogRecord } from '../automation/sessionLogService'
+import type { SessionLogRecord, SessionLogSearchOptions, SessionLogSearchResult } from '../automation/sessionLogService'
+import type { AgentRunLedger } from '../agentRunLedger'
 import type { SSHConnectionEntry, ProxyEntry, TunnelEntry, WinRMConnectionEntry, SerialConnectionEntry } from '../../types'
 import type {
   QueuedAgentInsertionInput,
@@ -32,7 +33,13 @@ export interface ToolExecutionContext {
    * templates) backing the automation agent tools. */
   automationManager?: AutomationManager
   /** Optional session-log handle so the agent can list/read recorded sessions. */
-  sessionLogger?: { list(): SessionLogRecord[]; read(sessionId: string): string }
+  sessionLogger?: {
+    list(): SessionLogRecord[]
+    read(sessionId: string): string
+    search?(query: string, opts?: SessionLogSearchOptions): SessionLogSearchResult
+  }
+  /** Optional persisted run audit + token-cost ledger (get_run_ledger). */
+  agentRunLedger?: Pick<AgentRunLedger, 'listRuns' | 'getRun' | 'summarize'>
   agentRunId?: string
   /**
    * Saved SSH connections from backend settings (`connections.ssh`).

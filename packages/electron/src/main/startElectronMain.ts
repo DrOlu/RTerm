@@ -28,6 +28,7 @@ import { UIHistoryService } from "../../../backend/src/services/UIHistoryService
 import { ChatHistoryService } from "../../../backend/src/services/ChatHistoryService";
 import { ConnectionManager } from "../../../backend/src/services/ConnectionManager";
 import { AutomationManager } from "../../../backend/src/services/automation/AutomationManager";
+import { AgentRunLedger } from "../../../backend/src/services/agentRunLedger";
 import { SessionLogService } from "../../../backend/src/services/automation/sessionLogService";
 import { SchedulerService } from "../../../backend/src/services/automation/schedulerService";
 import { GatewayService } from "../../../backend/src/services/Gateway/GatewayService";
@@ -1083,6 +1084,20 @@ export async function startElectronMain(): Promise<void> {
             gatewayService.broadcastRaw("settings:updated", next),
         });
         agentService.setAutomationManager(automationManager);
+
+        // Agent run ledger (persisted audit + token-cost record, SQLite).
+        // Close out runs orphaned by a previous crash, then wire for query IPC.
+        const agentRunLedger = new AgentRunLedger();
+        agentRunLedger.markStaleRunsAborted(Date.now());
+        agentService.setAgentRunLedger(agentRunLedger);
+        ipcMain.handle("agentRunLedger:list", (_e, filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
+          agentRunLedger.listRuns(filter),
+        );
+        ipcMain.handle("agentRunLedger:summary", (_e, filter?: { sinceDays?: number }) =>
+          agentRunLedger.summarize({
+            sinceMs: typeof filter?.sinceDays === "number" ? Date.now() - filter.sinceDays * 24 * 3600 * 1000 : undefined,
+          }),
+        );
 
         // Session logging (records terminal output per session when enabled).
         if (settingsService.getSettings().sessionLogging?.enabled) {

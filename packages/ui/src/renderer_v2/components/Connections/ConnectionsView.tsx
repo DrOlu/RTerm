@@ -28,6 +28,7 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
   const scripts = store.settings?.automation?.scripts ?? []
   const scheduledTasks = store.settings?.automation?.scheduledTasks ?? []
   const templates = store.settings?.automation?.templates ?? []
+  const playbooks = store.settings?.automation?.playbooks ?? []
 
   const proxies = store.settings?.connections?.proxies ?? []
   const tunnels = store.settings?.connections?.tunnels ?? []
@@ -137,7 +138,9 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                             ? (t.connections as any).scripts ?? 'Scripts'
                             : item.labelKey === 'scheduledTasks'
                               ? (t.connections as any).scheduledTasks ?? 'Scheduled Tasks'
-                              : (t.connections as any).templates ?? 'Templates'
+                              : item.labelKey === 'playbooks'
+                                ? (t.connections as any).playbooks ?? 'Playbooks'
+                                : (t.connections as any).templates ?? 'Templates'
             return (
               <div
                 key={item.id}
@@ -707,6 +710,108 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                   <div className="editor-card">
                     <div className="editor-row"><span className="editor-icon"><Server size={16} strokeWidth={2} /></span><input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
                     <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}><span className="editor-icon" style={{ marginTop: 6 }}><Server size={16} strokeWidth={2} /></span><textarea className="editor-input" style={{ minHeight: 96, resize: 'vertical', fontFamily: 'monospace' }} placeholder="Template body (Jinja-subset)" value={draft.body ?? ''} onChange={(e) => setDraft({ ...draft, body: e.target.value })} /></div>
+                    <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {section === 'playbooks' ? (
+          <>
+            <div className="connections-header"><div className="connections-title">{(t.connections as any).playbooks ?? 'Playbooks'}</div><div className="connections-actions"><button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}><Plus size={16} strokeWidth={2} /></button></div></div>
+            <div className="connections-split">
+              <div className="connections-table">
+                <div className="connections-row header"><div className="connections-row-main header-main"><div>{t.common.name}</div><div>Steps</div><div>Last run</div></div><div className="row-icon header-icon" /></div>
+                {playbooks.map((c) => (
+                  <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}>
+                      <div>{c.name}</div>
+                      <div>{c.steps?.length ?? 0}</div>
+                      <div>{c.lastRunAt ? `${c.lastRunOk ? '✓' : '✗'} ${new Date(c.lastRunAt).toLocaleString()}` : '—'}</div>
+                    </button>
+                    <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
+                  </div>
+                ))}
+                {!playbooks.length ? <div className="connections-empty">No playbooks yet. A playbook runs an ordered list of steps (commands, saved scripts, waits) against a target scope. Run it via the agent (run_playbook).</div> : null}
+              </div>
+              <div className="connections-editor">
+                {!draft ? <div className="editor-empty">{t.common.selectOrCreate}</div> : (
+                  <div className="editor-card">
+                    <div className="editor-row"><span className="editor-icon"><Waypoints size={16} strokeWidth={2} /></span><input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><Pencil size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Description" value={draft.description ?? ''} onChange={(e) => setDraft({ ...draft, description: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><FolderTree size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.groupId ?? ''} onChange={(val) => setDraft({ ...draft, groupId: val || undefined })} options={[{value:'',label:'Scope: local shell'}, ...groups.map((g:any)=>({value:g.id,label:`Scope: group ${g.name}`}))]} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.onError ?? 'stop'} onChange={(val) => setDraft({ ...draft, onError: val })} options={[{value:'stop',label:'On failure: stop'},{value:'continue',label:'On failure: continue'}]} />
+                    </div>
+                    <div style={{ padding: '4px 0 2px', fontSize: 12, opacity: 0.7 }}>Steps (run in order)</div>
+                    {(draft.steps ?? []).map((s: any, i: number) => (
+                      <div key={s.id ?? i} style={{ border: '1px solid var(--border, #333)', borderRadius: 6, padding: 6, marginBottom: 6 }}>
+                        <div className="editor-row">
+                          <span style={{ fontSize: 12, width: 18, textAlign: 'center' }}>{i + 1}</span>
+                          <Select className="editor-select" value={s.kind} onChange={(val) => {
+                            const steps = (draft.steps ?? []).slice()
+                            steps[i] = { ...steps[i], kind: val }
+                            setDraft({ ...draft, steps })
+                          }} options={[{value:'command',label:'command'},{value:'script',label:'script'},{value:'wait',label:'wait'}]} />
+                          <input className="editor-input" placeholder="Step name (optional)" value={s.name ?? ''} onChange={(e) => {
+                            const steps = (draft.steps ?? []).slice()
+                            steps[i] = { ...steps[i], name: e.target.value }
+                            setDraft({ ...draft, steps })
+                          }} />
+                          <button className="icon-btn-sm" title="Move up" disabled={i === 0} onClick={() => {
+                            const steps = (draft.steps ?? []).slice()
+                            ;[steps[i - 1], steps[i]] = [steps[i], steps[i - 1]]
+                            setDraft({ ...draft, steps })
+                          }}>↑</button>
+                          <button className="icon-btn-sm" title="Move down" disabled={i === (draft.steps?.length ?? 0) - 1} onClick={() => {
+                            const steps = (draft.steps ?? []).slice()
+                            ;[steps[i], steps[i + 1]] = [steps[i + 1], steps[i]]
+                            setDraft({ ...draft, steps })
+                          }}>↓</button>
+                          <button className="icon-btn-sm danger" title={t.common.delete} onClick={() => {
+                            const steps = (draft.steps ?? []).filter((_: any, j: number) => j !== i)
+                            setDraft({ ...draft, steps })
+                          }}><Trash2 size={14} /></button>
+                        </div>
+                        {s.kind === 'command' ? (
+                          <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '4px 0 0 18px' }}><textarea className="editor-input" style={{ minHeight: 44, resize: 'vertical', fontFamily: 'monospace' }} placeholder="Command" value={s.command ?? ''} onChange={(e) => {
+                            const steps = (draft.steps ?? []).slice()
+                            steps[i] = { ...steps[i], command: e.target.value }
+                            setDraft({ ...draft, steps })
+                          }} /></div>
+                        ) : s.kind === 'script' ? (
+                          <div className="editor-row" style={{ padding: '4px 0 0 18px' }}>
+                            <Select className="editor-select" value={s.scriptId ?? ''} onChange={(val) => {
+                              const steps = (draft.steps ?? []).slice()
+                              steps[i] = { ...steps[i], scriptId: val || undefined }
+                              setDraft({ ...draft, steps })
+                            }} options={[{value:'',label:'Pick a saved script…'}, ...scripts.map((sc:any)=>({value:sc.id,label:sc.name}))]} />
+                          </div>
+                        ) : (
+                          <div className="editor-row" style={{ padding: '4px 0 0 18px' }}>
+                            <input className="editor-input" type="number" min={1} placeholder="Wait seconds" value={s.waitSeconds ?? ''} onChange={(e) => {
+                              const steps = (draft.steps ?? []).slice()
+                              steps[i] = { ...steps[i], waitSeconds: Number(e.target.value) || undefined }
+                              setDraft({ ...draft, steps })
+                            }} />
+                          </div>
+                        )}
+                        <div className="editor-row" style={{ padding: '4px 0 0 18px' }}>
+                          <Select className="editor-select" value={s.onError ?? ''} onChange={(val) => {
+                            const steps = (draft.steps ?? []).slice()
+                            steps[i] = { ...steps[i], onError: val || undefined }
+                            setDraft({ ...draft, steps })
+                          }} options={[{value:'',label:`On failure: playbook default (${draft.onError ?? 'stop'})`},{value:'stop',label:'On failure: stop'},{value:'continue',label:'On failure: continue'}]} />
+                        </div>
+                      </div>
+                    ))}
+                    <div className="editor-row" style={{ justifyContent: 'flex-start' }}>
+                      <button className="icon-btn-sm" title="Add step" onClick={() => setDraft({ ...draft, steps: [...(draft.steps ?? []), { id: `st-${Math.random().toString(36).slice(2, 10)}`, kind: 'command', command: '' }] })}><Plus size={14} /> Add step</button>
+                    </div>
                     <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
                   </div>
                 )}

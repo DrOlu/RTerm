@@ -119,6 +119,28 @@ interface BackendSettings {
     scripts: Array<{ id: string; name: string; command: string; description?: string; targets?: string[]; groupId?: string; tags?: string[]; createdAt?: string; updatedAt?: string }>;
     scheduledTasks: Array<{ id: string; name: string; cron: string; scriptId?: string; command?: string; groupId?: string; tags?: string[]; targets?: string[]; retryAttempts?: number; retryDelaySeconds?: number; enabled: boolean; lastRunAt?: string }>;
     templates: Array<{ id: string; name: string; body: string; variables: Array<{ name: string; defaultValue?: string; description?: string }>; versions: Array<{ at: string; rendered: string; variables: Record<string, unknown> }>; updatedAt?: string }>;
+    playbooks: Array<{
+      id: string;
+      name: string;
+      description?: string;
+      steps: Array<{
+        id: string;
+        name?: string;
+        kind: 'command' | 'script' | 'wait';
+        command?: string;
+        scriptId?: string;
+        waitSeconds?: number;
+        onError?: 'stop' | 'continue';
+      }>;
+      groupId?: string;
+      tags?: string[];
+      targets?: string[];
+      onError?: 'stop' | 'continue';
+      createdAt?: string;
+      updatedAt?: string;
+      lastRunAt?: string;
+      lastRunOk?: boolean;
+    }>;
   };
   sessionLogging?: { enabled: boolean };
   model: string;
@@ -598,6 +620,36 @@ export interface GyShellAPI {
     set: (settings: Partial<UiSettings>) => Promise<void>;
   };
 
+  // Agent run ledger (persisted audit + token-cost record)
+  agentRunLedger: {
+    list: (filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
+      Promise<Array<{
+        runId: string;
+        sessionId: string;
+        profileId?: string;
+        model?: string;
+        inputPreview?: string;
+        startedAt: number;
+        endedAt?: number;
+        status: "running" | "completed" | "failed" | "aborted";
+        error?: string;
+        promptTokens: number;
+        completionTokens: number;
+        lastTotalTokens: number;
+        usageEvents: number;
+      }>>;
+    summary: (filter?: { sinceDays?: number }) =>
+      Promise<{
+        totalRuns: number;
+        completedRuns: number;
+        failedRuns: number;
+        abortedRuns: number;
+        promptTokens: number;
+        completionTokens: number;
+        byModel: Array<{ model: string; runs: number; promptTokens: number; completionTokens: number }>;
+      }>;
+  };
+
   // Terminal
   terminal: {
     list: () => Promise<{
@@ -606,6 +658,7 @@ export interface GyShellAPI {
     createTab: (config: TerminalConfig) => Promise<{ id: string }>;
     reconnect: (terminalId: string) => Promise<{ id: string }>;
     write: (terminalId: string, data: string) => Promise<void>;
+    writeBroadcast: (terminalIds: string[], data: string) => Promise<string[]>;
     writePaths: (terminalId: string, paths: string[]) => Promise<void>;
     resize: (terminalId: string, cols: number, rows: number) => Promise<void>;
     kill: (terminalId: string) => Promise<void>;
@@ -1021,6 +1074,10 @@ const api: GyShellAPI = {
     get: () => ipcRenderer.invoke("ui-settings:get"),
     set: (settings) => ipcRenderer.invoke("ui-settings:set", settings),
   },
+  agentRunLedger: {
+    list: (filter) => ipcRenderer.invoke("agentRunLedger:list", filter),
+    summary: (filter) => ipcRenderer.invoke("agentRunLedger:summary", filter),
+  },
 
   terminal: {
     list: () => ipcRenderer.invoke("terminal:list"),
@@ -1029,6 +1086,8 @@ const api: GyShellAPI = {
       ipcRenderer.invoke("terminal:reconnect", terminalId),
     write: (terminalId, data) =>
       ipcRenderer.invoke("terminal:write", terminalId, data),
+    writeBroadcast: (terminalIds, data) =>
+      ipcRenderer.invoke("terminal:writeBroadcast", terminalIds, data),
     writePaths: (terminalId, paths) =>
       ipcRenderer.invoke("terminal:writePaths", terminalId, paths),
     resize: (terminalId, cols, rows) =>

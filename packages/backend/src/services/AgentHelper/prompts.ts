@@ -232,6 +232,10 @@ export const LIST_SESSION_LOGS_DESCRIPTION =
   "List recorded terminal sessions (Netcatty \"connection logs\"). Sessions are recorded to disk when sessionLogging.enabled is on. Returns each session's id, title, type, start/end time, and byte size. Use read_session_log with a sessionId to read the full output.";
 export const READ_SESSION_LOG_DESCRIPTION =
   "Read the full recorded output of a terminal session by its sessionId (from list_session_logs). Useful for reviewing what happened on a connection after the fact — troubleshooting context, audit, training.";
+export const SEARCH_SESSION_LOGS_DESCRIPTION =
+  "Search across ALL recorded terminal session logs for a substring or regex. Returns matching lines with the session (host, id, time) and 1-based line number, plus optional surrounding context lines. Filter by host, sessionId, or time range. This is the fastest way to find 'when did we run X', 'which host showed error Y', or 'every occurrence of Z across the fleet' without reading each log in full.";
+export const GET_RUN_LEDGER_DESCRIPTION =
+  "Query the persisted agent run audit + token-cost ledger (SQLite, survives restarts). Every agent run is recorded with start/finish time, status (completed/failed/aborted), error, model, and per-call token usage. action='list' shows recent runs (filter by sessionId/status), 'summary' aggregates run counts and prompt/completion tokens by model (optionally over the last N days), 'get' shows one run with every usage event. Use it to answer 'what did the agent do', 'why did a run fail', and 'how many tokens are we burning per model'.";
 
 export const MANAGE_WINRM_CONNECTION_DESCRIPTION = [
   "Create, update, delete, or list saved WinRM connections (Windows Remote Management, WS-Management 5985/5986) — the Windows counterpart of manage_ssh_connection. Use this to provision a Windows server before connecting to it.",
@@ -283,6 +287,18 @@ export const MANAGE_TEMPLATE_DESCRIPTION = [
 export const IMPORT_PUTTY_DESCRIPTION = [
   "Import saved PuTTY sessions from a Windows Registry .reg export into RTerm's saved SSH connections. Only ssh-protocol sessions with a HostName are imported; serial/raw/telnet sessions are skipped, and duplicate names are not re-imported.",
   "Provide the full contents of the .reg file as `regContent`. The tool creates the connections via the connection manager so they appear in the Connections panel immediately. Open them with open_terminal_tab by Name.",
+].join("\n");
+
+export const MANAGE_PLAYBOOK_DESCRIPTION = [
+  "Create and manage playbooks — ordered, multi-step workflows that run a sequence of steps (inline command, saved script, or timed wait) against a target scope (group, tags, explicit connections, or the local shell when no scope is set). Steps run sequentially on each target; targets run one at a time.",
+  "action=\"create\" takes name + steps[] (each: kind=command|script|wait, command/scriptId/waitSeconds, optional name, optional onError). Failure policy: a failing step stops that target's remaining steps unless the step or playbook sets onError=\"continue\"; other targets still run.",
+  "action=\"list\"/\"get\"/\"update\"/\"delete\" manage playbooks. Execute with run_playbook. Every run is recorded (run history) and stamped on the entry (lastRunAt/lastRunOk).",
+  "Use playbooks for repeatable multi-step operations: pre-change snapshot → apply → verify → save; staged upgrades with settle waits; audit sweeps that tolerate per-device failures (onError=\"continue\").",
+].join("\n");
+
+export const RUN_PLAYBOOK_DESCRIPTION = [
+  "Execute a saved playbook by id or name: opens a short-lived headless session per target, runs each step to completion in order, and tears the session down. Returns a per-target, per-step report (ok/failed, exit codes, which steps ran).",
+  "Session output is captured by session logging when enabled, so playbook runs are auditable via list_session_logs / search_session_logs. The run is also recorded in the playbook run history and stamped on the playbook (lastRunAt/lastRunOk).",
 ].join("\n");
 
 export const PROBE_CONNECTIVITY_DESCRIPTION = [
@@ -372,6 +388,14 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     description: READ_SESSION_LOG_DESCRIPTION,
   },
   {
+    name: "search_session_logs",
+    description: SEARCH_SESSION_LOGS_DESCRIPTION,
+  },
+  {
+    name: "get_run_ledger",
+    description: GET_RUN_LEDGER_DESCRIPTION,
+  },
+  {
     name: "run_fleet_command",
     description: RUN_FLEET_COMMAND_DESCRIPTION,
   },
@@ -406,6 +430,14 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "import_putty",
     description: IMPORT_PUTTY_DESCRIPTION,
+  },
+  {
+    name: "manage_playbook",
+    description: MANAGE_PLAYBOOK_DESCRIPTION,
+  },
+  {
+    name: "run_playbook",
+    description: RUN_PLAYBOOK_DESCRIPTION,
   },
 ];
 

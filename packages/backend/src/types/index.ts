@@ -274,6 +274,55 @@ export interface AutomationSettings {
   scripts: ScriptEntry[]
   scheduledTasks: ScheduledTaskEntry[]
   templates: ConfigTemplateEntry[]
+  playbooks: PlaybookEntry[]
+}
+
+/** One step in a playbook — run sequentially on every resolved target. */
+export interface PlaybookStep {
+  id: string
+  /** Optional display name (e.g. "backup config"). */
+  name?: string
+  /**
+   * Step kind:
+   * - command: run an inline command
+   * - script: run a saved script by id
+   * - wait: pause for waitSeconds before the next step
+   */
+  kind: 'command' | 'script' | 'wait'
+  /** Inline command (kind=command). */
+  command?: string
+  /** Saved script id (kind=script). */
+  scriptId?: string
+  /** Seconds to pause (kind=wait). */
+  waitSeconds?: number
+  /** Per-step failure policy; overrides the playbook-level onError. */
+  onError?: 'stop' | 'continue'
+}
+
+/**
+ * A playbook — an ordered, multi-step workflow (command/script/wait steps)
+ * that runs against a target scope (group, tags, or explicit connections;
+ * empty scope = local shell). Steps run sequentially per target; targets are
+ * executed one at a time so shared infrastructure is never hammered in
+ * parallel by accident.
+ */
+export interface PlaybookEntry {
+  id: string
+  name: string
+  description?: string
+  steps: PlaybookStep[]
+  /** Target scope (same semantics as ScriptEntry/ScheduledTaskEntry). */
+  groupId?: string
+  tags?: string[]
+  targets?: string[]
+  /** Default failure policy for steps that don't override it (default stop). */
+  onError?: 'stop' | 'continue'
+  createdAt?: string
+  updatedAt?: string
+  /** ISO timestamp of last run, for the UI. */
+  lastRunAt?: string
+  /** Outcome of the last run (ok / failed), for the UI. */
+  lastRunOk?: boolean
 }
 
 export interface ProxyEntry {

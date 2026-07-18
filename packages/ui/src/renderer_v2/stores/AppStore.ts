@@ -255,6 +255,7 @@ export type SettingsSection =
   | "memory"
   | "workflow"
   | "accessTokens"
+  | "runLedger"
   | "version";
 
 export type McpToolSummary = Awaited<
@@ -512,6 +513,8 @@ export class AppStore {
       deleteScheduledTask: action,
       saveTemplate: action,
       deleteTemplate: action,
+      savePlaybook: action,
+      deletePlaybook: action,
       setSessionLoggingEnabled: action,
       importPuttySessions: action,
       reconnectTerminal: action,
@@ -3272,6 +3275,7 @@ export class AppStore {
         scripts: [],
         scheduledTasks: [],
         templates: [],
+        playbooks: [],
       },
     );
     const next = JSON.parse(JSON.stringify({ ...base, ...patch }));
@@ -3335,6 +3339,20 @@ export class AppStore {
     const current = this.settings ?? (await this.fetchCombinedSettings());
     const list = (current.automation?.templates ?? []).filter((t) => t.id !== id);
     await this.saveAutomationSlice({ templates: list });
+  }
+
+  async savePlaybook(pb: NonNullable<AppSettings["automation"]>["playbooks"][number]): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.playbooks ?? []).slice();
+    const idx = list.findIndex((p) => p.id === pb.id);
+    const next = idx === -1 ? [...list, pb] : list.map((p) => (p.id === pb.id ? { ...p, ...pb } : p));
+    await this.saveAutomationSlice({ playbooks: next });
+  }
+
+  async deletePlaybook(id: string): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = (current.automation?.playbooks ?? []).filter((p) => p.id !== id);
+    await this.saveAutomationSlice({ playbooks: list });
   }
 
   async setSessionLoggingEnabled(enabled: boolean): Promise<void> {

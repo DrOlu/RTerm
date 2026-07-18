@@ -41,6 +41,7 @@ export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
     scripts: [],
     scheduledTasks: [],
     templates: [],
+    playbooks: [],
   },
   sessionLogging: { enabled: false },
   gateway: {

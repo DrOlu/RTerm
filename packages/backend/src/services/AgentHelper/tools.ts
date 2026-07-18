@@ -51,9 +51,13 @@ import {
   manageSerialConnection
 } from './tools/serial_connection_tools'
 import {
-  listSessionLogsSchema, readSessionLogSchema,
-  listSessionLogs, readSessionLog,
+  listSessionLogsSchema, readSessionLogSchema, searchSessionLogsSchema,
+  listSessionLogs, readSessionLog, searchSessionLogs,
 } from './tools/session_log_tools'
+import {
+  getRunLedgerSchema,
+  getRunLedger,
+} from './tools/run_ledger_tools'
 import {
   runFleetCommandSchema,
   collectFactsSchema,
@@ -70,6 +74,10 @@ import {
   manageTemplateSchema, manageTemplate,
   importPuttySchema, importPutty,
 } from './tools/automation_tools'
+import {
+  managePlaybookSchema, managePlaybook,
+  runPlaybookSchema, runPlaybook,
+} from './tools/playbook_tools'
 import { 
   skillToolSchema, 
   buildSkillToolDescription,
@@ -99,7 +107,8 @@ export { copyBetweenTabsSchema, readFileTransferStatusSchema } from './tools/fil
 export { manageSshConnectionSchema } from './tools/connection_tools'
 export { manageWinrmConnectionSchema } from './tools/winrm_connection_tools'
 export { manageSerialConnectionSchema } from './tools/serial_connection_tools'
-export { listSessionLogsSchema, readSessionLogSchema } from './tools/session_log_tools'
+export { listSessionLogsSchema, readSessionLogSchema, searchSessionLogsSchema } from './tools/session_log_tools'
+export { getRunLedgerSchema } from './tools/run_ledger_tools'
 export {
   runFleetCommandSchema,
   collectFactsSchema,
@@ -109,6 +118,7 @@ export {
   manageDeviceMemorySchema, manageScriptSchema, manageGroupSchema,
   manageScheduledTaskSchema, manageTemplateSchema, importPuttySchema,
 } from './tools/automation_tools'
+export { managePlaybookSchema, runPlaybookSchema } from './tools/playbook_tools'
 export { skillToolSchema, createSkillSchema, buildSkillToolDescription } from './tools/skill_tools'
 
 export { BUILTIN_TOOL_INFO } from './prompts'
@@ -219,6 +229,16 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: readSessionLogSchema
     },
     {
+      name: 'search_session_logs',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'search_session_logs')?.description ?? '',
+      schema: searchSessionLogsSchema
+    },
+    {
+      name: 'get_run_ledger',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'get_run_ledger')?.description ?? '',
+      schema: getRunLedgerSchema
+    },
+    {
       name: 'run_fleet_command',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'run_fleet_command')?.description ?? '',
       schema: runFleetCommandSchema
@@ -259,6 +279,16 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: manageTemplateSchema
     },
     {
+      name: 'manage_playbook',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_playbook')?.description ?? '',
+      schema: managePlaybookSchema
+    },
+    {
+      name: 'run_playbook',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'run_playbook')?.description ?? '',
+      schema: runPlaybookSchema
+    },
+    {
       name: 'import_putty',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'import_putty')?.description ?? '',
       schema: importPuttySchema
@@ -286,6 +316,8 @@ export const toolImplementations = {
   manageSerialConnection,
   listSessionLogs,
   readSessionLog,
+  searchSessionLogs,
+  getRunLedger,
   runFleetCommand,
   collectFacts,
   probeConnectivity,
@@ -294,6 +326,8 @@ export const toolImplementations = {
   manageGroup,
   manageScheduledTask,
   manageTemplate,
+  managePlaybook,
+  runPlaybook,
   importPutty,
   writeFile,
   editFile,

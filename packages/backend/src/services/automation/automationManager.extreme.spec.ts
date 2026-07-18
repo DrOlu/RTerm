@@ -119,6 +119,67 @@ test('missing automation block defaults to empty safely', () => {
   if (m.listGroups().length !== 1) throw new Error('create after default')
 })
 
+test('playbooks: create/list/get/update/delete', () => {
+  const { m } = makeManager()
+  const pb = m.createPlaybook({
+    name: 'Nightly config backup',
+    steps: [
+      { id: '', kind: 'command', command: 'term length 0', name: 'prep' },
+      { id: '', kind: 'command', command: 'show run', name: 'collect' },
+    ],
+    groupId: 'grp-core',
+  })
+  if (!pb.id.startsWith('pb-')) throw new Error('id prefix')
+  if (pb.steps.some((s) => !s.id)) throw new Error('step ids should be assigned')
+  if (m.listPlaybooks().length !== 1) throw new Error('count')
+  // get by id AND by name (case-insensitive)
+  if (m.getPlaybook(pb.id)?.name !== 'Nightly config backup') throw new Error('get by id')
+  if (m.getPlaybook('nightly config backup')?.id !== pb.id) throw new Error('get by name')
+  // update
+  m.updatePlaybook({ id: pb.id, description: 'backs up all core routers' })
+  if (m.getPlaybook(pb.id)?.description !== 'backs up all core routers') throw new Error('update')
+  if (!(m.getPlaybook(pb.id)!.updatedAt! >= pb.updatedAt!)) throw new Error('updatedAt bump')
+  // delete
+  if (m.deletePlaybook(pb.id) !== true) throw new Error('delete true')
+  if (m.deletePlaybook(pb.id) !== false) throw new Error('delete false on missing')
+  if (m.listPlaybooks().length !== 0) throw new Error('empty after delete')
+})
+
+test('playbooks: validation rejects bad steps and missing name', () => {
+  const { m } = makeManager()
+  let threw = 0
+  try { m.createPlaybook({ name: '', steps: [{ id: '', kind: 'command', command: 'x' }] }) } catch { threw++ }
+  try { m.createPlaybook({ name: 'x', steps: [] }) } catch { threw++ }
+  try { m.createPlaybook({ name: 'x', steps: [{ id: '', kind: 'command' }] }) } catch { threw++ } // empty command
+  try { m.createPlaybook({ name: 'x', steps: [{ id: '', kind: 'script' }] }) } catch { threw++ } // no scriptId
+  try { m.createPlaybook({ name: 'x', steps: [{ id: '', kind: 'wait', waitSeconds: 0 }] }) } catch { threw++ } // bad wait
+  try { m.createPlaybook({ name: 'x', steps: [{ id: '', kind: 'nope' as any, command: 'x' }] }) } catch { threw++ } // bad kind
+  if (threw !== 6) throw new Error(`expected 6 throws, got ${threw}`)
+})
+
+test('playbooks: markPlaybookRun stamps last-run status', () => {
+  const { m } = makeManager()
+  const pb = m.createPlaybook({ name: 'pb', steps: [{ id: '', kind: 'command', command: 'x' }] })
+  m.markPlaybookRun(pb.id, true)
+  const after = m.getPlaybook(pb.id)!
+  if (!after.lastRunAt) throw new Error('lastRunAt should be set')
+  if (after.lastRunOk !== true) throw new Error('lastRunOk should be true')
+  m.markPlaybookRun(pb.id, false)
+  if (m.getPlaybook(pb.id)!.lastRunOk !== false) throw new Error('lastRunOk should flip to false')
+  // unknown id is a no-op (never throws)
+  m.markPlaybookRun('pb-ghost', true)
+})
+
+test('playbooks: pre-existing settings without playbooks key default safely', () => {
+  // Simulates settings written before the playbooks feature existed.
+  const { m } = makeManager({ scripts: [{ id: 's1', name: 's', command: 'c' }] })
+  if (m.listPlaybooks().length !== 0) throw new Error('should default to empty')
+  m.createPlaybook({ name: 'p', steps: [{ id: '', kind: 'command', command: 'x' }] })
+  if (m.listPlaybooks().length !== 1) throw new Error('create after default')
+  // other slices untouched
+  if (m.listScripts().length !== 1) throw new Error('scripts preserved')
+})
+
 function main() {
   let pass = 0, fail = 0
   for (const c of cases) {

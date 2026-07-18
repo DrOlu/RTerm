@@ -1,6 +1,7 @@
 import React from 'react'
 import { observer } from 'mobx-react-lite'
-import { Server, MonitorCog, Cable, Settings, FolderTree, Clock, FileCode, Activity, Upload } from 'lucide-react'
+import { Server, MonitorCog, Cable, Settings, FolderTree, Clock, FileCode, Activity, Upload, Radio } from 'lucide-react'
+import { broadcastStore } from '../../stores/BroadcastStore'
 import type { AppStore } from '../../stores/AppStore'
 
 /**
@@ -65,6 +66,19 @@ export const CommandPalette: React.FC<{ store: AppStore }> = observer(({ store }
   // Toggles
   const loggingOn = store.settings?.sessionLogging?.enabled === true
   items.push({ id: 'toggle-logging', label: loggingOn ? 'Session logging: On (turn off)' : 'Session logging: Off (turn on)', icon: <Activity size={16} />, run: () => { store.setSessionLoggingEnabled(!loggingOn); setOpen(false) } })
+  // Broadcast input (Terminator-style): toggle mode + manage membership of open terminals
+  const bcOn = broadcastStore.enabled
+  items.push({ id: 'broadcast-toggle', label: bcOn ? `Broadcast input: On (${broadcastStore.activeMemberIds.length} targets) — turn off` : 'Broadcast input: Off (turn on)', hint: 'send keystrokes to multiple terminals', icon: <Radio size={16} />, run: () => { broadcastStore.toggle(); setOpen(false) } })
+  for (const tab of store.terminalTabs) {
+    const inGroup = broadcastStore.isMember(tab.id)
+    items.push({
+      id: `broadcast-member-${tab.id}`,
+      label: `${inGroup ? '✓ ' : ''}Broadcast group: ${tab.title || tab.id}`,
+      hint: inGroup ? 'in group — remove' : 'add to group',
+      icon: <Radio size={16} />,
+      run: () => { broadcastStore.toggleMember(tab.id); setOpen(false) },
+    })
+  }
   // Script / task / template quick-open hint (deep-link into Connections sections)
   items.push({ id: 'goto-scripts', label: 'Go to Scripts', hint: 'Connections panel', icon: <FileCode size={16} />, run: () => { store.openConnections(); setOpen(false) } })
   items.push({ id: 'goto-tasks', label: 'Go to Scheduled Tasks', hint: 'Connections panel', icon: <Clock size={16} />, run: () => { store.openConnections(); setOpen(false) } })

@@ -19,7 +19,7 @@ import {
   MemorySaver,
 } from "@langchain/langgraph";
 import { RunnableLambda } from "@langchain/core/runnables";
-import type { ChatSession, BackendSettings, TerminalTab } from "../types";
+import type { ChatSession, BackendSettings, TerminalTab, UserInputPayload } from "../types";
 import { TerminalService } from "./TerminalService";
 import type { FileTransferService } from "./FileTransferService";
 import type {
@@ -33,6 +33,7 @@ import type { UIHistoryService } from "./UIHistoryService";
 import { v4 as uuidv4 } from "uuid";
 import type { z } from "zod";
 import type { StartTaskInput, StartTaskMode } from "./Gateway/types";
+import { extractUsageTokenBreakdown } from "./agentRunLedger";
 import type { StoredChatSession } from "./ChatHistoryService";
 import {
   buildToolsForModel,
@@ -55,12 +56,16 @@ import {
   manageSerialConnectionSchema,
   listSessionLogsSchema,
   readSessionLogSchema,
+  searchSessionLogsSchema,
+  getRunLedgerSchema,
   manageDeviceMemorySchema,
   manageScriptSchema,
   manageGroupSchema,
   manageScheduledTaskSchema,
   manageTemplateSchema,
   importPuttySchema,
+  managePlaybookSchema,
+  runPlaybookSchema,
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -327,6 +332,9 @@ export class AgentService_v2 {
   private automationManager?: import("./automation/AutomationManager").AutomationManager;
   /** Optional session-log handle for list_session_logs / read_session_log. */
   private sessionLogger?: { list(): import("./automation/sessionLogService").SessionLogRecord[]; read(sessionId: string): string };
+  /** Optional run ledger — persisted audit + token-cost record of every
+   * agent run (start/finish lifecycle + per-call token usage). */
+  private agentRunLedger?: import("./agentRunLedger").AgentRunLedger;
   private mcpToolService: IMcpRuntime;
   private skillService: ISkillRuntime;
   private memoryService: IMemoryRuntime;
@@ -367,6 +375,9 @@ export class AgentService_v2 {
   private fallbackCompactionHistoryExportService: PassChatTempExportService | null =
     null;
   private activeAgentRunIdsBySession: Map<string, string> = new Map();
+  /** sessionId → ledger run id for the in-flight run (set for every run,
+   * unlike activeAgentRunIdsBySession which requires caller metadata). */
+  private ledgerRunIdsBySession: Map<string, string> = new Map();
 
   constructor(
     terminalService: TerminalService,
@@ -418,6 +429,12 @@ export class AgentService_v2 {
   /** Wire a session-log handle so list_session_logs / read_session_log work. */
   setSessionLogger(logger: { list(): import("./automation/sessionLogService").SessionLogRecord[]; read(sessionId: string): string } | null): void {
     this.sessionLogger = logger ?? undefined;
+  }
+
+  /** Wire the persisted run ledger (audit + token cost) backing the
+   * get_run_ledger tool. Every run() is recorded start-to-finish. */
+  setAgentRunLedger(ledger: import("./agentRunLedger").AgentRunLedger | null): void {
+    this.agentRunLedger = ledger ?? undefined;
   }
 
   setFeedbackWaiter(
@@ -1435,6 +1452,17 @@ export class AgentService_v2 {
           totalTokens: currentTokens,
           maxTokens: state.token_state.max_tokens, // Use static max from state
         });
+        // Run ledger: record the per-call usage so cost is auditable later.
+        const ledgerRunId = this.ledgerRunIdsBySession.get(sessionId);
+        if (ledgerRunId && this.agentRunLedger) {
+          const breakdown = extractUsageTokenBreakdown(usageInfo.usage);
+          this.agentRunLedger.recordUsage(ledgerRunId, {
+            model: modelName,
+            promptTokens: breakdown.promptTokens,
+            completionTokens: breakdown.completionTokens,
+            totalTokens: usageInfo.totalTokens,
+          });
+        }
       }
 
       // Always reset pendingToolCalls here to avoid stale queue influencing routing.
@@ -1837,6 +1865,32 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "search_session_logs": {
+          try {
+            const validatedArgs = searchSessionLogsSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.searchSessionLogs(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for search_session_logs: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "get_run_ledger": {
+          try {
+            const validatedArgs = getRunLedgerSchema.parse(toolCall.args || {});
+            result = await toolImplementations.getRunLedger(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for get_run_ledger: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "manage_device_memory": {
           try {
             const validatedArgs = manageDeviceMemorySchema.parse(toolCall.args || {});
@@ -1888,6 +1942,24 @@ export class AgentService_v2 {
             result = await toolImplementations.importPutty(validatedArgs, executionContext);
           } catch (err) {
             result = `Parameter validation error for import_putty: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_playbook": {
+          try {
+            const validatedArgs = managePlaybookSchema.parse(toolCall.args || {});
+            result = await toolImplementations.managePlaybook(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_playbook: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "run_playbook": {
+          try {
+            const validatedArgs = runPlaybookSchema.parse(toolCall.args || {});
+            result = await toolImplementations.runPlaybook(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for run_playbook: ${(err as Error).message}`;
           }
           break;
         }
@@ -2739,6 +2811,7 @@ export class AgentService_v2 {
       connectionManager: this.connectionManager,
       automationManager: this.automationManager,
       sessionLogger: this.sessionLogger,
+      agentRunLedger: this.agentRunLedger,
       agentRunId,
       savedSshConnections: this.settings?.connections?.ssh ?? [],
       savedWinrmConnections: this.settings?.connections?.winrm ?? [],
@@ -3786,6 +3859,24 @@ export class AgentService_v2 {
     if (!lockedProfileId) {
       throw new Error(`Missing locked profile for session ${sessionId}`);
     }
+    // Run ledger: audit every run start-to-finish (id falls back to a
+    // synthetic one when the caller didn't supply a run/agentRun id).
+    const ledgerRunId =
+      agentRunId ??
+      `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    this.ledgerRunIdsBySession.set(sessionId, ledgerRunId);
+    const ledgerInputPreview =
+      typeof input === "string"
+        ? input
+        : ((input as UserInputPayload | undefined)?.text ?? "");
+    this.agentRunLedger?.startRun({
+      runId: ledgerRunId,
+      sessionId,
+      profileId: lockedProfileId,
+      inputPreview: ledgerInputPreview,
+    });
+    let ledgerExitStatus: "completed" | "failed" | "aborted" = "completed";
+    let ledgerExitError: string | undefined;
     this.selfCorrectionRuntimeManager.clearSession(sessionId);
     const sessionBinding = this.ensureSessionModelBinding(
       sessionId,
@@ -3866,6 +3957,7 @@ export class AgentService_v2 {
         console.log(
           `[AgentService_v2] Run abort trigger received (sessionId=${sessionId}).`,
         );
+        ledgerExitStatus = "aborted";
         return;
       }
 
@@ -3876,6 +3968,8 @@ export class AgentService_v2 {
       // Use our new detail extraction helper
       const errorDetails = this.helpers.extractErrorDetails(err);
       const errorMessage = err.message || String(err);
+      ledgerExitStatus = "failed";
+      ledgerExitError = errorMessage;
 
       // Broadcast with full details
       this.helpers.sendEvent(sessionId, {
@@ -3893,6 +3987,10 @@ export class AgentService_v2 {
       ) {
         this.activeAgentRunIdsBySession.delete(sessionId);
       }
+      if (this.ledgerRunIdsBySession.get(sessionId) === ledgerRunId) {
+        this.ledgerRunIdsBySession.delete(sessionId);
+      }
+      this.agentRunLedger?.finishRun(ledgerRunId, ledgerExitStatus, ledgerExitError);
       await this.clearCheckpoint(sessionId);
     }
   }
