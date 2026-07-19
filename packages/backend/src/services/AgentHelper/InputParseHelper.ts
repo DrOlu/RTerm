@@ -238,7 +238,7 @@ ${recentOutput}
 
     // enrichedContent structure: [Skill Details] + [Tab Details] + [File Details] + [User Body]
     // For inserted mode with keepTaggedBodyLiteral=true, userBody already contains the tagged block.
-    let prefix = skillDetails + tabDetails + fileDetails + passChatDetails;
+    const prefix = skillDetails + tabDetails + fileDetails + passChatDetails;
     const decoratedBody = keepTaggedBodyLiteral
       ? userBody
       : `${userInputTag}${userBody}`;
