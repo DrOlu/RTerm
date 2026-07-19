@@ -1139,9 +1139,17 @@ export class SSHBackend implements TerminalBackend {
           jumpSock,
         );
 
-        if (sshConfig.jumpHost!.authMethod === "password") {
+        // Same authMethod inference as the main connection (see spawn()).
+        const jumpAuthMethod: "password" | "privateKey" =
+          sshConfig.jumpHost!.authMethod === "password" || sshConfig.jumpHost!.authMethod === "privateKey"
+            ? sshConfig.jumpHost!.authMethod
+            : sshConfig.jumpHost!.privateKey || sshConfig.jumpHost!.privateKeyPath
+              ? "privateKey"
+              : "password";
+
+        if (jumpAuthMethod === "password") {
           jumpConnectConfig.password = sshConfig.jumpHost!.password;
-        } else if (sshConfig.jumpHost!.authMethod === "privateKey") {
+        } else if (jumpAuthMethod === "privateKey") {
           if (sshConfig.jumpHost!.privateKey) {
             jumpConnectConfig.privateKey = sshConfig.jumpHost!.privateKey;
           } else if (sshConfig.jumpHost!.privateKeyPath) {
@@ -1791,9 +1799,21 @@ export class SSHBackend implements TerminalBackend {
 
       const connectConfig = this.buildBaseConnectConfig(sshConfig);
 
-      if (sshConfig.authMethod === "password") {
+      // Resolve the effective auth method. `authMethod` is required on the
+      // typed config, but the gateway `terminal:createTab` path (and other
+      // programmatic callers) may omit it — infer it from the credentials
+      // present so a password/key is never silently dropped (which surfaced
+      // as "All configured authentication methods failed").
+      const effectiveAuthMethod: "password" | "privateKey" =
+        sshConfig.authMethod === "password" || sshConfig.authMethod === "privateKey"
+          ? sshConfig.authMethod
+          : sshConfig.privateKey || sshConfig.privateKeyPath
+            ? "privateKey"
+            : "password";
+
+      if (effectiveAuthMethod === "password") {
         connectConfig.password = sshConfig.password;
-      } else if (sshConfig.authMethod === "privateKey") {
+      } else if (effectiveAuthMethod === "privateKey") {
         if (sshConfig.privateKey) {
           connectConfig.privateKey = sshConfig.privateKey;
         } else if (sshConfig.privateKeyPath) {
