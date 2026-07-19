@@ -1,45 +1,54 @@
 :root {
-  /* Layout */
-  --app-bg: #0b0f14;
-  --panel-bg: #0f1620;
-  --panel-bg-2: #0c121a;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  /* Layout — deeper, richer surfaces with a cool blue-violet undertone */
+  --app-bg: #070a12;
+  --panel-bg: #0d1322;
+  --panel-bg-2: #0a0f1b;
+  --border: rgba(148, 178, 255, 0.10);
+  --border-strong: rgba(148, 178, 255, 0.20);
 
-  /* Text */
-  --fg: rgba(255, 255, 255, 0.92);
-  --fg-muted: rgba(255, 255, 255, 0.66);
-  --fg-faint: rgba(255, 255, 255, 0.46);
+  /* Text — brighter primary, softer mutes for clear hierarchy */
+  --fg: rgba(244, 247, 255, 0.96);
+  --fg-muted: rgba(204, 214, 245, 0.68);
+  --fg-faint: rgba(160, 174, 215, 0.46);
 
-  /* Accents */
-  --accent: #4ea1ff;
-  --accent-rgb: 78, 161, 255;
-  --accent-2: #7c5cff;
-  --danger: #ff5c7a;
-  --success: #2ecc71;
+  /* Accents — Aurora: luminous cyan-teal primary, violet secondary */
+  --accent: #4fd8e8;
+  --accent-rgb: 79, 216, 232;
+  --accent-2: #8b7bff;
+  --accent-2-rgb: 139, 123, 255;
+  --danger: #ff5d7e;
+  --success: #3ddc97;
+  --warning: #ffc44d;
 
   /* Controls */
-  --control-bg: rgba(255, 255, 255, 0.06);
-  --control-bg-hover: rgba(255, 255, 255, 0.09);
-  --control-bg-active: rgba(255, 255, 255, 0.12);
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  --panel-tab-header-height: 28px;
+  --control-bg: rgba(148, 178, 255, 0.07);
+  --control-bg-hover: rgba(148, 178, 255, 0.12);
+  --control-bg-active: rgba(148, 178, 255, 0.17);
+  --shadow: 0 12px 36px rgba(0, 0, 0, 0.52);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.60);
+  --glow-accent: 0 0 0 1px rgba(var(--accent-rgb), 0.30), 0 0 18px rgba(var(--accent-rgb), 0.18);
+  --panel-tab-header-height: 30px;
   --panel-tab-font-size: 10px;
   --panel-tab-font-weight: 600;
-  --panel-tab-letter-spacing: 0.42px;
+  --panel-tab-letter-spacing: 0.5px;
   --panel-tab-line-height: 1;
-  --panel-tab-item-gap: 4px;
+  --panel-tab-item-gap: 5px;
   --panel-tab-close-size: 18px;
   --panel-tab-close-visual-margin-left: -3px;
   --panel-tab-status-size: 7px;
-  --panel-tab-status-active: #3ccf6f;
+  --panel-tab-status-active: #3ddc97;
   --panel-tab-drag-handle-width: 12px;
 
-  /* Typography */
-  --font-ui: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
-    'Apple Color Emoji', 'Segoe UI Emoji';
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
+  /* Typography — crisper UI sans, tighter mono; system stacks keep zero deps */
+  --font-ui: ui-sans-serif, system-ui, -apple-system, 'SF Pro Text', 'Segoe UI Variable',
+    'Segoe UI', Roboto, Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, 'JetBrains Mono', Menlo, Monaco,
+    Consolas, 'Liberation Mono', 'Courier New', monospace;
+
+  /* Radius scale — softer, more modern than the old sharp 2px */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
 }
 
 html,
@@ -52,8 +61,9 @@ body {
   background: var(--app-bg);
   color: var(--fg);
   font-family: var(--font-ui);
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 12.5px;
+  line-height: 1.45;
+  letter-spacing: 0.01em;
   /* Keep native subpixel smoothing so small UI text does not render too thin on light themes. */
   -webkit-font-smoothing: auto;
   -moz-osx-font-smoothing: auto;
@@ -82,9 +92,9 @@ input[type="radio"] {
 }
 
 input[type="checkbox"] {
-  border-radius: 2px;
-  width: 14px;
-  height: 14px;
+  border-radius: 5px;
+  width: 15px;
+  height: 15px;
 }
 
 input[type="radio"] {
@@ -152,13 +162,13 @@ select,
 textarea {
   font: inherit;
   color: inherit;
-  border-radius: 2px; /* Set a sharp base radius */
+  border-radius: var(--radius-sm); /* Softer base radius */
 }
 
 .icon-btn-sm {
   height: 24px;
   width: 24px;
-  border-radius: 2px !important;
+  border-radius: var(--radius-sm) !important;
   border: 1px solid transparent !important;
   background: transparent !important;
   color: var(--fg-muted) !important;
