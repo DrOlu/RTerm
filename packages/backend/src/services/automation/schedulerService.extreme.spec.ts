@@ -74,7 +74,7 @@ test('SchedulerService fires due tasks within a tick window', async () => {
 
 test('SchedulerService skips disabled tasks', async () => {
   let calls: number = 0
-  let nowMs = Date.UTC(2026, 0, 1, 12, 0, 30)
+  const nowMs = Date.UTC(2026, 0, 1, 12, 0, 30)
   const tasks: ScheduledTaskEntry[] = [
     { id: 't1', name: 'noon', cron: '0 12 * * *', enabled: false },
   ]
@@ -85,7 +85,7 @@ test('SchedulerService skips disabled tasks', async () => {
 
 test('SchedulerService fires multiple tasks due same minute', async () => {
   let calls: number = 0
-  let nowMs = Date.UTC(2026, 0, 1, 12, 0, 30)
+  const nowMs = Date.UTC(2026, 0, 1, 12, 0, 30)
   const tasks: ScheduledTaskEntry[] = [
     { id: 'a', name: 'a', cron: '0 12 * * *', enabled: true },
     { id: 'b', name: 'b', cron: '*/1 * * * *', enabled: true },

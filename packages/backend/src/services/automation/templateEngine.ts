@@ -79,7 +79,7 @@ function evalCond(expr: string, scope: TemplateVars): boolean {
   const eq = e.match(/^(.+?)\s*(==|!=)\s*(.+)$/)
   if (eq) {
     const left = resolve(eq[1].trim(), scope)
-    let rightRaw = eq[3].trim()
+    const rightRaw = eq[3].trim()
     let right: unknown
     if (/^['"].*['"]$/.test(rightRaw)) right = rightRaw.replace(/^['"]|['"]$/g, '')
     else if (/^-?\d+$/.test(rightRaw)) right = parseInt(rightRaw, 10)
@@ -141,9 +141,9 @@ function splitIfElse(body: Token[]): {
   elseBody: Token[]
   elifs: { cond: string; body: Token[] }[]
 } {
-  let ifBody: Token[] = []
-  let elseBody: Token[] = []
-  let elifs: { cond: string; body: Token[] }[] = []
+  const ifBody: Token[] = []
+  const elseBody: Token[] = []
+  const elifs: { cond: string; body: Token[] }[] = []
   let cur = ifBody
   let curElif: { cond: string; body: Token[] } | null = null
   let depth = 0
