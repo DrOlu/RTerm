@@ -1,6 +1,6 @@
 {
   "name": "rterm",
-  "version": "1.8.4",
+  "version": "1.9.0",
   "description": "RTerm - AI-Native Terminal App",
   "main": "./out/main/index.js",
   "author": "Hyperspace Technologies <rterm@hyperspace.ng>",
@@ -26,6 +26,7 @@
     "build:electron": "electron-vite build --config apps/electron/electron.vite.config.ts",
     "build": "electron-vite build --config apps/electron/electron.vite.config.ts",
     "build:backend": "npm --workspace @gyshell/gybackend run build",
+    "build:backend-standalone": "npm --workspace @gyshell/gybackend run build:standalone",
     "prestart:backend": "npm run ensure:node-native",
     "start:backend": "npm --workspace @gyshell/gybackend run start",
     "typecheck:backend": "npm --workspace @gyshell/gybackend run typecheck",

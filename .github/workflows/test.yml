@@ -70,3 +70,6 @@ jobs:
 
       - name: Build electron bundles (main + preload + renderer)
         run: npm run build:electron
+
+      - name: Build standalone gybackend CLI bundle
+        run: npm --workspace @gyshell/gybackend run build:standalone
