@@ -1,6 +1,6 @@
 {
   "name": "rterm",
-  "version": "1.8.2",
+  "version": "1.8.3",
   "description": "RTerm - AI-Native Terminal App",
   "main": "./out/main/index.js",
   "author": "Hyperspace Technologies <rterm@hyperspace.ng>",
