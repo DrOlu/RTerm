@@ -6,8 +6,10 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "esbuild src/index.ts --bundle --platform=node --format=esm --packages=external --alias:@gyshell/shared=../../packages/shared/src/index.ts --outfile=dist/index.js",
+    "build:standalone": "node build-standalone.mjs",
     "prestart": "node ../electron/scripts/ensure-better-sqlite3-node.mjs",
     "start": "node dist/index.js",
+    "start:standalone": "node dist-standalone/gybackend.js",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

@@ -1,5 +1,6 @@
 
 dist
+dist-standalone
 out
 *.log
 .DS_Store
