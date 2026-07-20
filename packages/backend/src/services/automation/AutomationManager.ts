@@ -60,6 +60,7 @@ export class AutomationManager {
       scheduledTasks: a.scheduledTasks ?? [],
       templates: a.templates ?? [],
       playbooks: a.playbooks ?? [],
+      ...(a.triggers ? { triggers: a.triggers } : {}),
     }
   }
 
@@ -280,6 +281,39 @@ export class AutomationManager {
     const next = list.slice()
     next[i] = { ...list[i], lastRunAt: nowIso(), lastRunOk: ok }
     this.commit({ ...this.block(), playbooks: next })
+  }
+
+  // --- Triggers (Advanced Automation) ---
+  listTriggers(): readonly import('../../types').TriggerEntry[] {
+    return this.block().triggers ?? []
+  }
+  upsertTrigger(entry: import('../../types').TriggerEntry): import('../../types').TriggerEntry {
+    const list = (this.block().triggers ?? []).slice()
+    const i = list.findIndex((t) => t.id === entry.id || t.name.trim().toLowerCase() === entry.name.trim().toLowerCase())
+    if (i === -1) {
+      list.push(entry)
+    } else {
+      list[i] = { ...list[i], ...entry, id: list[i].id }
+    }
+    this.commit({ ...this.block(), triggers: list })
+    return i === -1 ? entry : list[i]
+  }
+  deleteTrigger(idOrName: string): boolean {
+    const list = this.block().triggers ?? []
+    const needle = idOrName.trim().toLowerCase()
+    const next = list.filter((t) => t.id !== idOrName && t.name.trim().toLowerCase() !== needle)
+    if (next.length === list.length) return false
+    this.commit({ ...this.block(), triggers: next })
+    return true
+  }
+  setTriggerEnabled(idOrName: string, enabled: boolean): boolean {
+    const list = (this.block().triggers ?? []).slice()
+    const needle = idOrName.trim().toLowerCase()
+    const i = list.findIndex((t) => t.id === idOrName || t.name.trim().toLowerCase() === needle)
+    if (i === -1) return false
+    list[i] = { ...list[i], enabled }
+    this.commit({ ...this.block(), triggers: list })
+    return true
   }
 }
 

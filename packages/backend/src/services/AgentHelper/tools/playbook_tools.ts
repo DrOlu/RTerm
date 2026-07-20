@@ -2,6 +2,18 @@ import { z } from 'zod'
 import type { ToolExecutionContext } from '../types'
 import type { BackendSettings, PlaybookStep } from '../../../types'
 import { executePlaybook } from '../../automation/playbookRunner'
+import { executeOrchestratedPlaybook } from '../../automation/orchestratedPlaybookRunner'
+
+/** True when a playbook uses Advanced Automation features that need the
+ * orchestrated engine (dependsOn DAG, runbook params, idempotent desiredState,
+ * captureVar). Linear playbooks keep the proven sequential runner. */
+export function playbookNeedsOrchestration(playbook: { steps: PlaybookStep[]; params?: unknown; maxParallelSteps?: number }): boolean {
+  if (playbook.maxParallelSteps && playbook.maxParallelSteps > 1) return true
+  if (Array.isArray(playbook.params) && playbook.params.length > 0) return true
+  return playbook.steps.some((s) =>
+    (s.dependsOn !== undefined) || s.desiredState || s.captureVar,
+  )
+}
 
 /**
  * Playbook agent tools — `manage_playbook` (CRUD) + `run_playbook`
@@ -63,6 +75,7 @@ export const managePlaybookSchema = z.object({
 export const runPlaybookSchema = z.object({
   id: z.string().optional().describe('Playbook id to run.'),
   name: z.string().optional().describe('Playbook name to run (when id is not given).'),
+  paramValues: z.record(z.string(), z.string()).optional().describe('Run-time values for the playbook\'s declared params (Advanced Automation).'),
 })
 
 export async function managePlaybook(
@@ -195,15 +208,28 @@ export async function runPlaybook(
 
   let record
   try {
-    record = await executePlaybook(
-      {
-        terminalService: context.terminalService,
-        automationManager: m,
-        getSettings: () => settings,
-        onLog: () => {},
-      },
-      playbook,
-    )
+    if (playbookNeedsOrchestration(playbook)) {
+      record = await executeOrchestratedPlaybook(
+        {
+          terminalService: context.terminalService,
+          automationManager: m,
+          getSettings: () => settings,
+          onLog: () => {},
+          paramValues: args.paramValues ?? {},
+        },
+        playbook,
+      )
+    } else {
+      record = await executePlaybook(
+        {
+          terminalService: context.terminalService,
+          automationManager: m,
+          getSettings: () => settings,
+          onLog: () => {},
+        },
+        playbook,
+      )
+    }
   } catch (error) {
     const msg = `Playbook "${playbook.name}" could not run: ${error instanceof Error ? error.message : error}`
     emit(context, 'run_playbook', args, msg)

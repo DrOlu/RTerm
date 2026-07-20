@@ -310,6 +310,13 @@ export const MANAGE_CHANGE_DESCRIPTION = [
   "Playbooks in MOP mode (requireApproval=true) can ONLY run this way; plain run_playbook refuses them.",
 ].join("\n");
 
+export const MANAGE_TRIGGER_DESCRIPTION = [
+  "Manage event-driven automation triggers (Advanced Automation). A trigger watches terminal output patterns, monitor thresholds, or webhook events and fires a playbook (or proposes a MOP change) on match — with per-trigger cooldown and a global concurrency cap so a noisy signal can't storm.",
+  "action=\"create\" (name, kind=pattern|threshold|webhook|schedule, playbookId, plus kind fields: match/matchMode for pattern, metric/op/value for threshold, scopeHosts, actionType=run-playbook|propose-change, cooldownSeconds).",
+  "action=\"update\"/\"delete\"/\"enable\"/\"disable\" manage by id or name. action=\"list\" shows all triggers with condition + action. action=\"fires\" lists recent firings (reason + outcome).",
+  "Examples: a pattern trigger on \"BGP.*DOWN\" (regex) on a router group that runs a bgp-recovery playbook; a cpu>90% threshold trigger that proposes a MOP change to scale out; a webhook trigger fired by CI to kick off a cleanup playbook.",
+].join("\n");
+
 export const PROBE_CONNECTIVITY_DESCRIPTION = [
   "Probe reachability of a SAVED SSH connection: open a fresh tab for it (or reuse an already-open one), wait for it to become ready or exit, then report REACHABLE/UNREACHABLE, the detected OS class, the terminal status header, and the initial login banner.",
   "This is the building block for autonomous operations — \"is host X up?\", \"what OS is on this box?\", pre-change sanity checks. It never sends commands beyond what the shell's own login produces.",
@@ -451,6 +458,10 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "manage_change",
     description: MANAGE_CHANGE_DESCRIPTION,
+  },
+  {
+    name: "manage_trigger",
+    description: MANAGE_TRIGGER_DESCRIPTION,
   },
 ];
 

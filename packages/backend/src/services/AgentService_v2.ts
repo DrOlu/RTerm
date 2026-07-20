@@ -67,6 +67,7 @@ import {
   managePlaybookSchema,
   runPlaybookSchema,
   manageChangeSchema,
+  manageTriggerSchema,
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -331,6 +332,7 @@ export class AgentService_v2 {
   private connectionManager?: IConnectionManagerRuntime;
   /** Optional automation store backing the automation agent tools. */
   private automationManager?: import("./automation/AutomationManager").AutomationManager;
+  private triggerEngine?: import("./automation/triggerEngine").TriggerEngine;
   /** Optional session-log handle for list_session_logs / read_session_log. */
   private sessionLogger?: { list(): import("./automation/sessionLogService").SessionLogRecord[]; read(sessionId: string): string };
   /** Optional run ledger — persisted audit + token-cost record of every
@@ -426,6 +428,11 @@ export class AgentService_v2 {
    * tasks, templates) backing the automation agent tools. */
   setAutomationManager(manager: import("./automation/AutomationManager").AutomationManager): void {
     this.automationManager = manager;
+  }
+
+  /** Wire the event-driven trigger engine (Advanced Automation v1.9.1). */
+  setTriggerEngine(engine: import("./automation/triggerEngine").TriggerEngine | null): void {
+    this.triggerEngine = engine ?? undefined;
   }
 
   /** Wire a session-log handle so list_session_logs / read_session_log work. */
@@ -1977,6 +1984,15 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "manage_trigger": {
+          try {
+            const validatedArgs = manageTriggerSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageTrigger(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_trigger: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "run_fleet_command": {
           try {
             const validatedArgs = runFleetCommandSchema.parse(
@@ -2827,6 +2843,7 @@ export class AgentService_v2 {
       sessionLogger: this.sessionLogger,
       agentRunLedger: this.agentRunLedger,
       changeLedger: this.changeLedger,
+      triggerEngine: this.triggerEngine,
       agentRunId,
       savedSshConnections: this.settings?.connections?.ssh ?? [],
       savedWinrmConnections: this.settings?.connections?.winrm ?? [],

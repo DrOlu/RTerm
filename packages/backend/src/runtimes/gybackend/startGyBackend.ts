@@ -38,6 +38,8 @@ import { executeScheduledTask } from "../../services/automation/scheduledTaskRun
 import { HistoryStorageMigration } from "../../services/history/HistoryStorageMigration";
 import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
 import { AgentSettingProfileService } from "../../services/AgentSettingProfileService";
+import { createTriggerRuntime } from "../../services/automation/triggerRuntime";
+import { ResourceMonitorService } from "../../services/ResourceMonitorService";
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
@@ -205,6 +207,43 @@ export async function startGyBackend(): Promise<void> {
   const changeLedger = new ChangeLedger();
   changeLedger.markStaleChangesAborted(Date.now());
   agentService.setChangeLedger(changeLedger);
+
+  // Advanced Automation: event-driven trigger engine. Loads persisted triggers,
+  // feeds terminal output (pattern) + monitor snapshots (threshold), and fires
+  // playbooks (or proposes MOP changes) on match.
+  const resourceMonitorService = new ResourceMonitorService(terminalService);
+  const triggerEngine = createTriggerRuntime({
+    automationManager,
+    terminalService,
+    monitorService: resourceMonitorService,
+    runPlaybook: async (playbookId, _reason) => {
+      const playbook = automationManager.getPlaybook(playbookId);
+      if (!playbook) return `playbook "${playbookId}" not found`;
+      try {
+        const { executeOrchestratedPlaybook } = await import("../../services/automation/orchestratedPlaybookRunner");
+        const rec = await executeOrchestratedPlaybook(
+          { terminalService, automationManager, getSettings: () => settingsService.getSettings(), onLog: () => {} },
+          playbook,
+        );
+        return rec.ok ? `ok (runId=${rec.runId})` : `failed (runId=${rec.runId})`;
+      } catch (e) {
+        return `error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+    proposeChange: async (playbookId, reason) => {
+      const playbook = automationManager.getPlaybook(playbookId);
+      if (!playbook) return `playbook "${playbookId}" not found`;
+      const changeId = `chg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      try {
+        changeLedger.createChange({ changeId, playbookId: playbook.id, playbookName: playbook.name, targetsSnapshot: JSON.stringify([`trigger:${reason.slice(0, 80)}`]) });
+        return `proposed change ${changeId} (${reason.slice(0, 60)})`;
+      } catch (e) {
+        return `error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    },
+    onLog: () => {},
+  });
+  agentService.setTriggerEngine(triggerEngine);
 
   // Session logging: record terminal output per session to disk when enabled.
   if (settingsService.getSettings().sessionLogging?.enabled) {

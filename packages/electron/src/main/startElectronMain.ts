@@ -32,6 +32,7 @@ import { AgentRunLedger } from "../../../backend/src/services/agentRunLedger";
 import { ChangeLedger } from "../../../backend/src/services/changeLedger";
 import { SessionLogService } from "../../../backend/src/services/automation/sessionLogService";
 import { SchedulerService } from "../../../backend/src/services/automation/schedulerService";
+import { createTriggerRuntime } from "../../../backend/src/services/automation/triggerRuntime";
 import { GatewayService } from "../../../backend/src/services/Gateway/GatewayService";
 import { ElectronGatewayIpcAdapter } from "../gateway/ElectronGatewayIpcAdapter";
 import { ElectronWindowTransport } from "../gateway/ElectronWindowTransport";
@@ -1094,6 +1095,42 @@ export async function startElectronMain(): Promise<void> {
         const changeLedger = new ChangeLedger();
         changeLedger.markStaleChangesAborted(Date.now());
         agentService.setChangeLedger(changeLedger);
+
+        // Advanced Automation: event-driven trigger engine (pattern/threshold/webhook).
+        // resourceMonitorService already exists above; feed terminal data + snapshots.
+        const triggerEngine = createTriggerRuntime({
+          automationManager,
+          terminalService,
+          monitorService: resourceMonitorService,
+          runPlaybook: async (playbookId, _reason) => {
+            const playbook = automationManager.getPlaybook(playbookId);
+            if (!playbook) return `playbook "${playbookId}" not found`;
+            try {
+              const { executeOrchestratedPlaybook } = await import("../../../backend/src/services/automation/orchestratedPlaybookRunner");
+              const rec = await executeOrchestratedPlaybook(
+                { terminalService, automationManager, getSettings: () => settingsService.getSettings(), onLog: () => {} },
+                playbook,
+              );
+              return rec.ok ? `ok (runId=${rec.runId})` : `failed (runId=${rec.runId})`;
+            } catch (e) {
+              return `error: ${e instanceof Error ? e.message : String(e)}`;
+            }
+          },
+          proposeChange: async (playbookId, reason) => {
+            const playbook = automationManager.getPlaybook(playbookId);
+            if (!playbook) return `playbook "${playbookId}" not found`;
+            const changeId = `chg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+            try {
+              changeLedger.createChange({ changeId, playbookId: playbook.id, playbookName: playbook.name, targetsSnapshot: JSON.stringify([`trigger:${reason.slice(0, 80)}`]) });
+              return `proposed change ${changeId} (${reason.slice(0, 60)})`;
+            } catch (e) {
+              return `error: ${e instanceof Error ? e.message : String(e)}`;
+            }
+          },
+          onLog: () => {},
+        });
+        agentService.setTriggerEngine(triggerEngine);
+
         ipcMain.handle("agentRunLedger:list", (_e, filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
           agentRunLedger.listRuns(filter),
         );
