@@ -3,6 +3,7 @@ import type { AutomationManager } from './AutomationManager'
 import type { TerminalService } from '../TerminalService'
 import type { ResourceMonitorService } from '../ResourceMonitorService'
 import type { TriggerEntry } from '../../types'
+import type { NatsEventBus } from './natsEventBus'
 
 /**
  * Wire a TriggerEngine into the live runtime: load persisted triggers from the
@@ -21,6 +22,9 @@ export interface TriggerRuntimeDeps {
   runPlaybook: (playbookId: string, reason: string) => Promise<string>
   proposeChange?: (playbookId: string, reason: string) => Promise<string>
   onLog?: (line: string) => void
+  /** Optional NATS mesh: local events are published onto the bus, and remote
+   * bus events feed this engine — so triggers fire fleet-wide. */
+  natsBus?: NatsEventBus | null
 }
 
 export function createTriggerRuntime(deps: TriggerRuntimeDeps): TriggerEngine {
@@ -35,7 +39,7 @@ export function createTriggerRuntime(deps: TriggerRuntimeDeps): TriggerEngine {
     engine.upsert(t)
   }
 
-  // Feed terminal output -> pattern triggers.
+  // Feed terminal output -> pattern triggers (and publish to the NATS mesh).
   const ts = deps.terminalService as unknown as {
     setRawEventPublisher?: (pub: (channel: string, data: unknown) => void) => void
   }
@@ -45,12 +49,14 @@ export function createTriggerRuntime(deps: TriggerRuntimeDeps): TriggerEngine {
     if (channel === 'terminal:data' && data && typeof data === 'object') {
       const d = data as { terminalId?: string; data?: string }
       if (typeof d.data === 'string' && d.terminalId) {
-        engine.handleTerminalData(String(d.terminalId), d.data)
+        const host = String(d.terminalId)
+        engine.handleTerminalData(host, d.data)
+        deps.natsBus?.publishTermData({ host, data: d.data })
       }
     }
   })
 
-  // Feed monitor snapshots -> threshold triggers.
+  // Feed monitor snapshots -> threshold triggers (and publish to the NATS mesh).
   const ms = deps.monitorService as unknown as {
     setPublisher?: (pub: (channel: string, data: unknown) => void) => void
   } | null | undefined
@@ -61,10 +67,24 @@ export function createTriggerRuntime(deps: TriggerRuntimeDeps): TriggerEngine {
       if (channel === 'monitor:snapshot' && data && typeof data === 'object') {
         const d = data as Record<string, unknown> & { terminalId?: string }
         const host = d.terminalId ? String(d.terminalId) : 'local'
-        engine.handleMonitorSnapshot(host, d as Record<string, unknown>)
+        const metrics: Record<string, unknown> = { ...d }
+        delete metrics.terminalId
+        engine.handleMonitorSnapshot(host, metrics)
+        deps.natsBus?.publishMonitorSnapshot({ host, metrics })
       }
     })
   }
 
-  return engine
+  // Subscribe remote NATS events into this engine (fleet-wide triggers).
+  // Await registration so the subscriptions are live before callers proceed
+  // (a publish that lands immediately after createTriggerRuntime is delivered).
+  const busReady = deps.natsBus
+    ? Promise.all([
+        deps.natsBus.onTermData((ev) => engine.handleTerminalData(ev.host, ev.data)),
+        deps.natsBus.onMonitorSnapshot((ev) => engine.handleMonitorSnapshot(ev.host, ev.metrics)),
+        deps.natsBus.onTriggerFire((ev) => engine.fire_webhook(ev.triggerId, ev.reason)),
+      ]).then(() => {})
+    : Promise.resolve()
+
+  return Object.assign(engine, { busReady })
 }
