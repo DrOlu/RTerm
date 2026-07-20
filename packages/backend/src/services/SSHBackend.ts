@@ -67,7 +67,13 @@ const LEGACY_ALGORITHMS = {
     'ecdh-sha2-nistp384',
     'ecdh-sha2-nistp521',
     'diffie-hellman-group14-sha256',
+    'diffie-hellman-group18-sha512',
+    'diffie-hellman-group17-sha512',
+    'diffie-hellman-group16-sha512',
+    'diffie-hellman-group15-sha512',
     'diffie-hellman-group14-sha1',
+    'diffie-hellman-group-exchange-sha256',
+    'diffie-hellman-group-exchange-sha1',
     'diffie-hellman-group1-sha1',
   ],
   serverHostKey: [
@@ -76,6 +82,8 @@ const LEGACY_ALGORITHMS = {
     'ssh-rsa',
     'ssh-ed25519',
     'ecdsa-sha2-nistp256',
+    'ecdsa-sha2-nistp384',
+    'ecdsa-sha2-nistp521',
     'ssh-dss',
   ],
   cipher: [
@@ -83,17 +91,26 @@ const LEGACY_ALGORITHMS = {
     'aes192-ctr',
     'aes256-ctr',
     'aes128-gcm',
+    'aes128-gcm@openssh.com',
     'aes256-gcm',
+    'aes256-gcm@openssh.com',
+    'chacha20-poly1305@openssh.com',
     'aes128-cbc',
-    '3des-cbc',
     'aes192-cbc',
     'aes256-cbc',
+    '3des-cbc',
   ],
   hmac: [
     'hmac-sha2-256',
     'hmac-sha2-512',
     'hmac-sha1',
+    'hmac-sha2-256-96',
+    'hmac-sha2-512-96',
     'hmac-sha1-96',
+    'hmac-sha2-256-etm@openssh.com',
+    'hmac-sha2-512-etm@openssh.com',
+    'hmac-sha1-etm@openssh.com',
+    'hmac-ripemd160',
     'hmac-md5',
     'hmac-md5-96',
   ],
@@ -103,11 +120,17 @@ const LEGACY_ALGORITHMS = {
 // the algorithms old Cisco IOS images actually advertise (DH group 1/14 with
 // SHA-1, ssh-rsa host keys, CBC ciphers, hmac-sha1). It avoids offering
 // algorithms the target can't use while still keeping the modern entries
-// first for any newer image that happens to support them.
+// first for any newer image that happens to support them. As of 1.9.3 it adds
+// the group-exchange KEX variants and ripemd160/etm/-96 MACs that some very
+// old images still require. (RC4/blowfish/cast are intentionally NOT included:
+// Node's OpenSSL 3 builds don't provide them, and ssh2 throws on any offered
+// cipher it can't actually use.)
 const CISCO_ALGORITHMS = {
   kex: [
     'diffie-hellman-group14-sha1',
     'diffie-hellman-group14-sha256',
+    'diffie-hellman-group-exchange-sha256',
+    'diffie-hellman-group-exchange-sha1',
     'diffie-hellman-group1-sha1',
     'curve25519-sha256',
     'curve25519-sha256@libssh.org',
@@ -125,7 +148,20 @@ const CISCO_ALGORITHMS = {
     'aes192-ctr',
     'aes256-ctr',
   ],
-  hmac: ['hmac-sha1', 'hmac-sha1-96', 'hmac-sha2-256', 'hmac-sha2-512', 'hmac-md5'],
+  hmac: [
+    'hmac-sha1',
+    'hmac-sha1-96',
+    'hmac-sha2-256',
+    'hmac-sha2-512',
+    'hmac-sha2-256-96',
+    'hmac-sha2-512-96',
+    'hmac-sha1-etm@openssh.com',
+    'hmac-sha2-256-etm@openssh.com',
+    'hmac-sha2-512-etm@openssh.com',
+    'hmac-ripemd160',
+    'hmac-md5',
+    'hmac-md5-96',
+  ],
 };
 
 function resolveSshAlgorithms(
