@@ -275,6 +275,34 @@ export interface AutomationSettings {
   scheduledTasks: ScheduledTaskEntry[]
   templates: ConfigTemplateEntry[]
   playbooks: PlaybookEntry[]
+  /** Event-driven triggers (Advanced Automation v1.9.1) — optional for
+   * backward compatibility with older settings files. */
+  triggers?: TriggerEntry[]
+}
+
+/** Event-driven automation trigger (Advanced Automation v1.9.1). */
+export interface TriggerEntry {
+  id: string
+  name: string
+  enabled: boolean
+  kind: 'pattern' | 'threshold' | 'webhook' | 'schedule'
+  /** pattern: text/regex to match in terminal output. */
+  match?: string
+  matchMode?: 'substring' | 'regex'
+  /** threshold: metric name + comparison. */
+  metric?: string
+  op?: 'gt' | 'gte' | 'lt' | 'lte' | 'eq'
+  value?: number
+  /** only react to these hosts (empty = all). */
+  scopeHosts?: string[]
+  action: 'run-playbook' | 'propose-change'
+  /** playbook id or name to run/propose on match. */
+  playbookId: string
+  /** seconds between firings of THIS trigger (default 300). */
+  cooldownSeconds?: number
+  createdAt: number
+  lastFiredAt?: number
+  fireCount?: number
 }
 
 /** One step in a playbook — run sequentially on every resolved target. */
@@ -328,6 +356,41 @@ export interface PlaybookStep {
   validate?: PlaybookStepValidation
   /** Optional undo action for the automatic rollback sequence. */
   rollback?: PlaybookStepRollback
+
+  // --- Advanced orchestration (v1.9.1) ---
+  /**
+   * DAG mode: ids of steps that must complete before this step runs (within a
+   * single target). Empty/undefined = depends on the previous step (linear).
+   * Steps whose dependencies are met run as soon as possible (subject to the
+   * playbook's maxParallelSteps cap).
+   */
+  dependsOn?: string[]
+  /**
+   * Idempotent-config mode: declare a desired-state check. If `validate` passes
+   * BEFORE running the command, the command is skipped (already in desired
+   * state) — so re-running the playbook is a no-op. Enables converge-style
+   * automation instead of blind re-execution.
+   */
+  desiredState?: {
+    /** check command; if its output matches `expect`, the step is skipped. */
+    command?: string
+    scriptId?: string
+    expect: string
+    expectMode?: 'substring' | 'regex'
+  }
+  /** Named capture: store a regex/substring extraction from this step's output
+   * into the run's variable map for later steps (cross-host orchestration vars). */
+  captureVar?: { name: string; pattern: string; regex?: boolean }
+}
+
+/** A named playbook parameter (runbook inputs injected at run time). */
+export interface PlaybookParam {
+  name: string
+  /** default value when not supplied at run time. */
+  defaultValue?: string
+  /** marks the value as a secret — masked in run records / logs. */
+  secret?: boolean
+  description?: string
 }
 
 /**
@@ -354,6 +417,14 @@ export interface PlaybookEntry {
    * calls are refused.
    */
   requireApproval?: boolean
+  /**
+   * DAG/parallel mode: max steps that may run concurrently within a single
+   * target when using dependsOn graphs (default 1 = strictly sequential).
+   */
+  maxParallelSteps?: number
+  /** Runbook parameters: values are injected at run time and substituted into
+   * step commands as {{param.name}}. `secret` params are masked in records. */
+  params?: PlaybookParam[]
   createdAt?: string
   updatedAt?: string
   /** ISO timestamp of last run, for the UI. */

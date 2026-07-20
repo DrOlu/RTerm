@@ -41,6 +41,8 @@ export interface ToolExecutionContext {
   /** Optional persisted run audit + token-cost ledger (get_run_ledger). */
   agentRunLedger?: Pick<AgentRunLedger, 'listRuns' | 'getRun' | 'summarize'>
   changeLedger?: import('../changeLedger').ChangeLedger
+  /** Optional event-driven trigger engine (Advanced Automation v1.9.1). */
+  triggerEngine?: import('../automation/triggerEngine').TriggerEngine
   agentRunId?: string
   /**
    * Saved SSH connections from backend settings (`connections.ssh`).

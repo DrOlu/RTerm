@@ -79,6 +79,7 @@ import {
   runPlaybookSchema, runPlaybook,
 } from './tools/playbook_tools'
 import { manageChangeSchema, manageChange } from './tools/change_tools'
+import { manageTriggerSchema, manageTrigger } from './tools/trigger_tools'
 import { 
   skillToolSchema, 
   buildSkillToolDescription,
@@ -121,6 +122,7 @@ export {
 } from './tools/automation_tools'
 export { managePlaybookSchema, runPlaybookSchema } from './tools/playbook_tools'
 export { manageChangeSchema } from './tools/change_tools'
+export { manageTriggerSchema } from './tools/trigger_tools'
 export { skillToolSchema, createSkillSchema, buildSkillToolDescription } from './tools/skill_tools'
 
 export { BUILTIN_TOOL_INFO } from './prompts'
@@ -296,6 +298,11 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: manageChangeSchema
     },
     {
+      name: 'manage_trigger',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_trigger')?.description ?? '',
+      schema: manageTriggerSchema
+    },
+    {
       name: 'import_putty',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'import_putty')?.description ?? '',
       schema: importPuttySchema
@@ -336,6 +343,7 @@ export const toolImplementations = {
   managePlaybook,
   runPlaybook,
   manageChange,
+  manageTrigger,
   importPutty,
   writeFile,
   editFile,
