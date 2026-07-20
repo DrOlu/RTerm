@@ -212,10 +212,28 @@ export async function startGyBackend(): Promise<void> {
   // feeds terminal output (pattern) + monitor snapshots (threshold), and fires
   // playbooks (or proposes MOP changes) on match.
   const resourceMonitorService = new ResourceMonitorService(terminalService);
+
+  // NATS event mesh (optional): when settings.nats is enabled, local terminal/
+  // monitor events publish onto the bus and remote bus events feed the engine,
+  // so triggers fire fleet-wide. Best-effort — a NATS outage never blocks ops.
+  let natsBus: import("../../services/automation/natsEventBus").NatsEventBus | null = null;
+  try {
+    const { NatsEventBus, resolveNatsOptions } = await import("../../services/automation/natsEventBus");
+    const natsOpts = resolveNatsOptions(settingsService.getSettings());
+    if (natsOpts) {
+      natsBus = new NatsEventBus(natsOpts);
+      await natsBus.connect();
+    }
+  } catch (e) {
+    console.warn(`[gybackend] NATS mesh unavailable: ${e instanceof Error ? e.message : String(e)}`);
+    natsBus = null;
+  }
+
   const triggerEngine = createTriggerRuntime({
     automationManager,
     terminalService,
     monitorService: resourceMonitorService,
+    natsBus,
     runPlaybook: async (playbookId, _reason) => {
       const playbook = automationManager.getPlaybook(playbookId);
       if (!playbook) return `playbook "${playbookId}" not found`;
