@@ -18,6 +18,7 @@ import { EtwService } from './etw/etwService'
 import { DashboardService } from './dashboard/dashboardService'
 import { slackChannel, teamsChannel, smtpChannel, telegramChannel } from './notify/notifyService'
 import { parseDaguYaml, parseDaguWorkflow, daguExecutionPlan } from './dagu/daguParser'
+import { PluginRegistry } from './plugin/pluginRegistry'
 import { EvalHarness } from './evals/evalHarness'
 import { AnomalyDetector } from './predictive/anomalyDetector'
 import { EarlyWarningService } from './predictive/earlyWarningService'
@@ -81,6 +82,8 @@ export interface Observability {
     smtpChannel: typeof smtpChannel
     telegramChannel: typeof telegramChannel
   }
+  /** the plugin system registry (v2.5.0). */
+  pluginRegistry: PluginRegistry
 }
 
 export function createObservability(deps: ObservabilityDeps): Observability {
@@ -157,6 +160,26 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     isCommandBlocked: () => false,
   })
 
+  // --- Plugin system (v2.5.0): discover + auto-integrate custom plugins from plugins/. ---
+  const pluginScanRoot = (process.env.GYBACKEND_DATA_DIR ?? './.gybackend-data') + '/plugins'
+  const pluginRegistry = new PluginRegistry({
+    scanRoots: [pluginScanRoot, './plugins'],
+    createContext: (record) => PluginRegistry.defaultContext(
+      record,
+      async (cmd, opts) => deps.agentService
+        ? `exec(${cmd} on ${opts?.host ?? 'local'})`
+        : '',
+      (name) => {
+        if (name === 'metrics') return metricsLedger.hosts()
+        if (name === 'incidents') return incidentLedger.list()
+        return {}
+      },
+      (line) => { try { deps.onLog?.(line) } catch { /* best-effort */ } },
+    ),
+    onLog: deps.onLog,
+  })
+  void pluginRegistry.reload().catch(() => {})
+
   // --- Feed monitor snapshots into the metrics ledger + behavior (the live data path) ---
   deps.setMonitorPublisher((channel: string, data: unknown) => {
     if (channel !== 'monitor:snapshot' || !data || typeof data !== 'object') return
@@ -174,5 +197,6 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     earlyWarning, behaviorLedger,
     dagu: { parseDaguYaml, parseDaguWorkflow, daguExecutionPlan },
     notify: { slackChannel, teamsChannel, smtpChannel, telegramChannel },
+    pluginRegistry,
   }
 }
