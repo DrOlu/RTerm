@@ -2,7 +2,7 @@
 
 > **The AI-Native Terminal that thinks, executes, and collaborates with you.**
 
-[![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#platforms)
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#key-capabilities)
 
@@ -271,7 +271,7 @@ For the full command matrix and packaging notes, see `docs/build-commands.md`.
 
 ## License
 
-This project is licensed under **CC BY-NC 4.0**.
+This project is licensed under the **Apache License, Version 2.0** ([LICENSE](./LICENSE)).
 
 Special acknowledgment: inspirations and references from [Tabby](https://github.com/Eugeny/tabby) (MIT).
 

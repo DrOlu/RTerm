@@ -3,8 +3,7 @@
 This document lists the third-party libraries used in **GyShell** and their respective licenses.
 
 ## GyShell License
-GyShell is licensed under the **Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**.
-You are free to share and adapt the material, but you **must** give appropriate credit and you **may not** use the material for commercial purposes.
+GyShell is licensed under the **Apache License, Version 2.0**. You may use, reproduce, and distribute the material for any purpose, including commercial use, subject to the terms of the Apache 2.0 license.
 
 ---
 
@@ -67,8 +66,7 @@ The following projects have provided significant inspiration or code references 
 本文档列出了 **GyShell** 中使用的第三方库及其对应的开源协议。
 
 ## GyShell 协议
-GyShell 采用 **知识共享署名-非商业性使用 4.0 国际许可协议 (CC BY-NC 4.0)** 开源。
-您可以自由地分享和修改本项目，但**必须**给出适当的署名，且**不得**将本项目用于商业目的。
+GyShell 采用 **Apache License 2.0** 开源。您可以出于任何目的（包括商业用途）使用、复制和分发本项目，但须遵守 Apache 2.0 许可证的条款。
 
 ---
 

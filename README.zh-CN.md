@@ -2,7 +2,7 @@
 
 > **会思考、会执行、可协作的 AI 原生终端。**
 
-[![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#支持平台)
 [![Shell](https://img.shields.io/badge/Shell-Zsh%20%7C%20Bash%20%7C%20PowerShell-orange)](#核心能力)
 
@@ -275,7 +275,7 @@ RTerm 采用严格分层：
 
 ## 许可证
 
-项目使用 **CC BY-NC 4.0** 许可证。
+项目使用 **Apache License 2.0** 许可证（见 [LICENSE](./LICENSE)）。
 
 特别鸣谢：参考与启发来源于 [Tabby](https://github.com/Eugeny/tabby)（MIT）。
 
