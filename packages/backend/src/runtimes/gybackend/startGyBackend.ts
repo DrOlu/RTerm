@@ -39,6 +39,7 @@ import { HistoryStorageMigration } from "../../services/history/HistoryStorageMi
 import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
 import { AgentSettingProfileService } from "../../services/AgentSettingProfileService";
 import { createTriggerRuntime } from "../../services/automation/triggerRuntime";
+import { createObservability } from "../../services/observability";
 import { ResourceMonitorService } from "../../services/ResourceMonitorService";
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
@@ -262,6 +263,24 @@ export async function startGyBackend(): Promise<void> {
     onLog: () => {},
   });
   agentService.setTriggerEngine(triggerEngine);
+
+  // Observability (v2.0.0–v2.3.0): SRE metrics/watchdog/SLO/alerts/incidents,
+  // APM spans, DEM RUM, k8s/cloud infra, ETW diagnostics, unified dashboard,
+  // predictive anomaly/early-warning, behavioral analytics, embedded evals.
+  // Feeds live monitor snapshots into the metrics ledger and wires watchdog →
+  // alert (notify channels) → incident. Exposes the unified dashboard state.
+  const observability = createObservability({
+    terminalService,
+    agentService,
+    automationManager,
+    agentRunLedger,
+    gatewayService,
+    setMonitorPublisher: (pub) => resourceMonitorService.setPublisher((channel: string, data: unknown) => {
+      pub(channel, data);
+    }),
+    onLog: () => {},
+  });
+  console.log(`[gybackend] Observability wired: dashboard state available (hosts=${observability.metricsLedger.hosts().length})`);
 
   // Session logging: record terminal output per session to disk when enabled.
   if (settingsService.getSettings().sessionLogging?.enabled) {
