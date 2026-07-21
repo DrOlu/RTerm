@@ -1,0 +1,11 @@
+{
+  "name": "sample-k8s-slo",
+  "version": "1.0.0",
+  "description": "Sample plugin: track SLOs for Kubernetes services and alert on pod crashes",
+  "author": "RTerm",
+  "entry": "index.ts",
+  "tools": ["k8s_slo_evaluate", "k8s_pod_restarts"],
+  "triggers": [{ "name": "k8s-pod-crashloop", "kind": "pattern", "match": "CrashLoopBackOff" }],
+  "panels": ["k8s-slo-board"],
+  "permissions": ["exec_command", "read_ledger"]
+}
