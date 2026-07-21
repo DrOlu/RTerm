@@ -59,22 +59,42 @@ export interface InfraMonitorDeps {
   now?: () => number
 }
 
-/** Pure: parse kubectl get pods -o wide-like rows (text) into K8sPod[]. */
+/** Pure: parse kubectl get pods -o wide-like rows (text) into K8sPod[].
+ * Handles BOTH output shapes:
+ *   - default:  NAME READY STATUS RESTARTS AGE            (no namespace column)
+ *   - all-ns:   NAMESPACE NAME READY STATUS RESTARTS AGE  (kubectl get pods -A)
+ * Detects the shape from the header line. */
 export function parseKubectlPods(text: string): K8sPod[] {
   const out: K8sPod[] = []
   const lines = text.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim() !== '')
+  // Detect the all-namespaces shape from the header (starts with NAMESPACE).
+  const header = lines.find((l) => /^NAME(SPACE)?\s+/.test(l))
+  const hasNamespaceCol = header !== undefined && /^NAMESPACE\s+/.test(header)
   for (let i = 0; i < lines.length; i += 1) {
     const l = lines[i]
-    if (/^NAME\s+/.test(l)) continue // header
+    if (/^NAME(SPACE)?\s+/.test(l)) continue // header
     const parts = l.trim().split(/\s+/)
-    if (parts.length < 5) continue
-    const [name, readyFrac, status, restartsStr] = parts
+    // With a namespace column, we need at least 6 fields; without it, at least 5.
+    const minFields = hasNamespaceCol ? 6 : 5
+    if (parts.length < minFields) continue
+
+    let namespace = 'default'
+    let name: string
+    let readyFrac: string
+    let status: string
+    let restartsStr: string
+    if (hasNamespaceCol) {
+      ;[namespace, name, readyFrac, status, restartsStr] = parts
+    } else {
+      ;[name, readyFrac, status, restartsStr] = parts
+    }
+
     const [readyNum, readyDen] = (readyFrac ?? '0/1').split('/').map((x) => parseInt(x, 10))
     const restarts = parseInt((restartsStr ?? '0').replace(/\D.*$/, ''), 10) || 0
     const phase = (['Pending', 'Running', 'Succeeded', 'Failed', 'Unknown'].includes(status) ? status : 'Unknown') as K8sPod['phase']
     out.push({
       name,
-      namespace: parts[1] && /^[a-z0-9-]+$/.test(parts[1]) && !readyFrac.includes('/') ? parts[1] : 'default',
+      namespace,
       phase,
       restarts,
       ready: readyNum === readyDen && readyDen > 0 && status === 'Running',

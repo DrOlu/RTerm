@@ -48,10 +48,17 @@ export interface EarlyWarningDeps {
 
 export class EarlyWarningService {
   private readonly now: () => number
+  /** cooldown tracker: dedupe identical warnings within a window so repeated
+   * evaluation doesn't re-fire the same warning over and over. */
+  private readonly firedAt = new Map<string, number>()
 
   constructor(private readonly deps: EarlyWarningDeps) {
     this.now = deps.now ?? (() => Date.now())
   }
+
+  /** seconds before an identical warning (host+metric+kind) may fire again
+   * (default 15 min). Prevents warning storms on repeated evaluation. */
+  private cooldownMs = 900_000
 
   /** Evaluate a host+metric for a predictive breach (forecast and/or anomaly). */
   evaluate(host: string, metric: keyof Omit<MetricPoint, 'host' | 'at'>, opts: EarlyWarningOptions): EarlyWarning[] {
@@ -82,7 +89,13 @@ export class EarlyWarningService {
       }
     }
 
+    // Fire each warning, deduped by cooldown so repeated evaluation doesn't storm.
+    const nowMs = this.now()
     for (const w of warnings) {
+      const key = `${w.host}:${w.metric}:${w.kind}`
+      const last = this.firedAt.get(key) ?? 0
+      if (nowMs - last < this.cooldownMs) continue // in cooldown — don't re-fire
+      this.firedAt.set(key, nowMs)
       try { this.deps.onWarning?.(w) } catch { /* best-effort */ }
       if (this.deps.proposeChange) {
         void this.deps.proposeChange(w).catch(() => {})
