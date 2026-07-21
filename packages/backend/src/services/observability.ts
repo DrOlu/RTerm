@@ -17,6 +17,7 @@ import { InfraMonitor } from './infra/infraMonitor'
 import { EtwService } from './etw/etwService'
 import { DashboardService } from './dashboard/dashboardService'
 import { slackChannel, teamsChannel, smtpChannel, telegramChannel } from './notify/notifyService'
+import { parseDaguYaml, parseDaguWorkflow, daguExecutionPlan } from './dagu/daguParser'
 import { EvalHarness } from './evals/evalHarness'
 import { AnomalyDetector } from './predictive/anomalyDetector'
 import { EarlyWarningService } from './predictive/earlyWarningService'
@@ -67,6 +68,12 @@ export interface Observability {
   anomalyDetector: AnomalyDetector
   earlyWarning: EarlyWarningService
   behaviorLedger: BehaviorLedger
+  /** dagu workflow support: compile dagu YAML workflows into playbooks. */
+  dagu: {
+    parseDaguYaml: typeof parseDaguYaml
+    parseDaguWorkflow: typeof parseDaguWorkflow
+    daguExecutionPlan: typeof daguExecutionPlan
+  }
   /** notification channel factories (slack/teams/smtp/telegram). */
   notify: {
     slackChannel: typeof slackChannel
@@ -165,6 +172,7 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     incidentLedger, syntheticChecks, driftDetector, spanLedger, rumLedger,
     infraMonitor, etwService, dashboard, evalHarness, anomalyDetector,
     earlyWarning, behaviorLedger,
+    dagu: { parseDaguYaml, parseDaguWorkflow, daguExecutionPlan },
     notify: { slackChannel, teamsChannel, smtpChannel, telegramChannel },
   }
 }
