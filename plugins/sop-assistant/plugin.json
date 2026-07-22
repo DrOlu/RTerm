@@ -1,0 +1,10 @@
+{
+  "name": "sop-assistant",
+  "version": "1.0.0",
+  "description": "IAM Knowledge & SOP Assistant for RTerm — SOP retrieval with keyword search, step-by-step guided flows, and IAM policy lookup. Answers 'how do I X?' with relevant SOPs and executes them with user confirmation.",
+  "entry": "index.mjs",
+  "tools": ["sop_search", "sop_get", "sop_execute", "iam_lookup"],
+  "triggers": ["sop_escalation"],
+  "panels": ["sop-library"],
+  "permissions": ["exec"]
+}

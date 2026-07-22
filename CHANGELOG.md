@@ -1,5 +1,46 @@
 # Changelog
 
+## v2.7.3 (2026-07-22)
+
+### Plugin Suite — Patch Management, Request Router, SOP Assistant, IAM Connector, FraudOps
+
+Five new plugins for RTerm's plugin system (v2.5.0), extending the platform into autonomous patch management, request handling, SOP knowledge, IAM integration, and fraud operations.
+
+#### 1. patch-manager — Autonomous Patch Management
+- **3 tools**: `patch_status` (query available patches on a host), `patch_plan` (build a 5-step deployment plan: pre-check → backup → apply → post-check → rollback), `patch_apply` (execute patches with dry-run support).
+- **2 triggers**: `patch_failure` (fires on patch execution errors → propose-change for investigation), `patch_completion` (fires on successful patch → run-playbook for compliance reporting).
+- **1 panel**: `patch-compliance` (fleet-wide patch compliance dashboard with compliance rate, critical/security patch counts, per-host status).
+- **Pure functions**: `buildPatchStatusCommand`, `buildPatchApplyCommand`, `buildPrePatchCheckCommand`, `buildPostPatchCheckCommand`, `parsePatchStatus`, `buildPatchPlan`, `buildComplianceReport`. Supports Linux (yum/apt) and Windows (Get-WindowsUpdate/Install-WindowsUpdate).
+
+#### 2. request-router — Automated Request Handling & Approval Workflow
+- **4 tools**: `submit_request` (submit operational request with type/target/justification/urgency), `approve_request` (approve/deny with rationale + audit trail), `list_requests` (filter by status/risk/urgency/target), `request_status` (get specific request).
+- **2 triggers**: `request_urgent` (fires on critical/high urgency → run-playbook for immediate notification), `request_approved` (fires on approval → run-playbook for post-approval automation).
+- **1 panel**: `request-queue` (request queue dashboard with pending/approved counts).
+- **Pure functions**: `classifyRequest` (low/medium/high risk based on type + target), `routeRequest` (auto_approve/queue/mop based on risk + urgency), `buildRequestId`, `buildApprovalRecord`, `buildQueueEntry`, `filterQueue`.
+
+#### 3. sop-assistant — IAM Knowledge & SOP Assistant
+- **4 tools**: `sop_search` (keyword search over SOP library), `sop_get` (get specific SOP by ID), `sop_execute` (execute SOP step-by-step with variable substitution + dry-run), `iam_lookup` (search IAM policies).
+- **1 trigger**: `sop_escalation` (fires on SOP execution failure → propose-change for escalation).
+- **1 panel**: `sop-library` (SOP library browser with 8 built-in SOPs).
+- **8 built-in SOPs**: restart-service, disk-cleanup, reset-password, database-failover, ssl-cert-renewal, user-offboarding, backup-restore, incident-response.
+- **4 IAM policies**: password-policy, access-control, ssh-access, service-account.
+- **Pure functions**: `searchSops`, `getSop`, `searchIamPolicies`, `buildStepCommand`.
+
+#### 4. iam-connector — IAM Integration
+- **4 tools**: `iam_user_info` (get user info: username, groups, enabled, locked, privileged), `iam_user_groups` (get group memberships), `iam_disable_user` (disable account — requires approval), `iam_access_review` (review all users + identify privileged users).
+- **1 trigger**: `iam_privileged_change` (fires on privileged account change → propose-change for compliance).
+- **1 panel**: `iam-access-dashboard` (IAM access dashboard with privileged user identification).
+- **Pure functions**: `buildUserInfoCommand`, `buildUserGroupsCommand`, `buildDisableUserCommand`, `buildAccessReviewCommand`, `parseUserInfo`, `parseAccessReview`, `isPrivileged`. Supports Linux (id/groups/usermod) and Windows (Get-LocalUser/Disable-LocalUser).
+
+#### 5. fraudops — FraudOps for RTerm
+- **4 tools**: `fraudops_pipeline_status` (check Flink/NATS/Kafka health), `fraudops_str_assign` (assign STR case with 7-day CBN deadline), `fraudops_str_status` (filter STR cases by status/analyst/overdue), `fraudops_decision_summary` (BLOCK/REVIEW/APPROVE counts + rates).
+- **2 triggers**: `fraudops_str_overdue` (fires on overdue STR case → propose-change for escalation), `fraudops_pipeline_down` (fires on pipeline component down → run-playbook for incident response).
+- **1 panel**: `fraudops-dashboard` (unified fraud operations dashboard with decision summary + STR case tracking).
+- **Pure functions**: `buildPipelineHealthCommand`, `buildNatsStatusCommand`, `buildKafkaLagCommand`, `parsePipelineHealth`, `buildStrCase`, `buildDecisionSummary`.
+
+- **45 new tests** (`pluginSuite.v2.7.3.extreme.spec.ts`): all 5 plugins' pure functions + plugin lifecycle (register tools/triggers/panels).
+- **1220 tests total** (1175 + 45 new), 0 failures.
+
 ## v2.7.2 (2026-07-22)
 
 ### Bug Hunt — 5 Bugs Found + Fixed

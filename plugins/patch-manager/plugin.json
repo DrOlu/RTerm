@@ -1,0 +1,10 @@
+{
+  "name": "patch-manager",
+  "version": "1.0.0",
+  "description": "Autonomous patch management for RTerm — discover patch status across hosts, plan patch deployments, execute via playbooks with MOP approval gates, and alert on completion/failure. Supports Linux (yum/apt) and Windows (Get-WindowsUpdate).",
+  "entry": "index.mjs",
+  "tools": ["patch_status", "patch_plan", "patch_apply"],
+  "triggers": ["patch_failure", "patch_completion"],
+  "panels": ["patch-compliance"],
+  "permissions": ["exec", "readLedger:metrics", "readLedger:incidents"]
+}
