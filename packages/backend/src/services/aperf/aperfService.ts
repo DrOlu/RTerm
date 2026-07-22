@@ -169,16 +169,19 @@ export function parseAperfReport(text: string): { summary: AperfResult['summary'
 
   // Synthesize findings from summary metrics when aperf didn't emit explicit flags.
   if (findings.length === 0) {
-    if ((summary.cpuUsagePercent ?? 0) >= 90) {
-      findings.push({ metric: 'cpu_utilization', value: summary.cpuUsagePercent!, severity: 'critical', message: `aggregate CPU utilization is ${summary.cpuUsagePercent}% (>= 90%)` })
-    } else if ((summary.cpuUsagePercent ?? 0) >= 75) {
-      findings.push({ metric: 'cpu_utilization', value: summary.cpuUsagePercent!, severity: 'warning', message: `aggregate CPU utilization is ${summary.cpuUsagePercent}% (>= 75%)` })
+    const cpu = summary.cpuUsagePercent
+    if (cpu !== undefined && cpu >= 90) {
+      findings.push({ metric: 'cpu_utilization', value: cpu, severity: 'critical', message: `aggregate CPU utilization is ${cpu}% (>= 90%)` })
+    } else if (cpu !== undefined && cpu >= 75) {
+      findings.push({ metric: 'cpu_utilization', value: cpu, severity: 'warning', message: `aggregate CPU utilization is ${cpu}% (>= 75%)` })
     }
-    if ((summary.memUsagePercent ?? 0) >= 90) {
-      findings.push({ metric: 'memory', value: summary.memUsagePercent!, severity: 'critical', message: `memory utilization is ${summary.memUsagePercent}% (>= 90%)` })
+    const mem = summary.memUsagePercent
+    if (mem !== undefined && mem >= 90) {
+      findings.push({ metric: 'memory', value: mem, severity: 'critical', message: `memory utilization is ${mem}% (>= 90%)` })
     }
-    if ((summary.diskUsagePercentMax ?? 0) >= 90) {
-      findings.push({ metric: 'disk', value: summary.diskUsagePercentMax!, severity: 'critical', message: `a disk is at ${summary.diskUsagePercentMax}% utilization (>= 90%)` })
+    const disk = summary.diskUsagePercentMax
+    if (disk !== undefined && disk >= 90) {
+      findings.push({ metric: 'disk', value: disk, severity: 'critical', message: `a disk is at ${disk}% utilization (>= 90%)` })
     }
     if (summary.topCpuProcesses && summary.topCpuProcesses.length > 0) {
       const top = summary.topCpuProcesses[0]

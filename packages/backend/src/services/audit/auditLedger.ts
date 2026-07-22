@@ -200,7 +200,12 @@ export class AuditLedger {
 
   /** Import records from JSON (for recovery). Verifies the chain on import. */
   import(json: string): { imported: number; valid: boolean; detail?: string } {
-    const parsed = JSON.parse(json) as AuditRecord[]
+    let parsed: AuditRecord[]
+    try {
+      parsed = JSON.parse(json) as AuditRecord[]
+    } catch {
+      return { imported: 0, valid: false, detail: 'invalid JSON' }
+    }
     if (!Array.isArray(parsed)) {
       return { imported: 0, valid: false, detail: 'not an array' }
     }
