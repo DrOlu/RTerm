@@ -1498,7 +1498,7 @@ export class AgentService_v2 {
       );
 
       const messages: BaseMessage[] = [...state.messages];
-      const lastMessage = messages[messages.length - 1];
+      const lastMessage: BaseMessage | undefined = messages.length > 0 ? messages[messages.length - 1] : undefined;
 
       let pendingToolCalls: any[] = [];
 
@@ -2511,7 +2511,7 @@ export class AgentService_v2 {
       if (!sessionId) throw new Error("No session ID in state");
 
       const messages: BaseMessage[] = [...state.messages];
-      const lastMessage = messages[messages.length - 1];
+      const lastMessage: BaseMessage | undefined = messages.length > 0 ? messages[messages.length - 1] : undefined;
       const lastMessageIsAi = AIMessage.isInstance(lastMessage);
       const guardMessages =
         lastMessageIsAi || messages.length === 0
@@ -2714,7 +2714,7 @@ export class AgentService_v2 {
       const messages: BaseMessage[] = Array.isArray(state.messages)
         ? [...state.messages]
         : [];
-      const lastMessage = messages[messages.length - 1];
+      const lastMessage: BaseMessage | undefined = messages.length > 0 ? messages[messages.length - 1] : undefined;
       const finalBoundaryMessages =
         AIMessage.isInstance(lastMessage) || messages.length === 0
           ? messages
@@ -3437,7 +3437,7 @@ export class AgentService_v2 {
     const messages: BaseMessage[] = Array.isArray(state.messages)
       ? state.messages
       : [];
-    const lastMessage = messages[messages.length - 1];
+    const lastMessage: BaseMessage | undefined = messages.length > 0 ? messages[messages.length - 1] : undefined;
     if (
       AIMessage.isInstance(lastMessage) &&
       (hasEmptyMalformedToolCallFinishFlag(lastMessage) ||
@@ -3504,8 +3504,8 @@ export class AgentService_v2 {
     messages: BaseMessage[],
     executedToolCall: any,
   ): void {
-    const lastMessage = messages[messages.length - 1];
-    if (!AIMessage.isInstance(lastMessage)) {
+    const lastMessage: BaseMessage | undefined = messages.length > 0 ? messages[messages.length - 1] : undefined;
+    if (!lastMessage || !AIMessage.isInstance(lastMessage)) {
       return;
     }
 

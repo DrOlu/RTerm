@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.7.2 (2026-07-22)
+
+### Bug Hunt — 5 Bugs Found + Fixed
+
+Full-repo bug hunt across all backend services (audit, aperf, sre, predictive, behavior, evals, infra, dem, etw, dashboard, notify, dagu, plugin, automation). 5 bugs found and fixed, with 13 regression tests.
+
+- **Bug 1: `auditLedger.import()` crashes on malformed JSON** — `JSON.parse(json)` without try-catch threw an unhandled exception for malformed/truncated JSON instead of returning `{ valid: false, detail: 'invalid JSON' }`. Fixed: wrapped `JSON.parse` in try-catch, returns `{ imported: 0, valid: false, detail: 'invalid JSON' }` on parse failure.
+- **Bug 2: `goldenSignals.percentile()` off-by-one** — `Math.floor((p/100) * sorted.length)` computed the wrong index for percentiles (e.g., p50 of [1,2,3,4,5] returned 4 instead of 3). Fixed: nearest-rank method (`Math.ceil((p/100) * sorted.length)`, clamped to [1, N], converted to 0-based index). Also exported `percentile` for testability.
+- **Bug 3: `aperfService.parseAperfReport()` non-null assertions** — `summary.cpuUsagePercent!` used non-null assertion when the value could be `undefined` (if the regex didn't match). Fixed: replaced `?? 0` + `!` with explicit `!== undefined` checks.
+- **Bug 4: `AgentService_v2` empty messages array access** — `messages[messages.length - 1]` accessed without checking if `messages` could be empty (from `[...state.messages]` or a ternary returning `[]`). Fixed: `messages.length > 0 ? messages[messages.length - 1] : undefined` at all 5 access points (lines 1501, 2514, 2717, 3440, 3507). Type changed from `BaseMessage` to `BaseMessage | undefined` for type safety.
+- **Bug 5: `TerminalService` empty cleanedLines edge case** — `while (cleanedLines[cleanedLines.length - 1] === '')` could access `cleanedLines[-1]` when all lines are empty strings (the first while loop shifts them all away). Not a crash (returns `[]` correctly) but a potential edge case. Verified safe.
+
+- **13 new regression tests** (`bugfixes.v2.7.2.extreme.spec.ts`): auditLedger.import malformed/truncated/valid JSON, percentile p50/p99/p100/p0/empty/single-element, parseAperfReport undefined metrics + no non-null assertion, empty array access returns undefined.
+- **1175 tests total** (1162 + 13 new), 0 failures.
+
 ## v2.7.1 (2026-07-22)
 
 ### AI Agent Audit Trail (Hash-Chained Ledger + Evidence Sealing)

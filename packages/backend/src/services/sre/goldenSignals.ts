@@ -45,10 +45,12 @@ export interface GoldenSignalsDeps {
 
 const DEFAULT_WINDOW = 3_600_000
 
-function percentile(sorted: number[], p: number): number | undefined {
+export function percentile(sorted: number[], p: number): number | undefined {
   if (sorted.length === 0) return undefined
-  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length))
-  return sorted[idx]
+  // Nearest-rank method: for p50 with N elements, the rank is ceil(N * p/100),
+  // clamped to [1, N], then converted to a 0-based index.
+  const rank = Math.max(1, Math.ceil((p / 100) * sorted.length))
+  return sorted[Math.min(rank, sorted.length) - 1]
 }
 
 export class GoldenSignals {
