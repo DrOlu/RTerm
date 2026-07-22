@@ -24,6 +24,8 @@ import { AnomalyDetector } from './predictive/anomalyDetector'
 import { EarlyWarningService } from './predictive/earlyWarningService'
 import { BehaviorLedger } from './behavior/behaviorLedger'
 import { AperfService, aperfSummaryToMetricPoint } from './aperf/aperfService'
+import { AuditLedger } from './audit/auditLedger'
+import { EvidenceSealer } from './audit/evidenceSealer'
 
 /**
  * Observability — central wiring for every SRE/APM/DEM/ETW/evals/predictive/
@@ -88,6 +90,11 @@ export interface Observability {
     service: AperfService
     /** flatten an aperf result into a metric-ledger-friendly point. */
     toMetricPoint: typeof aperfSummaryToMetricPoint
+  }
+  /** Hash-chained audit ledger + evidence sealing (v2.7.1): tamper-evident audit trail. */
+  audit: {
+    ledger: AuditLedger
+    sealer: EvidenceSealer
   }
   /** the plugin system registry (v2.5.0). */
   pluginRegistry: PluginRegistry
@@ -174,6 +181,10 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     execSsh: async () => '',
   })
 
+  // --- Audit ledger + evidence sealing (v2.7.1): tamper-evident audit trail ---
+  const auditLedger = new AuditLedger({})
+  const evidenceSealer = new EvidenceSealer({})
+
   // --- Plugin system (v2.5.0): discover + auto-integrate custom plugins from plugins/. ---
   const pluginScanRoot = (process.env.GYBACKEND_DATA_DIR ?? './.gybackend-data') + '/plugins'
   const pluginRegistry = new PluginRegistry({
@@ -212,6 +223,7 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     dagu: { parseDaguYaml, parseDaguWorkflow, daguExecutionPlan },
     notify: { slackChannel, teamsChannel, smtpChannel, telegramChannel },
     aperf: { service: aperfService, toMetricPoint: aperfSummaryToMetricPoint },
+    audit: { ledger: auditLedger, sealer: evidenceSealer },
     pluginRegistry,
   }
 }
