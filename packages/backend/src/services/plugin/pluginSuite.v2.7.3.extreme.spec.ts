@@ -62,7 +62,7 @@ test('patch: buildComplianceReport computes compliance rate', () => {
 })
 test('patch: register registers 3 tools, 2 triggers, 1 panel', () => {
   const tools: any[] = [], triggers: any[] = [], panels: any[] = []
-  patchRegister({ registerTool: (t) => tools.push(t), registerTrigger: (t) => triggers.push(t), registerPanel: (p) => panels.push(p), exec: async () => '', readLedger: () => ({}), log: () => {} })
+  patchRegister({ registerTool: (t: any) => tools.push(t), registerTrigger: (t: any) => triggers.push(t), registerPanel: (p: any) => panels.push(p), exec: async () => '', readLedger: () => ({}), log: () => {} })
   if (tools.length !== 3) throw new Error(`expected 3 tools, got ${tools.length}`)
   if (triggers.length !== 2) throw new Error(`expected 2 triggers, got ${triggers.length}`)
   if (panels.length !== 1) throw new Error(`expected 1 panel, got ${panels.length}`)
@@ -110,7 +110,7 @@ test('request: filterQueue filters by status', () => {
 })
 test('request: register registers 4 tools, 2 triggers, 1 panel', () => {
   const tools: any[] = [], triggers: any[] = [], panels: any[] = []
-  requestRegister({ registerTool: (t) => tools.push(t), registerTrigger: (t) => triggers.push(t), registerPanel: (p) => panels.push(p), exec: async () => '', readLedger: () => ({}), log: () => {} })
+  requestRegister({ registerTool: (t: any) => tools.push(t), registerTrigger: (t: any) => triggers.push(t), registerPanel: (p: any) => panels.push(p), exec: async () => '', readLedger: () => ({}), log: () => {} })
   if (tools.length !== 4) throw new Error(`expected 4 tools, got ${tools.length}`)
   if (triggers.length !== 2) throw new Error(`expected 2 triggers, got ${triggers.length}`)
   if (panels.length !== 1) throw new Error(`expected 1 panel, got ${panels.length}`)
@@ -156,7 +156,7 @@ test('sop: IAM_POLICIES has 4 policies', () => {
 })
 test('sop: register registers 4 tools, 1 trigger, 1 panel', () => {
   const tools: any[] = [], triggers: any[] = [], panels: any[] = []
-  sopRegister({ registerTool: (t) => tools.push(t), registerTrigger: (t) => triggers.push(t), registerPanel: (p) => panels.push(p), exec: async () => '', log: () => {} })
+  sopRegister({ registerTool: (t: any) => tools.push(t), registerTrigger: (t: any) => triggers.push(t), registerPanel: (p: any) => panels.push(p), exec: async () => '', log: () => {} })
   if (tools.length !== 4) throw new Error(`expected 4 tools, got ${tools.length}`)
   if (triggers.length !== 1) throw new Error(`expected 1 trigger, got ${triggers.length}`)
   if (panels.length !== 1) throw new Error(`expected 1 panel, got ${panels.length}`)
@@ -193,7 +193,7 @@ test('iam: isPrivileged returns false for regular user', () => {
 })
 test('iam: register registers 4 tools, 1 trigger, 1 panel', () => {
   const tools: any[] = [], triggers: any[] = [], panels: any[] = []
-  iamRegister({ registerTool: (t) => tools.push(t), registerTrigger: (t) => triggers.push(t), registerPanel: (p) => panels.push(p), exec: async () => '', readLedger: () => ({}), log: () => {} })
+  iamRegister({ registerTool: (t: any) => tools.push(t), registerTrigger: (t: any) => triggers.push(t), registerPanel: (p: any) => panels.push(p), exec: async () => '', readLedger: () => ({}), log: () => {} })
   if (tools.length !== 4) throw new Error(`expected 4 tools, got ${tools.length}`)
   if (triggers.length !== 1) throw new Error(`expected 1 trigger, got ${triggers.length}`)
   if (panels.length !== 1) throw new Error(`expected 1 panel, got ${panels.length}`)
@@ -240,7 +240,7 @@ test('fraudops: buildDecisionSummary handles empty', () => {
 })
 test('fraudops: register registers 4 tools, 2 triggers, 1 panel', () => {
   const tools: any[] = [], triggers: any[] = [], panels: any[] = []
-  fraudopsRegister({ registerTool: (t) => tools.push(t), registerTrigger: (t) => triggers.push(t), registerPanel: (p) => panels.push(p), exec: async () => '', readLedger: () => ({}), log: () => {} })
+  fraudopsRegister({ registerTool: (t: any) => tools.push(t), registerTrigger: (t: any) => triggers.push(t), registerPanel: (p: any) => panels.push(p), exec: async () => '', readLedger: () => ({}), log: () => {} })
   if (tools.length !== 4) throw new Error(`expected 4 tools, got ${tools.length}`)
   if (triggers.length !== 2) throw new Error(`expected 2 triggers, got ${triggers.length}`)
   if (panels.length !== 1) throw new Error(`expected 1 panel, got ${panels.length}`)
