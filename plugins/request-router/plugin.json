@@ -1,0 +1,10 @@
+{
+  "name": "request-router",
+  "version": "1.0.0",
+  "description": "Automated request handling and approval workflow for RTerm — receive operational requests, classify risk, route for approval (auto-approve/queue/MOP), execute end-to-end, and audit every step.",
+  "entry": "index.mjs",
+  "tools": ["submit_request", "approve_request", "list_requests", "request_status"],
+  "triggers": ["request_urgent", "request_approved"],
+  "panels": ["request-queue"],
+  "permissions": ["exec", "readLedger:incidents"]
+}

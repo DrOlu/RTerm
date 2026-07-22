@@ -1,0 +1,10 @@
+{
+  "name": "fraudops",
+  "version": "1.0.0",
+  "description": "FraudOps for RTerm — operational layer for the fraud detection pipeline. Monitors pipeline health (Flink, NATS, Kafka), manages STR workflow, tracks fraud incidents, and provides the unified fraud operations dashboard. Bridges Kafka/NATS metrics into RTerm's SRE pillar.",
+  "entry": "index.mjs",
+  "tools": ["fraudops_pipeline_status", "fraudops_str_assign", "fraudops_str_status", "fraudops_decision_summary"],
+  "triggers": ["fraudops_str_overdue", "fraudops_pipeline_down"],
+  "panels": ["fraudops-dashboard"],
+  "permissions": ["exec", "readLedger:metrics", "readLedger:incidents"]
+}

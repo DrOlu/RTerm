@@ -1,0 +1,10 @@
+{
+  "name": "iam-connector",
+  "version": "1.0.0",
+  "description": "IAM integration for RTerm — user/group management, role assignment, access review, and audit trail for Active Directory, local users, and service accounts. Covers user lifecycle (create, disable, offboard), group membership, and access compliance.",
+  "entry": "index.mjs",
+  "tools": ["iam_user_info", "iam_user_groups", "iam_disable_user", "iam_access_review"],
+  "triggers": ["iam_privileged_change"],
+  "panels": ["iam-access-dashboard"],
+  "permissions": ["exec", "readLedger:incidents"]
+}
