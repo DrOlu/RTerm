@@ -19,7 +19,7 @@ jobs:
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
           python3 -c "
-          import json, urllib.request, os
+          import json, urllib.request, os, time
           payload = json.dumps({
             'action': 'published',
             'release': {
@@ -33,5 +33,18 @@ jobs:
             }
           }).encode()
           req = urllib.request.Request(os.environ['WEBHOOK_URL'], data=payload, headers={'Content-Type': 'application/json'})
-          urllib.request.urlopen(req)
+          last_err = None
+          for attempt in range(1, 6):
+              try:
+                  urllib.request.urlopen(req, timeout=30)
+                  print(f'Webhook delivered on attempt {attempt}')
+                  break
+              except Exception as e:
+                  last_err = e
+                  print(f'Attempt {attempt} failed: {e}')
+                  if attempt < 5:
+                      time.sleep(10 * attempt)
+          else:
+              print(f'All 5 attempts failed; last error: {last_err}')
+              raise SystemExit(1)
           "
