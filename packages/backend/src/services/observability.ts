@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import type { TerminalService } from './TerminalService'
 import type { AgentService_v2 } from './AgentService_v2'
 import type { AutomationManager } from './automation/AutomationManager'
@@ -187,8 +188,19 @@ export function createObservability(deps: ObservabilityDeps): Observability {
 
   // --- Plugin system (v2.5.0): discover + auto-integrate custom plugins from plugins/. ---
   const pluginScanRoot = (process.env.GYBACKEND_DATA_DIR ?? './.gybackend-data') + '/plugins'
+  // Also scan the bundle's own plugins/ directory (for the rterm-backend npm package,
+  // where plugins ship alongside the gybackend binary). The bundle is at bin/gybackend.js,
+  // so the plugins are at ../plugins/ relative to the bundle file. We check that the
+  // directory actually exists before adding it (in the source/unbundled case it won't).
+  const bundlePluginRoot = new URL('../../plugins/', import.meta.url).pathname
+  const scanRoots = [pluginScanRoot, './plugins']
+  try {
+    const req = createRequire(import.meta.url)
+    const fs = req('node:fs') as typeof import('node:fs')
+    if (fs.existsSync(bundlePluginRoot)) scanRoots.push(bundlePluginRoot)
+  } catch { /* best-effort */ }
   const pluginRegistry = new PluginRegistry({
-    scanRoots: [pluginScanRoot, './plugins'],
+    scanRoots,
     createContext: (record) => PluginRegistry.defaultContext(
       record,
       async (cmd, opts) => deps.agentService
