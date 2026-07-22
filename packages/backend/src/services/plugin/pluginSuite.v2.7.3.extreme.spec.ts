@@ -2,7 +2,6 @@
  * v2.7.3 plugin suite — regression tests for patch-manager, request-router,
  * sop-assistant, iam-connector, and fraudops plugins.
  */
-// @ts-nocheck — the plugins are .mjs (JavaScript) and don't have type declarations.
 import { register as patchRegister, buildPatchStatusCommand, buildPatchApplyCommand, buildPrePatchCheckCommand, parsePatchStatus, buildPatchPlan, buildComplianceReport } from '../../../../../plugins/patch-manager/index.mjs'
 import { register as requestRegister, classifyRequest, routeRequest, buildQueueEntry, filterQueue } from '../../../../../plugins/request-router/index.mjs'
 import { register as sopRegister, searchSops, getSop, searchIamPolicies, buildStepCommand, BUILTIN_SOPS, IAM_POLICIES } from '../../../../../plugins/sop-assistant/index.mjs'
