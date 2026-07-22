@@ -23,6 +23,7 @@ import { EvalHarness } from './evals/evalHarness'
 import { AnomalyDetector } from './predictive/anomalyDetector'
 import { EarlyWarningService } from './predictive/earlyWarningService'
 import { BehaviorLedger } from './behavior/behaviorLedger'
+import { AperfService, aperfSummaryToMetricPoint, type AperfResult } from './aperf/aperfService'
 
 /**
  * Observability — central wiring for every SRE/APM/DEM/ETW/evals/predictive/
@@ -81,6 +82,12 @@ export interface Observability {
     teamsChannel: typeof teamsChannel
     smtpChannel: typeof smtpChannel
     telegramChannel: typeof telegramChannel
+  }
+  /** AWS APerf performance deep-dive (v2.6.0): deploy + record + parse aperf on hosts. */
+  aperf: {
+    service: AperfService
+    /** flatten an aperf result into a metric-ledger-friendly point. */
+    toMetricPoint: typeof aperfSummaryToMetricPoint
   }
   /** the plugin system registry (v2.5.0). */
   pluginRegistry: PluginRegistry
@@ -160,6 +167,13 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     isCommandBlocked: () => false,
   })
 
+  // --- APerf performance deep-dive (v2.6.0): deploy + record + parse aperf on hosts ---
+  // The execSsh is a no-op default; the agent tool or playbook injects the real
+  // SSH exec (bound to the target host's terminalId) at call time.
+  const aperfService = new AperfService({
+    execSsh: async () => '',
+  })
+
   // --- Plugin system (v2.5.0): discover + auto-integrate custom plugins from plugins/. ---
   const pluginScanRoot = (process.env.GYBACKEND_DATA_DIR ?? './.gybackend-data') + '/plugins'
   const pluginRegistry = new PluginRegistry({
@@ -197,6 +211,7 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     earlyWarning, behaviorLedger,
     dagu: { parseDaguYaml, parseDaguWorkflow, daguExecutionPlan },
     notify: { slackChannel, teamsChannel, smtpChannel, telegramChannel },
+    aperf: { service: aperfService, toMetricPoint: aperfSummaryToMetricPoint },
     pluginRegistry,
   }
 }
