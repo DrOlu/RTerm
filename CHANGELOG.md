@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.7.1 (2026-07-22)
+
+### AI Agent Audit Trail (Hash-Chained Ledger + Evidence Sealing)
+
+- **New: `auditLedger.ts`** — hash-chained, tamper-evident audit trail for AI agent operations. Every audit-relevant event (agent runs, command evaluations, approvals, MOP changes, playbook steps, trigger firings, alert ingestions, deep-dives) is appended as a hash-chained record: each record includes the SHA-256 hash of the previous record, forming an immutable chain. Any tampering with a historical record breaks the chain and is detectable by re-computing hashes.
+- **New: `evidenceSealer.ts`** — Merkle-tree sealing for the audit ledger. Periodically computes a Merkle tree root over the audit ledger records and produces a sealed evidence bundle (root hash + metadata + record hashes). The sealed bundle is independently verifiable: anyone with the records can recompute the root and compare it against the sealed root. Satisfies the KLA audit framework's "Evidence integrity, retention, and independent verification" domain.
+- **18 audit event kinds**: agent_run_start/end, command_evaluated/approved/denied/executed, mop_plan/approve/run/rollback, playbook_step, trigger_fired, netdata_alert, aperf_deepdive, config_change, incident_created/updated, evidence_sealed.
+- **Query methods**: list, listByKind, listByTarget, listByActor, listInRange.
+- **Chain verification**: verify() detects tampered content, tampered hashes, and broken prevHash chains.
+- **Export/import**: export() → JSON, import() → verifies chain on recovery.
+- **Wired into `createObservability`** — `observability.audit.ledger` + `observability.audit.sealer`.
+- **34 new tests** (`auditLedger.extreme.spec.ts`): append + chaining, query methods, chain verification (tampered content/hash/prevHash), export/import round-trip + tamper rejection, Merkle root computation (empty/single/pair/odd), seal + verify (valid/tampered/missing records), bundle metadata, all 18 event kinds.
+- **1162 tests total** (1128 + 34 new), 0 failures.
+
+### What this enables
+
+RTerm now has a production-auditable AI agent trail per the KLA 12-domain framework. Every agent action is recorded in a hash-chained, tamper-evident ledger. Evidence bundles can be sealed periodically (daily, weekly) and independently verified by auditors. Combined with RTerm's existing command policy (domain 4/6), MOP approvals (domain 7), run ledger (domain 8), drift detection (domain 9), incident ledger (domain 10), and session logging (domain 11), RTerm now covers 9 of the 12 KLA audit domains natively.
+
 ## v2.7.0 (2026-07-22)
 
 ### Netdata Integration Plugin
