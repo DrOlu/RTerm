@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.7.4 (2026-07-22)
+
+### All 6 Plugins Shipped into rterm-backend npm Package
+
+All 6 plugins (patch-manager, request-router, sop-assistant, iam-connector, fraudops, netdata-rterm) now ship bundled in the `rterm-backend` npm package and are auto-discovered on startup. No manual plugin installation required.
+
+- **`observability.ts`**: `PluginRegistry.scanRoots` now includes the bundle's own `plugins/` directory, resolved via `new URL('../../plugins/', import.meta.url).pathname` (the bundle is at `bin/gybackend.js`, plugins are at `../plugins/`). Uses `createRequire` + `fs.existsSync` to check existence before adding (the source/unbundled case won't have it).
+- **`package.json`**: `files` array now includes `"plugins/"` — the 6 plugin folders are shipped in the npm tarball.
+- **Published**: `rterm-backend@2.7.4` with 22 files (bin/gybackend.js + 6 plugin folders with .mjs/.d.mts/plugin.json + README.md + LICENSE.md + package.json).
+- **21 tools, 10 triggers, 6 panels** across all 6 plugins, all auto-discovered and available to the AI agent out of the box.
+
+| Plugin | Tools | Triggers | Panels |
+|---|---|---|---|
+| patch-manager | 3 | 2 | 1 |
+| request-router | 4 | 2 | 1 |
+| sop-assistant | 4 | 1 | 1 |
+| iam-connector | 4 | 1 | 1 |
+| fraudops | 4 | 2 | 1 |
+| netdata-rterm | 2 | 2 | 1 |
+| **Total** | **21** | **10** | **6** |
+
 ## v2.7.3 (2026-07-22)
 
 ### Plugin Suite — Patch Management, Request Router, SOP Assistant, IAM Connector, FraudOps
