@@ -2,11 +2,12 @@
  * v2.7.3 plugin suite — regression tests for patch-manager, request-router,
  * sop-assistant, iam-connector, and fraudops plugins.
  */
-import { register as patchRegister, buildPatchStatusCommand, buildPatchApplyCommand, buildPrePatchCheckCommand, buildPostPatchCheckCommand, parsePatchStatus, buildPatchPlan, buildComplianceReport } from '../../../../../plugins/patch-manager/index.mjs'
-import { register as requestRegister, classifyRequest, routeRequest, buildRequestId, buildApprovalRecord, buildQueueEntry, filterQueue } from '../../../../../plugins/request-router/index.mjs'
+// @ts-nocheck — the plugins are .mjs (JavaScript) and don't have type declarations.
+import { register as patchRegister, buildPatchStatusCommand, buildPatchApplyCommand, buildPrePatchCheckCommand, parsePatchStatus, buildPatchPlan, buildComplianceReport } from '../../../../../plugins/patch-manager/index.mjs'
+import { register as requestRegister, classifyRequest, routeRequest, buildQueueEntry, filterQueue } from '../../../../../plugins/request-router/index.mjs'
 import { register as sopRegister, searchSops, getSop, searchIamPolicies, buildStepCommand, BUILTIN_SOPS, IAM_POLICIES } from '../../../../../plugins/sop-assistant/index.mjs'
-import { register as iamRegister, buildUserInfoCommand, buildUserGroupsCommand, buildDisableUserCommand, buildAccessReviewCommand, parseUserInfo, parseAccessReview, isPrivileged } from '../../../../../plugins/iam-connector/index.mjs'
-import { register as fraudopsRegister, buildPipelineHealthCommand, buildNatsStatusCommand, buildKafkaLagCommand, parsePipelineHealth, buildStrCase, buildDecisionSummary } from '../../../../../plugins/fraudops/index.mjs'
+import { register as iamRegister, buildUserInfoCommand, buildDisableUserCommand, parseUserInfo, isPrivileged } from '../../../../../plugins/iam-connector/index.mjs'
+import { register as fraudopsRegister, buildPipelineHealthCommand, parsePipelineHealth, buildStrCase, buildDecisionSummary } from '../../../../../plugins/fraudops/index.mjs'
 
 const cases: Array<{ name: string; run: () => void | Promise<void> }> = []
 function test(n: string, r: () => void | Promise<void>) { cases.push({ name: n, run: r }) }
@@ -40,7 +41,7 @@ test('patch: parsePatchStatus parses yum output', () => {
 })
 test('patch: parsePatchStatus parses Windows KB output', () => {
   const output = 'KB5034441 Security Update for Windows Server 2022'
-  const { patches, summary } = parsePatchStatus(output, 'windows')
+  const { patches } = parsePatchStatus(output, 'windows')
   if (patches.length !== 1) throw new Error(`expected 1 patch, got ${patches.length}`)
   if (patches[0].id !== 'KB5034441') throw new Error('KB id')
 })
