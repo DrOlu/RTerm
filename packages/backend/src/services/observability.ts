@@ -23,7 +23,7 @@ import { EvalHarness } from './evals/evalHarness'
 import { AnomalyDetector } from './predictive/anomalyDetector'
 import { EarlyWarningService } from './predictive/earlyWarningService'
 import { BehaviorLedger } from './behavior/behaviorLedger'
-import { AperfService, aperfSummaryToMetricPoint, type AperfResult } from './aperf/aperfService'
+import { AperfService, aperfSummaryToMetricPoint } from './aperf/aperfService'
 
 /**
  * Observability — central wiring for every SRE/APM/DEM/ETW/evals/predictive/

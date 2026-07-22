@@ -122,7 +122,7 @@ test('deepDive: installs, records, reports, parses, and returns the result', asy
   if (result.summary.diskUsagePercentMax !== 45.1) throw new Error('disk parse')
   if (!result.findings.some((f) => f.metric.startsWith('process:'))) throw new Error('process finding')
   // verify the pipeline order: install (curl) -> prereq -> record -> report -> read
-  const order = cmds.map((c) => (c.includes('curl') ? 'install' : c.includes('perf_event_paranoid') ? 'prereq' : c.includes('record -r') ? 'record' : c.includes('report -r') ? 'report' : c.includes('index.html') ? 'read' : '?'))
+  const order: string[] = cmds.map((c) => (c.includes('curl') ? 'install' : c.includes('perf_event_paranoid') ? 'prereq' : c.includes('record -r') ? 'record' : c.includes('report -r') ? 'report' : c.includes('index.html') ? 'read' : '?'))
   const idx = (s: string) => order.indexOf(s)
   if (!(idx('install') < idx('prereq') && idx('prereq') < idx('record') && idx('record') < idx('report') && idx('report') < idx('read'))) {
     throw new Error(`pipeline order wrong: ${order.join(',')}`)
