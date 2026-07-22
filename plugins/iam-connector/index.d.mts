@@ -7,4 +7,5 @@ export function buildAccessReviewCommand(os?: string): string
 export function parseUserInfo(output: string, os?: string): { username: string; groups: string[]; enabled: boolean; locked: boolean }
 export function parseAccessReview(output: string, os?: string): Array<{ username: string; groups?: string[]; enabled?: boolean }>
 export function isPrivileged(userInfo: { groups: string[] }, privilegedGroups?: string[]): boolean
-export default any
+declare const _default: any
+export default _default

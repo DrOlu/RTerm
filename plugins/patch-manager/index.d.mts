@@ -7,4 +7,5 @@ export function buildPostPatchCheckCommand(os: string): string
 export function parsePatchStatus(output: string, os: string): { patches: Array<{ id: string; title: string; severity: string; os: string }>; summary: { total: number; critical: number; security: number; recommended: number } }
 export function buildPatchPlan(host: string, os: string, patchStatus: any, opts?: { severity?: string }): any
 export function buildComplianceReport(hostStatuses: Record<string, any>): any
-export default any
+declare const _default: any
+export default _default

@@ -6,4 +6,5 @@ export function searchIamPolicies(query: string, policies?: any[]): Array<{ id: 
 export function buildStepCommand(step: any, vars?: Record<string, any>): string
 export const BUILTIN_SOPS: any[]
 export const IAM_POLICIES: any[]
-export default any
+declare const _default: any
+export default _default
