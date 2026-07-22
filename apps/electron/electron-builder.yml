@@ -83,6 +83,12 @@ extraResources:
       - "**/*"
   - from: apps/electron/materials/icons/512x512.png
     to: icon.png
+  # Ship the official RTerm plugins so the desktop app's PluginRegistry
+  # discovers them at {resourcesPath}/plugins/.
+  - from: plugins
+    to: plugins
+    filter:
+      - "**/*"
 asarUnpack:
   - "**/*.node"
   - "node_modules/node-pty/lib/**/*.js"

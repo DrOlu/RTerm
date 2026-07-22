@@ -199,6 +199,20 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     const fs = req('node:fs') as typeof import('node:fs')
     if (fs.existsSync(bundlePluginRoot)) scanRoots.push(bundlePluginRoot)
   } catch { /* best-effort */ }
+  // Also scan the Electron app's resources/plugins/ directory (for the desktop app,
+  // where plugins are shipped as electron-builder extraResources). process.resourcesPath
+  // is set by Electron to {app}/Contents/Resources (macOS) or {app}/resources (Windows/Linux).
+  try {
+    const req = createRequire(import.meta.url)
+    const fs = req('node:fs') as typeof import('node:fs')
+    const path = req('node:path') as typeof import('node:path')
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath
+    if (resourcesPath) {
+      const resourcesPlugins = path.join(resourcesPath, 'plugins')
+      if (fs.existsSync(resourcesPlugins)) scanRoots.push(resourcesPlugins)
+    }
+  } catch { /* best-effort */ }
   const pluginRegistry = new PluginRegistry({
     scanRoots,
     createContext: (record) => PluginRegistry.defaultContext(
