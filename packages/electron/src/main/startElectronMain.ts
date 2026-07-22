@@ -47,6 +47,7 @@ import { AccessTokenService } from "../../../backend/src/services/AccessToken/Ac
 import { TerminalCommandDraftService } from "../../../backend/src/services/TerminalCommandDraftService";
 import { ElectronAppSettingsMigration } from "../settings/ElectronAppSettingsMigration";
 import { cleanupDeprecatedCliLaunchers } from "./DeprecatedCliCleanupService";
+import { createObservability } from "../../../backend/src/services/observability";
 import {
   buildBuiltInToolStatusSummary,
   buildSkillStatusSummary,
@@ -1130,6 +1131,21 @@ export async function startElectronMain(): Promise<void> {
           onLog: () => {},
         });
         agentService.setTriggerEngine(triggerEngine);
+
+        // Observability: SRE pillar + plugin system. The PluginRegistry discovers
+        // plugins from {resourcesPath}/plugins (packaged) and ./plugins (dev).
+        const observability = createObservability({
+          terminalService,
+          agentService,
+          automationManager,
+          agentRunLedger,
+          gatewayService,
+          setMonitorPublisher: (pub) => resourceMonitorService.setPublisher((channel: string, data: unknown) => {
+            pub(channel, data);
+          }),
+          onLog: () => {},
+        });
+        console.log(`[electron] Observability wired: dashboard state available (hosts=${observability.metricsLedger.hosts().length})`);
 
         ipcMain.handle("agentRunLedger:list", (_e, filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
           agentRunLedger.listRuns(filter),
