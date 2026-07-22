@@ -1,0 +1,22 @@
+{
+  "name": "netdata-rterm",
+  "version": "1.0.0",
+  "description": "Netdata integration for RTerm — ingests Netdata alert webhooks as triggers, correlates anomalies with changes/incidents for agent RCA + auto-remediation. Bridges Netdata's per-second monitoring + ML anomaly detection with RTerm's AI agent and SRE pillar.",
+  "entry": "index.mjs",
+  "tools": [
+    "netdata_alert_summary",
+    "netdata_correlate"
+  ],
+  "triggers": [
+    "netdata_critical_alert",
+    "netdata_warning_alert"
+  ],
+  "panels": [
+    "netdata-alert-feed"
+  ],
+  "permissions": [
+    "exec",
+    "readLedger:metrics",
+    "readLedger:incidents"
+  ]
+}
