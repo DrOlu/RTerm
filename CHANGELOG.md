@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.7.5 (2026-07-22)
+
+### Desktop App Plugin Shipping
+
+All 6 official plugins (patch-manager, request-router, sop-assistant, iam-connector, fraudops, netdata-rterm) now ship bundled in the **RTerm desktop app** and are auto-discovered on startup. No manual plugin installation required.
+
+- **`electron-builder.yml`**: `extraResources` now includes `plugins/` — the 6 plugin folders are copied to `{app}/resources/plugins/` in the packaged app.
+- **`startElectronMain.ts`**: `createObservability` is now called after `agentService.setTriggerEngine(triggerEngine)` (line ~1133), mirroring `startGyBackend.ts`. This was the critical gap — the desktop app previously never instantiated `PluginRegistry`, so the extraResources plugins would never have been discovered.
+- **`observability.ts`**: `PluginRegistry.scanRoots` now also scans `process.resourcesPath/plugins` (for the packaged Electron app). Uses `createRequire` + `fs.existsSync` to check existence before adding.
+- **Verified**: `dist/mac-arm64/RTerm.app/Contents/Resources/plugins/` contains all 6 plugin folders (fraudops, netdata-rterm, request-router, sop-assistant, iam-connector, patch-manager) + sample-k8s-slo.
+
+The desktop app now discovers all 21 tools, 10 triggers, and 6 panels automatically on startup, just like the npm package does.
+
 ## v2.7.4 (2026-07-22)
 
 ### All 6 Plugins Shipped into rterm-backend npm Package
