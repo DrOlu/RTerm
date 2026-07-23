@@ -1363,6 +1363,48 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                             ]}
                           />
                         </div>
+                        <div className="profile-field">
+                          <div className="profile-field-label-with-info">
+                            <label>Review Model (maker/checker)</label>
+                            <InfoTooltip content="The review/checker model independently verifies the action model's output for correctness, completeness, safety, compliance, and accuracy. If NOT specified, reviews are skipped entirely (fast output mode)." />
+                          </div>
+                          <Select
+                              value={p.reviewModelId || ""}
+                              onChange={(id) =>
+                                store.saveProfile({
+                                  ...p,
+                                  reviewModelId: id || undefined,
+                                })
+                              }
+                            options={[
+                                { value: "", label: "(None — skip reviews)" },
+                                ...(store.settings?.models.items.map((m) => ({
+                                  value: m.id,
+                                  label: m.name,
+                                })) || []),
+                            ]}
+                          />
+                        </div>
+                        <div className="profile-field">
+                          <div className="profile-field-label-with-info">
+                            <label>Review Mode</label>
+                            <InfoTooltip content="strict: block on any issue (escalate to human). advisory: flag issues but allow. auto-approve: skip review for low-risk actions." />
+                          </div>
+                          <Select
+                              value={p.reviewMode || "strict"}
+                              onChange={(mode) =>
+                                store.saveProfile({
+                                  ...p,
+                                  reviewMode: (mode as 'strict' | 'advisory' | 'auto-approve') || "strict",
+                                })
+                              }
+                            options={[
+                                { value: "strict", label: "Strict (block on any issue)" },
+                                { value: "advisory", label: "Advisory (flag but allow)" },
+                                { value: "auto-approve", label: "Auto-approve (skip low-risk)" },
+                            ]}
+                          />
+                        </div>
                       </div>
                     </div>
                     );
