@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.7.6 (2026-07-23)
+
+### Monitor Status Diagnostic
+
+New `monitorStatusService` — a diagnostic tool for the "stats don't display" issue. Reports exactly why stats aren't displaying for each terminal: whether the publisher is wired, whether a monitor session exists, whether collection is stuck (inFlight), whether the terminal is connected, whether the platform is detected, and when the last collection ran.
+
+- **`report()`** returns per-terminal entries: `terminalId`, `connected`, `platform`, `hasSession`, `inFlight`, `lastCollectAt`, `lastCollectAgoMs`, `diagnosis` (ok / terminal_not_connected / no_monitor_session / collection_stuck_in_flight / never_collected / stale_collection).
+- **`summary()`** returns a compact string for the agent: publisher status, terminal count, and issue list.
+- **Diagnoses**: publisher not wired (createObservability not called), terminal not connected, no monitor session, collection stuck in flight, never collected, stale collection (>30s).
+- **Wired into `createObservability`** — `observability.monitorStatus`. `resourceMonitorService` added to `ObservabilityDeps` (was previously only used via `setMonitorPublisher` closure, now passed directly). Both `startGyBackend.ts` and `startElectronMain.ts` updated to pass `resourceMonitorService`.
+- **12 new tests** (`monitorStatusService.extreme.spec.ts`): publisher detection, all 6 diagnoses, summary string.
+- **1232 tests total** (1220 + 12 new), 0 failures.
+
 ## v2.7.5 (2026-07-22)
 
 ### Desktop App Plugin Shipping
