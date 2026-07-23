@@ -61,7 +61,7 @@ export class MonitorStatusService {
 
     for (const terminal of terminals) {
       const terminalId = terminal.id
-      const connected = terminal.state === 'ready'
+      const connected = terminal.runtimeState === 'ready'
       const platform = terminal.remoteOs ?? terminal.type ?? 'unknown'
 
       // Check the monitor session.

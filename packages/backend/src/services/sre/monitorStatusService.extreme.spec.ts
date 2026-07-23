@@ -26,7 +26,7 @@ test('reports terminal_not_connected for exited terminal', () => {
   const mockMonitor = { publisher: () => {}, sessions: new Map() }
   const mockTerminal = {
     getDisplayTerminals: () => [
-      { id: 'ssh-1', state: 'exited', remoteOs: 'linux', type: 'ssh' },
+      { id: 'ssh-1', runtimeState: 'exited', remoteOs: 'linux', type: 'ssh' },
     ],
   }
   const svc = new MonitorStatusService(mockMonitor as any, mockTerminal as any, () => 1000)
@@ -40,7 +40,7 @@ test('reports no_monitor_session when session does not exist', () => {
   const mockMonitor = { publisher: () => {}, sessions: new Map() }
   const mockTerminal = {
     getDisplayTerminals: () => [
-      { id: 'ssh-1', state: 'ready', remoteOs: 'linux', type: 'ssh' },
+      { id: 'ssh-1', runtimeState: 'ready', remoteOs: 'linux', type: 'ssh' },
     ],
   }
   const svc = new MonitorStatusService(mockMonitor as any, mockTerminal as any, () => 1000)
@@ -56,7 +56,7 @@ test('reports collection_stuck_in_flight when inFlight is true', () => {
   }
   const mockTerminal = {
     getDisplayTerminals: () => [
-      { id: 'ssh-1', state: 'ready', remoteOs: 'linux', type: 'ssh' },
+      { id: 'ssh-1', runtimeState: 'ready', remoteOs: 'linux', type: 'ssh' },
     ],
   }
   const svc = new MonitorStatusService(mockMonitor as any, mockTerminal as any, () => 1000)
@@ -72,7 +72,7 @@ test('reports never_collected when lastCollectAt is 0', () => {
   }
   const mockTerminal = {
     getDisplayTerminals: () => [
-      { id: 'ssh-1', state: 'ready', remoteOs: 'linux', type: 'ssh' },
+      { id: 'ssh-1', runtimeState: 'ready', remoteOs: 'linux', type: 'ssh' },
     ],
   }
   const svc = new MonitorStatusService(mockMonitor as any, mockTerminal as any, () => 1000)
@@ -88,7 +88,7 @@ test('reports stale_collection when last collect was > 30s ago', () => {
   }
   const mockTerminal = {
     getDisplayTerminals: () => [
-      { id: 'ssh-1', state: 'ready', remoteOs: 'linux', type: 'ssh' },
+      { id: 'ssh-1', runtimeState: 'ready', remoteOs: 'linux', type: 'ssh' },
     ],
   }
   const svc = new MonitorStatusService(mockMonitor as any, mockTerminal as any, () => 35000)
@@ -103,7 +103,7 @@ test('reports ok when everything is healthy', () => {
   }
   const mockTerminal = {
     getDisplayTerminals: () => [
-      { id: 'ssh-1', state: 'ready', remoteOs: 'linux', type: 'ssh' },
+      { id: 'ssh-1', runtimeState: 'ready', remoteOs: 'linux', type: 'ssh' },
     ],
   }
   const svc = new MonitorStatusService(mockMonitor as any, mockTerminal as any, () => 1000)
@@ -126,7 +126,7 @@ test('summary includes publisher status and terminal count', () => {
   const mockMonitor = { publisher: () => {}, sessions: new Map() }
   const mockTerminal = {
     getDisplayTerminals: () => [
-      { id: 'ssh-1', state: 'ready', remoteOs: 'linux', type: 'ssh' },
+      { id: 'ssh-1', runtimeState: 'ready', remoteOs: 'linux', type: 'ssh' },
     ],
   }
   const svc = new MonitorStatusService(mockMonitor as any, mockTerminal as any, () => 1000)
@@ -151,7 +151,7 @@ test('summary says all normal when healthy', () => {
   }
   const mockTerminal = {
     getDisplayTerminals: () => [
-      { id: 'ssh-1', state: 'ready', remoteOs: 'linux', type: 'ssh' },
+      { id: 'ssh-1', runtimeState: 'ready', remoteOs: 'linux', type: 'ssh' },
     ],
   }
   const svc = new MonitorStatusService(mockMonitor as any, mockTerminal as any, () => 1000)
