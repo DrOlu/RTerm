@@ -256,7 +256,7 @@ void policyEngine.load().catch(() => {})
 // The review model independently verifies the action model's output.
 // If no reviewModelId is specified in the profile, reviews are skipped entirely (fast output mode).
 const reviewService = new ReviewService({
-  runReviewModel: deps.runReviewModel ?? (async (prompt) => ({
+  runReviewModel: deps.runReviewModel ?? (async (_prompt) => ({
     verdict: 'approved' as const,
     issues: [],
     reasoning: 'no review model configured',

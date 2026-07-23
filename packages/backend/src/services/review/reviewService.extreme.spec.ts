@@ -1,4 +1,4 @@
-import { ReviewService, createSkippedReviewResult, shouldSkipReview, type ReviewAction, type ReviewResult } from './reviewService'
+import { ReviewService, createSkippedReviewResult, shouldSkipReview } from './reviewService'
 
 const cases: Array<{ name: string; run: () => void | Promise<void> }> = []
 function test(n: string, r: () => void | Promise<void>) { cases.push({ name: n, run: r }) }
