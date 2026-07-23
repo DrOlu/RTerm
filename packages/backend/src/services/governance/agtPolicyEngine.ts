@@ -1,5 +1,3 @@
-import { createRequire } from 'node:module'
-
 /**
  * agtPolicyEngine — Microsoft AGT (Agent Governance Toolkit) policy engine for RTerm.
  *
