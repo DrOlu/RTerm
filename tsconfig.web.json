@@ -10,6 +10,7 @@
     "packages/ui/src/renderer_v2/**/*",
     "packages/mobile-web/src/**/*",
     "packages/shared/src/**/*",
+    "packages/backend/src/types/index.ts",
     "apps/mobile-web/src/**/*",
     "apps/mobile-web/vite.config.ts",
     "apps/electron/src/preload/index.d.ts"

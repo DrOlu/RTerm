@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { AppStore } from "../../stores/AppStore";
-import type { ModelDefinition } from "../../lib/ipcTypes";
+import type { ModelDefinition, ModelProfile } from "../../lib/ipcTypes";
 import { BUILTIN_THEMES } from "../../theme/themes";
 import type { AppTheme } from "../../theme/themes";
 import "./settings.scss";
@@ -1253,7 +1253,7 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
               </div>
               
               <div className="profiles-grid">
-                {store.settings?.models.profiles.map((p) => {
+                {store.settings?.models.profiles.map((p: ModelProfile) => {
                     const isActive =
                       store.settings?.models.activeProfileId === p.id;
                   return (

@@ -45,6 +45,10 @@ interface BackendSettings {
       actionModelId?: string;
       thinkingModelId?: string;
       compactionModelId?: string;
+      /** The review/checker model — independently verifies the action model's output. */
+      reviewModelId?: string;
+      /** how strict the review is: 'strict' (block on any issue), 'advisory' (flag but allow), 'auto-approve' (skip review for low-risk actions). */
+      reviewMode?: 'strict' | 'advisory' | 'auto-approve';
     }>;
     activeProfileId: string;
   };
