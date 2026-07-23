@@ -28,6 +28,7 @@ import { AperfService, aperfSummaryToMetricPoint } from './aperf/aperfService'
 import { AuditLedger } from './audit/auditLedger'
 import { EvidenceSealer } from './audit/evidenceSealer'
 import { MonitorStatusService } from './sre/monitorStatusService'
+import { AgtPolicyEngine, parsePolicyYaml, type PolicyDocument } from './governance/agtPolicyEngine'
 
 /**
  * Observability — central wiring for every SRE/APM/DEM/ETW/evals/predictive/
@@ -102,6 +103,10 @@ export interface Observability {
   }
   /** Monitor status diagnostic (v2.7.6): reports why stats aren't displaying per terminal. */
   monitorStatus: MonitorStatusService
+  /** AGT policy engine (v2.7.7): evaluates agent actions against YAML policies. */
+  governance: {
+    policyEngine: AgtPolicyEngine
+  }
   /** the plugin system registry (v2.5.0). */
   pluginRegistry: PluginRegistry
 }
@@ -194,6 +199,41 @@ export function createObservability(deps: ObservabilityDeps): Observability {
   // --- Monitor status diagnostic (v2.7.6): reports why stats aren't displaying ---
   const monitorStatus = new MonitorStatusService(deps.resourceMonitorService, deps.terminalService)
 
+  // --- AGT policy engine (v2.7.7): evaluates agent actions against YAML policies ---
+  const policyEngine = new AgtPolicyEngine({
+    loadPolicy: async () => {
+      // Default: load from a policy file in the data directory, or use a built-in default.
+      const req = createRequire(import.meta.url)
+      const fs = req('node:fs') as typeof import('node:fs')
+      const path = req('node:path') as typeof import('node:path')
+      const policyPath = path.join(deps.terminalService ? '.' : '.', 'policy.yaml')
+      if (fs.existsSync(policyPath)) {
+        return parsePolicyYaml(fs.readFileSync(policyPath, 'utf8'))
+      }
+      // Built-in default policy: allow read-only, deny destructive, escalate prod changes.
+      return {
+        name: 'rterm-default', version: '1.0', defaultDecision: 'deny',
+        rules: [
+          { name: 'allow-read', actionPattern: 'read', decision: 'allow' },
+          { name: 'allow-status', actionPattern: 'status', decision: 'allow' },
+          { name: 'allow-list', actionPattern: 'list', decision: 'allow' },
+          { name: 'deny-delete', actionPattern: 'delete', decision: 'deny' },
+          { name: 'deny-drop', actionPattern: 'drop', decision: 'deny' },
+          { name: 'deny-format', actionPattern: 'format', decision: 'deny' },
+          { name: 'escalate-restart-prod', actionPattern: 'restart', targetPattern: 'prod-*', decision: 'escalate' },
+          { name: 'escalate-patch-prod', actionPattern: 'patch', targetPattern: 'prod-*', decision: 'escalate' },
+          { name: 'escalate-deploy-prod', actionPattern: 'deploy', targetPattern: 'prod-*', decision: 'escalate' },
+          { name: 'allow-restart', actionPattern: 'restart', decision: 'allow' },
+          { name: 'allow-patch', actionPattern: 'patch', decision: 'allow' },
+          { name: 'allow-deploy', actionPattern: 'deploy', decision: 'allow' },
+        ],
+      }
+    },
+    agentIdentity: `rterm-agent-v${process.env.GYBACKEND_VERSION ?? '2.7.7'}`,
+    sponsoringPrincipal: process.env.USER ?? 'unknown',
+  })
+  await policyEngine.load()
+
   // --- Plugin system (v2.5.0): discover + auto-integrate custom plugins from plugins/. ---
   const pluginScanRoot = (process.env.GYBACKEND_DATA_DIR ?? './.gybackend-data') + '/plugins'
   // Also scan the bundle's own plugins/ directory (for the rterm-backend npm package,
@@ -259,6 +299,7 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     aperf: { service: aperfService, toMetricPoint: aperfSummaryToMetricPoint },
     audit: { ledger: auditLedger, sealer: evidenceSealer },
     monitorStatus,
+    governance: { policyEngine },
     pluginRegistry,
   }
 }
