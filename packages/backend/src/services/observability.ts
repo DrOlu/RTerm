@@ -27,6 +27,7 @@ import { BehaviorLedger } from './behavior/behaviorLedger'
 import { AperfService, aperfSummaryToMetricPoint } from './aperf/aperfService'
 import { AuditLedger } from './audit/auditLedger'
 import { EvidenceSealer } from './audit/evidenceSealer'
+import { MonitorStatusService } from './sre/monitorStatusService'
 
 /**
  * Observability — central wiring for every SRE/APM/DEM/ETW/evals/predictive/
@@ -46,6 +47,8 @@ export interface ObservabilityDeps {
   automationManager: AutomationManager
   agentRunLedger: AgentRunLedger
   gatewayService: GatewayService
+  /** the resource monitor service (injected; used for monitor status diagnostics). */
+  resourceMonitorService: import('./ResourceMonitorService').ResourceMonitorService
   /** monitor snapshot publisher (injected; called with 'monitor:snapshot' events). */
   setMonitorPublisher: (pub: (channel: string, data: unknown) => void) => void
   /** notification channels to wire (slack/teams/smtp/telegram). */
@@ -97,6 +100,8 @@ export interface Observability {
     ledger: AuditLedger
     sealer: EvidenceSealer
   }
+  /** Monitor status diagnostic (v2.7.6): reports why stats aren't displaying per terminal. */
+  monitorStatus: MonitorStatusService
   /** the plugin system registry (v2.5.0). */
   pluginRegistry: PluginRegistry
 }
@@ -186,6 +191,9 @@ export function createObservability(deps: ObservabilityDeps): Observability {
   const auditLedger = new AuditLedger({})
   const evidenceSealer = new EvidenceSealer({})
 
+  // --- Monitor status diagnostic (v2.7.6): reports why stats aren't displaying ---
+  const monitorStatus = new MonitorStatusService(deps.resourceMonitorService, deps.terminalService)
+
   // --- Plugin system (v2.5.0): discover + auto-integrate custom plugins from plugins/. ---
   const pluginScanRoot = (process.env.GYBACKEND_DATA_DIR ?? './.gybackend-data') + '/plugins'
   // Also scan the bundle's own plugins/ directory (for the rterm-backend npm package,
@@ -250,6 +258,7 @@ export function createObservability(deps: ObservabilityDeps): Observability {
     notify: { slackChannel, teamsChannel, smtpChannel, telegramChannel },
     aperf: { service: aperfService, toMetricPoint: aperfSummaryToMetricPoint },
     audit: { ledger: auditLedger, sealer: evidenceSealer },
+    monitorStatus,
     pluginRegistry,
   }
 }

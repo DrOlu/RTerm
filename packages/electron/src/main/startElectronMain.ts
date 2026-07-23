@@ -1140,6 +1140,7 @@ export async function startElectronMain(): Promise<void> {
           automationManager,
           agentRunLedger,
           gatewayService,
+          resourceMonitorService,
           setMonitorPublisher: (pub) => resourceMonitorService.setPublisher((channel: string, data: unknown) => {
             pub(channel, data);
           }),
