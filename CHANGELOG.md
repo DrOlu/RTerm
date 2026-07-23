@@ -1,5 +1,44 @@
 # Changelog
 
+## v2.7.9 (2026-07-23)
+
+### Review Model UI
+
+The review model is now visible in the RTerm Settings UI alongside the other models (global, action, thinking, compaction).
+
+- **Settings UI**: Two new dropdowns in the profile settings, right after the compaction model:
+  - **Review Model (maker/checker)**: `(None — skip reviews)` + all available models. If `(None — skip reviews)` is selected, reviews are skipped entirely (fast output mode).
+  - **Review Mode**: `Strict (block on any issue)` / `Advisory (flag but allow)` / `Auto-approve (skip low-risk)`.
+- **Tooltips**: Full documentation of the maker/checker pattern and review modes in the UI tooltips.
+- **TUI**: No change needed (TUI only uses `globalModelId`, no multi-model dropdowns).
+
+## v2.7.8 (2026-07-23)
+
+### Review Model — Maker/Checker Pattern
+
+New `reviewService` — the maker/checker pattern for RTerm's agent. The action model (maker) produces output. The review model (checker) independently verifies it on 5 dimensions: correctness, completeness, safety, compliance, and accuracy. If no `reviewModelId` is specified in the profile, reviews are skipped entirely (fast output mode).
+
+- **`ModelProfile`**: Added `reviewModelId` + `reviewMode` (`strict`/`advisory`/`auto-approve`).
+- **`ReviewService.review()`**: Independently verifies the action model's output on 5 dimensions. Verdicts: `approved` / `needs_revision` / `escalate`. Review modes: `strict` (block on any issue), `advisory` (downgrade escalate to needs_revision), `auto-approve` (skip review for low-risk actions).
+- **`shouldSkipReview()`**: Returns true when `reviewModelId` is undefined/empty.
+- **`createSkippedReviewResult()`**: Returns approved with skipped=true.
+- **Wired into `createObservability`** — `observability.review.service` + `shouldSkipReview` + `createSkippedReviewResult`. `runReviewModel` injected (offline mock or online).
+- **17 new tests** (`reviewService.extreme.spec.ts`).
+- **1249 tests total** (1232 + 17 new), 0 failures.
+
+## v2.7.7 (2026-07-23)
+
+### AGT Policy Engine — Pattern 1
+
+New `agtPolicyEngine` — Microsoft AGT (Agent Governance Toolkit) policy engine for RTerm's agent. Evaluates agent actions against YAML policies (allow/deny/escalate) before execution.
+
+- **`AgtPolicyEngine.evaluate()`**: Evaluates actions against a `PolicyDocument` (name, version, defaultDecision, rules). Features: glob-style pattern matching, target pattern wildcards (`prod-*`), first-match-wins rule evaluation, case-insensitive matching.
+- **`parsePolicyYaml`/`parsePolicyJson`**: Parse YAML/JSON policy documents.
+- **Agent identity + sponsoring principal**: For zero-trust identity.
+- **Wired into `createObservability`** — `observability.governance.policyEngine`. Built-in default policy: allow read/status/list, deny delete/drop/format, escalate restart/patch/deploy on prod-*.
+- **15 new tests** (`agtPolicyEngine.extreme.spec.ts`).
+- **1247 tests total** (1232 + 15 new), 0 failures.
+
 ## v2.7.6 (2026-07-23)
 
 ### Monitor Status Diagnostic
