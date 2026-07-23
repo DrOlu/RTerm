@@ -70,8 +70,8 @@ export function buildPostPatchCheckCommand(os) {
 
 // --- Pure: parse patch status output into structured results ---
 export function parsePatchStatus(output, os) {
-  const o = String(os).toLowerCase()
-  const lines = output.split(/\r?\n/).filter((l) => l.trim().length > 0)
+  const o = String(os ?? '').toLowerCase()
+  const lines = String(output ?? '').split(/\r?\n/).filter((l) => l.trim().length > 0)
   const patches = []
   let summary = { total: 0, critical: 0, security: 0, recommended: 0 }
 
@@ -151,7 +151,7 @@ export function buildPatchPlan(host, os, patchStatus, opts = {}) {
 
 // --- Pure: build a compliance report for a fleet ---
 export function buildComplianceReport(hostStatuses) {
-  const hosts = Object.entries(hostStatuses).map(([host, status]) => ({
+  const hosts = Object.entries(hostStatuses ?? {}).map(([host, status]) => ({
     host,
     os: status.os ?? 'unknown',
     totalPatches: status.summary?.total ?? 0,

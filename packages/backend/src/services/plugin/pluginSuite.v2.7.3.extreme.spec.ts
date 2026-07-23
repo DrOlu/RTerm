@@ -5,7 +5,7 @@
 import { register as patchRegister, buildPatchStatusCommand, buildPatchApplyCommand, buildPrePatchCheckCommand, parsePatchStatus, buildPatchPlan, buildComplianceReport } from '../../../../../plugins/patch-manager/index.mjs'
 import { register as requestRegister, classifyRequest, routeRequest, buildQueueEntry, filterQueue } from '../../../../../plugins/request-router/index.mjs'
 import { register as sopRegister, searchSops, getSop, searchIamPolicies, buildStepCommand, BUILTIN_SOPS, IAM_POLICIES } from '../../../../../plugins/sop-assistant/index.mjs'
-import { register as iamRegister, buildUserInfoCommand, buildDisableUserCommand, parseUserInfo, isPrivileged } from '../../../../../plugins/iam-connector/index.mjs'
+import { register as iamRegister, buildUserInfoCommand, buildDisableUserCommand, parseUserInfo, parseAccessReview, isPrivileged } from '../../../../../plugins/iam-connector/index.mjs'
 import { register as fraudopsRegister, buildPipelineHealthCommand, parsePipelineHealth, buildStrCase, buildDecisionSummary } from '../../../../../plugins/fraudops/index.mjs'
 
 const cases: Array<{ name: string; run: () => void | Promise<void> }> = []
@@ -244,6 +244,54 @@ test('fraudops: register registers 4 tools, 2 triggers, 1 panel', () => {
   if (tools.length !== 4) throw new Error(`expected 4 tools, got ${tools.length}`)
   if (triggers.length !== 2) throw new Error(`expected 2 triggers, got ${triggers.length}`)
   if (panels.length !== 1) throw new Error(`expected 1 panel, got ${panels.length}`)
+})
+
+// ========== NULL-SAFETY (v2.8.0) — pure functions must not throw on null/undefined inputs ==========
+test('null-safety: parsePatchStatus handles null output', () => {
+  const { patches, summary } = parsePatchStatus(null, 'linux')
+  if (!Array.isArray(patches)) throw new Error('patches should be array')
+  if (summary.total !== 0) throw new Error('total should be 0')
+})
+test('null-safety: buildComplianceReport handles null input', () => {
+  const r = buildComplianceReport(null)
+  if (r.summary.totalHosts !== 0) throw new Error('totalHosts should be 0')
+})
+test('null-safety: buildDecisionSummary handles null input', () => {
+  const s = buildDecisionSummary(null)
+  if (s.total !== 0) throw new Error('total should be 0')
+})
+test('null-safety: parseUserInfo handles null output', () => {
+  const info = parseUserInfo(null, 'linux')
+  if (info.username !== '') throw new Error('username should be empty')
+  if (!Array.isArray(info.groups)) throw new Error('groups should be array')
+})
+test('null-safety: parseAccessReview handles null output', () => {
+  const users = parseAccessReview(null, 'linux')
+  if (!Array.isArray(users)) throw new Error('should return array')
+})
+test('null-safety: isPrivileged handles null userInfo', () => {
+  if (isPrivileged(null) !== false) throw new Error('should be false for null')
+})
+test('null-safety: buildStepCommand handles null step', () => {
+  const cmd = buildStepCommand(null, { service: 'nginx' })
+  if (cmd !== '') throw new Error('should be empty string')
+})
+test('null-safety: classifyRequest handles null request', () => {
+  const risk = classifyRequest(null)
+  if (risk !== 'medium') throw new Error(`expected medium default, got ${risk}`)
+})
+test('null-safety: routeRequest handles null request', () => {
+  const { route } = routeRequest(null)
+  if (route !== 'queue') throw new Error(`expected queue for medium, got ${route}`)
+})
+test('null-safety: buildQueueEntry handles null request', () => {
+  const e = buildQueueEntry(null, 'req-1')
+  if (e.id !== 'req-1') throw new Error('id should be preserved')
+  if (e.risk !== 'medium') throw new Error('should default to medium')
+})
+test('null-safety: filterQueue handles null queue', () => {
+  const out = filterQueue(null)
+  if (!Array.isArray(out)) throw new Error('should return array')
 })
 
 async function main() {

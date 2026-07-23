@@ -214,8 +214,8 @@ export function searchIamPolicies(query, policies = IAM_POLICIES) {
 
 // --- Pure: build the command for a SOP step (with variable substitution) ---
 export function buildStepCommand(step, vars = {}) {
-  let cmd = step.command
-  for (const [key, value] of Object.entries(vars)) {
+  let cmd = String(step?.command ?? '')
+  for (const [key, value] of Object.entries(vars ?? {})) {
     cmd = cmd.replace(new RegExp(`\\{${key}\\}`, 'g'), String(value))
   }
   return cmd

@@ -46,13 +46,14 @@ export function buildAccessReviewCommand(os = 'linux') {
 
 // --- Pure: parse user info output ---
 export function parseUserInfo(output, os = 'linux') {
-  const o = String(os).toLowerCase()
+  const o = String(os ?? 'linux').toLowerCase()
+  const text = String(output ?? '')
   const info = { username: '', groups: [], enabled: true, locked: false }
 
   if (o === 'windows' || o === 'win32') {
-    const nameMatch = output.match(/Name\s+:\s+(\S+)/)
-    const enabledMatch = output.match(/Enabled\s+:\s+(True|False)/i)
-    const lockedMatch = output.match(/LockedOut\s+:\s+(True|False)/i)
+    const nameMatch = text.match(/Name\s+:\s+(\S+)/)
+    const enabledMatch = text.match(/Enabled\s+:\s+(True|False)/i)
+    const lockedMatch = text.match(/LockedOut\s+:\s+(True|False)/i)
     if (nameMatch) info.username = nameMatch[1]
     if (enabledMatch) info.enabled = enabledMatch[1].toLowerCase() === 'true'
     if (lockedMatch) info.locked = lockedMatch[1].toLowerCase() === 'true'
@@ -60,7 +61,7 @@ export function parseUserInfo(output, os = 'linux') {
   }
 
   // Linux: parse id + groups + passwd -S output
-  const lines = output.split(/\r?\n/)
+  const lines = text.split(/\r?\n/)
   for (const line of lines) {
     const l = line.trim()
     const idMatch = l.match(/uid=\d+\((\S+)\)/)
@@ -80,11 +81,12 @@ export function parseUserInfo(output, os = 'linux') {
 
 // --- Pure: parse access review output into a user list ---
 export function parseAccessReview(output, os = 'linux') {
-  const o = String(os).toLowerCase()
+  const o = String(os ?? 'linux').toLowerCase()
+  const text = String(output ?? '')
   const users = []
 
   if (o === 'windows' || o === 'win32') {
-    const lines = output.split(/\r?\n/)
+    const lines = text.split(/\r?\n/)
     for (const line of lines) {
       const l = line.trim()
       const match = l.match(/^(\S+)\s+(True|False)\s+/)
@@ -96,7 +98,7 @@ export function parseAccessReview(output, os = 'linux') {
   }
 
   // Linux: parse "user: group1 group2" lines
-  const lines = output.split(/\r?\n/)
+  const lines = text.split(/\r?\n/)
   for (const line of lines) {
     const l = line.trim()
     const match = l.match(/^(\S+):\s*(.*)/)
@@ -109,7 +111,9 @@ export function parseAccessReview(output, os = 'linux') {
 
 // --- Pure: check if a user has privileged access ---
 export function isPrivileged(userInfo, privilegedGroups = ['sudo', 'wheel', 'admin', 'root', 'Administrators']) {
-  return userInfo.groups.some((g) => privilegedGroups.some((pg) => g.toLowerCase().includes(pg.toLowerCase())))
+  const groups = Array.isArray(userInfo?.groups) ? userInfo.groups : []
+  const privs = Array.isArray(privilegedGroups) ? privilegedGroups : []
+  return groups.some((g) => privs.some((pg) => String(g).toLowerCase().includes(String(pg).toLowerCase())))
 }
 
 // --- Plugin entry ---

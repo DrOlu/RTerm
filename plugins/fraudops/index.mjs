@@ -53,10 +53,11 @@ export function buildStrCase(txnId, decision, indicators, assignedTo) {
 
 // --- Pure: build a decision summary ---
 export function buildDecisionSummary(decisions) {
-  const total = decisions.length
-  const blocks = decisions.filter((d) => d.decision === 'BLOCK').length
-  const reviews = decisions.filter((d) => d.decision === 'REVIEW').length
-  const approves = decisions.filter((d) => d.decision === 'APPROVE').length
+  const list = Array.isArray(decisions) ? decisions : []
+  const total = list.length
+  const blocks = list.filter((d) => d.decision === 'BLOCK').length
+  const reviews = list.filter((d) => d.decision === 'REVIEW').length
+  const approves = list.filter((d) => d.decision === 'APPROVE').length
   return {
     total,
     blocks,

@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.8.0 (2026-07-23)
+
+### Full-Repo Review + Null-Safety Hardening
+
+Full-repo review of all features and plugins with a dedicated null/undefined-input hardening pass across the 6 official plugins. Found and fixed **10 null-safety bugs** where plugin pure functions threw on null/undefined inputs.
+
+- **patch-manager**: `parsePatchStatus(null)` and `buildComplianceReport(null)` threw (`Cannot read properties of null (reading 'split')` / `Cannot convert undefined or null to object`). Fixed with `String(output ?? '')` and `Object.entries(hostStatuses ?? {})`.
+- **fraudops**: `buildDecisionSummary(null)` threw (`reading 'length'`). Fixed with `Array.isArray(decisions) ? decisions : []`.
+- **iam-connector**: `parseUserInfo(null)`, `parseAccessReview(null)`, `isPrivileged(null)` all threw. Fixed with `String(output ?? '')` and `Array.isArray(userInfo?.groups) ? userInfo.groups : []`.
+- **sop-assistant**: `buildStepCommand(null)` threw (`reading 'command'`). Fixed with `String(step?.command ?? '')` and `Object.entries(vars ?? {})`.
+- **request-router**: `classifyRequest(null)`, `routeRequest(null)`, `buildQueueEntry(null)`, `filterQueue(null)` all threw. Fixed with `request ?? {}` guards and `Array.isArray(queue) ? [...queue] : []`.
+
+- **11 new null-safety regression tests** (added to `pluginSuite.v2.7.3.extreme.spec.ts`) covering every fixed function.
+- **Verified healthy**: all JSON.parse sites wrapped in try-catch (TerminalStateStore, SSHBackend, ModelCapabilityService); anomalyDetector mean/stddev guarded by minPoints; ResourceMonitorService totalDelta > 0 guards; aperfService top-process sort + slice guarded; netdata correlate handles null.
+- **1260 tests total** (1249 + 11 new), 0 failures.
+
 ## v2.7.9 (2026-07-23)
 
 ### Review Model UI

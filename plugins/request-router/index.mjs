@@ -9,9 +9,10 @@
 
 // --- Pure: classify a request by risk ---
 export function classifyRequest(request) {
-  const type = String(request.type ?? '').toLowerCase()
-  const urgency = String(request.urgency ?? 'low').toLowerCase()
-  const target = String(request.target ?? '').toLowerCase()
+  const req = request ?? {}
+  const type = String(req.type ?? '').toLowerCase()
+  const urgency = String(req.urgency ?? 'low').toLowerCase()
+  const target = String(req.target ?? '').toLowerCase()
 
   // Destructive operations = high risk
   if (['delete', 'drop', 'purge', 'format', 'destroy'].some((w) => type.includes(w))) return 'high'
@@ -32,8 +33,9 @@ export function classifyRequest(request) {
 
 // --- Pure: route a request based on risk ---
 export function routeRequest(request) {
-  const risk = classifyRequest(request)
-  const urgency = String(request.urgency ?? 'low').toLowerCase()
+  const req = request ?? {}
+  const risk = classifyRequest(req)
+  const urgency = String(req.urgency ?? 'low').toLowerCase()
 
   if (risk === 'low') return { route: 'auto_approve', risk, reason: 'low-risk read-only operation' }
   if (risk === 'medium') {
@@ -63,18 +65,19 @@ export function buildApprovalRecord(requestId, approvedBy, rationale, decision) 
 
 // --- Pure: build a request queue entry ---
 export function buildQueueEntry(request, requestId) {
-  const { route, risk, reason } = routeRequest(request)
+  const req = request ?? {}
+  const { route, risk, reason } = routeRequest(req)
   return {
     id: requestId,
-    type: request.type,
-    target: request.target,
-    justification: request.justification ?? '',
-    urgency: request.urgency ?? 'low',
+    type: req.type,
+    target: req.target,
+    justification: req.justification ?? '',
+    urgency: req.urgency ?? 'low',
     risk,
     route,
     routeReason: reason,
     status: route === 'auto_approve' ? 'auto_approved' : 'pending',
-    submittedBy: request.submittedBy ?? 'unknown',
+    submittedBy: req.submittedBy ?? 'unknown',
     submittedAt: Date.now(),
     ...(route === 'auto_approve' ? { approvedAt: Date.now(), approvedBy: 'system' } : {}),
   }
@@ -82,11 +85,12 @@ export function buildQueueEntry(request, requestId) {
 
 // --- Pure: filter the request queue ---
 export function filterQueue(queue, filter = {}) {
-  let out = [...queue]
-  if (filter.status) out = out.filter((r) => r.status === filter.status)
-  if (filter.risk) out = out.filter((r) => r.risk === filter.risk)
-  if (filter.urgency) out = out.filter((r) => r.urgency === filter.urgency)
-  if (filter.target) out = out.filter((r) => r.target.includes(filter.target))
+  let out = Array.isArray(queue) ? [...queue] : []
+  const f = filter ?? {}
+  if (f.status) out = out.filter((r) => r.status === f.status)
+  if (f.risk) out = out.filter((r) => r.risk === f.risk)
+  if (f.urgency) out = out.filter((r) => r.urgency === f.urgency)
+  if (f.target) out = out.filter((r) => String(r.target ?? '').includes(f.target))
   return out
 }
 
