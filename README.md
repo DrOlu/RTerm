@@ -57,6 +57,10 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - **Profile lock safety**: busy sessions pin active model profile for consistency.
 - **Long-horizon context quality**: memory.md + compaction summaries + visible boundaries + deterministic fallback recovery keep long sessions understandable.
 - **Tooling-native workflow**: skills, MCP servers, and built-in tools are runtime primitives.
+- **Plugin system**: anyone can develop a custom plugin (agent tools, event triggers, dashboard panels) and have it auto-integrate on startup — 6 official plugins ship out of the box.
+- **SRE observability pillar**: metrics ledger, golden signals, SLO/error budgets, uptime watchdogs, incident ledger with RCA + postmortems, anomaly detection, capacity forecasting, and a unified live dashboard.
+- **APM + DEM + k8s/cloud infra**: OTLP distributed-trace store, Core Web Vitals (RUM), cluster health, and Windows ETW diagnostics.
+- **Governance & audit**: hash-chained tamper-evident audit ledger with Merkle-tree evidence sealing, an AGT-style YAML policy engine (allow/deny/escalate), and a maker/checker review model that independently verifies the agent's output for correctness, completeness, safety, compliance, and accuracy.
 
 ### At a Glance
 
@@ -66,7 +70,24 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - **For multi-device flow**: desktop + TUI + mobile-web with shared gateway semantics.
 - **For multimodal workflows**: text and image inputs can be combined in one execution turn.
 
-## v1.6.0 Key Highlights
+## Latest Highlights
+
+**v2.7.x — Governance, plugins & the maker/checker model:**
+- **Review model (maker/checker)** with a visible Settings UI — a second model independently verifies the action model's output (correctness, completeness, safety, compliance, accuracy); skipped when not configured for fast output.
+- **AGT policy engine** — YAML policies (allow/deny/escalate) evaluated before every consequential action, with a built-in safe default policy.
+- **Hash-chained audit ledger + Merkle evidence sealing** for tamper-evident, independently-verifiable audit trails.
+- **Monitor diagnostics** — one-call answer to "why aren't stats displaying?" per terminal.
+
+**v2.5–v2.6 — Plugin system + official plugin suite + APerf:**
+- **Plugin system** — custom plugins (agent tools, triggers, dashboard panels) auto-integrate on startup; 6 official plugins ship out of the box (patch-manager, request-router, sop-assistant, iam-connector, fraudops, netdata-rterm).
+- **AWS APerf deep-dive** — deploy aperf to any Linux host for deep performance profiling with agent RCA on the findings.
+
+**v2.0–v2.4 — The SRE pillar + advanced automation:**
+- **Full observability** — metrics ledger, golden signals, SLO/error budgets, uptime watchdogs, incident ledger (RCA + postmortems), anomaly detection, capacity forecasting, unified live dashboard.
+- **APM/DEM/infra/ETW** — OTLP traces, Core Web Vitals, k8s/cloud health, Windows ETW diagnostics.
+- **Advanced automation** — event-driven triggers (NATS mesh), DAG playbooks, parameterized runbooks, dagu workflows, MOP change management with automatic rollback.
+
+**v1.6.0 — Workspace foundation:**
 
 - **Global Tab List panel**
   - a new `TAB LIST` panel shows terminal and chat tabs as a vertical workspace inventory, with counts, status dots, latest-first ordering, drag/drop support, close actions, and quick creation for chat, local terminal, and saved-SSH terminal tabs
@@ -148,6 +169,51 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - Dynamic MCP server integration.
 - Precision editing tools for safe, targeted file updates.
 - Runtime tool toggles and summaries exposed to clients.
+
+### Plugin System (v2.5+)
+
+- **Custom plugins** auto-integrate on startup: drop a folder with `plugin.json` + `index.mjs` into `~/.gybackend-data/plugins/` — the agent gets your tools, triggers, and dashboard panels immediately.
+- **6 official plugins ship out of the box** (21 tools, 10 triggers, 6 panels):
+  - **patch-manager** — autonomous patch management (discover patches via yum/apt/Windows Update, build deployment plans, execute with MOP approval, fleet-wide compliance dashboard).
+  - **request-router** — automated request handling (submit/approve/list requests with risk classification → auto-approve/queue/MOP routing).
+  - **sop-assistant** — SOP retrieval + step-by-step guided execution; 8 built-in SOPs (restart-service, disk-cleanup, database-failover, incident-response, …) + IAM policy lookup.
+  - **iam-connector** — IAM integration (user/group info, privileged access identification, access reviews, disable users with approval) on Linux + Windows.
+  - **fraudops** — FraudOps operational layer (Flink/NATS/Kafka pipeline health, STR workflow with deadlines, decision summaries).
+  - **netdata-rterm** — Netdata Cloud alert webhook ingestion + correlation with RTerm metrics/incidents for RCA and auto-remediation.
+
+### SRE Observability (v2.0+)
+
+- **Metrics ledger** with per-second snapshots per host (cpu/mem/disk/net/load/gpu) and trend forecasting ("disk full in N days").
+- **Golden signals** per host (saturation/traffic/latency/errors) + capacity forecast.
+- **Uptime watchdogs** (tcp/ssh/http/command liveness), up/degraded/down with alerting.
+- **SLO/SLI** with error budget + burn rate + fast-burn alerting.
+- **Incident ledger** with timelines, AI root-cause analysis, and postmortems.
+- **Anomaly detection** (z-score + robust z-score) + predictive early warnings with optional MOP auto-remediation.
+- **APM** — OTLP distributed-trace store (per-service p50/95/99, error rate, bottleneck services).
+- **DEM/RUM** — Core Web Vitals (LCP/INP/CLS/TTFB) per page + error rate.
+- **k8s/cloud infra** — cluster health (pods, restarts, node readiness, cpu/mem % of limit).
+- **Windows ETW diagnostics** — built-in ETW providers (network/file/registry/process), agentless.
+- **UEBA behavior ledger** — agent run baselines + deviations (run-spike, token-blowout, error-spike, unusual-model).
+- **Embedded eval harness** — measures the agent's accuracy, tool selection, safety/policy compliance, and determinism.
+- **Unified live dashboard** + browser-renderable HTML dashboard.
+- **AWS APerf deep-dive** (v2.6+) — deploy aperf to any Linux host for deep CPU/PMU/process profiling with parsed findings feeding the agent's RCA.
+
+### Governance, Audit & the Maker/Checker Model (v2.7+)
+
+- **Hash-chained audit ledger** — every agent action, command evaluation, approval, MOP change, and playbook step is recorded with the SHA-256 hash of the previous record (tamper-evident), plus **Merkle-tree evidence sealing** for independently-verifiable audit bundles.
+- **AGT policy engine** — YAML policies evaluated before every consequential action (allow/deny/escalate); glob action patterns, target wildcards (`prod-*`), agent identity + sponsoring principal for zero-trust.
+- **Review model (maker/checker)** — a second model independently verifies the action model's output on 5 dimensions: correctness, completeness, safety, compliance, and accuracy. Three modes (strict/advisory/auto-approve); skipped entirely when no review model is configured (fast output mode).
+- **Monitor diagnostics** — one-call answer to "why aren't stats displaying?" per terminal (publisher wired? session exists? collection stuck? connected? last-collect time?).
+
+### Automation & Change Management
+
+- **Playbooks** with validation + automatic rollback; **DAG/orchestrated playbooks** with parallel waves.
+- **Event-driven triggers** (pattern/threshold/webhook/schedule) firing playbooks or proposing MOP changes, with cooldown + concurrency caps.
+- **MOP change management** — plan → approve → run → status with a durable change ledger and automatic rollback on validation failure.
+- **Scheduled tasks** (5-field cron) running headless inside the daemon.
+- **dagu workflows** — run declarative dagu YAML DAGs natively on the orchestrated playbook engine, no dagu server required.
+- **Parameterized runbooks** with `{{param}}` substitution + secret masking; idempotent `desiredState` steps; cross-host `captureVar`.
+- **NATS event mesh** — fleet-wide trigger fan-out across multiple RTerm backends.
 
 ### Mobile-Web Companion
 
