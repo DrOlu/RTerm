@@ -45,6 +45,8 @@ interface BackendSettings {
       actionModelId?: string;
       thinkingModelId?: string;
       compactionModelId?: string;
+      reviewModelId?: string;
+      reviewMode?: "strict" | "advisory" | "auto-approve";
     }>;
     activeProfileId: string;
   };
