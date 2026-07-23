@@ -42,6 +42,14 @@ export interface ModelProfile {
   actionModelId?: string
   thinkingModelId?: string
   compactionModelId?: string
+  /**
+   * The review/checker model — independently verifies the action model's output
+   * for correctness, completeness, safety, compliance, and accuracy.
+   * If NOT specified, reviews are skipped entirely (fast output mode).
+   */
+  reviewModelId?: string
+  /** how strict the review is: 'strict' (block on any issue), 'advisory' (flag but allow), 'auto-approve' (skip review for low-risk actions). */
+  reviewMode?: 'strict' | 'advisory' | 'auto-approve'
 }
 
 export interface ExperimentalFlags {

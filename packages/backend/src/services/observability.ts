@@ -29,6 +29,7 @@ import { AuditLedger } from './audit/auditLedger'
 import { EvidenceSealer } from './audit/evidenceSealer'
 import { MonitorStatusService } from './sre/monitorStatusService'
 import { AgtPolicyEngine, parsePolicyYaml } from './governance/agtPolicyEngine'
+import { ReviewService, createSkippedReviewResult, shouldSkipReview } from './review/reviewService'
 
 /**
  * Observability — central wiring for every SRE/APM/DEM/ETW/evals/predictive/
@@ -56,6 +57,12 @@ export interface ObservabilityDeps {
   alertChannels?: AlertChannel[]
   /** run agent for eval harness (injected; offline mock or online). */
   runAgentForEval?: (prompt: string) => Promise<{ answer: string; toolsCalled: string[]; tokens?: number }>
+  /** run the review model (injected; offline mock or online). */
+  runReviewModel?: (prompt: string) => Promise<{ verdict: 'approved' | 'needs_revision' | 'escalate'; issues: Array<{ dimension: 'correctness' | 'completeness' | 'safety' | 'compliance' | 'accuracy'; severity: 'info' | 'warning' | 'critical'; message: string }>; reasoning: string; confidence: number }>
+  /** the review model's identity. */
+  reviewerId?: string
+  /** the review mode: strict (block on any issue), advisory (flag but allow), auto-approve (skip review for low-risk actions). */
+  reviewMode?: 'strict' | 'advisory' | 'auto-approve'
   onLog?: (line: string) => void
 }
 
@@ -106,6 +113,14 @@ export interface Observability {
   /** AGT policy engine (v2.7.7): evaluates agent actions against YAML policies. */
   governance: {
     policyEngine: AgtPolicyEngine
+  }
+  /** Review service (v2.7.8): maker/checker pattern — independently verifies the action model's output. */
+  review: {
+    service: ReviewService
+    /** check if a review should be skipped (no reviewModelId). */
+    shouldSkipReview: typeof shouldSkipReview
+    /** create a skipped review result. */
+    createSkippedReviewResult: typeof createSkippedReviewResult
   }
   /** the plugin system registry (v2.5.0). */
   pluginRegistry: PluginRegistry
@@ -237,6 +252,20 @@ const policyEngine = new AgtPolicyEngine({
 // but the agent will call load() explicitly before evaluating).
 void policyEngine.load().catch(() => {})
 
+// --- Review service (v2.7.8): maker/checker pattern ---
+// The review model independently verifies the action model's output.
+// If no reviewModelId is specified in the profile, reviews are skipped entirely (fast output mode).
+const reviewService = new ReviewService({
+  runReviewModel: deps.runReviewModel ?? (async (prompt) => ({
+    verdict: 'approved' as const,
+    issues: [],
+    reasoning: 'no review model configured',
+    confidence: 1.0,
+  })),
+  reviewerId: deps.reviewerId ?? 'review-model',
+  reviewMode: deps.reviewMode ?? 'strict',
+})
+
   // --- Plugin system (v2.5.0): discover + auto-integrate custom plugins from plugins/. ---
   const pluginScanRoot = (process.env.GYBACKEND_DATA_DIR ?? './.gybackend-data') + '/plugins'
   // Also scan the bundle's own plugins/ directory (for the rterm-backend npm package,
@@ -303,6 +332,7 @@ void policyEngine.load().catch(() => {})
     audit: { ledger: auditLedger, sealer: evidenceSealer },
     monitorStatus,
     governance: { policyEngine },
+    review: { service: reviewService, shouldSkipReview, createSkippedReviewResult },
     pluginRegistry,
   }
 }
