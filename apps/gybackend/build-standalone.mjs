@@ -49,15 +49,13 @@ const EXTERNAL = [
 // Collision-free CJS-globals shim. Assigns require/__filename/__dirname onto
 // globalThis using uniquely-named module-scope imports, so bundled CJS deps can
 // call require(...) without redeclaring names app modules import (createRequire).
+// For CJS output: the shim uses `var` + `require` (CJS-native, no ESM import).
 const banner = `#!/usr/bin/env node
-// gybackend — RTerm headless backend CLI (standalone ESM build).
+// gybackend — RTerm headless backend CLI (standalone CJS build).
 // Bundled by apps/gybackend/build-standalone.mjs. Do not edit by hand.
-import { createRequire as __gybCR } from 'node:module'
-import { fileURLToPath as __gybFUT } from 'node:url'
-import { dirname as __gybDN } from 'node:path'
-globalThis.require = __gybCR(import.meta.url)
-globalThis.__filename = __gybFUT(import.meta.url)
-globalThis.__dirname = __gybDN(globalThis.__filename)`
+// CJS-globals shim: give bundled CJS deps a require() they can call.
+var __gybCR = require('module').createRequire(__filename)
+globalThis.__gybRequire = __gybCR`
 
 const outfile = path.join(here, 'dist-standalone', 'gybackend.js')
 fs.mkdirSync(path.dirname(outfile), { recursive: true })
@@ -66,7 +64,7 @@ await build({
   entryPoints: [path.join(here, 'src/index.ts')],
   bundle: true,
   platform: 'node',
-  format: 'esm',
+  format: 'cjs',
   target: ['node18'],
   outfile,
   banner: { js: banner },
