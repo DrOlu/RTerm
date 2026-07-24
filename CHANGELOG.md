@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.9.0 (2026-07-25)
+
+### 9 New Platform Capabilities — Observability Export, Secrets, On-Call, Cost, GitOps, Cloud, Live Dashboard, Recording, Playbook Versioning
+
+Nine new subsystems, all built as pure/injectable modules in `packages/backend/src/services/`, wired into `createObservability`, and covered by exhaustive `*.extreme.spec.ts` suites — **158 new tests, all green, zero regressions** across the existing suites.
+
+- **Prometheus `/metrics` scrape exporter + OTel push exporter** (`sre/prometheusExporter`, `sre/otelExporter`) — RTerm can now be *observed by* other tools. A `PrometheusRegistry` renders `# HELP/# TYPE` exposition text from the metrics ledger; an `OtelExporter` pushes OTLP/HTTP JSON to a collector (endpoint via `OTEL_EXPORTER_OTLP_ENDPOINT` / `RTERM_OTLP_METRICS_ENDPOINT`). Closes the "RTerm ingests observability but can't be observed" gap.
+
+- **Built-in secrets vault** (`secrets/secretsVault`) — first-class encrypted secret store. AES-256-GCM over scrypt-derived keys, encrypted at rest, materialized only at exec time (never into LLM context), constant-time master-key verify, ciphertext export/import, and every access audited into the tamper-evident audit ledger. Master key via `RTERM_SECRETS_MASTER_KEY`.
+
+- **Incident escalation & on-call (paging)** (`oncall/escalationService`) — multi-level escalation policies with ack deadlines, paging channels, repeat/expire, acknowledge/resolve, and per-incident page queries. Turns "an alert in a Slack channel" into real incident response.
+
+- **AI cost & token budgets** (`cost/costBudgetService`) — per-model price table turns run-ledger token counts into dollars (per model/profile/day), with daily/monthly budgets that gate runs (`warn` / `throttle` / `deny`). Financial control for multi-model agent setups.
+
+- **Live multi-user dashboard hub** (`liveui/liveDashboardHub`) — upgrades the static self-refreshing dashboard to a push model: many concurrent subscribers (web/TUI/mobile), per-client section/host filters, replay-on-subscribe, publishes on every monitor snapshot.
+
+- **Session recording/replay (asciinema-style)** (`recording/sessionRecorder`) — timed event capture with standard asciinema `.cast` v2 export/import, plus scrub/replay for training + audit.
+
+- **GitOps — config & state in Git** (`gitops/gitOpsService`) — exports the whole desired-state estate (connections, playbooks, triggers, templates, policies, budgets) to a content-hashed manifest, detects drift (added/removed/changed with field-level diffs), and reconciles live state to the repo (gated, recorded).
+
+- **Runbook/playbook versioning + linting** (`automation/playbookVersioning`) — version history with diff + rollback to any prior version, plus a static lint pass (undefined params, dependsOn cycles, empty steps, missing-rollback heuristic) that runs before any save/run.
+
+- **Cloud resource inventory (AWS/GCP/Azure)** (`cloud/cloudInventory`) — normalizes each provider's instance list into a single `CloudResource` model with query/summary, feeding the CMDB/infra monitor. Fetchers are injectable; credentials come from the secrets vault.
+
+**Wired into `createObservability`:** `metricsExport`, `secrets`, `oncall`, `cost`, `recording`, `gitops`, `playbooks`, `cloud`, `liveDashboard` — all reachable over the gateway. `package.json` gains the `test:v29-features` suite, wired into `npm test`.
+
 ## v2.8.0 (2026-07-23)
 
 ### Full-Repo Review + Null-Safety Hardening
