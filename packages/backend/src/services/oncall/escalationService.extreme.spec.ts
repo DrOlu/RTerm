@@ -1,4 +1,4 @@
-import { EscalationService, type Page, type EscalationPolicy } from './escalationService'
+import { EscalationService, type EscalationPolicy } from './escalationService'
 
 const cases: Array<{ name: string; run: () => void | Promise<void> }> = []
 function test(n: string, r: () => void | Promise<void>) { cases.push({ name: n, run: r }) }

@@ -81,12 +81,11 @@ test('inSync true when no drift, false otherwise', async () => {
 })
 test('reconcile upserts added/changed + calls onReconciled', async () => {
   const applied: Array<[string, string]> = []
-  let live = [ent('keep', 'k', { v: 1 }), ent('change', 'k', { v: 1 })]
-  let hash = ''
+  const live = [ent('keep', 'k', { v: 1 }), ent('change', 'k', { v: 1 })]
   const s = new GitOpsService({
     readLive: () => live,
     applyEntity: async (action, e) => { applied.push([action, e.id]) },
-    onReconciled: (h, n) => { hash = h; eq(n, 2) },
+    onReconciled: (h, n) => { eq(h, h); eq(n, 2) },
   })
   const repo = buildManifest([ent('keep', 'k', { v: 1 }), ent('change', 'k', { v: 2 }), ent('new', 'k', { v: 0 })])
   const res = await s.reconcile(repo)

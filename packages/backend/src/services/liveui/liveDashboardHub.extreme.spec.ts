@@ -5,7 +5,7 @@ function test(n: string, r: () => void | Promise<void>) { cases.push({ name: n, 
 function eq(a: unknown, b: unknown, m = '') { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${m} expected ${JSON.stringify(b)} got ${JSON.stringify(a)}`) }
 function ok(v: unknown, m = '') { if (!v) throw new Error(m || 'expected truthy') }
 function throws(fn: () => void, m = '') { let t = false; try { fn() } catch { t = true } if (!t) throw new Error(m || 'expected throw') }
-async function throwsAsync(fn: () => Promise<void>, m = '') { let t = false; try { await fn() } catch { t = true } if (!t) throw new Error(m || 'expected throw') }
+async function throwsAsync(fn: () => Promise<unknown>, m = '') { let t = false; try { await fn() } catch { t = true } if (!t) throw new Error(m || 'expected throw') }
 
 const mkState = () => ({ goldenSignals: { cpu: 50 }, incidents: [{ id: 'i1' }], slo: { burn: 1.2 } })
 

@@ -110,7 +110,6 @@ export function diffManifest(repo: StateManifest, live: DesiredEntity[]): DriftE
 }
 
 export class GitOpsService {
-  private readonly now: () => number
   private readonly readLive: GitOpsDeps['readLive']
   private readonly applyEntity?: GitOpsDeps['applyEntity']
   private readonly onReconciled?: GitOpsDeps['onReconciled']
@@ -118,7 +117,6 @@ export class GitOpsService {
 
   constructor(deps: GitOpsDeps) {
     if (!deps.readLive) throw new Error('gitOpsService needs readLive')
-    this.now = deps.now ?? Date.now
     this.readLive = deps.readLive
     this.applyEntity = deps.applyEntity
     this.onReconciled = deps.onReconciled
