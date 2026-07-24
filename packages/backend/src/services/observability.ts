@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import path from 'node:path'
 import type { TerminalService } from './TerminalService'
 import type { AgentService_v2 } from './AgentService_v2'
 import type { AutomationManager } from './automation/AutomationManager'
@@ -30,6 +31,16 @@ import { EvidenceSealer } from './audit/evidenceSealer'
 import { MonitorStatusService } from './sre/monitorStatusService'
 import { AgtPolicyEngine, parsePolicyYaml } from './governance/agtPolicyEngine'
 import { ReviewService, createSkippedReviewResult, shouldSkipReview } from './review/reviewService'
+import { PrometheusRegistry, registryFromHostMetrics } from './sre/prometheusExporter'
+import { OtelExporter } from './sre/otelExporter'
+import { SecretsVault } from './secrets/secretsVault'
+import { EscalationService } from './oncall/escalationService'
+import { CostBudgetService } from './cost/costBudgetService'
+import { SessionRecorder } from './recording/sessionRecorder'
+import { GitOpsService, type DesiredEntity } from './gitops/gitOpsService'
+import { PlaybookVersioning, lintPlaybook, lintOk } from './automation/playbookVersioning'
+import { CloudInventory } from './cloud/cloudInventory'
+import { LiveDashboardHub } from './liveui/liveDashboardHub'
 
 /**
  * Observability — central wiring for every SRE/APM/DEM/ETW/evals/predictive/
@@ -63,6 +74,18 @@ export interface ObservabilityDeps {
   reviewerId?: string
   /** the review mode: strict (block on any issue), advisory (flag but allow), auto-approve (skip review for low-risk actions). */
   reviewMode?: 'strict' | 'advisory' | 'auto-approve'
+  /** paging channels for incident escalation (v2.9.0). */
+  pagingChannels?: import('./oncall/escalationService').PageChannel[]
+  /** model price table for AI cost attribution (v2.9.0). */
+  modelPrices?: import('./cost/costBudgetService').CostBudgetDeps['prices']
+  /** GitOps: read the live desired-state estate (v2.9.0). */
+  gitopsReadLive?: () => import('./gitops/gitOpsService').DesiredEntity[] | Promise<import('./gitops/gitOpsService').DesiredEntity[]>
+  /** GitOps: apply one entity to live state (v2.9.0). */
+  gitopsApplyEntity?: (action: 'upsert' | 'delete', entity: import('./gitops/gitOpsService').DesiredEntity) => Promise<void>
+  /** cloud inventory fetchers (v2.9.0). */
+  fetchAwsInstances?: (account: import('./cloud/cloudInventory').CloudAccount) => Promise<unknown>
+  fetchGcpInstances?: (account: import('./cloud/cloudInventory').CloudAccount) => Promise<unknown>
+  fetchAzureVms?: (account: import('./cloud/cloudInventory').CloudAccount) => Promise<unknown>
   onLog?: (line: string) => void
 }
 
@@ -124,6 +147,34 @@ export interface Observability {
   }
   /** the plugin system registry (v2.5.0). */
   pluginRegistry: PluginRegistry
+  /** Prometheus scrape exporter + OTel push exporter (v2.9.0): RTerm observed by other tools. */
+  metricsExport: {
+    registry: PrometheusRegistry
+    otel: OtelExporter | null
+    registryFromHostMetrics: typeof registryFromHostMetrics
+    /** rebuild the registry from the metrics ledger's latest points + render text. */
+    renderPrometheus: () => string
+  }
+  /** Built-in encrypted secrets vault (v2.9.0): AES-256-GCM, never in LLM context. */
+  secrets: SecretsVault
+  /** Incident escalation & on-call paging (v2.9.0). */
+  oncall: EscalationService
+  /** AI cost attribution + budgets (v2.9.0). */
+  cost: CostBudgetService
+  /** asciinema-style session recording + replay (v2.9.0). */
+  recording: SessionRecorder
+  /** GitOps — desired state in Git, drift + reconcile (v2.9.0). */
+  gitops: GitOpsService
+  /** Playbook/runbook versioning + lint (v2.9.0). */
+  playbooks: {
+    versioning: PlaybookVersioning
+    lint: typeof lintPlaybook
+    lintOk: typeof lintOk
+  }
+  /** Cloud resource inventory (AWS/GCP/Azure) (v2.9.0). */
+  cloud: CloudInventory
+  /** Live multi-client dashboard hub (v2.9.0): push-based state to web/TUI/mobile. */
+  liveDashboard: LiveDashboardHub<import('./dashboard/dashboardService').DashboardState>
 }
 
 export function createObservability(deps: ObservabilityDeps): Observability {
@@ -219,7 +270,7 @@ export function createObservability(deps: ObservabilityDeps): Observability {
 const policyEngine = new AgtPolicyEngine({
   loadPolicy: async () => {
     // Default: load from a policy file in the data directory, or use a built-in default.
-    const req = createRequire(import.meta.url)
+    const req = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
     const fs = req('node:fs') as typeof import('node:fs')
     const path = req('node:path') as typeof import('node:path')
     const policyPath = path.join('.', 'policy.yaml')
@@ -272,10 +323,12 @@ const reviewService = new ReviewService({
   // where plugins ship alongside the gybackend binary). The bundle is at bin/gybackend.js,
   // so the plugins are at ../plugins/ relative to the bundle file. We check that the
   // directory actually exists before adding it (in the source/unbundled case it won't).
-  const bundlePluginRoot = new URL('../../plugins/', import.meta.url).pathname
+  const bundlePluginRoot = typeof __filename !== 'undefined'
+    ? path.join(path.dirname(__filename), '..', '..', 'plugins')
+    : new URL('../../plugins/', import.meta.url).pathname
   const scanRoots = [pluginScanRoot, './plugins']
   try {
-    const req = createRequire(import.meta.url)
+    const req = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
     const fs = req('node:fs') as typeof import('node:fs')
     if (fs.existsSync(bundlePluginRoot)) scanRoots.push(bundlePluginRoot)
   } catch { /* best-effort */ }
@@ -283,7 +336,7 @@ const reviewService = new ReviewService({
   // where plugins are shipped as electron-builder extraResources). process.resourcesPath
   // is set by Electron to {app}/Contents/Resources (macOS) or {app}/resources (Windows/Linux).
   try {
-    const req = createRequire(import.meta.url)
+    const req = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
     const fs = req('node:fs') as typeof import('node:fs')
     const path = req('node:path') as typeof import('node:path')
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
@@ -311,6 +364,77 @@ const reviewService = new ReviewService({
   })
   void pluginRegistry.reload().catch(() => {})
 
+  // --- Prometheus / OTel metrics export (v2.9.0): RTerm observed by other tools ---
+  const prometheusRegistry = new PrometheusRegistry({ prefix: 'rterm' })
+  const otelEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? process.env.RTERM_OTLP_METRICS_ENDPOINT
+  const otelExporter = otelEndpoint
+    ? new OtelExporter({
+        endpoint: otelEndpoint,
+        resourceAttributes: { 'service.name': 'rterm', 'service.version': process.env.GYBACKEND_VERSION ?? 'dev' },
+      })
+    : null
+
+  // Rebuild the Prometheus registry from the metrics ledger's latest points.
+  const renderPrometheus = (): string => {
+    const series: Array<{ host: string; metric: string; value: number }> = []
+    for (const host of metricsLedger.hosts()) {
+      const latest = metricsLedger.latest(host)
+      if (!latest) continue
+      for (const [k, v] of Object.entries(latest)) {
+        if (k === 'host' || k === 'at') continue
+        if (typeof v === 'number' && Number.isFinite(v)) series.push({ host, metric: `host_${k}`, value: v })
+      }
+    }
+    const reg = registryFromHostMetrics(series, { prefix: 'rterm', helpPrefix: 'RTerm host metric' })
+    return reg.render()
+  }
+
+  // --- Secrets vault (v2.9.0): encrypted at rest, never in LLM context ---
+  const secretsVault = new SecretsVault({
+    masterKey: process.env.RTERM_SECRETS_MASTER_KEY,
+    onAudit: (action, key) => {
+      try {
+        auditLedger.append({
+          kind: 'config_change',
+          actor: 'secrets-vault',
+          target: key,
+          summary: `secret ${action}`,
+          detail: { action },
+        })
+      } catch { /* best-effort */ }
+    },
+  })
+
+  // --- Incident escalation & on-call (v2.9.0) ---
+  const escalationService = new EscalationService({ channels: deps.pagingChannels ?? [] })
+
+  // --- AI cost & budgets (v2.9.0): feed from the agent run ledger's usage events ---
+  const costBudgetService = new CostBudgetService({ prices: deps.modelPrices })
+
+  // --- Session recording (v2.9.0) ---
+  const sessionRecorder = new SessionRecorder({})
+
+  // --- GitOps (v2.9.0): desired state in Git ---
+  const gitopsService = new GitOpsService({
+    readLive: deps.gitopsReadLive ?? ((): DesiredEntity[] => []),
+    applyEntity: deps.gitopsApplyEntity,
+  })
+
+  // --- Playbook versioning + lint (v2.9.0) ---
+  const playbookVersioning = new PlaybookVersioning({})
+
+  // --- Cloud inventory (v2.9.0) ---
+  const cloudInventory = new CloudInventory({
+    fetchAwsInstances: deps.fetchAwsInstances,
+    fetchGcpInstances: deps.fetchGcpInstances,
+    fetchAzureVms: deps.fetchAzureVms,
+  })
+
+  // --- Live dashboard hub (v2.9.0): push unified state to all clients ---
+  const liveDashboardHub = new LiveDashboardHub({
+    getState: () => dashboard.state(),
+  })
+
   // --- Feed monitor snapshots into the metrics ledger + behavior (the live data path) ---
   deps.setMonitorPublisher((channel: string, data: unknown) => {
     if (channel !== 'monitor:snapshot' || !data || typeof data !== 'object') return
@@ -318,6 +442,8 @@ const reviewService = new ReviewService({
     const host = d.terminalId ? String(d.terminalId) : 'local'
     try {
       metricsLedger.record(host, d as never)
+      // push live dashboard updates to subscribers (best-effort, non-blocking)
+      void liveDashboardHub.publish().catch(() => {})
     } catch { /* best-effort */ }
   })
 
@@ -334,5 +460,19 @@ const reviewService = new ReviewService({
     governance: { policyEngine },
     review: { service: reviewService, shouldSkipReview, createSkippedReviewResult },
     pluginRegistry,
+    metricsExport: {
+      registry: prometheusRegistry,
+      otel: otelExporter,
+      registryFromHostMetrics,
+      renderPrometheus,
+    },
+    secrets: secretsVault,
+    oncall: escalationService,
+    cost: costBudgetService,
+    recording: sessionRecorder,
+    gitops: gitopsService,
+    playbooks: { versioning: playbookVersioning, lint: lintPlaybook, lintOk },
+    cloud: cloudInventory,
+    liveDashboard: liveDashboardHub,
   }
 }
