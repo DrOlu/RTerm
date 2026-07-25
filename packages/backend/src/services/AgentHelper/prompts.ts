@@ -463,6 +463,42 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     name: "manage_trigger",
     description: MANAGE_TRIGGER_DESCRIPTION,
   },
+  {
+    name: "get_metrics",
+    description: "Read host metrics as Prometheus exposition text (for a scraper) or a one-line dashboard summary. Use to answer \"how are my hosts doing\" or to feed an external Prometheus/OTel collector.",
+  },
+  {
+    name: "manage_secret",
+    description: "Manage the encrypted secrets vault — list metadata (never values), set, delete, or check a secret. Secrets are materialized only at exec time and never enter the conversation. Vault must be unlocked (RTERM_SECRETS_MASTER_KEY).",
+  },
+  {
+    name: "manage_oncall",
+    description: "Incident on-call paging — list open pages, raise a page for an incident under an escalation policy, acknowledge or resolve a page, list policies, or advance the escalation clock.",
+  },
+  {
+    name: "get_cost",
+    description: "AI cost & budgets — summarize token spend in dollars (per model/profile, daily/monthly), check an intended run against budgets (ok/warn/throttle/deny), or list budgets.",
+  },
+  {
+    name: "manage_recording",
+    description: "asciinema-style session recording — list, start, stop, replay (scrub), export (.cast), or delete a terminal session recording.",
+  },
+  {
+    name: "manage_gitops",
+    description: "GitOps for desired state — export the live estate (connections/playbooks/triggers/etc.) as a content-hashed manifest, or detect drift / verify a manifest against live.",
+  },
+  {
+    name: "manage_playbook_version",
+    description: "Playbook/runbook versioning + lint — statically lint a playbook definition (undefined params, dependsOn cycles, empty steps, missing rollback), list version history, roll back, or diff two versions.",
+  },
+  {
+    name: "get_cloud_inventory",
+    description: "Cloud resource inventory (AWS/GCP/Azure) — summary counts by provider/state, query instances (filter by provider/state/region), or pull fresh inventory.",
+  },
+  {
+    name: "get_live_dashboard",
+    description: "Live multi-client dashboard — read the current unified dashboard state/summary, or the number of connected dashboard subscribers.",
+  },
 ];
 
 export function buildReadFileDescription(support: { image: boolean }): string {
