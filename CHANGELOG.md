@@ -2,6 +2,17 @@
 
 ## v2.9.7 (2026-07-25)
 
+### SECURITY — npm republish (credential leak) + Bug Fixes
+
+**Security (npm packages only):** `neuralos@2.9.6` / `rterm-backend@2.9.6` accidentally
+bundled a local runtime state file (`.gybackend-data/settings.json`) created when the
+staging package was boot-verified before publish — it contained a live API key. Both 2.9.6
+packages were **deprecated and then unpublished**; this clean 2.9.7 republish adds a
+hardened `.npmignore` (excludes `.gybackend-data/`, `*.sqlite*`, `.npmrc`) and is verified
+to contain **zero** state/secret files. Git history was never affected (repo
+`.gybackend-data/` is gitignored + untracked). **If you installed 2.9.6 from npm, rotate
+any key present in your OpenRouter/provider accounts and upgrade to 2.9.7.**
+
 ### Bug Fixes — Cost Attribution, GitOps Gateway Robustness, Schema Test Drift
 
 A focused audit + hardening pass over the v2.9.6 settings-driven work and the broader
