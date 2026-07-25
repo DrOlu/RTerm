@@ -86,6 +86,11 @@ export interface ObservabilityDeps {
   fetchAwsInstances?: (account: import('./cloud/cloudInventory').CloudAccount) => Promise<unknown>
   fetchGcpInstances?: (account: import('./cloud/cloudInventory').CloudAccount) => Promise<unknown>
   fetchAzureVms?: (account: import('./cloud/cloudInventory').CloudAccount) => Promise<unknown>
+  /** settings service (v2.9.x) — used to build the default GitOps live estate. */
+  settingsService?: { getSettings?: () => unknown }
+  /** called with the background driver handles (otel push timer, on-call tick timer)
+   * so the runtime can clear them on shutdown. */
+  onBackgroundDrivers?: (drivers: { otelPushTimer?: NodeJS.Timeout; oncallTickTimer?: NodeJS.Timeout }) => void
   onLog?: (line: string) => void
 }
 
@@ -415,20 +420,61 @@ const reviewService = new ReviewService({
   const sessionRecorder = new SessionRecorder({})
 
   // --- GitOps (v2.9.0): desired state in Git ---
+  // Default readLive: build the live estate from saved connections + automation
+  // (groups/scripts/playbooks/triggers/templates) so gitops works out of the box.
+  const defaultGitopsReadLive = (): DesiredEntity[] => {
+    const out: DesiredEntity[] = []
+    try {
+      const settings = deps.settingsService?.getSettings?.() as { connections?: Record<string, unknown> } | undefined
+      const conns = (settings?.connections ?? {}) as Record<string, unknown>
+      for (const [kind, list] of Object.entries(conns)) {
+        if (!Array.isArray(list)) continue
+        for (const c of list as Array<Record<string, unknown>>) {
+          const id = c?.id ?? c?.name
+          if (id) out.push({ id: `connection:${kind}:${String(id)}`, kind: 'connection', spec: c })
+        }
+      }
+    } catch { /* best-effort */ }
+    try {
+    const am = deps.automationManager
+    const groups = ((am?.listGroups?.() ?? []) as unknown) as Array<Record<string, unknown>>
+    for (const g of groups) { const id = g?.id ?? g?.name; if (id) out.push({ id: `group:${String(id)}`, kind: 'group', spec: g }) }
+    const scripts = ((am?.listScripts?.() ?? []) as unknown) as Array<Record<string, unknown>>
+    for (const s of scripts) { const id = s?.id ?? s?.name; if (id) out.push({ id: `script:${String(id)}`, kind: 'script', spec: s }) }
+    const playbooks = ((am?.listPlaybooks?.() ?? []) as unknown) as Array<Record<string, unknown>>
+    for (const p of playbooks) { const id = p?.id ?? p?.name; if (id) out.push({ id: `playbook:${String(id)}`, kind: 'playbook', spec: p }) }
+    const templates = ((am?.listTemplates?.() ?? []) as unknown) as Array<Record<string, unknown>>
+    for (const t of templates) { const id = t?.id ?? t?.name; if (id) out.push({ id: `template:${String(id)}`, kind: 'template', spec: t }) }
+    const tasks = ((am?.listScheduledTasks?.() ?? []) as unknown) as Array<Record<string, unknown>>
+    for (const t of tasks) { const id = t?.id ?? t?.name; if (id) out.push({ id: `scheduledTask:${String(id)}`, kind: 'scheduledTask', spec: t }) }
+    } catch { /* best-effort */ }
+    return out
+  }
   const gitopsService = new GitOpsService({
-    readLive: deps.gitopsReadLive ?? ((): DesiredEntity[] => []),
+    readLive: deps.gitopsReadLive ?? defaultGitopsReadLive,
     applyEntity: deps.gitopsApplyEntity,
   })
 
   // --- Playbook versioning + lint (v2.9.0) ---
   const playbookVersioning = new PlaybookVersioning({})
 
-  // --- Cloud inventory (v2.9.0) ---
-  const cloudInventory = new CloudInventory({
-    fetchAwsInstances: deps.fetchAwsInstances,
-    fetchGcpInstances: deps.fetchGcpInstances,
-    fetchAzureVms: deps.fetchAzureVms,
+  // --- Cloud inventory (v2.9.0): real fetchers via the provider CLIs when no
+  // explicit fetcher is injected. Runs the CLI, parses JSON. Best-effort — a
+  // missing CLI or missing credentials surfaces as a sync error, not a crash.
+const runCliJson = async (bin: string, args: string[]): Promise<unknown> => {
+  const { execFile } = await import('node:child_process')
+  return new Promise((resolve, reject) => {
+    execFile(bin, args, { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+      if (err) return reject(err)
+      try { resolve(JSON.parse(stdout)) } catch (e) { reject(e instanceof Error ? e : new Error('invalid JSON')) }
+    })
   })
+}
+const cloudInventory = new CloudInventory({
+  fetchAwsInstances: deps.fetchAwsInstances ?? (async () => runCliJson('aws', ['ec2', 'describe-instances', '--output', 'json'])),
+  fetchGcpInstances: deps.fetchGcpInstances ?? (async () => runCliJson('gcloud', ['compute', 'instances', 'list', '--format', 'json'])),
+  fetchAzureVms: deps.fetchAzureVms ?? (async () => runCliJson('az', ['vm', 'list', '--show-details', '--output', 'json'])),
+})
 
   // --- Live dashboard hub (v2.9.0): push unified state to all clients ---
   const liveDashboardHub = new LiveDashboardHub({
@@ -446,6 +492,53 @@ const reviewService = new ReviewService({
       void liveDashboardHub.publish().catch(() => {})
     } catch { /* best-effort */ }
   })
+
+  // --- AI cost auto-feed (v2.9.x): mirror agent-run token usage into the cost
+  // ledger so spend attribution works without manual costRecord calls. Reads
+  // completed runs from the run ledger and records any not-yet-counted usage.
+  let lastCostRunId: string | null = null
+  const feedCostFromRuns = (): void => {
+    try {
+      const runs = deps.agentRunLedger?.listRuns?.({ limit: 100 }) ?? []
+      for (const r of runs as Array<{ runId: string; status: string; model?: string; promptTokens: number; completionTokens: number }>) {
+        if (r.runId === lastCostRunId) break // already fed up to here
+        if (!r.model || (r.promptTokens === 0 && r.completionTokens === 0)) continue
+        costBudgetService.record({ model: r.model, promptTokens: r.promptTokens, completionTokens: r.completionTokens })
+      }
+      const newest = (runs as Array<{ runId: string }>)[0]
+      if (newest) lastCostRunId = newest.runId
+    } catch { /* best-effort */ }
+  }
+  // Feed on a slow interval (cost is not latency-sensitive) + once at startup.
+  const costFeedTimer = setInterval(feedCostFromRuns, 60_000)
+  if (typeof costFeedTimer.unref === 'function') costFeedTimer.unref()
+  feedCostFromRuns()
+
+  // --- OTel push driver (v2.9.x): push metrics to the collector on an interval
+  // when an endpoint is configured. Default 30s; disabled when no exporter.
+  let otelPushTimer: NodeJS.Timeout | undefined
+  if (otelExporter) {
+    const intervalMs = Number(process.env.OTEL_EXPORTER_OTLP_INTERVAL_MS ?? 30_000) || 30_000
+    const pushOnce = async () => {
+      try {
+        // refresh the registry from the ledger before pushing
+        renderPrometheus()
+        await otelExporter.push(prometheusRegistry)
+      } catch { /* best-effort — a collector outage never blocks RTerm */ }
+    }
+    otelPushTimer = setInterval(() => { void pushOnce() }, intervalMs)
+    if (typeof otelPushTimer.unref === 'function') otelPushTimer.unref()
+    void pushOnce()
+  }
+
+  // --- On-call escalation driver (v2.9.x): advance the escalation clock on an
+  // interval so unacked pages escalate automatically (no manual oncallTick).
+  const oncallTickTimer = setInterval(() => {
+    void escalationService.tick().catch(() => {})
+  }, 30_000)
+  if (typeof oncallTickTimer.unref === 'function') oncallTickTimer.unref()
+
+  deps.onBackgroundDrivers?.({ otelPushTimer, oncallTickTimer })
 
   return {
     metricsLedger, goldenSignals, sloService, uptimeWatchdog, alertService,

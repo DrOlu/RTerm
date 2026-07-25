@@ -224,6 +224,37 @@ export class TerminalService {
     this.sessionLogger = logger
   }
 
+  /** Wire the asciinema-style session recorder (v2.9.x). Output events feed all active recordings. */
+  setSessionRecorder(recorder: import('./recording/sessionRecorder').SessionRecorder | null): void {
+    this.sessionRecorder = recorder
+  }
+
+  /** Live-recording state: terminalId -> recordingId. */
+  private readonly activeRecordings = new Map<string, string>()
+  private sessionRecorder: import('./recording/sessionRecorder').SessionRecorder | null = null
+
+  /** Begin recording a terminal's output. Returns the recordingId. */
+  startRecording(terminalId: string, opts: { title?: string; width?: number; height?: number } = {}): string {
+    if (!this.sessionRecorder) throw new Error('session recorder is not wired')
+    const id = this.sessionRecorder.start(terminalId, opts)
+    this.activeRecordings.set(terminalId, id)
+    return id
+  }
+
+  /** Stop the active recording for a terminal (if any). Returns the recordingId or null. */
+  stopRecording(terminalId: string): string | null {
+    const id = this.activeRecordings.get(terminalId)
+    if (!id) return null
+    this.activeRecordings.delete(terminalId)
+    this.sessionRecorder?.stop(id)
+    return id
+  }
+
+  /** True if a terminal is currently being recorded. */
+  isRecording(terminalId: string): boolean {
+    return this.activeRecordings.has(terminalId)
+  }
+
   setRawEventPublisher(publisher: RawEventPublisher): void {
     this.rawEventPublisher = publisher
   }
@@ -788,6 +819,13 @@ export class TerminalService {
   private handleData(terminalId: string, data: string): void {
     const sanitizedData = stripInternalControlMarkers(data)
     const tab = this.terminals.get(terminalId)
+    // Session recording (asciinema): feed live output into any active recording for this terminal.
+    const recordingId = this.activeRecordings.get(terminalId)
+    if (recordingId && this.sessionRecorder && sanitizedData) {
+      try {
+        this.sessionRecorder.out(recordingId, sanitizedData)
+      } catch { /* recording may have been stopped/limit hit — drop the chunk */ }
+    }
     // Session logging (records raw terminal output per session to disk).
     if (this.sessionLogger && tab) {
       if (!this.sessionLogStarted.has(terminalId)) {

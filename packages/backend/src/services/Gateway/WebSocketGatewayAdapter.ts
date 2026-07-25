@@ -843,6 +843,29 @@ export class WebSocketGatewayAdapter {
           `${request.method} is not available on this websocket gateway.`,
         );
       }
+      // Live dashboard subscribe: register this socket as a subscriber and push
+      // the (filtered) dashboard state as gateway:event frames on every update.
+      if (request.method === "observability:liveDashboardSubscribe") {
+        const hub = (bridge as unknown as { liveDashboard: import('../liveui/liveDashboardHub').LiveDashboardHub<any> }).liveDashboard;
+        const filter = (params as { filter?: { sections?: string[]; host?: string } }).filter;
+        const subId = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        await hub.subscribe({
+          id: subId,
+          filter,
+          send: (payload: unknown) => {
+            this.safeSocketSend(socket, {
+              type: "gateway:event",
+              event: "observability:dashboard",
+              data: payload,
+            });
+          },
+        });
+        // Prune on socket close.
+        const sock = socket as unknown as { on?: (ev: string, fn: () => void) => void; off?: (ev: string, fn: () => void) => void };
+        const onClose = () => { hub.unsubscribe(subId); sock.off?.("close", onClose) };
+        sock.on?.("close", onClose);
+        return { subscribed: true, subscriberId: subId };
+      }
       const fnName = request.method.slice("observability:".length);
       const fn = (bridge as Record<string, unknown>)[fnName];
       if (typeof fn !== "function") {

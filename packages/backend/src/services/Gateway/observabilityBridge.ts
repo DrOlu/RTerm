@@ -14,6 +14,9 @@ import type { Observability } from '../observability'
 
 export interface ObservabilityBridgeDeps {
   observability: () => Observability | null
+  /** optional TerminalService — enables live recording capture (start/stop route
+   * through it so terminal output feeds the recording). */
+  terminalService?: () => import('../TerminalService').TerminalService | null
 }
 
 function requireObs(deps: ObservabilityBridgeDeps): Observability {
@@ -72,10 +75,18 @@ export function createObservabilityBridge(deps: ObservabilityBridgeDeps) {
 
     // ── session recording ───────────────────────────────────────────────────
     recordingList: async () => requireObs(deps).recording.list(),
-    recordingStart: async (params: { terminalId: string; width?: number; height?: number; title?: string }) => ({
-      recordingId: requireObs(deps).recording.start(params.terminalId, params),
-    }),
+    recordingStart: async (params: { terminalId: string; width?: number; height?: number; title?: string }) => {
+      // Route through TerminalService when available so live output feeds the recording.
+      const ts = deps.terminalService?.()
+      if (ts) return { recordingId: ts.startRecording(params.terminalId, params) }
+      return { recordingId: requireObs(deps).recording.start(params.terminalId, params) }
+    },
     recordingStop: async (params: { recordingId: string }) => requireObs(deps).recording.stop(params.recordingId),
+    recordingStopTerminal: async (params: { terminalId: string }) => {
+      const ts = deps.terminalService?.()
+      const id = ts?.stopRecording(params.terminalId)
+      return { recordingId: id, stopped: id !== null && id !== undefined }
+    },
     recordingReplay: async (params: { recordingId: string; fromSec?: number; durationSec?: number }) =>
       requireObs(deps).recording.replay(params.recordingId, params),
     recordingExportCast: async (params: { recordingId: string }) => requireObs(deps).recording.exportCast(params.recordingId),
@@ -115,6 +126,8 @@ export function createObservabilityBridge(deps: ObservabilityBridgeDeps) {
     // ── live dashboard hub ──────────────────────────────────────────────────
     liveDashboardState: async () => requireObs(deps).liveDashboard.lastState() ?? (await requireObs(deps).dashboard.state()),
     liveDashboardSubscriberCount: async () => ({ count: requireObs(deps).liveDashboard.subscriberCount() }),
+    /** the raw hub (used by the gateway adapter for liveDashboardSubscribe). */
+    get liveDashboard() { return requireObs(deps).liveDashboard },
   }
 }
 

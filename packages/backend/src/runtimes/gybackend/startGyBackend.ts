@@ -277,6 +277,7 @@ export async function startGyBackend(): Promise<void> {
     agentRunLedger,
     gatewayService,
     resourceMonitorService,
+    settingsService,
     setMonitorPublisher: (pub) => resourceMonitorService.setPublisher((channel: string, data: unknown) => {
       pub(channel, data);
     }),
@@ -287,6 +288,8 @@ export async function startGyBackend(): Promise<void> {
   // (metrics, secrets, on-call, cost, recording, gitops, playbooks, cloud, live
   // dashboard) work in chat.
   agentService.setObservability(observability);
+  // Wire the session recorder so terminal output feeds live recordings (asciinema).
+  terminalService.setSessionRecorder(observability.recording);
 
   // Session logging: record terminal output per session to disk when enabled.
   if (settingsService.getSettings().sessionLogging?.enabled) {
@@ -782,6 +785,7 @@ export async function startGyBackend(): Promise<void> {
         // cloud, live dashboard) as observability:* RPC methods.
         observabilityBridge: createObservabilityBridge({
           observability: () => observability,
+          terminalService: () => terminalService,
         }),
       }),
   });

@@ -484,6 +484,7 @@ export async function startElectronMain(): Promise<void> {
               // Observability bridge (v2.9.x): the 9 platform capabilities over RPC.
               observabilityBridge: createObservabilityBridge({
                 observability: () => observabilityRef.current,
+                terminalService: () => terminalService,
               }),
               terminalBridge: {
                 listTerminals: () =>
@@ -1150,6 +1151,7 @@ export async function startElectronMain(): Promise<void> {
           agentRunLedger,
           gatewayService,
           resourceMonitorService,
+          settingsService,
           setMonitorPublisher: (pub) => resourceMonitorService.setPublisher((channel: string, data: unknown) => {
             pub(channel, data);
           }),
@@ -1161,6 +1163,8 @@ export async function startElectronMain(): Promise<void> {
         // observability_* tools work in chat.
         observabilityRef.current = observability;
         agentService.setObservability(observability);
+        // Wire the session recorder so terminal output feeds live recordings (asciinema).
+        terminalService.setSessionRecorder(observability.recording);
 
         ipcMain.handle("agentRunLedger:list", (_e, filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
           agentRunLedger.listRuns(filter),
