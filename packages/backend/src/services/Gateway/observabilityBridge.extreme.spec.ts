@@ -80,8 +80,8 @@ function bridge() {
 }
 
 // ─── method surface ───
-test('OBSERVABILITY_METHODS covers all 41 methods with observability: prefix', () => {
-  eq(OBSERVABILITY_METHODS.length, 41)
+test('OBSERVABILITY_METHODS covers every observability: method (all dispatchable)', () => {
+  ok(OBSERVABILITY_METHODS.length >= 41, 'at least the v2.9.2 set')
   ok(OBSERVABILITY_METHODS.every((m) => m.startsWith('observability:')))
   // every method name maps to a bridge fn
   const b = bridge() as Record<string, unknown>

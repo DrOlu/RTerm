@@ -12,6 +12,10 @@
 
 import type { Observability } from '../observability'
 
+interface KubectlPodContainerStatus { ready?: boolean; restartCount?: number }
+interface KubectlPodItem { metadata?: { name?: string; namespace?: string }; status?: { phase?: string; containerStatuses?: KubectlPodContainerStatus[] } }
+interface KubectlPodList { items?: KubectlPodItem[] }
+
 export interface ObservabilityBridgeDeps {
   observability: () => Observability | null
   /** optional TerminalService — enables live recording capture (start/stop route
@@ -123,6 +127,76 @@ export function createObservabilityBridge(deps: ObservabilityBridgeDeps) {
       return { ok: true }
     },
 
+    // ── APM (OTLP span ingestion) ───────────────────────────────────────────
+    apmIngestSpans: async (params: { payload: unknown; defaultService?: string }) => {
+      const { ingestOtlp } = await import('../apm/spanLedger')
+      const count = ingestOtlp(requireObs(deps).spanLedger, params.payload, params.defaultService)
+      return { ingested: count }
+    },
+    apmSummary: async () => ({
+      spans: requireObs(deps).spanLedger.size(),
+      traces: requireObs(deps).spanLedger.traceIds().length,
+      byService: requireObs(deps).spanLedger.serviceStats(),
+    }),
+
+    // ── DEM (RUM beacon ingestion) ──────────────────────────────────────────
+    demIngestBeacon: async (params: { payload: unknown }) => {
+      const s = requireObs(deps).rumLedger.ingestBeacon(params.payload)
+      return { ingested: s !== undefined, id: s?.id }
+    },
+    demSummary: async () => ({
+      sessions: requireObs(deps).rumLedger.size(),
+      byPage: requireObs(deps).rumLedger.pageStats(),
+    }),
+
+    // ── Infra (k8s collect) ─────────────────────────────────────────────────
+    infraCollect: async (params: { context?: string; kubectlJson?: unknown; execKubectl?: () => Promise<unknown> }) => {
+      const { parseKubectlPods } = await import('../infra/infraMonitor')
+      const context = params.context ?? 'default'
+      let podsPayload = params.kubectlJson
+      if (podsPayload === undefined) {
+        if (!params.execKubectl) throw new Error('infraCollect needs kubectlJson or an injected execKubectl')
+        podsPayload = await params.execKubectl()
+      }
+      const text = typeof podsPayload === 'string' ? podsPayload : JSON.stringify(podsPayload)
+      // parseKubectlPods reads the kubectl text table (NAMESPACE NAME READY STATUS RESTARTS AGE).
+      // If a JSON object is passed instead, render it to that table shape first.
+      let pods = parseKubectlPods(text)
+      if (pods.length === 0 && typeof podsPayload === 'object' && podsPayload !== null) {
+        const items = (podsPayload as KubectlPodList).items ?? []
+        const table = ['NAMESPACE NAME READY STATUS RESTARTS AGE', ...items.map((it) => {
+          const ns = it.metadata?.namespace ?? 'default'
+          const name = it.metadata?.name ?? 'pod'
+          const cs = it.status?.containerStatuses ?? []
+          const ready = `${cs.filter((c) => c.ready).length}/${cs.length || 1}`
+          const status = it.status?.phase ?? 'Unknown'
+          const restarts = String(cs.reduce((s, c) => s + (c.restartCount ?? 0), 0))
+          return `${ns} ${name} ${ready} ${status} ${restarts} 1d`
+        })].join('\n')
+        pods = parseKubectlPods(table)
+      }
+      const health = requireObs(deps).infraMonitor.recordCluster(context, pods, [])
+      return { context, pods: pods.length, notReady: health.notReadyPods, crashLoop: health.crashLoopPods }
+    },
+    infraClusters: async () => requireObs(deps).infraMonitor.clusters_(),
+    infraUnhealthy: async () => requireObs(deps).infraMonitor.unhealthyInstances(),
+
+    // ── ETW (Windows trace) ─────────────────────────────────────────────────
+    etwStartTrace: async (params: { name: string; providers: Array<'network' | 'file' | 'registry' | 'process' | 'dns' | 'power'>; outDir?: string }) =>
+      requireObs(deps).etwService.createSession(params.name, params.providers, params.outDir),
+    etwStopTrace: async (params: { sessionId: string }) => {
+      const s = requireObs(deps).etwService.session(params.sessionId)
+      if (!s) throw new Error(`etw session not found: ${params.sessionId}`)
+      const { buildStopCommands } = await import('../etw/etwService')
+      return { commands: buildStopCommands(s) }
+    },
+    etwParse: async (params: { output: string; format?: 'winevent' | 'counter' }) => {
+      const { parseWinEventJson, parseWinEventText, parseCounterJson } = await import('../etw/etwService')
+      if (params.format === 'counter') return { counters: parseCounterJson(params.output) }
+      return { events: parseWinEventJson(params.output) ?? parseWinEventText(params.output) }
+    },
+    etwSessions: async () => requireObs(deps).etwService.sessions_(),
+
     // ── live dashboard hub ──────────────────────────────────────────────────
     liveDashboardState: async () => requireObs(deps).liveDashboard.lastState() ?? (await requireObs(deps).dashboard.state()),
     liveDashboardSubscriberCount: async () => ({ count: requireObs(deps).liveDashboard.subscriberCount() }),
@@ -174,6 +248,17 @@ export const OBSERVABILITY_METHODS = [
   'observability:cloudQuery',
   'observability:cloudSync',
   'observability:cloudAddAccount',
+  'observability:apmIngestSpans',
+  'observability:apmSummary',
+  'observability:demIngestBeacon',
+  'observability:demSummary',
+  'observability:infraCollect',
+  'observability:infraClusters',
+  'observability:infraUnhealthy',
+  'observability:etwStartTrace',
+  'observability:etwStopTrace',
+  'observability:etwParse',
+  'observability:etwSessions',
   'observability:liveDashboardState',
   'observability:liveDashboardSubscriberCount',
 ] as const

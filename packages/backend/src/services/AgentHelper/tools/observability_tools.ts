@@ -286,3 +286,157 @@ export async function getLiveDashboard(args: z.infer<typeof getLiveDashboardSche
   emit(context, 'get_live_dashboard', args, out)
   return out
 }
+
+// ─── APM (OTLP span ingestion) ─────────────────────────────────────────────
+export const ingestApmSpansSchema = z.object({
+  payload: z.any().describe("OTLP/HTTP-JSON payload: {resourceSpans:[...]} with spans (traceId/spanId/name/startTimeUnixNano/endTimeUnixNano/status)."),
+  defaultService: z.string().optional().describe("Fallback service name when a span has none."),
+})
+export async function ingestApmSpans(args: z.infer<typeof ingestApmSpansSchema>, context: ToolExecutionContext): Promise<string> {
+  const { o, msg } = obs(context, 'ingest_apm_spans', args)
+  if (!o) return msg!
+  const { ingestOtlp } = await import('../../apm/spanLedger')
+  const n = ingestOtlp(o.spanLedger, args.payload, args.defaultService)
+  const out = `Ingested ${n} APM span(s) into the trace store.`
+  emit(context, 'ingest_apm_spans', args, out)
+  return out
+}
+
+export const getApmSummarySchema = z.object({})
+export async function getApmSummary(_args: z.infer<typeof getApmSummarySchema>, context: ToolExecutionContext): Promise<string> {
+  const { o, msg } = obs(context, 'get_apm_summary', _args)
+  if (!o) return msg!
+  const stats = (o.spanLedger.serviceStats() as unknown) as Array<{ service: string; spans: number; errors?: number; p95Ms?: number }>
+  const out = stats.length
+    ? `APM: ${o.spanLedger.size()} spans across ${stats.length} service(s). ` + stats.map((x) => `${x.service}(${x.spans}${x.errors ? ', ' + x.errors + ' err' : ''})`).join(', ')
+    : 'APM: no spans ingested yet.'
+  emit(context, 'get_apm_summary', _args, out)
+  return out
+}
+
+// ─── DEM (RUM beacon ingestion) ────────────────────────────────────────────
+export const ingestDemBeaconSchema = z.object({
+  payload: z.any().describe("RUM beacon: {page, route?, region?, userAgent?, lcpMs?, inpMs?, cls?, ttfbMs?, jsErrors?, at?}."),
+})
+export async function ingestDemBeacon(args: z.infer<typeof ingestDemBeaconSchema>, context: ToolExecutionContext): Promise<string> {
+  const { o, msg } = obs(context, 'ingest_dem_beacon', args)
+  if (!o) return msg!
+  const s = o.rumLedger.ingestBeacon(args.payload)
+  const out = s ? `Ingested RUM beacon for ${s.page}${s.lcpMs ? ` (LCP ${s.lcpMs}ms)` : ''}.` : 'Beacon ignored — needs a `page` field.'
+  emit(context, 'ingest_dem_beacon', args, out)
+  return out
+}
+
+export const getDemSummarySchema = z.object({})
+export async function getDemSummary(_args: z.infer<typeof getDemSummarySchema>, context: ToolExecutionContext): Promise<string> {
+  const { o, msg } = obs(context, 'get_dem_summary', _args)
+  if (!o) return msg!
+  const pages = o.rumLedger.pageStats() as Array<{ page: string; sessions: number; errorRate?: number }>
+  const out = pages.length
+    ? `DEM: ${o.rumLedger.size()} sessions across ${pages.length} page(s). ` + pages.map((p) => `${p.page}(${p.sessions}${p.errorRate ? `, ${(p.errorRate * 100).toFixed(0)}% err` : ''})`).join(', ')
+    : 'DEM: no RUM sessions ingested yet.'
+  emit(context, 'get_dem_summary', _args, out)
+  return out
+}
+
+// ─── Infra (k8s collect) ───────────────────────────────────────────────────
+interface KubectlPodContainerStatus { ready?: boolean; restartCount?: number }
+interface KubectlPodItem { metadata?: { name?: string; namespace?: string }; status?: { phase?: string; containerStatuses?: KubectlPodContainerStatus[] } }
+interface KubectlPodList { items?: KubectlPodItem[] }
+
+export const collectInfraSchema = z.object({
+  context: z.string().optional().describe("Cluster context name (default 'default')."),
+  kubectlJson: z.any().optional().describe("Parsed `kubectl get pods -A -o json` payload (or its text). If omitted, runs kubectl on the local shell."),
+})
+export async function collectInfra(args: z.infer<typeof collectInfraSchema>, context: ToolExecutionContext): Promise<string> {
+  const { o, msg } = obs(context, 'collect_infra', args)
+  if (!o) return msg!
+  const { parseKubectlPods } = await import('../../infra/infraMonitor')
+  const clusterCtx = args.context ?? 'default'
+  let out: string
+  try {
+    let payload = args.kubectlJson
+    if (payload === undefined) {
+      const { execFile } = await import('node:child_process')
+      payload = await new Promise<string>((resolve, reject) => {
+        // text table output (NAMESPACE NAME READY STATUS RESTARTS AGE) — what parseKubectlPods reads
+        execFile('kubectl', ['get', 'pods', '-A'], { timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+          if (err) return reject(err)
+          resolve(stdout)
+        })
+      })
+    }
+    const text = typeof payload === 'string' ? payload : JSON.stringify(payload)
+    let pods = parseKubectlPods(text)
+    // parseKubectlPods reads the kubectl text table; render a JSON object to that shape if needed.
+    if (pods.length === 0 && typeof payload === 'object' && payload !== null) {
+      const jsonObj = payload as KubectlPodList
+      const items = jsonObj.items ?? []
+      const table = ['NAMESPACE NAME READY STATUS RESTARTS AGE', ...items.map((it) => {
+        const ns = it.metadata?.namespace ?? 'default'
+        const name = it.metadata?.name ?? 'pod'
+        const cs = it.status?.containerStatuses ?? []
+        const ready = `${cs.filter((c) => c.ready).length}/${cs.length || 1}`
+        const status = it.status?.phase ?? 'Unknown'
+        const restarts = String(cs.reduce((s, c) => s + (c.restartCount ?? 0), 0))
+        return `${ns} ${name} ${ready} ${status} ${restarts} 1d`
+      })].join('\n')
+      pods = parseKubectlPods(table)
+    }
+    const health = o.infraMonitor.recordCluster(clusterCtx, pods, [])
+    out = `k8s ${clusterCtx}: ${pods.length} pods, ${health.notReadyPods} not-ready, ${health.crashLoopPods} CrashLoopBackOff.`
+  } catch (e) {
+    out = `infra collect failed (kubectl or cluster unavailable): ${e instanceof Error ? e.message : String(e)}`
+  }
+  emit(context, 'collect_infra', args, out)
+  return out
+}
+
+// ─── ETW (Windows trace) ───────────────────────────────────────────────────
+export const manageEtwSchema = z.object({
+  action: z.enum(['start', 'stop', 'parse', 'sessions']).describe("start a trace, stop it, parse captured output, or list sessions."),
+  name: z.string().optional().describe("Trace name (start)."),
+  providers: z.array(z.enum(['network', 'file', 'registry', 'process', 'dns', 'power'])).optional().describe("ETW providers to trace (start)."),
+  sessionId: z.string().optional().describe("Session id (stop)."),
+  output: z.string().optional().describe("Captured Get-WinEvent/Get-Counter output (parse)."),
+  format: z.enum(['winevent', 'counter']).optional().describe("Parse format (parse)."),
+})
+export async function manageEtw(args: z.infer<typeof manageEtwSchema>, context: ToolExecutionContext): Promise<string> {
+  const { o, msg } = obs(context, 'manage_etw', args)
+  if (!o) return msg!
+  const svc = o.etwService
+  let out: string
+  try {
+    if (args.action === 'start') {
+      if (!args.name || !args.providers?.length) { out = 'start requires name + providers.' } else {
+        const s = svc.createSession(args.name, args.providers)
+        const { buildStartCommands } = await import('../../etw/etwService')
+        out = `ETW session ${s.id} created (${args.providers.join(', ')}). Start commands:\n${buildStartCommands(s).join('\n')}`
+      }
+    } else if (args.action === 'stop') {
+      if (!args.sessionId) { out = 'stop requires sessionId.' } else {
+        const s = svc.session(args.sessionId)
+        if (!s) { out = `No ETW session ${args.sessionId}.` } else {
+          const { buildStopCommands } = await import('../../etw/etwService')
+          out = `Stop commands for ${args.sessionId}:\n${buildStopCommands(s).join('\n')}`
+        }
+      }
+    } else if (args.action === 'parse') {
+      if (!args.output) { out = 'parse requires output.' } else {
+        const { parseWinEventJson, parseWinEventText, parseCounterJson } = await import('../../etw/etwService')
+        if (args.format === 'counter') {
+          const c = parseCounterJson(args.output)
+          out = `${c.length} counter sample(s).`
+        } else {
+          const ev = parseWinEventJson(args.output) ?? parseWinEventText(args.output)
+          out = `${ev.length} event(s) parsed.`
+        }
+      }
+    } else {
+      const sessions = svc.sessions_()
+      out = sessions.length ? sessions.map((s) => `- ${s.id} (${s.name}): ${s.providers.join(',')}`).join('\n') : 'No ETW sessions.'
+    }
+  } catch (e) { out = `etw error: ${e instanceof Error ? e.message : String(e)}` }
+  emit(context, 'manage_etw', args, out)
+  return out
+}

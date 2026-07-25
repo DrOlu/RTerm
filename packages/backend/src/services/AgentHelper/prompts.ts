@@ -515,6 +515,30 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     name: "get_live_dashboard",
     description: "Live multi-client dashboard — read the current unified dashboard state/summary, or the number of connected dashboard subscribers.",
   },
+  {
+    name: "ingest_apm_spans",
+    description: "Ingest OTLP/HTTP-JSON distributed-trace spans into the APM trace store (feeds bottleneck/slowest-trace analysis and the dashboard APM section).",
+  },
+  {
+    name: "get_apm_summary",
+    description: "Read the APM summary — traces, spans, per-service error rates and p95 latency.",
+  },
+  {
+    name: "ingest_dem_beacon",
+    description: "Ingest a Core Web Vitals RUM beacon (page, LCP/INP/CLS/TTFB, JS errors) into the DEM store (feeds per-page p75 + error rate and the dashboard DEM section).",
+  },
+  {
+    name: "get_dem_summary",
+    description: "Read the DEM summary — sessions, pages, p75 Core Web Vitals, error rate.",
+  },
+  {
+    name: "collect_infra",
+    description: "Collect Kubernetes cluster health — runs `kubectl get pods -A -o json` (or accepts the payload), feeds the infra monitor (pod readiness, restarts, CrashLoopBackOff).",
+  },
+  {
+    name: "manage_etw",
+    description: "Windows ETW diagnostics — start/stop a trace (logman), parse captured Get-WinEvent/Get-Counter output, list sessions. Use against a Windows host for network/file/registry/process/DNS diagnostics.",
+  },
 ];
 
 export function buildReadFileDescription(support: { image: boolean }): string {

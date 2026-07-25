@@ -90,6 +90,12 @@ import {
   managePlaybookVersionSchema, managePlaybookVersion,
   getCloudInventorySchema, getCloudInventory,
   getLiveDashboardSchema, getLiveDashboard,
+  ingestApmSpansSchema, ingestApmSpans,
+  getApmSummarySchema, getApmSummary,
+  ingestDemBeaconSchema, ingestDemBeacon,
+  getDemSummarySchema, getDemSummary,
+  collectInfraSchema, collectInfra,
+  manageEtwSchema, manageEtw,
 } from './tools/observability_tools'
 import { 
   skillToolSchema, 
@@ -362,6 +368,36 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'get_live_dashboard',
       description: 'Live multi-client dashboard — read the current unified dashboard state/summary, or the number of connected dashboard subscribers.',
       schema: getLiveDashboardSchema
+    },
+    {
+      name: 'ingest_apm_spans',
+      description: 'Ingest OTLP/HTTP-JSON distributed-trace spans into the APM trace store (feeds bottleneck/slowest-trace analysis and the dashboard APM section).',
+      schema: ingestApmSpansSchema
+    },
+    {
+      name: 'get_apm_summary',
+      description: 'Read the APM summary — traces, spans, per-service error rates and p95 latency.',
+      schema: getApmSummarySchema
+    },
+    {
+      name: 'ingest_dem_beacon',
+      description: 'Ingest a Core Web Vitals RUM beacon (page, LCP/INP/CLS/TTFB, JS errors) into the DEM store (feeds per-page p75 + error rate and the dashboard DEM section).',
+      schema: ingestDemBeaconSchema
+    },
+    {
+      name: 'get_dem_summary',
+      description: 'Read the DEM summary — sessions, pages, p75 Core Web Vitals, error rate.',
+      schema: getDemSummarySchema
+    },
+    {
+      name: 'collect_infra',
+      description: 'Collect Kubernetes cluster health — runs `kubectl get pods -A -o json` (or accepts the payload), feeds the infra monitor (pod readiness, restarts, CrashLoopBackOff).',
+      schema: collectInfraSchema
+    },
+    {
+      name: 'manage_etw',
+      description: 'Windows ETW diagnostics — start/stop a trace (logman), parse captured Get-WinEvent/Get-Counter output, list sessions. Use against a Windows host for network/file/registry/process/DNS diagnostics.',
+      schema: manageEtwSchema
     }
   ].map((tool) => convertToOpenAITool(tool))
 }
@@ -410,6 +446,12 @@ export const toolImplementations = {
   managePlaybookVersion,
   getCloudInventory,
   getLiveDashboard,
+  ingestApmSpans,
+  getApmSummary,
+  ingestDemBeacon,
+  getDemSummary,
+  collectInfra,
+  manageEtw,
   writeFile,
   editFile,
   writeAndEdit,

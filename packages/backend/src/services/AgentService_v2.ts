@@ -84,6 +84,12 @@ import {
   managePlaybookVersionSchema,
   getCloudInventorySchema,
   getLiveDashboardSchema,
+  ingestApmSpansSchema,
+  getApmSummarySchema,
+  ingestDemBeaconSchema,
+  getDemSummarySchema,
+  collectInfraSchema,
+  manageEtwSchema,
 } from "./AgentHelper/tools/observability_tools";
 import type { IConnectionManagerRuntime } from "./runtimeContracts";
 import type { ToolExecutionContext } from "./AgentHelper/types";
@@ -1998,6 +2004,60 @@ export class AgentService_v2 {
             result = await toolImplementations.getLiveDashboard(validatedArgs, executionContext);
           } catch (err) {
             result = `Parameter validation error for get_live_dashboard: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "ingest_apm_spans": {
+          try {
+            const validatedArgs = ingestApmSpansSchema.parse(toolCall.args || {});
+            result = await toolImplementations.ingestApmSpans(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for ingest_apm_spans: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "get_apm_summary": {
+          try {
+            const validatedArgs = getApmSummarySchema.parse(toolCall.args || {});
+            result = await toolImplementations.getApmSummary(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for get_apm_summary: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "ingest_dem_beacon": {
+          try {
+            const validatedArgs = ingestDemBeaconSchema.parse(toolCall.args || {});
+            result = await toolImplementations.ingestDemBeacon(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for ingest_dem_beacon: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "get_dem_summary": {
+          try {
+            const validatedArgs = getDemSummarySchema.parse(toolCall.args || {});
+            result = await toolImplementations.getDemSummary(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for get_dem_summary: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "collect_infra": {
+          try {
+            const validatedArgs = collectInfraSchema.parse(toolCall.args || {});
+            result = await toolImplementations.collectInfra(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for collect_infra: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_etw": {
+          try {
+            const validatedArgs = manageEtwSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageEtw(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_etw: ${(err as Error).message}`;
           }
           break;
         }
