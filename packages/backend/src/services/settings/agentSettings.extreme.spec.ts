@@ -40,14 +40,14 @@ const defaults = {
   },
 }
 
-runCase('migrates v3 settings to schema v4 with empty agent settings', () => {
+runCase('migrates v3 settings to schema v5 with empty agent settings', () => {
   const migrated = migrateBackendSettings({
     schemaVersion: 3,
     commandPolicyMode: 'safe',
     memory: { enabled: false },
   })
 
-  assertEqual(migrated.schemaVersion, 4, 'schema version should be v4')
+  assertEqual(migrated.schemaVersion, 5, 'schema version should be v5')
   assertDeepEqual(
     migrated.agentSettings,
     { profiles: [], activeProfileId: null },
@@ -57,6 +57,11 @@ runCase('migrates v3 settings to schema v4 with empty agent settings', () => {
     migrated.memory?.enabled,
     false,
     'memory enabled flag should be preserved',
+  )
+  assertDeepEqual(
+    migrated.cost,
+    { modelPrices: {}, budgets: [] },
+    'cost block should be initialized by the v5 migration',
   )
 })
 
