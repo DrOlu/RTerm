@@ -75,6 +75,19 @@ export function buildManifest(entities: DesiredEntity[]): StateManifest {
   return { version: 1, stateHash, entities: sorted }
 }
 
+/**
+ * Guard a caller-supplied manifest before use. A missing or malformed manifest
+ * (e.g. an RPC call that omitted it) previously crashed with an opaque
+ * "Cannot read properties of undefined (reading 'entities')" — surface a clear,
+ * actionable error instead.
+ */
+export function assertManifest(repo: unknown): asserts repo is StateManifest {
+  const r = repo as StateManifest | undefined | null
+  if (!r || typeof r !== 'object' || !Array.isArray(r.entities)) {
+    throw new Error('a StateManifest with an entities array is required (call export first to build one)')
+  }
+}
+
 /** Compute field-level diffs between two specs (top-level fields). */
 export function specDiff(repo: Record<string, unknown>, live: Record<string, unknown>): Array<{ field: string; repo: unknown; live: unknown }> {
   const diffs: Array<{ field: string; repo: unknown; live: unknown }> = []
@@ -129,6 +142,7 @@ export class GitOpsService {
 
   /** Drift between a repo manifest and the current live estate. */
   async drift(repo: StateManifest): Promise<DriftEntry[]> {
+    assertManifest(repo)
     return diffManifest(repo, await this.readLive())
   }
 
@@ -144,6 +158,7 @@ export class GitOpsService {
    */
   async reconcile(repo: StateManifest, opts: { deleteRemoved?: boolean } = {}): Promise<ReconcileResult> {
     if (!this.applyEntity) throw new Error('reconcile needs an applyEntity handler')
+    assertManifest(repo)
     const drift = await this.drift(repo)
     const applied: DriftEntry[] = []
     const errors: Array<{ id: string; error: string }> = []

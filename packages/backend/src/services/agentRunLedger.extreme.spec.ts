@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import assert from 'node:assert'
-import { AgentRunLedger, extractUsageTokenBreakdown } from './agentRunLedger'
+import { AgentRunLedger, extractUsageTokenBreakdown, normalizeModelId } from './agentRunLedger'
 
 /**
  * agentRunLedger.extreme.spec — verifies the persisted run-audit + token-cost
@@ -124,6 +124,36 @@ await test('summarize aggregates run counts and tokens, grouped by model', () =>
   const since = ledger.summarize({ sinceMs: 5500 })
   assert.strictEqual(since.totalRuns, 1, 'since filter excludes older runs')
   assert.strictEqual(since.promptTokens, 1000)
+  ledger.close()
+})
+
+await test('normalizeModelId collapses self-doubled provider model ids', () => {
+  // Observed with OpenRouter streams: "moonshotai/kimi-k3moonshotai/kimi-k3".
+  assert.strictEqual(normalizeModelId('moonshotai/kimi-k3moonshotai/kimi-k3'), 'moonshotai/kimi-k3')
+  assert.strictEqual(normalizeModelId('z-ai/glm-5.2z-ai/glm-5.2'), 'z-ai/glm-5.2')
+  // normal ids pass through untouched
+  assert.strictEqual(normalizeModelId('moonshotai/kimi-k3'), 'moonshotai/kimi-k3')
+  assert.strictEqual(normalizeModelId('gpt-4o'), 'gpt-4o')
+  // even-length self-doubled collapses; even-length non-doubled passes through
+  assert.strictEqual(normalizeModelId('abab'), 'ab', "'abab' = 'ab'+'ab' collapses")
+  assert.strictEqual(normalizeModelId('abcx'), 'abcx', "'abcx' halves differ, passes through")
+  assert.strictEqual(normalizeModelId('gpt-4ogpt-4o'), 'gpt-4o')
+  // edge cases
+  assert.strictEqual(normalizeModelId(''), null)
+  assert.strictEqual(normalizeModelId(null), null)
+  assert.strictEqual(normalizeModelId(undefined), null)
+  assert.strictEqual(normalizeModelId('  padded/id  '), 'padded/id')
+})
+
+await test('recordUsage normalizes doubled model ids so cost attribution matches', () => {
+  const { ledger } = tmpLedger()
+  ledger.startRun({ runId: 'd1', sessionId: 's1', model: 'moonshotai/kimi-k3moonshotai/kimi-k3', startedAt: 1000 })
+  ledger.recordUsage('d1', { model: 'moonshotai/kimi-k3moonshotai/kimi-k3', promptTokens: 1000, completionTokens: 100 })
+  ledger.finishRun('d1', 'completed')
+  const sum = ledger.summarize()
+  assert.strictEqual(sum.byModel.length, 1, 'one model bucket')
+  assert.strictEqual(sum.byModel[0].model, 'moonshotai/kimi-k3', 'doubled id collapsed to the canonical id')
+  assert.strictEqual(sum.byModel[0].promptTokens, 1000)
   ledger.close()
 })
 

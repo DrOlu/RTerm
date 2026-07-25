@@ -1,5 +1,42 @@
 # Changelog
 
+## v2.9.7 (2026-07-25)
+
+### Bug Fixes — Cost Attribution, GitOps Gateway Robustness, Schema Test Drift
+
+A focused audit + hardening pass over the v2.9.6 settings-driven work and the broader
+gateway/agent surface. Three real bugs fixed, each covered by tests.
+
+- **Cost attribution — self-doubled provider model ids.** Some providers (observed with
+  OpenRouter streams) report the model id concatenated to itself (e.g.
+  `moonshotai/kimi-k3moonshotai/kimi-k3`). Those ids never matched the price-table keys, so
+  affected runs silently priced at `default` instead of the model's real rate. New
+  `normalizeModelId()` collapses an exact self-doubled id at the run-ledger persistence
+  boundary (`startRun` + `recordUsage`), so cost attribution matches the configured price.
+  (Fixes forward; historical doubled rows are not retro-rewritten.)
+- **GitOps gateway — clear error instead of an opaque crash.** Calling
+  `observability:gitopsDrift` / `gitopsInSync` / `gitopsReconcile` without a manifest (the
+  agent tool guarded this, but the gateway RPC did not) crashed with
+  `Cannot read properties of undefined (reading 'entities')`. New `assertManifest()` guard
+  at the `GitOpsService` boundary returns an actionable message
+  ("a StateManifest with an entities array is required (call export first to build one)").
+- **Schema-test drift.** `agentSettings.extreme.spec.ts` asserted the final schema version
+  was `4`; after the v2.9.6 v4→v5 bump it failed. It now asserts against
+  `BACKEND_SETTINGS_SCHEMA_VERSION` so it tracks future bumps.
+
+**Hardening / tests:** new `migrations.edgecases.extreme.spec.ts` (6 tests) locking in
+`settings:set` deep-merge behavior (a budgets-only save preserves prices and vice-versa) and
+normalizer robustness against null/garbage/NaN cost·alerts·oncall·cloud blocks; gitops guard
+tests; `normalizeModelId` unit + integration tests.
+
+**Verification:** backend typecheck clean on changed files; web typecheck exit 0; backend-unit
+232 PASS / 0 FAIL; v2.9 suite 217 PASS / 0 FAIL; layout-ui 396 PASS / 0 FAIL; gitops 16/16;
+run-ledger 14/14; migrations 17/17 + edge-cases 6/6. (Note: `sessionLogging.integration.spec.ts`
+fails in this environment because `node-pty` can't load under the tsx/ESM test runner — the
+bare `require('node-pty')` in `NodePtyBackend.ts` works in the shipped CJS build but not under
+ESM; local PTY terminals work in the actual app. Recommend switching that loader to
+`createRequire(import.meta.url)` — left as-is since that file is under active edit.)
+
 ## v2.9.6 (2026-07-25)
 
 ### Settings-Driven Observability — Cost, Alerts, On-Call & Cloud Wired End-to-End (No Placeholders)

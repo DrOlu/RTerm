@@ -1,4 +1,4 @@
-import { GitOpsService, buildManifest, diffManifest, specDiff, type DesiredEntity } from './gitOpsService'
+import { GitOpsService, assertManifest, buildManifest, diffManifest, specDiff, type DesiredEntity } from './gitOpsService'
 
 const cases: Array<{ name: string; run: () => void | Promise<void> }> = []
 function test(n: string, r: () => void | Promise<void>) { cases.push({ name: n, run: r }) }
@@ -78,6 +78,21 @@ test('inSync true when no drift, false otherwise', async () => {
   const s = new GitOpsService({ readLive: () => live })
   ok(await s.inSync(buildManifest(live)))
   ok(!(await s.inSync(buildManifest([ent('a', 'k', { x: 2 })]))))
+})
+test('drift/inSync/reconcile reject a missing manifest with a clear error (not a TypeError)', async () => {
+  const s = new GitOpsService({ readLive: () => [ent('a', 'k', { x: 1 })] })
+  for (const bad of [undefined, null, {}, { entities: 'nope' }, 42]) {
+    let msg = ''
+    try { await s.drift(bad as never) } catch (e) { msg = (e as Error).message }
+    ok(msg.includes('StateManifest'), `drift(${JSON.stringify(bad)}) should name StateManifest, got: ${msg}`)
+    ok(!msg.includes("reading 'entities'"), 'must not be the opaque TypeError')
+    let msg2 = ''
+    try { await s.inSync(bad as never) } catch (e) { msg2 = (e as Error).message }
+    ok(msg2.includes('StateManifest'), 'inSync should name StateManifest')
+  }
+})
+test('assertManifest passes a valid manifest', () => {
+  assertManifest(buildManifest([ent('a', 'k', { x: 1 })]))
 })
 test('reconcile upserts added/changed + calls onReconciled', async () => {
   const applied: Array<[string, string]> = []

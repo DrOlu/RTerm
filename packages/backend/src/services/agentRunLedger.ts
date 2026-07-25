@@ -98,6 +98,24 @@ export interface AgentRunLedgerOptions {
   filePath?: string;
 }
 
+/**
+ * Normalize a provider-reported model id for storage/attribution. Some
+ * providers (observed with OpenRouter streams) report the model id concatenated
+ * to itself — e.g. "moonshotai/kimi-k3moonshotai/kimi-k3" — which silently breaks
+ * cost attribution because the price-table key ("moonshotai/kimi-k3") never
+ * matches. Collapse an exact self-doubled string; otherwise pass through.
+ */
+export function normalizeModelId(model: string | null | undefined): string | null {
+  if (typeof model !== "string") return model ?? null;
+  const m = model.trim();
+  if (m.length === 0) return null;
+  if (m.length % 2 === 0) {
+    const half = m.length / 2;
+    if (m.slice(0, half) === m.slice(half)) return m.slice(0, half);
+  }
+  return m;
+}
+
 export class AgentRunLedger {
   private readonly filePath: string;
   private readonly db: DatabaseHandle;
@@ -160,7 +178,7 @@ export class AgentRunLedger {
           input.runId,
           input.sessionId,
           input.profileId ?? null,
-          input.model ?? null,
+          normalizeModelId(input.model),
           (input.inputPreview ?? "").slice(0, 500) || null,
           input.startedAt ?? Date.now(),
         );
@@ -181,12 +199,13 @@ export class AgentRunLedger {
         typeof usage.totalTokens === "number" && Number.isFinite(usage.totalTokens)
           ? Math.floor(usage.totalTokens)
           : null;
+      const model = normalizeModelId(usage.model);
       this.db
         .prepare(
           `INSERT INTO usage_events (run_id, at, model, prompt_tokens, completion_tokens, total_tokens)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
-        .run(runId, Date.now(), usage.model ?? null, prompt, completion, total);
+        .run(runId, Date.now(), model, prompt, completion, total);
       this.db
         .prepare(
           `UPDATE runs SET
@@ -195,9 +214,9 @@ export class AgentRunLedger {
              last_total_tokens = COALESCE(?, last_total_tokens),
              usage_events = usage_events + 1,
              model = COALESCE(?, model)
-           WHERE run_id = ?`,
+            WHERE run_id = ?`,
         )
-        .run(prompt, completion, total, usage.model ?? null, runId);
+        .run(prompt, completion, total, model, runId);
     } catch (error) {
       console.warn("[AgentRunLedger] recordUsage failed:", error);
     }
