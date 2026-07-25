@@ -86,7 +86,8 @@ type WebSocketRpcMethod =
   | "agent:deleteChatSessions"
   | "agent:renameSession"
   | "agent:branchFromMessage"
-  | "agent:rollbackToMessage";
+  | "agent:rollbackToMessage"
+  | `observability:${string}`;
 
 type FileTransferConflictStrategy = "error" | "overwrite" | "rename";
 
@@ -372,6 +373,8 @@ export interface WebSocketGatewayAdapterOptions {
       enabled: boolean,
     ) => unknown | Promise<unknown>;
   };
+  /** observability bridge (v2.9.x): the 9 platform capabilities over RPC. */
+  observabilityBridge?: import('./observabilityBridge').ObservabilityBridge;
   serverFactory?: WebSocketServerFactory;
   logger?: IWebSocketGatewayAdapterLogger;
 }
@@ -830,6 +833,26 @@ export class WebSocketGatewayAdapter {
     socket: IWebSocketConnectionLike,
   ): Promise<any> {
     const params = request.params ?? {};
+    // Observability bridge (v2.9.x): dispatch any observability:* method to the
+    // bridge by stripping the prefix and camel-casing the remainder.
+    if (request.method.startsWith("observability:")) {
+      const bridge = this.options.observabilityBridge;
+      if (!bridge) {
+        throw new WebSocketRpcError(
+          "METHOD_NOT_FOUND",
+          `${request.method} is not available on this websocket gateway.`,
+        );
+      }
+      const fnName = request.method.slice("observability:".length);
+      const fn = (bridge as Record<string, unknown>)[fnName];
+      if (typeof fn !== "function") {
+        throw new WebSocketRpcError(
+          "METHOD_NOT_FOUND",
+          `Unknown observability method: ${request.method}`,
+        );
+      }
+      return await (fn as (p: Record<string, any>) => unknown)(params);
+    }
     switch (request.method) {
       case "gateway:ping":
         return { pong: true, ts: Date.now() };

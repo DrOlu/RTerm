@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.9.2 (2026-07-25)
+
+### Wiring the 9 Capabilities into the App, Agent & Gateway
+
+The 9 platform capabilities from v2.9.0 are now **usable, not just present in the engine** — exposed as WebSocket RPC methods on the gateway **and** as first-class AI-agent tools, in both the headless (`gybackend` / `neuralos` / `rterm-backend`) and desktop runtimes. **24 new tests, all green; RPC verified live over the real gateway.**
+
+**Gateway RPC bridge** (`services/Gateway/observabilityBridge.ts`):
+- 41 new `observability:*` RPC methods covering every capability — `observability:metricsPrometheus`, `dashboardState/Summary`, `secretsList/Set/Delete/Has` (metadata only, never values), `oncallListPolicies/RegisterPolicy/OpenPages/Page/Ack/Resolve/Tick`, `costSummary/Record/Check/ListBudgets/SetBudget/RemoveBudget`, `recordingList/Start/Stop/Replay/ExportCast/Delete`, `gitopsExport/Drift/InSync/Reconcile`, `playbookLint/History/Save/Rollback/Diff`, `cloudSummary/Query/Sync/AddAccount`, `liveDashboardState/SubscriberCount`.
+- Dispatched generically in `WebSocketGatewayAdapter` (any `observability:*` method → bridge fn), and wired into both `startGyBackend` and `startElectronMain` (desktop uses a late-bound ref since the adapter is built before `createObservability`).
+
+**AI-agent tools** (`services/AgentHelper/tools/observability_tools.ts`) — drive all 9 in natural language:
+- `get_metrics` (Prometheus text or summary), `manage_secret` (vault list/set/delete/has — value never echoed), `manage_oncall` (page/ack/resolve/open-pages/policies/tick), `get_cost` (spend summary, budget check, list budgets), `manage_recording` (start/stop/replay/export_cast/list/delete), `manage_gitops` (export/drift/in_sync), `manage_playbook_version` (lint/history/rollback/diff), `get_cloud_inventory` (summary/query/sync), `get_live_dashboard` (state/subscribers).
+- Registered in `AgentHelper/tools.ts` (schemas + OpenAI tool defs + implementations) and dispatched in `AgentService_v2`; the `ToolExecutionContext` gains an `observability` handle wired via `agentService.setObservability(...)` in both runtimes.
+
+Now you can say in chat: *"add this API key to the vault"*, *"show my AI spend today"*, *"page the on-call for the DB incident"*, *"record this session"*, *"export my setup as a GitOps manifest"*, *"lint this playbook"*, *"list my AWS instances"* — and the agent does it.
+
 ## v2.9.0 (2026-07-25)
 
 ### 9 New Platform Capabilities — Observability Export, Secrets, On-Call, Cost, GitOps, Cloud, Live Dashboard, Recording, Playbook Versioning

@@ -43,6 +43,9 @@ export interface ToolExecutionContext {
   changeLedger?: import('../changeLedger').ChangeLedger
   /** Optional event-driven trigger engine (Advanced Automation v1.9.1). */
   triggerEngine?: import('../automation/triggerEngine').TriggerEngine
+  /** Optional observability handle (v2.9.x): backs the observability_* agent tools
+   * (metrics, secrets, on-call, cost, recording, gitops, playbooks, cloud, live dashboard). */
+  observability?: import('../observability').Observability
   agentRunId?: string
   /**
    * Saved SSH connections from backend settings (`connections.ssh`).

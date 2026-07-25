@@ -48,6 +48,7 @@ import { TerminalCommandDraftService } from "../../../backend/src/services/Termi
 import { ElectronAppSettingsMigration } from "../settings/ElectronAppSettingsMigration";
 import { cleanupDeprecatedCliLaunchers } from "./DeprecatedCliCleanupService";
 import { createObservability } from "../../../backend/src/services/observability";
+import { createObservabilityBridge } from "../../../backend/src/services/Gateway/observabilityBridge";
 import {
   buildBuiltInToolStatusSummary,
   buildSkillStatusSummary,
@@ -465,6 +466,10 @@ export async function startElectronMain(): Promise<void> {
           gatewayService.broadcastRaw("skills:updated", result.skills);
           gatewayService.broadcastRaw("memory:updated", result.memory);
         };
+        // Late-bound holder: the adapter is created before createObservability
+        // runs (observability is built later in startup), so the bridge reads a
+        // ref that is filled in once observability is wired.
+        const observabilityRef: { current: import("../../../backend/src/services/observability").Observability | null } = { current: null };
         webSocketGatewayControlService = new WebSocketGatewayControlService({
           createAdapter: (host, port, ipFilter) =>
             new WebSocketGatewayAdapter(gatewayService, {
@@ -476,6 +481,10 @@ export async function startElectronMain(): Promise<void> {
                 allowLocalhostWithoutToken: true,
               },
               ipFilter,
+              // Observability bridge (v2.9.x): the 9 platform capabilities over RPC.
+              observabilityBridge: createObservabilityBridge({
+                observability: () => observabilityRef.current,
+              }),
               terminalBridge: {
                 listTerminals: () =>
                   terminalService.getDisplayTerminals().map((terminal) => ({
@@ -1147,6 +1156,11 @@ export async function startElectronMain(): Promise<void> {
           onLog: () => {},
         });
         console.log(`[electron] Observability wired: dashboard state available (hosts=${observability.metricsLedger.hosts().length})`);
+        // Fill the late-bound ref so the gateway's observabilityBridge can serve
+        // observability:* RPC methods, and wire the handle into the agent so the
+        // observability_* tools work in chat.
+        observabilityRef.current = observability;
+        agentService.setObservability(observability);
 
         ipcMain.handle("agentRunLedger:list", (_e, filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
           agentRunLedger.listRuns(filter),

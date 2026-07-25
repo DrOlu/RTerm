@@ -74,6 +74,17 @@ import {
   toolImplementations,
   buildSkillToolDescription,
 } from "./AgentHelper/tools";
+import {
+  getMetricsSchema,
+  manageSecretSchema,
+  manageOncallSchema,
+  getCostSchema,
+  manageRecordingSchema,
+  manageGitopsSchema,
+  managePlaybookVersionSchema,
+  getCloudInventorySchema,
+  getLiveDashboardSchema,
+} from "./AgentHelper/tools/observability_tools";
 import type { IConnectionManagerRuntime } from "./runtimeContracts";
 import type { ToolExecutionContext } from "./AgentHelper/types";
 import {
@@ -333,6 +344,7 @@ export class AgentService_v2 {
   /** Optional automation store backing the automation agent tools. */
   private automationManager?: import("./automation/AutomationManager").AutomationManager;
   private triggerEngine?: import("./automation/triggerEngine").TriggerEngine;
+  private observability?: import("./observability").Observability;
   /** Optional session-log handle for list_session_logs / read_session_log. */
   private sessionLogger?: { list(): import("./automation/sessionLogService").SessionLogRecord[]; read(sessionId: string): string };
   /** Optional run ledger — persisted audit + token-cost record of every
@@ -433,6 +445,11 @@ export class AgentService_v2 {
   /** Wire the event-driven trigger engine (Advanced Automation v1.9.1). */
   setTriggerEngine(engine: import("./automation/triggerEngine").TriggerEngine | null): void {
     this.triggerEngine = engine ?? undefined;
+  }
+
+  /** Wire the observability handle (v2.9.x) so the observability_* agent tools work. */
+  setObservability(obs: import("./observability").Observability | null): void {
+    this.observability = obs ?? undefined;
   }
 
   /** Wire a session-log handle so list_session_logs / read_session_log work. */
@@ -1903,6 +1920,87 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "get_metrics": {
+          try {
+            const validatedArgs = getMetricsSchema.parse(toolCall.args || {});
+            result = await toolImplementations.getMetrics(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for get_metrics: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_secret": {
+          try {
+            const validatedArgs = manageSecretSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageSecret(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_secret: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_oncall": {
+          try {
+            const validatedArgs = manageOncallSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageOncall(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_oncall: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "get_cost": {
+          try {
+            const validatedArgs = getCostSchema.parse(toolCall.args || {});
+            result = await toolImplementations.getCost(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for get_cost: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_recording": {
+          try {
+            const validatedArgs = manageRecordingSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageRecording(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_recording: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_gitops": {
+          try {
+            const validatedArgs = manageGitopsSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageGitops(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_gitops: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_playbook_version": {
+          try {
+            const validatedArgs = managePlaybookVersionSchema.parse(toolCall.args || {});
+            result = await toolImplementations.managePlaybookVersion(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_playbook_version: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "get_cloud_inventory": {
+          try {
+            const validatedArgs = getCloudInventorySchema.parse(toolCall.args || {});
+            result = await toolImplementations.getCloudInventory(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for get_cloud_inventory: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "get_live_dashboard": {
+          try {
+            const validatedArgs = getLiveDashboardSchema.parse(toolCall.args || {});
+            result = await toolImplementations.getLiveDashboard(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for get_live_dashboard: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "manage_device_memory": {
           try {
             const validatedArgs = manageDeviceMemorySchema.parse(toolCall.args || {});
@@ -2844,6 +2942,7 @@ export class AgentService_v2 {
       agentRunLedger: this.agentRunLedger,
       changeLedger: this.changeLedger,
       triggerEngine: this.triggerEngine,
+      observability: this.observability,
       agentRunId,
       savedSshConnections: this.settings?.connections?.ssh ?? [],
       savedWinrmConnections: this.settings?.connections?.winrm ?? [],

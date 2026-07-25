@@ -40,6 +40,7 @@ import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
 import { AgentSettingProfileService } from "../../services/AgentSettingProfileService";
 import { createTriggerRuntime } from "../../services/automation/triggerRuntime";
 import { createObservability } from "../../services/observability";
+import { createObservabilityBridge } from "../../services/Gateway/observabilityBridge";
 import { ResourceMonitorService } from "../../services/ResourceMonitorService";
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
@@ -282,6 +283,10 @@ export async function startGyBackend(): Promise<void> {
     onLog: () => {},
   });
   console.log(`[gybackend] Observability wired: dashboard state available (hosts=${observability.metricsLedger.hosts().length})`);
+  // Wire the observability handle into the agent so the observability_* tools
+  // (metrics, secrets, on-call, cost, recording, gitops, playbooks, cloud, live
+  // dashboard) work in chat.
+  agentService.setObservability(observability);
 
   // Session logging: record terminal output per session to disk when enabled.
   if (settingsService.getSettings().sessionLogging?.enabled) {
@@ -772,6 +777,12 @@ export async function startGyBackend(): Promise<void> {
             return summary;
           },
         },
+        // Observability bridge (v2.9.x): exposes the 9 platform capabilities
+        // (metrics export, secrets, on-call, cost, recording, gitops, playbooks,
+        // cloud, live dashboard) as observability:* RPC methods.
+        observabilityBridge: createObservabilityBridge({
+          observability: () => observability,
+        }),
       }),
   });
   await wsGatewayControlService.applyPolicy(startupPolicy);
