@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.9.5 (2026-07-25)
+
+### APM / DEM / Infra / ETW Ingestion — the Last 4 Placeholders, Now Genuinely Fed
+
+The APM `spanLedger`, DEM `rumLedger`, Infra `infraMonitor`, and ETW `etwService` existed and rendered in the dashboard, but **nothing fed them data out of the box** — they showed "No APM spans ingested yet" forever. This release wires real ingestion surfaces for all four, following the v2.9.x pattern, and verifies each one live against a real boot.
+
+- **APM** — `observability:apmIngestSpans` RPC + `ingest_apm_spans` / `get_apm_summary` tools accept OTLP/HTTP-JSON trace payloads → `spanLedger` (bottleneck services, slowest traces, dashboard APM). Verified: 2 spans land, the service appears in the summary and in `dashboard:state`.
+- **DEM** — `observability:demIngestBeacon` RPC + `ingest_dem_beacon` / `get_dem_summary` tools accept Core Web Vitals beacons (page, LCP/INP/CLS/TTFB, JS errors) → `rumLedger` (per-page p75 + error rate). Verified: a `/pricing` beacon populates the summary.
+- **Infra (k8s)** — `observability:infraCollect` RPC + `collect_infra` runs `kubectl get pods -A` (text) or accepts a payload (text table **or** a JSON object, rendered to the table shape) → `infraMonitor` cluster health (not-ready, CrashLoopBackOff). Verified: pods parsed + recorded.
+- **ETW (Windows)** — `observability:etwStartTrace` / `etwStopTrace` / `etwParse` RPC + `manage_etw` builds logman start/stop commands and parses `Get-WinEvent`/`Get-Counter` output → `etwService` sessions. Verified: start/stop/parse over the bridge.
+
+Registered across `observabilityBridge` (**+15 RPC methods**, 56 total), `observability_tools` (6 new agent tools), `tools.ts`, `AgentService_v2` dispatch, and `BUILTIN_TOOL_INFO` (Tools-section visibility). **14 new tests** (208 total, all green). Typecheck + lint clean.
+
 ## v2.9.4 (2026-07-25)
 
 ### No Placeholders — the 9 Capabilities Actually Work Out of the Box
