@@ -6,6 +6,7 @@ import { BACKEND_SETTINGS_STORE_NAME } from './settings/storeNames'
 
 export class SettingsService {
   private store: Store<BackendSettings>
+  private listeners = new Set<(settings: BackendSettings) => void>()
 
   constructor() {
     this.store = new Store<BackendSettings>({
@@ -33,5 +34,29 @@ export class SettingsService {
     const merged = deepMerge(current, settings)
     const migrated = migrateBackendSettings(merged)
     this.store.store = migrated as any
+    this.emitChange()
+  }
+
+  /**
+   * Subscribe to settings changes. Fires after every setSettings() (covers the
+   * settings:set gateway RPC, ConnectionManager, AutomationManager, and any
+   * other mutation path). Returns an unsubscribe function.
+   */
+  onDidChange(listener: (settings: BackendSettings) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private emitChange(): void {
+    const snapshot = this.store.store as BackendSettings
+    for (const listener of this.listeners) {
+      try {
+        listener(snapshot)
+      } catch {
+        /* a faulty listener must not break settings persistence */
+      }
+    }
   }
 }

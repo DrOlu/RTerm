@@ -160,6 +160,39 @@ test('onNotify fires per level with targets', async () => {
   eq(calls, [0])
 })
 
+// ─── live channel hot-swap (settings re-sync) ───
+test('setChannels hot-swaps paging channels live (no restart)', async () => {
+  const sentA: string[] = []
+  const sentB: string[] = []
+  const s = new EscalationService({
+    channels: [{ name: 'slack', send: async (t) => { sentA.push(t.id); return 'a' } }],
+  })
+  s.registerPolicy(policy())
+  await s.page({ incidentId: 'i1', policyId: 'pol-1', title: 't', severity: 'sev1' })
+  eq(sentA, ['@alice'], 'original channel delivers level 0')
+  eq(s.listChannels(), ['slack'], 'initial channel registered')
+
+  // Hot-swap: replace 'slack' with a different sender keyed under the same name.
+  s.setChannels([{ name: 'slack', send: async (t) => { sentB.push(t.id); return 'b' } }])
+  eq(s.listChannels(), ['slack'], 'channel still keyed by name after swap')
+  await s.page({ incidentId: 'i2', policyId: 'pol-1', title: 't', severity: 'sev1' })
+  eq(sentA, ['@alice'], 'old sender no longer used after swap')
+  eq(sentB, ['@alice'], 'new sender delivers after hot-swap')
+})
+
+test('setChannels can add + remove channels', async () => {
+  const hits: string[] = []
+  const s = new EscalationService({ channels: [] })
+  eq(s.listChannels(), [], 'starts empty')
+  s.setChannels([
+    { name: 'slack', send: async () => { hits.push('slack'); return 's' } },
+    { name: 'email', send: async () => { hits.push('email'); return 'e' } },
+  ])
+  eq(s.listChannels().sort(), ['email', 'slack'], 'both channels registered')
+  s.setChannels([{ name: 'email', send: async () => { hits.push('email2'); return 'e' } }])
+  eq(s.listChannels(), ['email'], 'removal reflects immediately')
+})
+
 async function main() {
   let pass = 0, fail = 0
   for (const c of cases) {

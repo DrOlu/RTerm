@@ -83,6 +83,21 @@ export class EscalationService {
     this.onNotify = deps.onNotify
   }
 
+  /**
+   * Replace the paging-channel set live (settings re-sync). Channels are keyed
+   * by name; pages target channels by name, so swapping the map takes effect on
+   * the next notifyLevel without a restart.
+   */
+  setChannels(channels: PageChannel[]): void {
+    this.channels.clear()
+    for (const c of channels) this.channels.set(c.name, c)
+  }
+
+  /** Current paging-channel names (for inspection / status). */
+  listChannels(): string[] {
+    return [...this.channels.keys()]
+  }
+
   /** Register/replace an escalation policy. Validates structure. */
   registerPolicy(policy: EscalationPolicy): void {
     if (!policy.id) throw new Error('policy needs an id')

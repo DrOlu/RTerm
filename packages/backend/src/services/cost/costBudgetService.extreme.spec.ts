@@ -142,6 +142,37 @@ test('removeBudget + listBudgets', () => {
   eq(s.listBudgets().length, 1)
 })
 
+test('setPrices live-updates cost math without restart', () => {
+  const s = new CostBudgetService({ prices, now: () => NOON })
+  s.record({ model: 'gpt-4o', promptTokens: 1_000_000, completionTokens: 0 }) // $5 at old price
+  eq(s.summarize({ period: 'daily', at: NOON }).totalUsd, 5)
+  // live-update the price; previously-recorded events are re-priced on summarize
+  s.setPrices({ 'gpt-4o': { promptPer1M: 10, completionPer1M: 30 } })
+  eq(s.summarize({ period: 'daily', at: NOON }).totalUsd, 10)
+})
+
+test('setPrices + getPrices round-trips the table', () => {
+  const s = new CostBudgetService({ prices, now: () => NOON })
+  const next = { 'kimi-k3': { promptPer1M: 0.6, completionPer1M: 2.5 }, default: { promptPer1M: 1, completionPer1M: 2 } }
+  s.setPrices(next)
+  eq(s.getPrices(), next)
+  // unknown model now uses the new default fallback
+  s.record({ model: 'unpriced-model', promptTokens: 1_000_000, completionTokens: 0 })
+  eq(s.summarize({ period: 'daily', at: NOON }).totalUsd, 1)
+})
+
+test('clearBudgets empties the registry (re-sync from settings)', () => {
+  const s = new CostBudgetService({ prices })
+  s.setBudget(budget({ id: 'b1' }))
+  s.setBudget(budget({ id: 'b2' }))
+  eq(s.listBudgets().length, 2)
+  s.clearBudgets()
+  eq(s.listBudgets().length, 0)
+  // re-registering after clear works (settings re-sync path)
+  s.setBudget(budget({ id: 'b3' }))
+  eq(s.listBudgets().map((b) => b.id), ['b3'])
+})
+
 async function main() {
   let pass = 0, fail = 0
   for (const c of cases) {

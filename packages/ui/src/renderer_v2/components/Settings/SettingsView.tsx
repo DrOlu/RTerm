@@ -23,6 +23,10 @@ import {
   Database,
   GitBranch,
   ScrollText,
+  DollarSign,
+  Bell,
+  PhoneCall,
+  Cloud,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { AppStore } from "../../stores/AppStore";
@@ -125,6 +129,790 @@ function RunLedgerPanel() {
           </div>
         ))}
         {!runs.length && !loading ? <div className="connections-empty">No agent runs recorded yet. Runs are recorded automatically from the next agent task onward.</div> : null}
+      </div>
+    </>
+  );
+}
+
+type PriceRow = { model: string; promptPer1M: string; completionPer1M: string };
+type BudgetRow = {
+  id: string;
+  model: string;
+  period: "daily" | "monthly";
+  capUsd: string;
+  warnAt: string;
+  overAction: "throttle" | "deny";
+};
+
+/**
+ * AI Cost panel — edit the model price table (USD per 1M tokens) and the
+ * persisted spend budgets. Saves via store.saveCostSettings → settings:set,
+ * which the backend persists (schema v5) and live-reloads (no restart).
+ */
+function CostPanel({ store }: { store: AppStore }) {
+  const toPriceRows = (): PriceRow[] => {
+    const mp = store.settings?.cost?.modelPrices ?? {};
+    const rows = Object.entries(mp).map(([model, p]) => ({
+      model,
+      promptPer1M: String(p?.promptPer1M ?? ""),
+      completionPer1M: String(p?.completionPer1M ?? ""),
+    }));
+    return rows.length ? rows : [{ model: "default", promptPer1M: "", completionPer1M: "" }];
+  };
+  const toBudgetRows = (): BudgetRow[] => {
+    const bs = store.settings?.cost?.budgets ?? [];
+    return bs.map((b) => ({
+      id: b.id,
+      model: b.model ?? "*",
+      period: b.period === "monthly" ? "monthly" : "daily",
+      capUsd: String(b.capUsd ?? ""),
+      warnAt: typeof b.warnAt === "number" ? String(b.warnAt) : "0.8",
+      overAction: b.overAction === "deny" ? "deny" : "throttle",
+    }));
+  };
+
+  const [priceRows, setPriceRows] = useState<PriceRow[]>(toPriceRows);
+  const [budgetRows, setBudgetRows] = useState<BudgetRow[]>(toBudgetRows);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  // Re-sync local drafts if settings change underneath us (e.g. another client).
+  useEffect(() => {
+    setPriceRows(toPriceRows());
+    setBudgetRows(toBudgetRows());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.settings?.cost]);
+
+  const setPrice = (i: number, patch: Partial<PriceRow>) =>
+    setPriceRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const setBudget = (i: number, patch: Partial<BudgetRow>) =>
+    setBudgetRows((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const modelPrices: Record<string, { promptPer1M: number; completionPer1M: number }> = {};
+      for (const r of priceRows) {
+        const model = r.model.trim();
+        if (!model) continue;
+        modelPrices[model] = {
+          promptPer1M: Number(r.promptPer1M) || 0,
+          completionPer1M: Number(r.completionPer1M) || 0,
+        };
+      }
+      const budgets = budgetRows
+        .filter((b) => b.id.trim() && Number(b.capUsd) > 0)
+        .map((b) => ({
+          id: b.id.trim(),
+          model: b.model.trim() && b.model.trim() !== "*" ? b.model.trim() : "*",
+          period: b.period,
+          capUsd: Number(b.capUsd),
+          warnAt: Number(b.warnAt) > 0 && Number(b.warnAt) <= 1 ? Number(b.warnAt) : undefined,
+          overAction: b.overAction,
+        }));
+      await store.saveCostSettings({ modelPrices, budgets });
+      setSavedAt(Date.now());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <div className="settings-section-title">
+          {(store.i18n.t.settings as any).cost ?? "AI Cost"}
+        </div>
+        <div className="settings-actions">
+          <button className="btn-primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="settings-section-desc">
+        Turn tracked token usage into dollars. Prices are USD per 1M tokens; the
+        special model <code>default</code> applies to any model without its own
+        row. Budgets warn/throttle/deny when spend crosses the cap. Saved values
+        persist across restarts and apply immediately (no restart needed).
+        {savedAt ? <span style={{ marginLeft: 8, opacity: 0.7 }}>Saved {new Date(savedAt).toLocaleTimeString()}</span> : null}
+      </div>
+
+      <div className="settings-subsection-header">Model prices (USD per 1M tokens)</div>
+      <div className="connections-table">
+        <div className="connections-row header">
+          <div className="connections-row-main header-main">
+            <div>Model</div>
+            <div>$/1M prompt</div>
+            <div>$/1M completion</div>
+            <div></div>
+          </div>
+        </div>
+        {priceRows.map((r, i) => (
+          <div key={i} className="connections-row">
+            <div className="connections-row-main">
+              <div>
+                <input
+                  className="editor-input"
+                  placeholder="model id or default"
+                  value={r.model}
+                  onChange={(e) => setPrice(i, { model: e.target.value })}
+                />
+              </div>
+              <div>
+                <input
+                  className="editor-input"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={r.promptPer1M}
+                  onChange={(e) => setPrice(i, { promptPer1M: e.target.value })}
+                />
+              </div>
+              <div>
+                <input
+                  className="editor-input"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={r.completionPer1M}
+                  onChange={(e) => setPrice(i, { completionPer1M: e.target.value })}
+                />
+              </div>
+              <div>
+                <button
+                  className="icon-btn-sm"
+                  title="Remove"
+                  onClick={() => setPriceRows((rows) => rows.filter((_, idx) => idx !== i))}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ margin: "6px 0 18px" }}>
+        <button
+          className="btn-secondary"
+          onClick={() => setPriceRows((rows) => [...rows, { model: "", promptPer1M: "", completionPer1M: "" }])}
+        >
+          <Plus size={14} /> Add price
+        </button>
+      </div>
+
+      <div className="settings-subsection-header">Budgets</div>
+      <div className="connections-table">
+        <div className="connections-row header">
+          <div className="connections-row-main header-main">
+            <div>ID</div>
+            <div>Model</div>
+            <div>Period</div>
+            <div>Cap (USD)</div>
+            <div>Warn at</div>
+            <div>Over action</div>
+            <div></div>
+          </div>
+        </div>
+        {budgetRows.map((b, i) => (
+          <div key={i} className="connections-row">
+            <div className="connections-row-main">
+              <div><input className="editor-input" placeholder="daily-all" value={b.id} onChange={(e) => setBudget(i, { id: e.target.value })} /></div>
+              <div><input className="editor-input" placeholder="*" value={b.model} onChange={(e) => setBudget(i, { model: e.target.value })} /></div>
+              <div>
+                <Select
+                  value={b.period}
+                  onChange={(v) => setBudget(i, { period: v === "monthly" ? "monthly" : "daily" })}
+                  options={[
+                    { value: "daily", label: "daily" },
+                    { value: "monthly", label: "monthly" },
+                  ]}
+                />
+              </div>
+              <div><input className="editor-input" type="number" min="0" step="0.01" placeholder="25" value={b.capUsd} onChange={(e) => setBudget(i, { capUsd: e.target.value })} /></div>
+              <div><input className="editor-input" type="number" min="0" max="1" step="0.05" placeholder="0.8" value={b.warnAt} onChange={(e) => setBudget(i, { warnAt: e.target.value })} /></div>
+              <div>
+                <Select
+                  value={b.overAction}
+                  onChange={(v) => setBudget(i, { overAction: v === "deny" ? "deny" : "throttle" })}
+                  options={[
+                    { value: "throttle", label: "throttle" },
+                    { value: "deny", label: "deny" },
+                  ]}
+                />
+              </div>
+              <div>
+                <button className="icon-btn-sm" title="Remove" onClick={() => setBudgetRows((rows) => rows.filter((_, idx) => idx !== i))}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {!budgetRows.length ? <div className="connections-empty">No budgets. Add one to cap spend per day or month.</div> : null}
+      </div>
+      <div style={{ margin: "6px 0 18px" }}>
+        <button
+          className="btn-secondary"
+          onClick={() =>
+            setBudgetRows((rows) => [
+              ...rows,
+              { id: "", model: "*", period: "daily", capUsd: "", warnAt: "0.8", overAction: "throttle" },
+            ])
+          }
+        >
+          <Plus size={14} /> Add budget
+        </button>
+      </div>
+    </>
+  );
+}
+
+type AlertChannelDraft = {
+  id: string;
+  name: string;
+  type: "slack" | "teams" | "smtp" | "telegram" | "webhook";
+  enabled: boolean;
+  minSeverity: "info" | "warning" | "critical";
+  secretRef: string;
+  chatId: string;
+  webhookUrl: string;
+  smtpHost: string;
+  smtpPort: string;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpFrom: string;
+  smtpTo: string;
+};
+
+/**
+ * Alerts panel — manage the notification channels (slack/teams/smtp/telegram)
+ * routed by AlertService. Secrets are stored only as a secretRef pointer into
+ * the encrypted vault (set the value via the agent's manage_secret tool or the
+ * RTERM_SECRETS_MASTER_KEY vault); never inline. Saved via settings.set → the
+ * backend live-rebuilds channels with no restart.
+ */
+function AlertsPanel({ store }: { store: AppStore }) {
+  const toDrafts = (): AlertChannelDraft[] => {
+    const chs = store.settings?.alerts?.channels ?? [];
+    return chs.map((c) => ({
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      enabled: c.enabled !== false,
+      minSeverity: c.minSeverity ?? "info",
+      secretRef: c.secretRef ?? "",
+      chatId: c.chatId ?? "",
+      webhookUrl: "",
+      smtpHost: c.smtp?.host ?? "",
+      smtpPort: String(c.smtp?.port ?? "587"),
+      smtpSecure: c.smtp?.secure === true,
+      smtpUser: c.smtp?.user ?? "",
+      smtpFrom: c.smtp?.from ?? "",
+      smtpTo: (c.smtp?.to ?? []).join(", "),
+    }));
+  };
+
+  const [rows, setRows] = useState<AlertChannelDraft[]>(toDrafts);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    setRows(toDrafts());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.settings?.alerts]);
+
+  const setRow = (i: number, patch: Partial<AlertChannelDraft>) =>
+    setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+
+  const newRow = (): AlertChannelDraft => ({
+    id: `ch-${Date.now().toString(36)}`,
+    name: "",
+    type: "slack",
+    enabled: true,
+    minSeverity: "info",
+    secretRef: "",
+    chatId: "",
+    webhookUrl: "",
+    smtpHost: "",
+    smtpPort: "587",
+    smtpSecure: false,
+    smtpUser: "",
+    smtpFrom: "",
+    smtpTo: "",
+  });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const channels = rows
+        .filter((r) => r.id.trim())
+        .map((r) => {
+          const base = {
+            id: r.id.trim(),
+            name: r.name.trim() || r.id.trim(),
+            type: r.type,
+            enabled: r.enabled,
+            ...(r.minSeverity !== "info" ? { minSeverity: r.minSeverity } : {}),
+            ...(r.secretRef.trim() ? { secretRef: r.secretRef.trim() } : {}),
+          } as const;
+          if (r.type === "telegram") {
+            return { ...base, ...(r.chatId.trim() ? { chatId: r.chatId.trim() } : {}) };
+          }
+          if (r.type === "smtp") {
+            const to = r.smtpTo.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+            return {
+              ...base,
+              smtp: {
+                host: r.smtpHost.trim(),
+                port: Number(r.smtpPort) || 587,
+                secure: r.smtpSecure,
+                ...(r.smtpUser.trim() ? { user: r.smtpUser.trim() } : {}),
+                from: r.smtpFrom.trim(),
+                to,
+              },
+            };
+          }
+          return base;
+        });
+      await store.saveAlertChannels(channels as never);
+      setSavedAt(Date.now());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const secretHint = (r: AlertChannelDraft): string => {
+    if (r.type === "smtp") return r.smtpUser ? "vault key for the SMTP password" : "optional (only if the server needs auth)";
+    if (r.type === "telegram") return "vault key for the bot token";
+    return "vault key for the webhook URL";
+  };
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <div className="settings-section-title">
+          {(store.i18n.t.settings as any).alerts ?? "Alerts"}
+        </div>
+        <div className="settings-actions">
+          <button className="btn-primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="settings-section-desc">
+        Route alerts to Slack, Teams, Email (SMTP), or Telegram. Each channel's
+        secret is referenced by a <code>secretRef</code> — a key in the encrypted
+        vault — never stored inline. Set the secret value via the agent (
+        <code>manage_secret</code>) after unlocking the vault with
+        <code> RTERM_SECRETS_MASTER_KEY</code>. Channels apply immediately.
+        {savedAt ? <span style={{ marginLeft: 8, opacity: 0.7 }}>Saved {new Date(savedAt).toLocaleTimeString()}</span> : null}
+      </div>
+
+      <div className="connections-table">
+        {rows.map((r, i) => (
+          <div key={i} className="connections-row" style={{ display: "block", padding: "10px 0" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input className="editor-input" style={{ width: 120 }} placeholder="id" value={r.id} onChange={(e) => setRow(i, { id: e.target.value })} />
+              <input className="editor-input" style={{ width: 160 }} placeholder="name" value={r.name} onChange={(e) => setRow(i, { name: e.target.value })} />
+              <Select
+                value={r.type}
+                onChange={(v) => setRow(i, { type: (v as AlertChannelDraft["type"]) ?? "slack" })}
+                options={[
+                  { value: "slack", label: "slack" },
+                  { value: "teams", label: "teams" },
+                  { value: "smtp", label: "smtp" },
+                  { value: "telegram", label: "telegram" },
+                ]}
+              />
+              <Select
+                value={r.minSeverity}
+                onChange={(v) => setRow(i, { minSeverity: (v as AlertChannelDraft["minSeverity"]) ?? "info" })}
+                options={[
+                  { value: "info", label: "info+" },
+                  { value: "warning", label: "warning+" },
+                  { value: "critical", label: "critical" },
+                ]}
+              />
+              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                <input type="checkbox" checked={r.enabled} onChange={(e) => setRow(i, { enabled: e.target.checked })} />
+                enabled
+              </label>
+              <button className="icon-btn-sm" title="Remove" onClick={() => setRows((rows) => rows.filter((_, idx) => idx !== i))}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+              <input
+                className="editor-input"
+                style={{ width: 220 }}
+                placeholder={`secretRef — ${secretHint(r)}`}
+                value={r.secretRef}
+                onChange={(e) => setRow(i, { secretRef: e.target.value })}
+              />
+              {r.type === "telegram" ? (
+                <input className="editor-input" style={{ width: 140 }} placeholder="chat id" value={r.chatId} onChange={(e) => setRow(i, { chatId: e.target.value })} />
+              ) : null}
+            </div>
+            {r.type === "smtp" ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                <input className="editor-input" style={{ width: 180 }} placeholder="smtp host" value={r.smtpHost} onChange={(e) => setRow(i, { smtpHost: e.target.value })} />
+                <input className="editor-input" style={{ width: 80 }} placeholder="port" value={r.smtpPort} onChange={(e) => setRow(i, { smtpPort: e.target.value })} />
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                  <input type="checkbox" checked={r.smtpSecure} onChange={(e) => setRow(i, { smtpSecure: e.target.checked })} />
+                  TLS (465)
+                </label>
+                <input className="editor-input" style={{ width: 140 }} placeholder="user (optional)" value={r.smtpUser} onChange={(e) => setRow(i, { smtpUser: e.target.value })} />
+                <input className="editor-input" style={{ width: 180 }} placeholder="from" value={r.smtpFrom} onChange={(e) => setRow(i, { smtpFrom: e.target.value })} />
+                <input className="editor-input" style={{ width: 220 }} placeholder="to (comma separated)" value={r.smtpTo} onChange={(e) => setRow(i, { smtpTo: e.target.value })} />
+              </div>
+            ) : null}
+          </div>
+        ))}
+        {!rows.length ? <div className="connections-empty">No alert channels. Add one to route SRE alerts out of RTerm.</div> : null}
+      </div>
+      <div style={{ margin: "6px 0 18px" }}>
+        <button className="btn-secondary" onClick={() => setRows((rows) => [...rows, newRow()])}>
+          <Plus size={14} /> Add channel
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * On-Call panel — manage paging channels used by EscalationService. Pages target
+ * a channel by name from an escalation policy. Secrets via secretRef into the
+ * vault; webhook URLs may be inline or via secretRef. Saved via settings.set →
+ * the backend hot-swaps live paging channels (no restart).
+ */
+function OncallPanel({ store }: { store: AppStore }) {
+  const toDrafts = (): AlertChannelDraft[] => {
+    const chs = store.settings?.oncall?.pagingChannels ?? [];
+    return chs.map((c) => ({
+      id: c.id,
+      name: c.name,
+      type: c.type as AlertChannelDraft["type"],
+      enabled: c.enabled !== false,
+      minSeverity: c.minSeverity ?? "info",
+      secretRef: c.secretRef ?? "",
+      chatId: c.chatId ?? "",
+      webhookUrl: c.webhookUrl ?? "",
+      smtpHost: c.smtp?.host ?? "",
+      smtpPort: String(c.smtp?.port ?? "587"),
+      smtpSecure: c.smtp?.secure === true,
+      smtpUser: c.smtp?.user ?? "",
+      smtpFrom: c.smtp?.from ?? "",
+      smtpTo: (c.smtp?.to ?? []).join(", "),
+    }));
+  };
+
+  const [rows, setRows] = useState<AlertChannelDraft[]>(toDrafts);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    setRows(toDrafts());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.settings?.oncall]);
+
+  const setRow = (i: number, patch: Partial<AlertChannelDraft>) =>
+    setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+
+  const newRow = (): AlertChannelDraft => ({
+    id: `pg-${Date.now().toString(36)}`,
+    name: "",
+    type: "webhook",
+    enabled: true,
+    minSeverity: "info",
+    secretRef: "",
+    chatId: "",
+    webhookUrl: "",
+    smtpHost: "",
+    smtpPort: "587",
+    smtpSecure: false,
+    smtpUser: "",
+    smtpFrom: "",
+    smtpTo: "",
+  });
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const pagingChannels = rows
+        .filter((r) => r.id.trim() && r.name.trim())
+        .map((r) => {
+          const base = {
+            id: r.id.trim(),
+            name: r.name.trim(),
+            type: r.type,
+            enabled: r.enabled,
+            ...(r.minSeverity !== "info" ? { minSeverity: r.minSeverity } : {}),
+            ...(r.secretRef.trim() ? { secretRef: r.secretRef.trim() } : {}),
+          } as const;
+          if (r.type === "webhook") {
+            return { ...base, ...(r.webhookUrl.trim() ? { webhookUrl: r.webhookUrl.trim() } : {}) };
+          }
+          if (r.type === "telegram") {
+            return { ...base, ...(r.chatId.trim() ? { chatId: r.chatId.trim() } : {}) };
+          }
+          if (r.type === "smtp") {
+            const to = r.smtpTo.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+            return {
+              ...base,
+              smtp: {
+                host: r.smtpHost.trim(),
+                port: Number(r.smtpPort) || 587,
+                secure: r.smtpSecure,
+                ...(r.smtpUser.trim() ? { user: r.smtpUser.trim() } : {}),
+                from: r.smtpFrom.trim(),
+                to,
+              },
+            };
+          }
+          return base;
+        });
+      await store.saveOncallChannels(pagingChannels as never);
+      setSavedAt(Date.now());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <div className="settings-section-title">
+          {(store.i18n.t.settings as any).oncall ?? "On-Call"}
+        </div>
+        <div className="settings-actions">
+          <button className="btn-primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="settings-section-desc">
+        Paging channels used by escalation policies — a page targets a channel by
+        its <code>name</code>. Secrets are referenced by <code>secretRef</code>
+        (vault); webhook URLs may be inline. Channels apply immediately.
+        {savedAt ? <span style={{ marginLeft: 8, opacity: 0.7 }}>Saved {new Date(savedAt).toLocaleTimeString()}</span> : null}
+      </div>
+
+      <div className="connections-table">
+        {rows.map((r, i) => (
+          <div key={i} className="connections-row" style={{ display: "block", padding: "10px 0" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input className="editor-input" style={{ width: 110 }} placeholder="id" value={r.id} onChange={(e) => setRow(i, { id: e.target.value })} />
+              <input className="editor-input" style={{ width: 150 }} placeholder="name (page target)" value={r.name} onChange={(e) => setRow(i, { name: e.target.value })} />
+              <Select
+                value={r.type}
+                onChange={(v) => setRow(i, { type: (v as AlertChannelDraft["type"]) ?? "webhook" })}
+                options={[
+                  { value: "webhook", label: "webhook" },
+                  { value: "slack", label: "slack" },
+                  { value: "teams", label: "teams" },
+                  { value: "smtp", label: "smtp" },
+                  { value: "telegram", label: "telegram" },
+                ]}
+              />
+              <Select
+                value={r.minSeverity}
+                onChange={(v) => setRow(i, { minSeverity: (v as AlertChannelDraft["minSeverity"]) ?? "info" })}
+                options={[
+                  { value: "info", label: "info+" },
+                  { value: "warning", label: "warning+" },
+                  { value: "critical", label: "critical" },
+                ]}
+              />
+              <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                <input type="checkbox" checked={r.enabled} onChange={(e) => setRow(i, { enabled: e.target.checked })} />
+                enabled
+              </label>
+              <button className="icon-btn-sm" title="Remove" onClick={() => setRows((rows) => rows.filter((_, idx) => idx !== i))}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+              {r.type === "webhook" ? (
+                <input className="editor-input" style={{ width: 260 }} placeholder="webhook URL (inline) — or leave blank + secretRef" value={r.webhookUrl} onChange={(e) => setRow(i, { webhookUrl: e.target.value })} />
+              ) : (
+                <input className="editor-input" style={{ width: 220 }} placeholder="secretRef (vault key)" value={r.secretRef} onChange={(e) => setRow(i, { secretRef: e.target.value })} />
+              )}
+              {r.type === "webhook" ? (
+                <input className="editor-input" style={{ width: 180 }} placeholder="secretRef (optional)" value={r.secretRef} onChange={(e) => setRow(i, { secretRef: e.target.value })} />
+              ) : null}
+              {r.type === "telegram" ? (
+                <input className="editor-input" style={{ width: 140 }} placeholder="chat id (default)" value={r.chatId} onChange={(e) => setRow(i, { chatId: e.target.value })} />
+              ) : null}
+            </div>
+            {r.type === "smtp" ? (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+                <input className="editor-input" style={{ width: 180 }} placeholder="smtp host" value={r.smtpHost} onChange={(e) => setRow(i, { smtpHost: e.target.value })} />
+                <input className="editor-input" style={{ width: 80 }} placeholder="port" value={r.smtpPort} onChange={(e) => setRow(i, { smtpPort: e.target.value })} />
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                  <input type="checkbox" checked={r.smtpSecure} onChange={(e) => setRow(i, { smtpSecure: e.target.checked })} />
+                  TLS (465)
+                </label>
+                <input className="editor-input" style={{ width: 140 }} placeholder="user (optional)" value={r.smtpUser} onChange={(e) => setRow(i, { smtpUser: e.target.value })} />
+                <input className="editor-input" style={{ width: 180 }} placeholder="from" value={r.smtpFrom} onChange={(e) => setRow(i, { smtpFrom: e.target.value })} />
+                <input className="editor-input" style={{ width: 220 }} placeholder="to (comma separated)" value={r.smtpTo} onChange={(e) => setRow(i, { smtpTo: e.target.value })} />
+              </div>
+            ) : null}
+          </div>
+        ))}
+        {!rows.length ? <div className="connections-empty">No paging channels. Add one so escalation policies can page on-call.</div> : null}
+      </div>
+      <div style={{ margin: "6px 0 18px" }}>
+        <button className="btn-secondary" onClick={() => setRows((rows) => [...rows, newRow()])}>
+          <Plus size={14} /> Add paging channel
+        </button>
+      </div>
+    </>
+  );
+}
+
+type CloudAccountDraft = {
+  id: string;
+  provider: "aws" | "gcp" | "azure";
+  name: string;
+  accountId: string;
+  region: string;
+  secretRef: string;
+  enabled: boolean;
+};
+
+/**
+ * Cloud panel — manage the accounts synced by CloudInventory. Credentials are
+ * referenced by secretRef (a vault key holding a KEY=VAL env blob or named
+ * profile), never inline. With no accounts the backend falls back to ambient
+ * provider CLI credentials. Saved via settings.set → re-registered live.
+ */
+function CloudPanel({ store }: { store: AppStore }) {
+  const toDrafts = (): CloudAccountDraft[] => {
+    const accts = store.settings?.cloud?.accounts ?? [];
+    return accts.map((a) => ({
+      id: a.id,
+      provider: a.provider,
+      name: a.name,
+      accountId: a.accountId,
+      region: a.region ?? "",
+      secretRef: a.secretRef ?? "",
+      enabled: a.enabled !== false,
+    }));
+  };
+
+  const [rows, setRows] = useState<CloudAccountDraft[]>(toDrafts);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    setRows(toDrafts());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.settings?.cloud]);
+
+  const setRow = (i: number, patch: Partial<CloudAccountDraft>) =>
+    setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+
+  const newRow = (): CloudAccountDraft => ({
+    id: `acct-${Date.now().toString(36)}`,
+    provider: "aws",
+    name: "",
+    accountId: "",
+    region: "",
+    secretRef: "",
+    enabled: true,
+  });
+
+  const accountPlaceholder = (p: CloudAccountDraft["provider"]): string =>
+    p === "aws" ? "account id (123456789012)" : p === "gcp" ? "project id" : "subscription id";
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const accounts = rows
+        .filter((r) => r.id.trim() && r.accountId.trim())
+        .map((r) => ({
+          id: r.id.trim(),
+          provider: r.provider,
+          name: r.name.trim() || r.accountId.trim(),
+          accountId: r.accountId.trim(),
+          ...(r.region.trim() ? { region: r.region.trim() } : {}),
+          ...(r.secretRef.trim() ? { secretRef: r.secretRef.trim() } : {}),
+          enabled: r.enabled,
+        }));
+      await store.saveCloudAccounts(accounts);
+      setSavedAt(Date.now());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <div className="settings-section-title">
+          {(store.i18n.t.settings as any).cloud ?? "Cloud"}
+        </div>
+        <div className="settings-actions">
+          <button className="btn-primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="settings-section-desc">
+        Accounts synced into the cloud inventory (aws / gcp / azure). Credentials
+        are referenced by <code>secretRef</code> — a vault key holding a
+        <code> KEY=VAL</code> env blob or named profile — never inline. With no
+        accounts, the ambient provider CLI credentials are used. Applies immediately.
+        {savedAt ? <span style={{ marginLeft: 8, opacity: 0.7 }}>Saved {new Date(savedAt).toLocaleTimeString()}</span> : null}
+      </div>
+
+      <div className="connections-table">
+        <div className="connections-row header">
+          <div className="connections-row-main header-main">
+            <div>Provider</div>
+            <div>Name</div>
+            <div>Account / Project / Subscription</div>
+            <div>Region</div>
+            <div>secretRef</div>
+            <div>On</div>
+            <div></div>
+          </div>
+        </div>
+        {rows.map((r, i) => (
+          <div key={i} className="connections-row">
+            <div className="connections-row-main">
+              <div>
+                <Select
+                  value={r.provider}
+                  onChange={(v) => setRow(i, { provider: (v as CloudAccountDraft["provider"]) ?? "aws" })}
+                  options={[
+                    { value: "aws", label: "aws" },
+                    { value: "gcp", label: "gcp" },
+                    { value: "azure", label: "azure" },
+                  ]}
+                />
+              </div>
+              <div><input className="editor-input" placeholder="alias" value={r.name} onChange={(e) => setRow(i, { name: e.target.value })} /></div>
+              <div><input className="editor-input" placeholder={accountPlaceholder(r.provider)} value={r.accountId} onChange={(e) => setRow(i, { accountId: e.target.value })} /></div>
+              <div><input className="editor-input" placeholder="region (optional)" value={r.region} onChange={(e) => setRow(i, { region: e.target.value })} /></div>
+              <div><input className="editor-input" placeholder="vault key" value={r.secretRef} onChange={(e) => setRow(i, { secretRef: e.target.value })} /></div>
+              <div><input type="checkbox" checked={r.enabled} onChange={(e) => setRow(i, { enabled: e.target.checked })} /></div>
+              <div>
+                <button className="icon-btn-sm" title="Remove" onClick={() => setRows((rows) => rows.filter((_, idx) => idx !== i))}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {!rows.length ? <div className="connections-empty">No cloud accounts. Using ambient CLI credentials. Add one to inventory a specific account.</div> : null}
+      </div>
+      <div style={{ margin: "6px 0 18px" }}>
+        <button className="btn-secondary" onClick={() => setRows((rows) => [...rows, newRow()])}>
+          <Plus size={14} /> Add account
+        </button>
       </div>
     </>
   );
@@ -777,6 +1565,26 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
             "runLedger",
             <ScrollText size={16} strokeWidth={2} />,
             (t.settings as any).runLedger ?? "Run Ledger",
+          )}
+          {renderNavItem(
+            "cost",
+            <DollarSign size={16} strokeWidth={2} />,
+            (t.settings as any).cost ?? "AI Cost",
+          )}
+          {renderNavItem(
+            "alerts",
+            <Bell size={16} strokeWidth={2} />,
+            (t.settings as any).alerts ?? "Alerts",
+          )}
+          {renderNavItem(
+            "oncall",
+            <PhoneCall size={16} strokeWidth={2} />,
+            (t.settings as any).oncall ?? "On-Call",
+          )}
+          {renderNavItem(
+            "cloud",
+            <Cloud size={16} strokeWidth={2} />,
+            (t.settings as any).cloud ?? "Cloud",
           )}
           {renderNavItem(
             "version",
@@ -2570,6 +3378,22 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
 
             {store.settingsSection === "runLedger" ? (
               <RunLedgerPanel />
+            ) : null}
+
+            {store.settingsSection === "cost" ? (
+              <CostPanel store={store} />
+            ) : null}
+
+            {store.settingsSection === "alerts" ? (
+              <AlertsPanel store={store} />
+            ) : null}
+
+            {store.settingsSection === "oncall" ? (
+              <OncallPanel store={store} />
+            ) : null}
+
+            {store.settingsSection === "cloud" ? (
+              <CloudPanel store={store} />
             ) : null}
 
             {store.settingsSection === "version" ? (

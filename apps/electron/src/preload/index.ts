@@ -7,12 +7,74 @@ import {
 
 // Types (duplicated to avoid cross-project imports)
 interface BackendSettings {
-  schemaVersion: 4;
+  schemaVersion: 5;
   commandPolicyMode: "safe" | "standard" | "smart";
   memory?: {
     enabled: boolean;
   };
   agentSettings?: AgentSettingState;
+  cost?: {
+    modelPrices: Record<string, { promptPer1M: number; completionPer1M: number }>;
+    budgets: Array<{
+      id: string;
+      model?: string;
+      profileId?: string;
+      period: "daily" | "monthly";
+      capUsd: number;
+      warnAt?: number;
+      overAction?: "throttle" | "deny";
+    }>;
+  };
+  alerts?: {
+    channels: Array<{
+      id: string;
+      name: string;
+      type: "slack" | "teams" | "smtp" | "telegram";
+      enabled: boolean;
+      minSeverity?: "info" | "warning" | "critical";
+      secretRef?: string;
+      chatId?: string;
+      smtp?: {
+        host: string;
+        port: number;
+        secure?: boolean;
+        user?: string;
+        from: string;
+        to: string[];
+      };
+    }>;
+  };
+  oncall?: {
+    pagingChannels: Array<{
+      id: string;
+      name: string;
+      type: "slack" | "teams" | "smtp" | "telegram" | "webhook";
+      enabled: boolean;
+      minSeverity?: "info" | "warning" | "critical";
+      secretRef?: string;
+      chatId?: string;
+      webhookUrl?: string;
+      smtp?: {
+        host: string;
+        port: number;
+        secure?: boolean;
+        user?: string;
+        from: string;
+        to: string[];
+      };
+    }>;
+  };
+  cloud?: {
+    accounts: Array<{
+      id: string;
+      provider: "aws" | "gcp" | "azure";
+      name: string;
+      accountId: string;
+      region?: string;
+      secretRef?: string;
+      enabled: boolean;
+    }>;
+  };
   tools: {
     builtIn: Record<string, boolean>;
     skills?: Record<string, boolean>;

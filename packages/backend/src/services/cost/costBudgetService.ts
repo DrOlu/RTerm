@@ -84,7 +84,7 @@ export function periodStart(at: number, period: 'daily' | 'monthly'): number {
 }
 
 export class CostBudgetService {
-  private readonly prices: Record<string, ModelPrice>
+  private prices: Record<string, ModelPrice>
   private readonly now: () => number
   private readonly events: Array<Required<Pick<UsageEvent, 'model' | 'promptTokens' | 'completionTokens'>> & { at: number; profileId?: string }> = []
   private readonly budgets = new Map<string, Budget>()
@@ -92,6 +92,26 @@ export class CostBudgetService {
   constructor(deps: CostBudgetDeps = {}) {
     this.prices = deps.prices ?? {}
     this.now = deps.now ?? Date.now
+  }
+
+  /**
+   * Live-update the price table without restarting. Subsequent costFor /
+   * record / summarize calls use the new prices immediately; already-recorded
+   * events are re-priced on the fly because summarize() computes cost from the
+   * stored token counts against the current price table.
+   */
+  setPrices(prices: Record<string, ModelPrice>): void {
+    this.prices = prices ?? {}
+  }
+
+  /** Current price table (for inspection / round-tripping to settings). */
+  getPrices(): Record<string, ModelPrice> {
+    return { ...this.prices }
+  }
+
+  /** Remove every registered budget (used when re-syncing from settings). */
+  clearBudgets(): void {
+    this.budgets.clear()
   }
 
   private priceFor(model: string): ModelPrice {

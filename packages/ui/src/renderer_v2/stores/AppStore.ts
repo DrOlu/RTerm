@@ -256,6 +256,10 @@ export type SettingsSection =
   | "workflow"
   | "accessTokens"
   | "runLedger"
+  | "cost"
+  | "alerts"
+  | "oncall"
+  | "cloud"
   | "version";
 
 export type McpToolSummary = Awaited<
@@ -538,6 +542,10 @@ export class AppStore {
       setCommandDraftProfileId: action,
       saveModel: action,
       deleteModel: action,
+      saveCostSettings: action,
+      saveAlertChannels: action,
+      saveOncallChannels: action,
+      saveCloudAccounts: action,
       saveProfile: action,
       deleteProfile: action,
       setActiveProfile: action,
@@ -2265,6 +2273,116 @@ export class AppStore {
       }
     });
     await window.gyshell.settings.set({ debugMode: enabled });
+  }
+
+  /**
+   * Persist the AI cost block (model price table + budgets). The backend
+   * normalizes + persists it (schema v5) and live-reloads the cost service via
+   * the settings onDidChange subscription — no restart needed.
+   */
+  async saveCostSettings(cost: {
+    modelPrices: Record<string, { promptPer1M: number; completionPer1M: number }>;
+    budgets: Array<{
+      id: string;
+      model?: string;
+      profileId?: string;
+      period: "daily" | "monthly";
+      capUsd: number;
+      warnAt?: number;
+      overAction?: "throttle" | "deny";
+    }>;
+  }): Promise<void> {
+    runInAction(() => {
+      if (this.settings) {
+        this.settings = { ...this.settings, cost } as AppSettings;
+      }
+    });
+    await window.gyshell.settings.set({ cost });
+  }
+
+  /**
+   * Persist the alert-notification channel list. Channels carry a secretRef
+   * (a pointer into the AES-256-GCM vault) — never an inline secret. The
+   * backend rebuilds live AlertChannels on settings change and resolves each
+   * secretRef at send time.
+   */
+  async saveAlertChannels(channels: Array<{
+    id: string;
+    name: string;
+    type: "slack" | "teams" | "smtp" | "telegram";
+    enabled: boolean;
+    minSeverity?: "info" | "warning" | "critical";
+    secretRef?: string;
+    chatId?: string;
+    smtp?: {
+      host: string;
+      port: number;
+      secure?: boolean;
+      user?: string;
+      from: string;
+      to: string[];
+    };
+  }>): Promise<void> {
+    runInAction(() => {
+      if (this.settings) {
+        this.settings = { ...this.settings, alerts: { channels } } as AppSettings;
+      }
+    });
+    await window.gyshell.settings.set({ alerts: { channels } });
+  }
+
+  /**
+   * Persist the on-call paging channel list. Pages target a channel by name;
+   * secrets via secretRef into the vault. The backend hot-swaps the live
+   * paging channels on settings change (no restart).
+   */
+  async saveOncallChannels(pagingChannels: Array<{
+    id: string;
+    name: string;
+    type: "slack" | "teams" | "smtp" | "telegram" | "webhook";
+    enabled: boolean;
+    minSeverity?: "info" | "warning" | "critical";
+    secretRef?: string;
+    chatId?: string;
+    webhookUrl?: string;
+    smtp?: {
+      host: string;
+      port: number;
+      secure?: boolean;
+      user?: string;
+      from: string;
+      to: string[];
+    };
+  }>): Promise<void> {
+    runInAction(() => {
+      if (this.settings) {
+        this.settings = { ...this.settings, oncall: { pagingChannels } } as AppSettings;
+      }
+    });
+    await window.gyshell.settings.set({ oncall: { pagingChannels } });
+  }
+
+  /**
+   * Persist the cloud-inventory account list. Credentials via secretRef into the
+   * vault (a KEY=VAL env blob or named profile) — never inline. The backend
+   * re-registers accounts on settings change (no restart); with no accounts it
+   * falls back to ambient provider CLI credentials.
+   */
+  async saveCloudAccounts(accounts: Array<{
+    id: string;
+    provider: "aws" | "gcp" | "azure";
+    name: string;
+    accountId: string;
+    region?: string;
+    secretRef?: string;
+    enabled: boolean;
+  }>): Promise<void> {
+    runInAction(() => {
+      if (this.settings) {
+        this.settings = { ...this.settings, cloud: { accounts } } as AppSettings;
+      }
+    });
+    await window.gyshell.settings.set({ cloud: { accounts } });
   }
 
   setMobileWebStatus(status: {

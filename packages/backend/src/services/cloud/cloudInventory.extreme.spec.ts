@@ -152,6 +152,37 @@ test('removeAccount drops its resources too', async () => {
   eq(inv.summary().total, 0)
 })
 
+test('setAccounts replaces the account set live (settings re-sync)', async () => {
+  const inv = new CloudInventory({
+    fetchAwsInstances: async () => ({ Reservations: [{ Instances: [{ InstanceId: 'i-1' }] }] }),
+    fetchGcpInstances: async () => ([{ id: 'g1', name: 'g', zone: 'z', status: 'RUNNING' }]),
+  })
+  inv.setAccounts([acct('aws', 'a')])
+  eq(inv.listAccounts().map((a) => a.accountId), ['a'], 'initial account registered')
+  await inv.sync()
+  eq(inv.summary().total, 1)
+
+  // Re-sync with a different set: aws removed, gcp added. Resources are cleared.
+  inv.setAccounts([acct('gcp', 'proj')])
+  eq(inv.listAccounts().map((a) => `${a.provider}:${a.accountId}`), ['gcp:proj'], 'account set replaced')
+  eq(inv.summary().total, 0, 'resources cleared on setAccounts')
+  await inv.sync()
+  eq(inv.summary().total, 1, 'new account syncs after swap')
+  eq(inv.summary().byProvider.gcp, 1, 'only gcp resources remain')
+})
+
+test('setAccounts skips entries without accountId + clears stale resources', async () => {
+  const inv = new CloudInventory({
+    fetchAwsInstances: async () => ({ Reservations: [{ Instances: [{ InstanceId: 'i-1' }] }] }),
+  })
+  inv.setAccounts([acct('aws', 'a')])
+  await inv.sync()
+  eq(inv.summary().total, 1)
+  inv.setAccounts([{ provider: 'aws', accountId: '' } as CloudAccount]) // invalid → skipped
+  eq(inv.listAccounts().length, 0, 'invalid account skipped')
+  eq(inv.summary().total, 0, 'stale resources cleared')
+})
+
 async function main() {
   let pass = 0, fail = 0
   for (const c of cases) {

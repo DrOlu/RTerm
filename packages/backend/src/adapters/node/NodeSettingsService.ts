@@ -49,6 +49,7 @@ function bootstrapPatchFromEnv(): Partial<BackendSettings> {
 export class NodeSettingsService {
   private readonly settingsPath: string
   private settings: BackendSettings
+  private listeners = new Set<(settings: BackendSettings) => void>()
 
   constructor(private readonly dataDir: string) {
     this.settingsPath = path.join(this.dataDir, 'settings.json')
@@ -67,6 +68,30 @@ export class NodeSettingsService {
   setSettings(settingsPatch: Partial<BackendSettings>): void {
     this.settings = this.normalize(deepMerge(this.settings, settingsPatch))
     this.persist()
+    this.emitChange()
+  }
+
+  /**
+   * Subscribe to settings changes. Fires after every setSettings() (covers the
+   * settings:set gateway RPC and every other mutation path). Returns an
+   * unsubscribe function.
+   */
+  onDidChange(listener: (settings: BackendSettings) => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private emitChange(): void {
+    const snapshot = this.settings
+    for (const listener of this.listeners) {
+      try {
+        listener(snapshot)
+      } catch {
+        /* a faulty listener must not break settings persistence */
+      }
+    }
   }
 
   private ensureDir(): void {

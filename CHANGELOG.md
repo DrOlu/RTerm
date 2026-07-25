@@ -1,5 +1,48 @@
 # Changelog
 
+## v2.9.6 (2026-07-25)
+
+### Settings-Driven Observability — Cost, Alerts, On-Call & Cloud Wired End-to-End (No Placeholders)
+
+Four observability capabilities were constructor-injected but **never wired to settings or
+the UI**, so they silently no-op'd out of the box. This release gives each a persisted
+settings block (schema **v4 → v5**), a Settings UI section, and **live reload with no
+restart** — plus a documented decision on the review model. Secrets are never stored
+inline (vault `secretRef` only).
+
+- **AI Cost** — new `cost` block (`modelPrices` + `budgets`). `CostBudgetService` gains
+  `setPrices`/`getPrices`/`clearBudgets`; `createObservability` reads `settings.cost` and
+  re-prices on the fly. New **Settings → AI Cost** section: editable price table (USD/1M
+  tokens, `default` fallback) + budgets editor. Turns the run ledger's token counts into
+  real dollars (previously always `$0`).
+- **Alerts** — new `alerts.channels` (slack/teams/smtp/telegram). Channels are built live
+  from settings + the vault into the array `AlertService` reads at fire time. New
+  **Settings → Alerts** editor (type, severity, enable, secretRef, telegram chatId, full
+  SMTP config). Ships a **dependency-free SMTP sender** (`sendSmtpMail`, Node `net`/`tls`:
+  EHLO → STARTTLS → AUTH LOGIN → DATA) so alert email works with no mail dependency.
+- **On-Call** — new `oncall.pagingChannels` (slack/teams/smtp/telegram/**webhook**).
+  `EscalationService` gains `setChannels`/`listChannels`; channels hot-swap live. New
+  **Settings → On-Call** editor.
+- **Cloud Inventory** — new `cloud.accounts` (aws/gcp/azure, region + credential
+  `secretRef`). `CloudInventory` gains `setAccounts`; the CLI fetchers are now
+  account/region/credential-aware (vault `KEY=VAL` env injected per call). With no accounts
+  it falls back to ambient CLI credentials. New **Settings → Cloud** editor.
+- **Live reload** — `SettingsService.onDidChange` + `NodeSettingsService.onDidChange`;
+  `startGyBackend` subscribes and calls `refreshCost` / `refreshAlertChannels` /
+  `refreshOncallChannels` / `refreshCloudAccounts` on any settings change (covers the
+  `settings:set` RPC, Connection/Automation managers, and UI saves).
+- **Review model** — verified **agent-profile-bound, not a settings block**:
+  `reviewModelId`/`reviewMode` already live on `ModelProfile` and are editable in
+  Settings → Models → Profiles; `runReviewModel` is a runtime function injection.
+  Documented in `docs/settings-driven-features.md`.
+
+**Security:** every channel/account secret is a `secretRef` into the AES-256-GCM vault,
+resolved only at send/sync time — never persisted in settings.
+
+**Verification:** backend typecheck clean on changed files; web typecheck exit 0; v2.9
+feature suite **215 PASS / 0 FAIL**; migrations 17/17; cost 23/23; SMTP 3/3; escalation
+19/19; cloud 15/15.
+
 ## v2.9.5 (2026-07-25)
 
 ### APM / DEM / Infra / ETW Ingestion — the Last 4 Placeholders, Now Genuinely Fed

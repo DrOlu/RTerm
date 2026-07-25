@@ -488,9 +488,151 @@ export interface WsGatewaySettings {
   allowedCidrs?: string[]
 }
 
+/** USD price for one model, per 1M tokens (AI cost attribution). */
+export interface ModelPriceEntry {
+  /** USD per 1M prompt/input tokens. */
+  promptPer1M: number
+  /** USD per 1M completion/output tokens. */
+  completionPer1M: number
+}
+
+/** A persisted AI-spend budget (daily/monthly cap with warn/throttle/deny). */
+export interface CostBudgetEntry {
+  id: string
+  /** scope: which model this budget covers ('*' or undefined = all). */
+  model?: string
+  /** optional profile/actor attribution scope. */
+  profileId?: string
+  /** window the budget is measured over. */
+  period: 'daily' | 'monthly'
+  /** USD cap for the window. */
+  capUsd: number
+  /** fraction of cap that triggers 'warn' (default 0.8). */
+  warnAt?: number
+  /** when over cap: 'throttle' (flag, allow) or 'deny' (block). */
+  overAction?: 'throttle' | 'deny'
+}
+
+/**
+ * AI cost configuration: the model price table that turns the run ledger's
+ * token counts into dollars, plus persisted spend budgets. Persisted in
+ * settings so cost attribution + budgets survive restarts (no placeholders).
+ */
+export interface CostSettings {
+  /**
+   * Price table keyed by model id. The special key `default` is used as a
+   * fallback for any model without an explicit entry. Values are USD per 1M
+   * tokens.
+   */
+  modelPrices: Record<string, ModelPriceEntry>
+  /** Persisted spend budgets. */
+  budgets: CostBudgetEntry[]
+}
+
+/**
+ * A persisted alert-notification channel. Secrets (webhook URLs, bot tokens,
+ * SMTP passwords) are NEVER stored inline — `secretRef` points at a key in the
+ * AES-256-GCM secrets vault, resolved only at send time.
+ */
+export interface AlertChannelEntry {
+  id: string
+  /** human label shown in the UI. */
+  name: string
+  type: 'slack' | 'teams' | 'smtp' | 'telegram'
+  /** minimum severity to route (info < warning < critical); default info. */
+  minSeverity?: 'info' | 'warning' | 'critical'
+  /** enable/disable without deleting the channel. */
+  enabled: boolean
+  /**
+   * Reference to the vault key holding the channel secret:
+   * slack/teams → webhook URL, telegram → bot token, smtp → password.
+   */
+  secretRef?: string
+  /** telegram: target chat id. */
+  chatId?: string
+  /** smtp: sender + recipients + host/port/user (password via secretRef). */
+  smtp?: {
+    host: string
+    port: number
+    secure?: boolean
+    user?: string
+    from: string
+    to: string[]
+  }
+}
+
+/** Alert-notification configuration: the channel list routed by AlertService. */
+export interface AlertsSettings {
+  channels: AlertChannelEntry[]
+}
+
+/**
+ * A persisted on-call paging channel. Like AlertChannelEntry but adds a generic
+ * outbound `webhook` type (POST a page JSON to any URL). Secrets (webhook URLs,
+ * bot tokens, SMTP passwords) live in the vault via `secretRef`, never inline.
+ * A page targets a channel by its `name`.
+ */
+export interface PagingChannelEntry {
+  id: string
+  /** channel name — pages reference this in policy targets. */
+  name: string
+  type: 'slack' | 'teams' | 'smtp' | 'telegram' | 'webhook'
+  /** minimum severity to page (info < warning < critical); default info. */
+  minSeverity?: 'info' | 'warning' | 'critical'
+  /** enable/disable without deleting the channel. */
+  enabled: boolean
+  /** vault key holding the channel secret (webhook URL / bot token / smtp password). */
+  secretRef?: string
+  /** telegram: default chat id (target.id overrides when set). */
+  chatId?: string
+  /** webhook: URL may be inline (non-secret) or via secretRef. */
+  webhookUrl?: string
+  /** smtp: sender + recipients + host/port/user (password via secretRef). */
+  smtp?: {
+    host: string
+    port: number
+    secure?: boolean
+    user?: string
+    from: string
+    to: string[]
+  }
+}
+
+/** On-call paging configuration: the paging-channel list used by EscalationService. */
+export interface OncallSettings {
+  pagingChannels: PagingChannelEntry[]
+}
+
+/**
+ * A persisted cloud account for inventory. Credentials are NOT stored inline —
+ * `secretRef` points at a vault key whose value is a provider credential env
+ * blob (e.g. "AWS_ACCESS_KEY_ID=…\nAWS_SECRET_ACCESS_KEY=…" or a named profile),
+ * resolved at sync time. When no accounts are configured, CloudInventory falls
+ * back to the ambient provider CLI credentials.
+ */
+export interface CloudAccountEntry {
+  id: string
+  provider: 'aws' | 'gcp' | 'azure'
+  /** display alias. */
+  name: string
+  /** account id / project id / subscription id. */
+  accountId: string
+  /** optional region/location scope for the list call. */
+  region?: string
+  /** vault key holding the credential env/profile blob. */
+  secretRef?: string
+  /** enable/disable without deleting the account. */
+  enabled: boolean
+}
+
+/** Cloud-inventory configuration: the account list synced by CloudInventory. */
+export interface CloudSettings {
+  accounts: CloudAccountEntry[]
+}
+
 export interface BackendSettings {
   /** Settings schema version, used for migrations */
-  schemaVersion: 4
+  schemaVersion: 5
 
   /** Command policy mode */
   commandPolicyMode: CommandPolicyMode
@@ -568,6 +710,18 @@ export interface BackendSettings {
   automation?: AutomationSettings
   /** Session logging (record terminal output to disk per session). */
   sessionLogging?: { enabled: boolean }
+
+  /** AI cost attribution: model price table + persisted spend budgets. */
+  cost?: CostSettings
+
+  /** Alert-notification channels (slack/teams/smtp/telegram), secrets via vault. */
+  alerts?: AlertsSettings
+
+  /** On-call paging channels (slack/teams/smtp/telegram/webhook), secrets via vault. */
+  oncall?: OncallSettings
+
+  /** Cloud-inventory accounts (aws/gcp/azure), credentials via vault. */
+  cloud?: CloudSettings
 
   /** WebSocket gateway exposure policy */
   gateway: {

@@ -284,6 +284,31 @@ export async function startGyBackend(): Promise<void> {
     onLog: () => {},
   });
   console.log(`[gybackend] Observability wired: dashboard state available (hosts=${observability.metricsLedger.hosts().length})`);
+  // Live-reload AI cost prices + budgets, alert channels, AND on-call paging
+  // channels whenever settings change (no restart).
+  const refreshObservabilityFromSettings = (): void => {
+    try {
+      observability.refreshCost?.();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      observability.refreshAlertChannels?.();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      observability.refreshOncallChannels?.();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      observability.refreshCloudAccounts?.();
+    } catch {
+      /* best-effort */
+    }
+  };
+  settingsService.onDidChange?.(refreshObservabilityFromSettings);
   // Wire the observability handle into the agent so the observability_* tools
   // (metrics, secrets, on-call, cost, recording, gitops, playbooks, cloud, live
   // dashboard) work in chat.

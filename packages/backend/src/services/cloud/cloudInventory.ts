@@ -167,6 +167,19 @@ export class CloudInventory {
     return [...this.accounts.values()].sort((a, b) => a.provider.localeCompare(b.provider))
   }
 
+  /**
+   * Replace the account set live (settings re-sync). Clears accounts (and their
+   * cached resources) then re-registers the provided ones, so a settings edit
+   * takes effect on the next sync() without a restart.
+   */
+  setAccounts(accounts: CloudAccount[]): void {
+    this.accounts.clear()
+    this.resources.clear()
+    for (const a of accounts) {
+      if (a?.accountId) this.accounts.set(`${a.provider}:${a.accountId}`, a)
+    }
+  }
+
   /** Pull + normalize inventory from every registered account (best-effort). */
   async sync(): Promise<{ added: number; errors: Array<{ account: string; error: string }> }> {
     const errors: Array<{ account: string; error: string }> = []

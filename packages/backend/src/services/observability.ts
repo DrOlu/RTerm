@@ -76,8 +76,12 @@ export interface ObservabilityDeps {
   reviewMode?: 'strict' | 'advisory' | 'auto-approve'
   /** paging channels for incident escalation (v2.9.0). */
   pagingChannels?: import('./oncall/escalationService').PageChannel[]
-  /** model price table for AI cost attribution (v2.9.0). */
+  /** model price table for AI cost attribution (v2.9.0). When omitted, the
+   * persisted settings.cost.modelPrices block is used (and re-read on refresh). */
   modelPrices?: import('./cost/costBudgetService').CostBudgetDeps['prices']
+  /** programmatic budget override (v2.9.x). When omitted, persisted
+   * settings.cost.budgets are registered (and re-read on refresh). */
+  costBudgets?: Array<import('./cost/costBudgetService').Budget>
   /** GitOps: read the live desired-state estate (v2.9.0). */
   gitopsReadLive?: () => import('./gitops/gitOpsService').DesiredEntity[] | Promise<import('./gitops/gitOpsService').DesiredEntity[]>
   /** GitOps: apply one entity to live state (v2.9.0). */
@@ -166,6 +170,14 @@ export interface Observability {
   oncall: EscalationService
   /** AI cost attribution + budgets (v2.9.0). */
   cost: CostBudgetService
+  /** Re-read prices + budgets from settings (call on settings change). */
+  refreshCost: () => void
+  /** Rebuild alert channels from settings.alerts + vault (call on settings change). */
+  refreshAlertChannels: () => void
+  /** Rebuild on-call paging channels from settings.oncall + vault (call on settings change). */
+  refreshOncallChannels: () => void
+  /** Re-register cloud-inventory accounts from settings.cloud (call on settings change). */
+  refreshCloudAccounts: () => void
   /** asciinema-style session recording + replay (v2.9.0). */
   recording: SessionRecorder
   /** GitOps — desired state in Git, drift + reconcile (v2.9.0). */
@@ -182,6 +194,154 @@ export interface Observability {
   liveDashboard: LiveDashboardHub<import('./dashboard/dashboardService').DashboardState>
 }
 
+interface SmtpConfig {
+  host: string
+  port: number
+  secure?: boolean
+  auth?: { user: string; pass: string }
+}
+
+/** Read one SMTP reply (until a line whose 4th char is a space, per RFC 5321). */
+function makeLineReader(onChunk: (cb: (buf: Buffer) => void) => void): () => Promise<string> {
+  let buffer = ''
+  const waiters: Array<(s: string) => void> = []
+  onChunk((chunk) => {
+    buffer += chunk.toString('utf8')
+    flush()
+  })
+  const complete = (buf: string): boolean => /^\d{3} /m.test(buf)
+  function flush(): void {
+    if (!waiters.length) return
+    if (!complete(buffer)) return
+    const out = buffer
+    buffer = ''
+    const w = waiters.shift()
+    w?.(out)
+  }
+  return () => new Promise<string>((resolve) => {
+    if (complete(buffer)) {
+      const out = buffer
+      buffer = ''
+      resolve(out)
+      return
+    }
+    waiters.push(resolve)
+  })
+}
+
+/**
+ * Minimal, dependency-free SMTP sender (EHLO → [STARTTLS] → [AUTH LOGIN] →
+ * MAIL FROM → RCPT TO → DATA → QUIT) over Node's built-in net/tls. Backend has
+ * no mail dependency, so this keeps alert email working out of the box with no
+ * placeholder. Supports implicit TLS (secure, port 465) and STARTTLS (587).
+ */
+export async function sendSmtpMail(
+  cfg: SmtpConfig,
+  mail: { from: string; to: string[]; subject: string; text: string; html: string },
+): Promise<string> {
+  const net = await import('node:net')
+  const tls = await import('node:tls')
+
+  const boundary = `----rterm-${Date.now().toString(36)}`
+  const addr = (a: string) => a.replace(/^.*<(.+)>.*$/, '$1').trim()
+  const dataLines = [
+    `From: ${mail.from}`,
+    `To: ${mail.to.join(', ')}`,
+    `Subject: ${mail.subject}`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    ``,
+    `--${boundary}`,
+    `Content-Type: text/plain; charset=utf-8`,
+    ``,
+    mail.text,
+    `--${boundary}`,
+    `Content-Type: text/html; charset=utf-8`,
+    ``,
+    mail.html,
+    `--${boundary}--`,
+  ].join('\r\n')
+
+  const expect = (reply: string, codes: number[], step: string): void => {
+    const code = parseInt(reply.slice(0, 3), 10)
+    if (!codes.includes(code)) throw new Error(`smtp ${step} failed: ${reply.trim().slice(0, 200)}`)
+  }
+
+  // Open the control channel (implicit TLS for secure, plain + optional STARTTLS otherwise).
+  const dataCbs: Array<(chunk: Buffer) => void> = []
+  const attach = (socket: import('node:net').Socket | import('node:tls').TLSSocket): void => {
+    socket.on('data', (chunk) => { for (const cb of dataCbs) cb(chunk) })
+  }
+  let socket: import('node:net').Socket | import('node:tls').TLSSocket
+
+  if (cfg.secure) {
+    socket = await new Promise<import('node:tls').TLSSocket>((resolve, reject) => {
+      const s = tls.connect({ host: cfg.host, port: cfg.port, servername: cfg.host })
+      s.once('secureConnect', () => resolve(s))
+      s.once('error', reject)
+    })
+  } else {
+    socket = await new Promise<import('node:net').Socket>((resolve, reject) => {
+      const s = net.connect({ host: cfg.host, port: cfg.port })
+      s.once('connect', () => resolve(s))
+      s.once('error', reject)
+    })
+  }
+  attach(socket)
+  let read = makeLineReader((cb) => dataCbs.push(cb))
+
+  try {
+    expect(await read(), [220], 'greeting')
+    socket.write(`EHLO rterm.local\r\n`)
+    let ehlo = await read()
+    expect(ehlo, [250], 'EHLO')
+
+    if (!cfg.secure && /STARTTLS/i.test(ehlo)) {
+      socket.write(`STARTTLS\r\n`)
+      expect(await read(), [220], 'STARTTLS')
+      // Upgrade the same connection to TLS and re-read with a fresh buffer.
+      const plain = socket as import('node:net').Socket
+      plain.removeAllListeners('data')
+      dataCbs.length = 0
+      socket = await new Promise<import('node:tls').TLSSocket>((resolve, reject) => {
+        const ts = tls.connect({ socket: plain, servername: cfg.host })
+        ts.once('secureConnect', () => resolve(ts))
+        ts.once('error', reject)
+      })
+      attach(socket)
+      read = makeLineReader((cb) => dataCbs.push(cb))
+      socket.write(`EHLO rterm.local\r\n`)
+      ehlo = await read()
+      expect(ehlo, [250], 'EHLO (post-TLS)')
+    }
+
+    if (cfg.auth) {
+      socket.write(`AUTH LOGIN\r\n`)
+      expect(await read(), [334], 'AUTH LOGIN')
+      socket.write(`${Buffer.from(cfg.auth.user, 'utf8').toString('base64')}\r\n`)
+      expect(await read(), [334], 'AUTH user')
+      socket.write(`${Buffer.from(cfg.auth.pass, 'utf8').toString('base64')}\r\n`)
+      expect(await read(), [235], 'AUTH pass')
+    }
+
+    socket.write(`MAIL FROM:<${addr(mail.from)}>\r\n`)
+    expect(await read(), [250], 'MAIL FROM')
+    for (const rcpt of mail.to) {
+      socket.write(`RCPT TO:<${addr(rcpt)}>\r\n`)
+      expect(await read(), [250, 251], 'RCPT TO')
+    }
+    socket.write(`DATA\r\n`)
+    expect(await read(), [354], 'DATA')
+    socket.write(`${dataLines}\r\n.\r\n`)
+    const sent = await read()
+    expect(sent, [250], 'message body')
+    socket.write(`QUIT\r\n`)
+    return 'smtp 250 sent'
+  } finally {
+    try { socket.end() } catch { /* best-effort */ }
+  }
+}
+
 export function createObservability(deps: ObservabilityDeps): Observability {
   const log = deps.onLog ?? (() => {})
 
@@ -189,7 +349,12 @@ export function createObservability(deps: ObservabilityDeps): Observability {
   const metricsLedger = new MetricsLedger({})
   const goldenSignals = new GoldenSignals({ ledger: metricsLedger })
   const incidentLedger = new IncidentLedger({})
-  const alertService = new AlertService({ channels: deps.alertChannels ?? [] })
+  // Alert channels are resolved from settings.alerts + the secrets vault at send
+  // time. AlertService reads deps.channels lazily on every fire(), so we hand it
+  // a live array we mutate in refreshAlertChannels() — channels update without a
+  // restart. deps.alertChannels (when injected) is a programmatic override.
+  const liveAlertChannels: AlertChannel[] = Array.isArray(deps.alertChannels) ? [...deps.alertChannels] : []
+  const alertService = new AlertService({ channels: liveAlertChannels })
   const sloService = new SloService({
     source: { count: async () => ({ good: 0, total: 0 }) },
   })
@@ -411,10 +576,198 @@ const reviewService = new ReviewService({
   })
 
   // --- Incident escalation & on-call (v2.9.0) ---
+  // Paging channels are built from settings.oncall + the vault (secretRef) and
+  // hot-swapped via setChannels() on refresh — no restart. deps.pagingChannels
+  // (when injected) is a programmatic override.
   const escalationService = new EscalationService({ channels: deps.pagingChannels ?? [] })
 
+  // --- Alert channels (v2.9.x): build live AlertChannels from settings.alerts,
+  // resolving each channel's secret from the vault at send time (secretRef).
+  // The array is mutated in place so AlertService (which reads it on fire())
+  // picks up channel edits without a restart. Skipped when deps.alertChannels is
+  // injected (programmatic override).
+const httpFetch: import('./notify/notifyService').HttpFetchFn = async (url, init) => {
+  const res = await fetch(url, { method: init.method, headers: init.headers, body: init.body })
+  return { ok: res.ok, status: res.status, text: () => res.text() }
+}
+const resolveAlertSecret = (ref: string | undefined): string | undefined => {
+    if (!ref) return undefined
+    try {
+      if (!secretsVault.unlocked()) return undefined
+      return secretsVault.has(ref) ? secretsVault.get(ref) : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const readAlertSettings = (): Array<import('../types').AlertChannelEntry> => {
+    try {
+      const s = deps.settingsService?.getSettings?.() as { alerts?: { channels?: Array<import('../types').AlertChannelEntry> } } | undefined
+      return Array.isArray(s?.alerts?.channels) ? (s!.alerts!.channels as Array<import('../types').AlertChannelEntry>) : []
+    } catch {
+      return []
+    }
+  }
+  const refreshAlertChannels = (): void => {
+    if (Array.isArray(deps.alertChannels)) return // programmatic override wins
+    try {
+      const built: AlertChannel[] = []
+      for (const ch of readAlertSettings()) {
+        if (!ch.enabled) continue
+        const minSeverity = ch.minSeverity
+        if (ch.type === 'slack' || ch.type === 'teams') {
+          const webhookUrl = resolveAlertSecret(ch.secretRef)
+          if (!webhookUrl) { log(`[alerts] channel ${ch.id} skipped — secret "${ch.secretRef}" unavailable (vault locked or missing)`) ; continue }
+          built.push(ch.type === 'slack'
+            ? slackChannel({ webhookUrl, ...(minSeverity ? { minSeverity } : {}) }, httpFetch)
+            : teamsChannel({ webhookUrl, ...(minSeverity ? { minSeverity } : {}) }, httpFetch))
+        } else if (ch.type === 'telegram') {
+          const botToken = resolveAlertSecret(ch.secretRef)
+          if (!botToken || !ch.chatId) { log(`[alerts] telegram channel ${ch.id} skipped — bot token or chatId missing`) ; continue }
+          built.push(telegramChannel({ botToken, chatId: ch.chatId, ...(minSeverity ? { minSeverity } : {}) }, httpFetch))
+        } else if (ch.type === 'smtp') {
+          if (!ch.smtp) { log(`[alerts] smtp channel ${ch.id} skipped — no smtp config`) ; continue }
+          const cfg = ch.smtp
+          const password = resolveAlertSecret(ch.secretRef)
+          const smtpFn: import('./notify/notifyService').SmtpSendFn = async (mail) =>
+            sendSmtpMail({
+              host: cfg.host,
+              port: cfg.port,
+              secure: cfg.secure === true,
+              ...(cfg.user ? { auth: { user: cfg.user, pass: password ?? '' } } : {}),
+            }, mail)
+          built.push(smtpChannel({ from: cfg.from, to: cfg.to, name: ch.name, ...(minSeverity ? { minSeverity } : {}) }, smtpFn))
+        }
+      }
+    liveAlertChannels.splice(0, liveAlertChannels.length, ...built)
+    log(`[alerts] ${built.length} channel(s) active`)
+  } catch { /* best-effort */ }
+}
+refreshAlertChannels()
+
+// --- On-call paging channels (v2.9.x): build live PageChannels from
+// settings.oncall.pagingChannels + the vault. A page targets a channel by name;
+// send(target, page, level) formats + delivers via the matching transport.
+const readOncallSettings = (): Array<import('../types').PagingChannelEntry> => {
+  try {
+    const s = deps.settingsService?.getSettings?.() as { oncall?: { pagingChannels?: Array<import('../types').PagingChannelEntry> } } | undefined
+    return Array.isArray(s?.oncall?.pagingChannels) ? (s!.oncall!.pagingChannels as Array<import('../types').PagingChannelEntry>) : []
+  } catch {
+    return []
+  }
+}
+const SEV_RANK: Record<string, number> = { info: 0, warning: 1, critical: 2 }
+const pageSeverityRank = (sev: string): number => SEV_RANK[sev?.toLowerCase?.() ?? ''] ?? 0
+const buildPageText = (target: import('./oncall/escalationService').OnCallTarget, page: import('./oncall/escalationService').Page, level: number): string =>
+  [`🔥 *${page.title}*`, ``, `*Severity:* ${page.severity.toUpperCase()}`, `*Incident:* ${page.incidentId}`, `*Level:* ${level + 1}`, `*Target:* ${target.id}`, ``, `_RTerm On-Call_`].join('\n')
+const refreshOncallChannels = (): void => {
+  if (Array.isArray(deps.pagingChannels)) return // programmatic override wins
+  try {
+    const built: Array<import('./oncall/escalationService').PageChannel> = []
+    for (const ch of readOncallSettings()) {
+      if (!ch.enabled) continue
+      const minRank = ch.minSeverity ? pageSeverityRank(ch.minSeverity) : 0
+      const gate = (page: import('./oncall/escalationService').Page): boolean => pageSeverityRank(page.severity) >= minRank
+      if (ch.type === 'slack' || ch.type === 'teams' || ch.type === 'webhook') {
+        const url = ch.type === 'webhook' ? (ch.webhookUrl ?? resolveAlertSecret(ch.secretRef)) : resolveAlertSecret(ch.secretRef)
+        if (!url) { log(`[oncall] channel ${ch.id} skipped — url/secret unavailable`); continue }
+        built.push({
+          name: ch.name,
+          send: async (target, page, level) => {
+            if (!gate(page)) return 'skipped: below min severity'
+            const text = buildPageText(target, page, level)
+            const body = ch.type === 'teams'
+              ? JSON.stringify({ '@type': 'MessageCard', '@context': 'https://schema.org/extensions', summary: page.title, text })
+              : ch.type === 'slack'
+                ? JSON.stringify({ text })
+                : JSON.stringify({ kind: 'rterm.page', target: target.id, level, page: { id: page.id, incidentId: page.incidentId, title: page.title, severity: page.severity }, text })
+            const res = await httpFetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body })
+            if (!res.ok) throw new Error(`${ch.type} page ${res.status}: ${await res.text()}`)
+            return `${ch.type} ${res.status}`
+          },
+        })
+      } else if (ch.type === 'telegram') {
+        const botToken = resolveAlertSecret(ch.secretRef)
+        if (!botToken) { log(`[oncall] telegram channel ${ch.id} skipped — bot token missing`); continue }
+        built.push({
+          name: ch.name,
+          send: async (target, page, level) => {
+            if (!gate(page)) return 'skipped: below min severity'
+            const chatId = target.id || ch.chatId
+            if (!chatId) throw new Error('telegram page: no chat id (target.id or channel chatId)')
+            const text = buildPageText(target, page, level)
+            const res = await httpFetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' }),
+            })
+            if (!res.ok) throw new Error(`telegram page ${res.status}: ${await res.text()}`)
+            return `telegram ${res.status}`
+          },
+        })
+      } else if (ch.type === 'smtp') {
+        if (!ch.smtp) { log(`[oncall] smtp channel ${ch.id} skipped — no smtp config`); continue }
+        const cfg = ch.smtp
+        const password = resolveAlertSecret(ch.secretRef)
+        built.push({
+          name: ch.name,
+          send: async (target, page, level) => {
+            if (!gate(page)) return 'skipped: below min severity'
+            const text = buildPageText(target, page, level).replace(/\*/g, '')
+            const to = target.id ? [target.id, ...cfg.to] : cfg.to
+            return sendSmtpMail(
+              { host: cfg.host, port: cfg.port, secure: cfg.secure === true, ...(cfg.user ? { auth: { user: cfg.user, pass: password ?? '' } } : {}) },
+              { from: cfg.from, to, subject: `[PAGE/${page.severity.toUpperCase()}] ${page.title}`, text, html: `<pre>${text}</pre>` },
+            )
+          },
+        })
+      }
+    }
+    escalationService.setChannels(built)
+    log(`[oncall] ${built.length} paging channel(s) active`)
+  } catch { /* best-effort */ }
+}
+refreshOncallChannels()
+
   // --- AI cost & budgets (v2.9.0): feed from the agent run ledger's usage events ---
-  const costBudgetService = new CostBudgetService({ prices: deps.modelPrices })
+  // Price table + budgets are persisted in settings.cost so they survive restarts.
+  // deps.modelPrices (when injected) still wins for programmatic/test wiring;
+  // otherwise we read the persisted settings block.
+  const readCostSettings = (): { modelPrices: Record<string, import('./cost/costBudgetService').ModelPrice>; budgets: Array<import('./cost/costBudgetService').Budget> } => {
+    try {
+      const s = deps.settingsService?.getSettings?.() as { cost?: { modelPrices?: Record<string, import('./cost/costBudgetService').ModelPrice>; budgets?: Array<import('./cost/costBudgetService').Budget> } } | undefined
+      return {
+        modelPrices: (s?.cost?.modelPrices ?? {}) as Record<string, import('./cost/costBudgetService').ModelPrice>,
+        budgets: Array.isArray(s?.cost?.budgets) ? (s!.cost!.budgets as Array<import('./cost/costBudgetService').Budget>) : [],
+      }
+    } catch {
+      return { modelPrices: {}, budgets: [] }
+    }
+  }
+  const initialCost = readCostSettings()
+  const costBudgetService = new CostBudgetService({ prices: deps.modelPrices ?? initialCost.modelPrices })
+  const readBudgets = (): Array<import('./cost/costBudgetService').Budget> => {
+    if (Array.isArray(deps.costBudgets)) return deps.costBudgets
+    return readCostSettings().budgets
+  }
+  const syncCostBudgets = (): void => {
+    try {
+      costBudgetService.clearBudgets()
+      for (const b of readBudgets()) costBudgetService.setBudget(b)
+    } catch { /* best-effort */ }
+  }
+  syncCostBudgets()
+
+  /** Live re-sync prices + budgets from settings (called on settings change).
+   * Prices only refresh from settings when no programmatic price table was
+   * injected (deps.modelPrices is an explicit override). */
+  const refreshCost = (): void => {
+    try {
+      if (deps.modelPrices === undefined) {
+        costBudgetService.setPrices(readCostSettings().modelPrices)
+      }
+      syncCostBudgets()
+    } catch { /* best-effort */ }
+  }
 
   // --- Session recording (v2.9.0) ---
   const sessionRecorder = new SessionRecorder({})
@@ -461,20 +814,66 @@ const reviewService = new ReviewService({
   // --- Cloud inventory (v2.9.0): real fetchers via the provider CLIs when no
   // explicit fetcher is injected. Runs the CLI, parses JSON. Best-effort — a
   // missing CLI or missing credentials surfaces as a sync error, not a crash.
-const runCliJson = async (bin: string, args: string[]): Promise<unknown> => {
+  // Fetchers are account-aware: they honor the account's region scope and inject
+  // a vault-resolved credential env (secretRef → KEY=VAL lines) for that call.
+const runCliJson = async (bin: string, args: string[], env?: Record<string, string>): Promise<unknown> => {
   const { execFile } = await import('node:child_process')
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { timeout: 60_000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+    execFile(bin, args, { timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: env ? { ...process.env, ...env } : process.env }, (err, stdout) => {
       if (err) return reject(err)
       try { resolve(JSON.parse(stdout)) } catch (e) { reject(e instanceof Error ? e : new Error('invalid JSON')) }
     })
   })
 }
+/** Parse a vault credential blob ("KEY=VAL" per line) into an env map. */
+const parseCredEnv = (blob: string | undefined): Record<string, string> | undefined => {
+  if (!blob) return undefined
+  const out: Record<string, string> = {}
+  for (const line of blob.split(/\r?\n/)) {
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line)
+    if (m) out[m[1]] = m[2].trim()
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+const cloudCredEnvFor = (entry: import('../types').CloudAccountEntry): Record<string, string> | undefined =>
+  parseCredEnv(resolveAlertSecret(entry.secretRef))
 const cloudInventory = new CloudInventory({
-  fetchAwsInstances: deps.fetchAwsInstances ?? (async () => runCliJson('aws', ['ec2', 'describe-instances', '--output', 'json'])),
-  fetchGcpInstances: deps.fetchGcpInstances ?? (async () => runCliJson('gcloud', ['compute', 'instances', 'list', '--format', 'json'])),
-  fetchAzureVms: deps.fetchAzureVms ?? (async () => runCliJson('az', ['vm', 'list', '--show-details', '--output', 'json'])),
+  fetchAwsInstances: deps.fetchAwsInstances ?? (async (account) => {
+    const entry = readCloudSettings().find((a) => a.provider === 'aws' && a.accountId === account.accountId)
+    const region = entry?.region
+    const args = ['ec2', 'describe-instances', '--output', 'json', ...(region ? ['--region', region] : [])]
+    return runCliJson('aws', args, entry ? cloudCredEnvFor(entry) : undefined)
+  }),
+  fetchGcpInstances: deps.fetchGcpInstances ?? (async (account) => {
+    const entry = readCloudSettings().find((a) => a.provider === 'gcp' && a.accountId === account.accountId)
+    const args = ['compute', 'instances', 'list', '--format', 'json', '--project', account.accountId, ...(entry?.region ? ['--filter', `zone~^${entry.region}`] : [])]
+    return runCliJson('gcloud', args, entry ? cloudCredEnvFor(entry) : undefined)
+  }),
+  fetchAzureVms: deps.fetchAzureVms ?? (async (account) => {
+    const entry = readCloudSettings().find((a) => a.provider === 'azure' && a.accountId === account.accountId)
+    const args = ['vm', 'list', '--show-details', '--output', 'json', '--subscription', account.accountId]
+    return runCliJson('az', args, entry ? cloudCredEnvFor(entry) : undefined)
+  }),
 })
+/** Register the settings.cloud.accounts (enabled ones) into the inventory. */
+function readCloudSettings(): Array<import('../types').CloudAccountEntry> {
+  try {
+    const s = deps.settingsService?.getSettings?.() as { cloud?: { accounts?: Array<import('../types').CloudAccountEntry> } } | undefined
+    return Array.isArray(s?.cloud?.accounts) ? (s!.cloud!.accounts as Array<import('../types').CloudAccountEntry>) : []
+  } catch {
+    return []
+  }
+}
+const refreshCloudAccounts = (): void => {
+  try {
+    const accounts = readCloudSettings()
+      .filter((a) => a.enabled)
+      .map((a) => ({ provider: a.provider, accountId: a.accountId, ...(a.name ? { alias: a.name } : {}) }))
+    cloudInventory.setAccounts(accounts)
+    log(`[cloud] ${accounts.length} account(s) registered`)
+  } catch { /* best-effort */ }
+}
+refreshCloudAccounts()
 
   // --- Live dashboard hub (v2.9.0): push unified state to all clients ---
   const liveDashboardHub = new LiveDashboardHub({
@@ -562,6 +961,10 @@ const cloudInventory = new CloudInventory({
     secrets: secretsVault,
     oncall: escalationService,
     cost: costBudgetService,
+    refreshCost,
+    refreshAlertChannels,
+    refreshOncallChannels,
+    refreshCloudAccounts,
     recording: sessionRecorder,
     gitops: gitopsService,
     playbooks: { versioning: playbookVersioning, lint: lintPlaybook, lintOk },
