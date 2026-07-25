@@ -1,5 +1,19 @@
 # Changelog
 
+## v2.9.3 (2026-07-25)
+
+### Tool Visibility — every agent tool is now visible in the Tools section
+
+A full audit of the agent's tool surface vs the UI catalog (`BUILTIN_TOOL_INFO`) found that several working tools were **callable but invisible** — they didn't appear in the Tools section (driven by `tools:getBuiltIn`), weren't toggleable, and weren't proactively offered to the agent. All are now registered and visible.
+
+**Newly visible tools:**
+- The 9 observability tools from v2.9.2: `get_metrics`, `manage_secret`, `manage_oncall`, `get_cost`, `manage_recording`, `manage_gitops`, `manage_playbook_version`, `get_cloud_inventory`, `get_live_dashboard`.
+- 4 long-standing tools that were never in the catalog: `write_file`, `edit_file`, `skill`, `create_skill`.
+
+**Regression test** (`AgentHelper/tools/toolVisibility.extreme.spec.ts`): asserts every dispatchable tool appears in `BUILTIN_TOOL_INFO`, in the `tools:getBuiltIn` summary, defaults to enabled (except the intentionally-dangerous `copy_between_tabs` / `read_file_transfer_status`), survives the enabled filter, and that the 9 observability + 4 file/skill tools specifically are visible. Wired into `test:v29-features` (188 tests total, all green).
+
+Verified across all three surfaces: `BUILTIN_TOOL_INFO`, the `tools:getBuiltIn` summary the UI renders, and `TOOLS_FOR_MODEL` after the enabled filter.
+
 ## v2.9.2 (2026-07-25)
 
 ### Wiring the 9 Capabilities into the App, Agent & Gateway

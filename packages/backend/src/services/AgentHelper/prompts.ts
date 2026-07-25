@@ -364,6 +364,22 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     description: CREATE_OR_EDIT_TOOL_DESCRIPTION,
   },
   {
+    name: "write_file",
+    description: WRITE_FILE_TOOL_DESCRIPTION,
+  },
+  {
+    name: "edit_file",
+    description: EDIT_FILE_TOOL_DESCRIPTION,
+  },
+  {
+    name: "skill",
+    description: "Load a skill to get detailed instructions for a specific task. Skills provide specialized knowledge, step-by-step guidance, and may include supporting files (scripts, references).",
+  },
+  {
+    name: "create_skill",
+    description: "Create a new skill in GyShell skills. This tool only creates new skills and does not modify or overwrite existing ones. If the skill name already exists, the call must fail and you should choose a different name. If you need to modify an existing skill, use edit_file to edit that skill's md file directly, or write_file only when intentionally replacing the full file.",
+  },
+  {
     name: "wait",
     description: WAIT_TOOL_DESCRIPTION,
   },
