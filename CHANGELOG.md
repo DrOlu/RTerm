@@ -1,5 +1,21 @@
 # Changelog
 
+## v2.9.4 (2026-07-25)
+
+### No Placeholders — the 9 Capabilities Actually Work Out of the Box
+
+The v2.9.x modules + RPC/agent tools existed, but 6 of them didn't function end-to-end without manual steps. This release wires them all for real, with a **live verification pass proving each one**.
+
+- **Session recording** — `TerminalService.handleData` now feeds live terminal output into active recordings (`setSessionRecorder` + per-terminal recording map + `startRecording`/`stopRecording`/`isRecording`). `recordingStart` routes through TerminalService so capture actually flows; `recordingStopTerminal` added. Wired into both runtimes. **E2E-proven: a real terminal command's output is captured + replayed** (`recordingCapture.extreme.spec.ts`, 6 tests).
+- **Live dashboard** — new `observability:liveDashboardSubscribe`: a WebSocket subscribes to the hub and receives filtered `dashboard:state` as `gateway:event` frames on every update (pruned on socket close). Verified: a subscriber receives live frames.
+- **OTel push** — background timer pushes metrics to `OTEL_EXPORTER_OTLP_ENDPOINT` every `OTEL_EXPORTER_OTLP_INTERVAL_MS` (default 30s), refreshing the registry from the ledger before each push. Verified: a local OTLP listener receives `resourceMetrics` POSTs.
+- **On-call** — background 30s tick driver escalates unacked pages automatically. Verified: a page with a 1s ack timeout escalates level 0→1 with no manual `oncallTick`.
+- **AI cost** — background feeder mirrors agent-run token usage from the run ledger into the cost ledger every 60s (deduped by run id). Verified: a real completed agent run's spend appears in `costSummary` with no manual `costRecord`.
+- **GitOps** — default `readLive` builds the real estate from saved connections + automation (groups/scripts/playbooks/templates/scheduled tasks). Verified: `gitopsExport` returns real saved entities.
+- **Cloud inventory** — default fetchers shell out to `aws`/`gcloud`/`az` CLIs (JSON) when none are injected; a missing CLI/credential surfaces as a structured sync error, not a crash. Verified: the fetcher path executes and returns a structured result.
+
+`settingsService` dep wired into both `createObservability` call sites; `onBackgroundDrivers` hook added for clean shutdown. **194 tests green** (188 + 6 new recording-capture). Typecheck + full suite clean.
+
 ## v2.9.3 (2026-07-25)
 
 ### Tool Visibility — every agent tool is now visible in the Tools section
