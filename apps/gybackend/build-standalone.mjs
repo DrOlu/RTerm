@@ -57,7 +57,7 @@ const banner = `#!/usr/bin/env node
 var __gybCR = require('module').createRequire(__filename)
 globalThis.__gybRequire = __gybCR`
 
-const outfile = path.join(here, 'dist-standalone', 'gybackend.js')
+const outfile = path.join(here, 'dist-standalone', 'gybackend.cjs')
 fs.mkdirSync(path.dirname(outfile), { recursive: true })
 
 await build({
