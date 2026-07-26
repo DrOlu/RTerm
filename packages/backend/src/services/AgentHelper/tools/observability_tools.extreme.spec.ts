@@ -119,6 +119,40 @@ test('manage_recording start/stop/list/export/delete', async () => {
   includes(await manageRecording({ action: 'delete', recordingId: id }, c), 'Deleted')
 })
 
+// ─── recording: agent-tool start must register activeRecordings so output is captured ───
+test('manage_recording start via agent tool registers the terminal for live capture (regression)', async () => {
+  // Use the SAME recorder instance the observability handle exposes, so start/stop/list
+  // all hit one SessionRecorder (the agent tool uses o.recording for those).
+  const o = makeObs()
+  const recorder = o.recording
+  const activeRecordings = new Map<string, string>()
+  const ts = {
+    sessionRecorder: recorder,
+    activeRecordings,
+    startRecording(terminalId: string, opts: { title?: string } = {}) {
+      const id = recorder.start(terminalId, opts)
+      activeRecordings.set(terminalId, id)
+      return id
+    },
+    handleData(terminalId: string, data: string) {
+      const id = activeRecordings.get(terminalId)
+      if (id) recorder.out(id, data)
+    },
+  }
+  const { c } = ctx(o)
+  ;(c as unknown as { terminalService: unknown }).terminalService = ts
+  const out = await manageRecording({ action: 'start', terminalId: 't-live' }, c)
+  const id = out.split(': ')[1].trim()
+  // The agent-tool start must have registered the terminal so handleData captures.
+  ok(activeRecordings.get('t-live') === id, 'terminal not registered in activeRecordings after agent-tool start')
+  ts.handleData('t-live', 'captured-line-1\n')
+  const rec = recorder.list().find((x) => x.id === id)
+  ok(rec && rec.events === 1, `expected 1 captured event, got ${rec?.events ?? 'none'}`)
+  // stop must deregister
+  await manageRecording({ action: 'stop', recordingId: id }, c)
+  ok(!activeRecordings.has('t-live'), 'terminal still registered after agent-tool stop')
+})
+
 // ─── gitops ───
 test('manage_gitops export + in_sync', async () => {
   const { c } = ctx(makeObs())

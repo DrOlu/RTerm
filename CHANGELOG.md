@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.9.11 (2026-07-26)
+
+### Fix — Agent-Tool Session Recording Now Captures (Was 0 Events)
+
+**Session recording started via the agent's `manage_recording` tool captured nothing (0 events).**
+The tool called `SessionRecorder.start()` directly, which never registered the terminal in
+`TerminalService.activeRecordings` — and the live-output feed (`handleData`) checks that map to decide
+what to capture. So recordings started by the agent ran empty, while the gateway path
+(`observability:recordingStart`) worked because it went through `TerminalService.startRecording()`.
+
+- **`manage_recording` `start` now routes through `TerminalService.startRecording()`** (which sets
+  `activeRecordings`, with a fallback to the raw recorder when TerminalService isn't available), so
+  agent-started recordings actually capture live output.
+- **`stop` now deregisters** the terminal from `activeRecordings` so it's no longer flagged as
+  recording.
+- **Regression test added:** agent-tool `start` must register the terminal for live capture (and
+  `stop` must deregister). observability_tools suite 12/12 green.
+
+**Verification:** backend typecheck exit 0; v2.9 suite 218 PASS / 0 FAIL; live reproduction confirmed
+(agent-started recording now captures events, replays, and exports `.cast`). No asciinema needed —
+recording/playback/export are native.
+
 ## v2.9.10 (2026-07-26)
 
 ### AgentSpan Phase 2 — RTerm Playbooks as Conductor Workflows + Durable Delegation

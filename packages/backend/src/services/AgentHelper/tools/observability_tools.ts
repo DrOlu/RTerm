@@ -159,9 +159,31 @@ export async function manageRecording(args: z.infer<typeof manageRecordingSchema
       const list = r.list()
       out = list.length ? list.map((x) => `- ${x.id} (${x.terminalId}) ${x.events} events${x.endedAt ? ' [stopped]' : ' [recording]'}`).join('\n') : 'No recordings.'
     } else if (args.action === 'start') {
-      if (!args.terminalId) { out = 'start requires terminalId.' } else { out = `Recording started: ${r.start(args.terminalId, { title: args.title })}` }
+      if (!args.terminalId) { out = 'start requires terminalId.' } else {
+        // Route through TerminalService.startRecording so the terminal is registered in
+        // activeRecordings — without it, the live-output feed (handleData) never sees a
+        // recordingId for this terminal and nothing is captured. (Calling r.start()
+        // directly bypassed that registration and produced 0-event recordings.)
+        const ts = context.terminalService
+        const id = ts && typeof ts.startRecording === 'function'
+          ? ts.startRecording(args.terminalId, { title: args.title })
+          : r.start(args.terminalId, { title: args.title })
+        out = `Recording started: ${id}`
+      }
     } else if (args.action === 'stop') {
-      if (!args.recordingId) { out = 'stop requires recordingId.' } else { const rec = r.stop(args.recordingId); out = `Recording ${args.recordingId} stopped (${rec.events.length} events).` }
+      if (!args.recordingId) { out = 'stop requires recordingId.' } else {
+        const rec = r.stop(args.recordingId)
+        // Also deregister from activeRecordings so the terminal is no longer flagged
+        // as recording (symmetric with the TerminalService.startRecording fix above).
+        try {
+          const ts = context.terminalService as unknown as { activeRecordings?: Map<string, string>; stopRecording?: (t: string) => unknown }
+          const termId = (rec as { terminalId?: string }).terminalId ?? args.terminalId
+          if (termId && ts?.activeRecordings instanceof Map) {
+            if (ts.activeRecordings.get(termId) === args.recordingId) ts.activeRecordings.delete(termId)
+          }
+        } catch { /* best-effort deregistration */ }
+        out = `Recording ${args.recordingId} stopped (${rec.events.length} events).`
+      }
     } else if (args.action === 'replay') {
       if (!args.recordingId) { out = 'replay requires recordingId.' } else {
         const ev = r.replay(args.recordingId, { fromSec: args.fromSec, durationSec: args.durationSec })
