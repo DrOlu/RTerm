@@ -172,7 +172,7 @@ export const en = {
     currentVersion: "Current Version",
     latestVersion: "Latest Version",
     versionStatus: "Status",
-    versionSource: "Source URL",
+    versionSource: "Source",
     downloadPage: "Download URL",
     upToDate: "Up to Date",
     updateAvailable: "Update Available",
@@ -188,7 +188,7 @@ export const en = {
       `Version check failed: ${detail}`,
     versionCheckNoteTitle: "Privacy Note",
     versionCheckNote:
-      "Version checks are sent only to this project GitHub repository (version.json). No third-party websites are contacted. This is the only network request the app may perform automatically in the background.",
+      "The app checks for new versions quietly in the background from the official RTerm release channel. No third-party websites are contacted. This is the only network request the app may perform automatically.",
     commandPolicyModes: {
       safe: "Safe",
       standard: "Standard",

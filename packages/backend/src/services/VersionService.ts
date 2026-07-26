@@ -27,8 +27,13 @@ export interface VersionCheckResult {
   warning?: string
 }
 
-const VERSION_MANIFEST_URL = 'https://api.github.com/repos/DrOlu/RTerm/contents/version.json?ref=main'
-const FALLBACK_DOWNLOAD_URL = 'https://hyperspace.ng/rterm/releases'
+// Fetch version.json from the raw GitHub URL, not the api.github.com contents
+// endpoint — the contents API is rate-limited (60/hr unauthenticated) and returns
+// HTTP 403 when the limit is hit, which surfaced as "Version check failed: HTTP 403".
+// The raw host has no such limit, so background checks are silent + reliable.
+const VERSION_MANIFEST_URL = 'https://raw.githubusercontent.com/DrOlu/RTerm/main/version.json'
+const FALLBACK_DOWNLOAD_URL = 'https://rterm.app/#download'
+const APP_WEBSITE_URL = 'https://rterm.app'
 
 export class VersionService {
   private readonly store: Store<VersionCache>
@@ -65,7 +70,7 @@ export class VersionService {
       downloadUrl,
       releaseNotes,
       checkedAt,
-      sourceUrl: VERSION_MANIFEST_URL
+      sourceUrl: APP_WEBSITE_URL
     }
   }
 
@@ -82,7 +87,9 @@ export class VersionService {
 
       if (response.statusCode === 200) {
         latestVersion = this.normalizeVersion(response.manifest.version)
-        downloadUrl = response.manifest.download || FALLBACK_DOWNLOAD_URL
+        // Download always points at the app website's download page — never the
+        // GitHub releases URL (no GitHub should be visible in the UI).
+        downloadUrl = FALLBACK_DOWNLOAD_URL
         releaseNotes = response.manifest.notes
         this.store.set('latestVersion', latestVersion)
         this.store.set('downloadUrl', downloadUrl)
@@ -109,20 +116,26 @@ export class VersionService {
         downloadUrl,
         releaseNotes,
         checkedAt: now,
-        sourceUrl: VERSION_MANIFEST_URL
+        sourceUrl: APP_WEBSITE_URL
       }
       this.lastResult = result
       return result
     } catch (error) {
+      // Silent background check: a transient network failure (rate-limit, timeout,
+      // DNS, offline) must NOT surface as a red "Check Failed" state. Keep the
+      // last-good cached version and report up-to-date quietly, with the warning
+      // recorded for diagnostics only. A genuine update still surfaces normally.
       const warning = error instanceof Error ? error.message : String(error)
+      const cachedLatest = this.store.get('latestVersion')
+      const status = cachedLatest && this.compareVersions(cachedLatest, currentVersion) > 0 ? 'update-available' : 'up-to-date'
       const result: VersionCheckResult = {
-        status: 'error',
+        status,
         currentVersion,
-        latestVersion: this.store.get('latestVersion'),
+        latestVersion: cachedLatest,
         downloadUrl: this.store.get('downloadUrl') ?? FALLBACK_DOWNLOAD_URL,
         releaseNotes: this.store.get('releaseNotes'),
         checkedAt: now,
-        sourceUrl: VERSION_MANIFEST_URL,
+        sourceUrl: APP_WEBSITE_URL,
         warning
       }
       this.lastResult = result
@@ -170,13 +183,9 @@ export class VersionService {
           })
           res.on('end', () => {
             try {
-              const payload = JSON.parse(rawData) as { content?: string; encoding?: string }
-              if (!payload || payload.encoding !== 'base64' || typeof payload.content !== 'string') {
-                reject(new Error('Invalid GitHub contents payload'))
-                return
-              }
-              const decoded = Buffer.from(payload.content.replace(/\n/g, ''), 'base64').toString('utf8')
-              const parsed = JSON.parse(decoded) as VersionManifest
+              // The raw host returns the version.json file directly (plain JSON),
+              // not the GitHub contents-API base64 wrapper.
+              const parsed = JSON.parse(rawData) as VersionManifest
               if (!parsed || typeof parsed.version !== 'string') {
                 reject(new Error('Invalid version manifest format'))
                 return

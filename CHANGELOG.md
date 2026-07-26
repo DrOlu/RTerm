@@ -1,5 +1,33 @@
 # Changelog
 
+## v2.9.13 (2026-07-26)
+
+### Fix — Version Check 403 + No GitHub in UI (Silent Background Updates)
+
+**Version check failed with a red "Check Failed: HTTP 403".** The updater fetched `version.json` from
+the **GitHub API contents endpoint** (`api.github.com/repos/.../contents/version.json`), which is
+rate-limited (60 req/hr unauthenticated) and returns **HTTP 403** when the limit is hit — surfacing
+as a scary red error every hour.
+
+- **Fetch from the raw URL instead** (`raw.githubusercontent.com/.../version.json`) — no API rate
+  limit, no 403, and a simpler plain-JSON parse (no base64 contents wrapper). Verified live: HTTP 200.
+- **Silent background check:** a transient network failure (rate-limit, timeout, offline, DNS) no
+  longer surfaces as a red "Check Failed" — it keeps the last-good cached version and reports
+  up-to-date quietly (warning recorded for diagnostics only). A genuine update still surfaces normally.
+- **No GitHub in the UI:** the version Source and Download URL now point at the app website —
+  `https://rterm.app` and `https://rterm.app/#download` (download always, regardless of the manifest's
+  `download` field). The privacy note no longer mentions GitHub.
+
+**Also in this release:** end-to-end live validation of the Automation & Change-Management and SRE
+pillars — reusable scripts, cron, Jinja templates (render + versioned diff), multi-step playbooks,
+approval-gated MOP changes (plan→approve→run→committed), event-driven triggers (pattern in terminal
+output → playbook fired), 18/18 observability RPC methods, APM/DEM/Infra ingestion, fleet
+(run_fleet_command, collect_facts) and connections across SSH (Windows) + Cisco. Integrations verified
+live: Telegram (message delivered), AWS (sts identity + EC2 inventory). NATS is wired but needs NKey
+credentials not in the vault (skipped live per policy; the feature is correctly wired).
+
+**Verification:** backend typecheck exit 0; web typecheck exit 0; v2.9 suite 218 PASS / 0 FAIL.
+
 ## v2.9.12 (2026-07-26)
 
 ### Fix — Agent-Created Triggers Now Fire Immediately (No Restart Needed)

@@ -186,7 +186,7 @@ export const zh = {
     versionNetworkWarning: (detail: string) => `版本检查失败：${detail}`,
     versionCheckNoteTitle: "隐私说明",
     versionCheckNote:
-      "版本检查只会请求本项目 GitHub 仓库中的 version.json，不会向任何第三方网站发起请求。这也是本应用唯一会在后台自动发起的网络请求。",
+      "应用会在后台从 RTerm 官方发布渠道静默检查新版本，不会向任何第三方网站发起请求。这也是本应用唯一会自动发起的网络请求。",
     commandPolicyModes: {
       safe: "安全模式",
       standard: "标准模式",
