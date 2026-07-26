@@ -21,6 +21,7 @@
  */
 
 import { ConductorClient, DEFAULT_BASE_URL, joinUrl } from './conductorClient.mjs'
+import { playbookToWorkflowDef } from './playbookToWorkflowDef.mjs'
 
 // ─── config resolution ──────────────────────────────────────────────────────
 
@@ -119,6 +120,48 @@ async function guarded(fn, log) {
     const msg = e?.message ?? String(e)
     log?.(`[agentspan] ${msg}`)
     return { error: msg, hint: 'Is the AgentSpan server running? (agentspan server start, default http://localhost:6767). Configure the URL in Settings → agentspan.' }
+  }
+}
+
+// ─── playbook resolution (from RTerm AutomationManager / settings) ─────────
+
+/** Find a named RTerm playbook from the plugin context (AutomationManager or
+ * settings.automation.playbooks), by id or name. */
+export function findPlaybook(ctx = {}, nameOrId) {
+  if (!nameOrId) return undefined
+  const want = String(nameOrId)
+  // 1) AutomationManager (runtime handle)
+  try {
+    const am = ctx.automationManager
+    if (am) {
+      if (typeof am.getPlaybook === 'function') {
+        const p = am.getPlaybook(want)
+        if (p) return p
+      }
+      if (typeof am.listPlaybooks === 'function') {
+        const found = (am.listPlaybooks() || []).find((x) => x.id === want || x.name === want)
+        if (found) return found
+      }
+    }
+  } catch { /* fall through to settings */ }
+  // 2) settings.automation.playbooks
+  try {
+    const s = (typeof ctx.getSettings === 'function' ? ctx.getSettings() : ctx.settings) || {}
+    const list = s.automation?.playbooks || []
+    return list.find((x) => x.id === want || x.name === want)
+  } catch {
+    return undefined
+  }
+}
+
+/** Build a default durable AgentConfig for `agentspan_delegate` (a simple
+ * tool-using ReAct agent compiled + started on the server). */
+export function buildDelegateAgentConfig(name, prompt, opts = {}) {
+  return {
+    name: name || 'rterm_delegate',
+    model: opts.model || 'openai/gpt-4o',
+    instructions: opts.instructions || 'You are a durable RTerm delegate agent. Complete the task, calling tools as needed.',
+    input: prompt,
   }
 }
 
@@ -238,6 +281,75 @@ export function register(ctx) {
     }, log),
   })
 
+  // Tool: agentspan_export_playbook — map a named RTerm playbook to a Conductor
+  // WorkflowDef (returns the def; does NOT register it). Pure/dry-run preview.
+  registerTool({
+    name: 'agentspan_export_playbook',
+    description: 'Map an RTerm playbook (by id or name) to a Conductor WorkflowDef and return it — a dry-run preview of what agentspan_register_playbook would register. command steps → HTTP run_command tasks, script steps → script-reference tasks, wait steps → WAIT tasks; sequential + dependsOn DAG + retries + rollback compensating tasks.',
+    params: {
+      playbook: { type: 'string', description: 'RTerm playbook id or name' },
+      execUri: { type: 'string', description: 'Override the RTerm exec URI tasks call (default from settings)', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      const pb = findPlaybook(ctx, p?.playbook)
+      if (!pb) return { error: `playbook not found: ${p?.playbook ?? '(none given)'}` }
+      const execUri = p?.execUri || `${config.gatewayUrl ?? 'http://localhost:17888'}/rpc/exec`
+      const def = playbookToWorkflowDef(pb, { execUri })
+      return { name: def.name, taskCount: def.tasks.length, def }
+    }, log),
+  })
+
+  // Tool: agentspan_register_playbook — register an RTerm playbook on the
+  // AgentSpan server as a Conductor WorkflowDef (so agentspan_run {workflow:<name>}
+  // and AgentSpan SUB_WORKFLOW steps can invoke it).
+  registerTool({
+    name: 'agentspan_register_playbook',
+    description: 'Export an RTerm playbook to a Conductor WorkflowDef AND register it on the AgentSpan server (POST /api/metadata/workflow), so it can be run durably via agentspan_run {workflow:<name>} or invoked by AgentSpan agents as a SUB_WORKFLOW step.',
+    params: {
+      playbook: { type: 'string', description: 'RTerm playbook id or name' },
+      execUri: { type: 'string', description: 'Override the RTerm exec URI tasks call (default from settings)', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      const pb = findPlaybook(ctx, p?.playbook)
+      if (!pb) return { error: `playbook not found: ${p?.playbook ?? '(none given)'}` }
+      const execUri = p?.execUri || `${config.gatewayUrl ?? 'http://localhost:17888'}/rpc/exec`
+      const def = playbookToWorkflowDef(pb, { execUri })
+      await client.registerWorkflowDef(def)
+      return {
+        registered: true,
+        name: def.name,
+        taskCount: def.tasks.length,
+        runWith: { tool: 'agentspan_run', args: { workflow: def.name } },
+        uiUrl: joinUrl(config.serverUrl, `/workflowDef/${def.name}`),
+      }
+    }, log),
+  })
+
+  // Tool: agentspan_delegate — run a prompt/task as a durable AgentSpan agent
+  // (AgentConfig), returning an executionId that survives RTerm/host restart.
+  registerTool({
+    name: 'agentspan_delegate',
+    description: 'Delegate a long-running task to AgentSpan: runs the prompt as a durable agent on the Conductor server (compiles + starts an AgentConfig) and returns an executionId that survives restarts. Follow up with agentspan_status / agentspan_approve / agentspan_stop.',
+    params: {
+      prompt: { type: 'string', description: 'The task/prompt for the durable agent' },
+      name: { type: 'string', description: 'Agent name (default rterm_delegate)', optional: true },
+      model: { type: 'string', description: 'Model id (default openai/gpt-4o)', optional: true },
+      instructions: { type: 'string', description: 'Override system instructions', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      if (!p?.prompt) return { error: 'agentspan_delegate needs a prompt' }
+      const cfg = buildDelegateAgentConfig(p.name, p.prompt, { model: p.model, instructions: p.instructions })
+      const r = await client.runAgent(cfg)
+      return {
+        delegated: true,
+        executionId: r.executionId,
+        serverUrl: config.serverUrl,
+        uiUrl: joinUrl(config.serverUrl, `/execution/${r.executionId}`),
+        followUp: { status: 'agentspan_status', approve: 'agentspan_approve', stop: 'agentspan_stop' },
+      }
+    }, log),
+  })
+
   // Trigger: agentspan_execution_failed — fires when a durable execution fails.
   registerTrigger({
     name: 'agentspan_execution_failed',
@@ -272,4 +384,6 @@ export default {
   summarizeStatus,
   toExecutionRows,
   isFailedExecution,
+  findPlaybook,
+  buildDelegateAgentConfig,
 }

@@ -92,6 +92,58 @@ remediation change) and an **AgentSpan Executions** dashboard panel.
 When the server is unreachable, every tool returns a clear
 `{error, hint: "Is the AgentSpan server running? …"}` instead of crashing the agent.
 
+## Phase 2 — RTerm playbooks as Conductor workflows + durable delegation
+
+Phase 2 deepens the integration in two ways: exporting RTerm's own playbooks to the AgentSpan
+server, and delegating long-running RTerm tasks to durable AgentSpan agents.
+
+### Export + register RTerm playbooks (`agentspan_export_playbook`, `agentspan_register_playbook`)
+
+`playbookToWorkflowDef(playbook)` maps an RTerm playbook to a Conductor **WorkflowDef**:
+
+| RTerm step | Conductor task |
+|---|---|
+| `command` | `HTTP` run_command task (carries the command + optional `validate`) |
+| `script` | `SIMPLE` script-reference task (`scriptId`, no inline body — resolved by the worker) |
+| `wait` | `WAIT` task (`duration`) |
+| sequential order | top-down task order |
+| `dependsOn` (multi) | a `JOIN` fan-in task before the dependent step |
+| `onError: continue` | `retryCount` |
+| `rollback` | compensating `optional` tasks appended in reverse step order (undo newest first) |
+
+- **`agentspan_export_playbook { playbook }`** → returns the mapped WorkflowDef (dry-run preview,
+  no registration).
+- **`agentspan_register_playbook { playbook }`** → maps **and** registers it on the server
+  (`POST /api/metadata/workflow`). The playbook can then be run durably with
+  `agentspan_run { workflow: <name> }` **and** invoked by AgentSpan agents as a `SUB_WORKFLOW` step.
+
+The command tasks call back into RTerm via an exec URI (default
+`http://localhost:17888/rpc/exec`, overridable per call) so the actual command execution still
+happens through RTerm's policy-gated path.
+
+### Durable task delegation (`agentspan_delegate`)
+
+`agentspan_delegate { prompt }` runs a long-running task as a **durable AgentSpan agent**
+(compiles + starts an `AgentConfig`) and returns an `executionId` that **survives RTerm/host
+restart**. Follow up with the existing `agentspan_status` / `agentspan_approve` / `agentspan_stop`.
+
+> "Delegate 'investigate the disk-full on web-01 and remediate' to AgentSpan as a durable agent."
+
+### Full tool list (9)
+
+| Tool | What it does |
+|---|---|
+| `agentspan_health` | server reachable? auth configured? |
+| `agentspan_run` | start a durable agent or named workflow |
+| `agentspan_status` | detailed per-task status + failure reason |
+| `agentspan_approve` | respond to a paused HUMAN task + resume |
+| `agentspan_list` | list recent executions |
+| `agentspan_stop` | terminate a running execution |
+| `agentspan_export_playbook` | map an RTerm playbook → WorkflowDef (dry-run) |
+| `agentspan_register_playbook` | map + register an RTerm playbook on the server |
+| `agentspan_delegate` | run a task as a durable agent (survives restart) |
+
+
 ## Example
 
 > "Run the `disk-cleanup` workflow as a durable job on AgentSpan and tell me the execution id."

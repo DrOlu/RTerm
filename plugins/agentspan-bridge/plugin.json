@@ -4,12 +4,15 @@
   "description": "AgentSpan/Conductor bridge for RTerm — run durable, crash-resilient agents and workflows on an AgentSpan (Conductor) server from RTerm. Adds durable agent execution (resume-from-step on crash), plan-execute determinism, enterprise event triggers, and a live execution feed to RTerm's agent + dashboard. Server URL + optional auth are configured in Settings (agentspan block); secrets via the vault.",
   "entry": "index.mjs",
   "tools": [
+    "agentspan_health",
     "agentspan_run",
     "agentspan_status",
     "agentspan_approve",
     "agentspan_list",
     "agentspan_stop",
-    "agentspan_health"
+    "agentspan_export_playbook",
+    "agentspan_register_playbook",
+    "agentspan_delegate"
   ],
   "triggers": [
     "agentspan_execution_failed"

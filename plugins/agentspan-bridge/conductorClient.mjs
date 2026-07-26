@@ -161,6 +161,22 @@ export class ConductorClient {
     const q = new URLSearchParams({ freeText: query, size: String(size), sort: 'startTime:DESC' })
     return this.request('GET', `/api/workflow/search?${q}`)
   }
+
+  // ── Metadata (WorkflowDef registration) ──────────────────────────────────
+  /** Register (create/update) a WorkflowDef on the server (POST /api/metadata/workflow).
+   * Accepts a single def or an array (Conductor accepts a JSON array of defs). */
+  async registerWorkflowDef(defOrDefs) {
+    if (!defOrDefs) throw new Error('registerWorkflowDef needs a WorkflowDef')
+    const body = Array.isArray(defOrDefs) ? defOrDefs : [defOrDefs]
+    return this.request('POST', '/api/metadata/workflow', body)
+  }
+
+  /** Get a registered WorkflowDef by name (+ optional version). */
+  async getWorkflowDef(name, version) {
+    if (!name) throw new Error('getWorkflowDef needs a name')
+    const q = version !== undefined ? `?version=${version}` : ''
+    return this.request('GET', `/api/metadata/workflow/${encodeURIComponent(name)}${q}`)
+  }
 }
 
 export default ConductorClient

@@ -203,11 +203,11 @@ function makeCtx(fetchImpl, settings = {}) {
   return { tools, triggers, panels, logs, ctx }
 }
 
-test('register wires 6 tools, 1 trigger, 1 panel', () => {
+test('register wires 9 tools, 1 trigger, 1 panel', () => {
   const { tools, triggers, panels, ctx } = makeCtx(null, { serverUrl: 'http://x:6767' })
   register(ctx)
-  assert.equal(tools.size, 6)
-  for (const n of ['agentspan_health', 'agentspan_run', 'agentspan_status', 'agentspan_approve', 'agentspan_list', 'agentspan_stop']) assert.ok(tools.has(n), `missing ${n}`)
+  assert.equal(tools.size, 9)
+  for (const n of ['agentspan_health', 'agentspan_run', 'agentspan_status', 'agentspan_approve', 'agentspan_list', 'agentspan_stop', 'agentspan_export_playbook', 'agentspan_register_playbook', 'agentspan_delegate']) assert.ok(tools.has(n), `missing ${n}`)
   assert.equal(triggers.length, 1)
   assert.equal(panels.length, 1)
 })

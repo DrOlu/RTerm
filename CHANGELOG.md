@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.9.10 (2026-07-26)
+
+### AgentSpan Phase 2 — RTerm Playbooks as Conductor Workflows + Durable Delegation
+
+Deepens the AgentSpan/Conductor bridge so the integration runs **both** directions: AgentSpan
+agents can now invoke RTerm's own playbooks as steps, and RTerm can delegate long-running tasks
+to durable AgentSpan agents.
+
+- **Export + register RTerm playbooks as Conductor WorkflowDefs.** New
+  `playbookToWorkflowDef(playbook)` pure mapper (`plugins/agentspan-bridge/playbookToWorkflowDef.mjs`):
+  command steps → `HTTP` run_command tasks, script steps → `SIMPLE` script-reference tasks,
+  wait steps → `WAIT` tasks; sequential + `dependsOn` DAG (multi-dep steps get a `JOIN` fan-in),
+  `onError: continue` → `retryCount`, and `rollback` steps → compensating `optional` tasks run in
+  reverse step order (undo newest first). New client methods `registerWorkflowDef`
+  (`POST /api/metadata/workflow`) + `getWorkflowDef`.
+- **2 new tools for playbooks:** `agentspan_export_playbook` (dry-run — returns the mapped
+  WorkflowDef) and `agentspan_register_playbook` (maps + registers it on the server so
+  `agentspan_run {workflow:<name>}` and AgentSpan `SUB_WORKFLOW` steps can call it). Command tasks
+  call back into RTerm's policy-gated exec path via a configurable exec URI.
+- **Durable task delegation:** new `agentspan_delegate` tool runs a prompt/task as a durable
+  AgentSpan agent (compiles + starts an `AgentConfig`) and returns an `executionId` that survives
+  RTerm/host restart — follow up with the existing `agentspan_status` / `agentspan_approve` /
+  `agentspan_stop`. The plugin now exposes **9 tools** + 1 trigger + 1 panel.
+- **Docs:** `docs/agentspan-integration.md` gains the Phase-2 section (mapping table, both
+  directions, full 9-tool reference).
+
+**Verification:** 22 new offline tests for the mapper (step→task, DAG edges, wait/rollback,
+retries), the new client methods, and all 3 new tools (mocked fetch) — plus the 26 Phase-1 tests
+stay green (48 total). pluginRegistry 17/17; pluginSuite 56/56; migrations 18/18; v2.9 suite
+217 PASS / 0 FAIL; backend-unit 232 PASS; backend + web typecheck exit 0.
+
 ## v2.9.9 (2026-07-26)
 
 ### AgentSpan / Conductor Integration — Durable, Crash-Resilient Agents
