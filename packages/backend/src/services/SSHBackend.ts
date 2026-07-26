@@ -1,4 +1,21 @@
-import * as ssh2 from "ssh2";
+// ssh2 is loaded lazily so the standalone CJS bundle can start without it being
+// present in a Node SEA single-binary build where ssh2's native crypto isn't embedded.
+// The pure-JS crypto path is used when the native sshcrypto.node isn't available.
+import type * as ssh2 from 'ssh2'
+import { createRequire } from 'node:module'
+
+let ssh2Lib: typeof import('ssh2') | null = null
+function loadSsh2(): typeof import('ssh2') {
+  if (ssh2Lib) return ssh2Lib
+  try {
+    // ESM-safe require: works under both tsx/ESM (tests) and the CJS app bundle.
+    const req = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
+    ssh2Lib = req('ssh2')
+    return ssh2Lib!
+  } catch (e) {
+    throw new Error(`ssh2 is not available in this build (SSH terminals are unavailable; WinRM/serial/local terminals still work): ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 import * as fs from "fs";
 import * as net from "net";
 import { dirname } from "node:path";
@@ -1156,7 +1173,7 @@ export class SSHBackend implements TerminalBackend {
         `\x1b[36m▹ ${jumpId} Establishing tunnel via jump host ${sshConfig.jumpHost.host}...\x1b[0m\r\n`,
       );
 
-      const jumpClient = new ssh2.Client();
+      const jumpClient = new (loadSsh2().Client)();
 
       // Recursive call to handle nested jump hosts or proxies for the jump host itself
       const jumpSock = await this.buildConnectSocketIfNeeded(
@@ -1532,7 +1549,7 @@ export class SSHBackend implements TerminalBackend {
     }
     const sshConfig: SSHConnectionConfig = config;
 
-    const client = new ssh2.Client();
+    const client = new (loadSsh2().Client)();
 
     const instance: SSHInstance = {
       client,

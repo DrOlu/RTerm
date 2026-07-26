@@ -199,125 +199,67 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           RELEASE_NAME: "RTerm v${{ steps.version.outputs.version }}"
-          RELEASE_BODY: |
-            RTerm v${{ steps.version.outputs.version }} — AI-Native Terminal App by Hyperspace Technologies
-
-            Synced from upstream GyShell, with RTerm-specific enhancements.
-
-            ## What's new in RTerm v1.7.6
-
-            - **No more upstream sync.** RTerm is now maintained independently — the GitHub Actions workflow no longer pulls from GyShell upstream or rebrands. The Build and Release workflow simply builds and releases the version on `main`. (You update RTerm yourself from now on.)
-            - **PuTTY import button is always visible** in the Connections → SSH section header (was hidden when existing connections were present).
-
-            ## What's new in RTerm v1.7.4
-
-            A visual polish + new app icon. Same engine, much better feel.
-
-            - **New app icon** across macOS / Windows / Linux (and the CI rebrand-restore now keeps the new icon set).
-            - **Command palette (⌘/Ctrl+K)** — fuzzy "do anything" launcher: open any saved SSH/WinRM/Serial connection, open the Connections/Settings panels, toggle session logging, or trigger PuTTY import, all from one keyboard-first overlay.
-            - **Toast notifications** — consistent bottom-right toasts for save/delete/import with optional undo, replacing silent inline messages.
-            - **Cohesive motion language** — a shared easing + duration token set, boot fade-in, and hover transitions across tabs/rows/cards.
-            - **Ambient depth** — a faint theme-tinted radial background behind the app for depth without distraction.
-            - **Themed overlay scrollbars** — thin, auto-hiding, themed everywhere.
-            - **Connection tab status pills + type tints** — colored left-border stripe per connection type (SSH/WinRM/Serial/Local/exited).
-            - **Split-pane visible grab handles** on hover.
-            - **Focus-visible rings** across all interactives (accessibility).
-            - **Reduced-motion support** — `prefers-reduced-motion` disables animations.
-            - **CSS scaffolding** for exit-code badges, fleet results tables, device-memory cards, empty-state illustrations, and approval modals (ready to wire into components).
-
-            ## What's new in RTerm v1.7.3
-
-            Closes every usability gap from 1.7.2: all automation features are now fully usable via the agent AND the Connections panel, plus improved chat rendering.
-
-            - **Every feature is now agent-usable.** `manage_ssh_connection` / `manage_winrm_connection` now accept `groupId` + `notes` (create a connection *and* put it in a folder in one call). New `manage_serial_connection` tool for serial console connections. New `list_session_logs` + `read_session_log` tools to review recorded sessions. `open_terminal_tab` and `probe_connectivity` now resolve Serial saved connections too.
-            - **Every feature is now UI-usable.** The Connections panel gains new sections: **Serial** (path/baud/parity/flow), **Groups** (folder tree with parent selector), **Scripts**, **Scheduled Tasks**, and **Templates** (Jinja-subset body editor). Each SSH/WinRM/Serial editor gains a **Group** selector and a **Notes** textarea. A **PuTTY import** button parses a `.reg` file into SSH connections. The terminal **+** menu lists serial connections alongside SSH/WinRM.
-            - **Improved chat rendering.** Raw HTML now renders inline (rehype-raw), images render with lazy loading, fenced code blocks carry language classes (enabling future syntax highlighting), and ` ```mermaid ` blocks render as a styled source preview with a Mermaid badge.
-            - Runtime: `AutomationManager` + `SessionLogService` wired into both runtimes; the session logger is exposed to the agent for list/read; serial ConnectionManager CRUD added.
-
-            ## What's new in RTerm v1.7.2
-
-            Netcatty + NetStacks parity — a full local-only automation & knowledge layer, plus serial console and PuTTY import. No server required.
-
-            - **Connection groups / folders.** Organize saved SSH/WinRM connections into a tree (parent/child); children of a deleted group reparent to root. New `manage_group` agent tool + `groupId` on connection entries.
-            - **Per-device memory.** Record role, standing instructions, and dated incident history per host (with ticket ids). Standing instructions are injected into the agent's context for that host on future turns. `manage_device_memory` agent tool (get/upsert/add_incident/list/delete).
-            - **Saved scripts / snippets.** A reusable command library. `manage_script` tool (create/update/delete/list); run a saved script's body on open tabs via `run_fleet_command`/`exec_command`.
-            - **Scheduled tasks (cron).** Create cron-scheduled tasks that run a saved script or inline command on a target scope. A local per-minute scheduler evaluates due tasks. `manage_scheduled_task` tool (5-field cron, retry, enable/disable).
-            - **Config templates (Jinja-subset).** Parameterized network config templates with `{{ var | default/upper/lower/length }}`, `{% for %}`, `{% if %}/{% elif %}/{% else %}`. `manage_template` tool: create → render (preview) → version (saves a versioned render + returns a diff vs the previous version for review/rollback). Dependency-free renderer.
-            - **Session logging.** Record terminal output per session to disk (Netcatty "connection logs"). New `SessionLogService` wired into the terminal data path; an index lists recorded sessions with start/end/bytes. Enable via `sessionLogging.enabled`.
-            - **Serial console connections.** New `serial` terminal type (`/dev/ttyUSB0`, COM3, baud/parity/flow-control) presented as a live PTY tab. Lazy-loads the `serialport` npm module (clear error if not installed); backend logic unit-tested with a mock transport (no serial hardware needed).
-            - **PuTTY import.** `import_putty` agent tool parses a Windows .reg PuTTY session export into saved SSH connections (ssh-protocol only, duplicate names skipped).
-            - **Per-connection `notes` + `groupId` fields** on SSH and WinRM entries.
-
-            ## What's new in RTerm v1.7.1
-
-            - **WinRM (Windows Remote Management) connectivity.** Connect to Windows servers over WS-Management on port 5985 (HTTP) / 5986 (HTTPS) with Basic auth, alongside SSH. Add WinRM connections from the Connections panel (new **WinRM** section) or with the new `manage_winrm_connection` agent tool, open a tab, and run PowerShell/cmd commands via `exec_command` / `run_fleet_command` / `collect_facts`.
-            - **WinRM is scoped to command execution + the fleet tools**, rendered as a **command/response log** (not a full interactive PTY) — the right model for WinRM's request/response shell. No streaming stdin / interactive TUI (vim/top/Ctrl+C) over WinRM; everything else (guardrails, structured output, exit codes, fleet fan-out, fact inventory, connectivity probe) works on WinRM tabs just like SSH/Linux tabs.
-            - **`manage_winrm_connection` agent tool** — create / update / delete / list saved WinRM connections, the Windows counterpart of `manage_ssh_connection`. `open_terminal_tab` and `probe_connectivity` now resolve WinRM saved connections too; saved WinRM connections are surfaced to the agent in system info.
-            - **Dependency-free WS-Management transport** — the new `WinRMTransport` hand-implements the SOAP/WS-Man command cycle (Create shell → Command → Receive-with-CommandId → Delete) over Node's built-in http/https, with no new npm dependency. Verified end-to-end against a live Windows Server 2022 target.
-            - The agent's command path (`TerminalService.runCommandAndWait`) now routes through an optional backend `executeCommand` hook for non-PTY backends, so WinRM commands bypass the SSH-style marker tracking cleanly.
-
-            ## What's new in RTerm v1.7.0
-
-            RTerm 1.7.0 turns the agent into a true data-center operator. Four new agent tools compose with the existing terminal/file/guardrail tools so you can provision, connect, inventory, and command whole fleets from a single chat — across Linux servers, Windows servers, and Cisco/legacy network gear.
-
-            - **`manage_ssh_connection`** — Create, update, delete, or list saved SSH connections the same way the Connections panel does. The agent can now provision a server end-to-end: "set up my core switch at 10.0.0.1, user admin, Cisco preset, vt100" → it creates the connection, then opens a tab for it. Mutations persist to backend settings and the Connections panel refreshes live; duplicate names are rejected so `open_terminal_tab` name-matching stays unambiguous.
-            - **`run_fleet_command`** — Run the same command on many open tabs at once and get one structured, machine-parseable `<fleet_results>` block (per-target OK/FAIL, exit code, output). "show version on all core switches", "free -m on every web node", "systemctl status nginx across the farm". The command is policy-checked once for the whole fleet, then fanned out in parallel; duplicates and not-ready tabs are handled gracefully.
-            - **`collect_facts`** — Inventory one or more open tabs (or all of them) with a small per-OS fact template (hostname, OS/version, uptime, interfaces) and return a structured `<inventory>` JSON block. A `defaultClass` hint (network/linux/windows) classifies raw-shell Cisco tabs that report no OS.
-            - **`probe_connectivity`** — Probe a saved connection's reachability: open a fresh tab (or reuse an open one), wait for ready/exit, and report REACHABLE/UNREACHABLE plus the detected OS class, status header, and login banner. The building block for autonomous ops and pre-change sanity checks.
-
-            All four go through the existing command-policy guardrails (allow/deny/ask + approval) and the shell-integration command tracking, so fleet ops are as safe as single-tab ops. Saved connections surfaced to the agent in system info now drive the whole lifecycle.
-
-            ## What's new in RTerm v1.6.3
-
-            - **Fix: Algorithms preset + TERM actually reach the SSH backend.** In v1.6.1/v1.6.2, connecting from the Connections panel dropped the *Algorithms* and *TERM* fields when building the runtime config, so Cisco/legacy raw-shell mode never engaged (SFTP warning + hang at "Opening interactive shell..." persisted). The saved connection's `algorithmsPreset` and `termType` are now forwarded, so **Algorithms: Cisco / Network gear + TERM: vt100** works as intended.
-
-            ## What's new in RTerm v1.6.2
-
-            - **Fix: Cisco / legacy SSH interactive shell now opens.** On v1.6.1 the connection succeeded but the shell hung at "Opening interactive shell..." because ssh2 sent `env` channel requests that Cisco IOS doesn't acknowledge, and the POSIX shell-integration injection (`base64`/`eval`) produced garbage on a network OS. The `cisco` and `legacy` presets now use a **raw-shell mode**: no `env` requests, no SFTP init, no OS-detection exec probes, and no shell-integration injection — the device's prompt streams straight through. Set **Algorithms: Cisco / Network gear** (or **Legacy**) and **TERM: vt100** in the Connections panel.
-
-            ## What's new in RTerm v1.6.1
-
-            - **Legacy / Cisco SSH support.** New *Algorithms* preset (Modern / Legacy / Cisco) and optional *TERM* type field on saved SSH connections. Older network gear (Cisco IOS/IOS-XE, legacy switches/routers) that only offers `diffie-hellman-group1-sha1`, `ssh-rsa`, `aes*-cbc`, `hmac-sha1` now connects successfully instead of failing the SSH handshake. Select **Algorithms: Cisco / Network gear** (or **Legacy**) in the Connections panel.
-            - **`open_terminal_tab` agent tool.** The AI agent can now open a new SSH terminal tab from a saved connection by Name or ID, instead of only operating on already-open tabs. Saved SSH connections are surfaced to the agent in the system info. Duplicate-open is detected and reported. Enables fully autonomous "connect to server X and run …" workflows.
-
-            ## Downloads
-
-            | Platform | File |
-            |----------|------|
-            | macOS ARM64 | `RTerm-${{ steps.version.outputs.version }}-arm64.dmg` |
-            | Windows x64 (Portable) | `RTerm.Portable.${{ steps.version.outputs.version }}-x64.exe` |
-            | Windows x64 (Setup) | `RTerm.Setup.${{ steps.version.outputs.version }}-x64.exe` |
-            | Linux x64 (AppImage) | `RTerm-${{ steps.version.outputs.version }}-x64.AppImage` |
-            | Linux x64 (deb) | `RTerm-${{ steps.version.outputs.version }}-x64.deb` |
-            | Linux x64 (pacman) | `RTerm-${{ steps.version.outputs.version }}-x64.pacman` |
-            | Linux x64 (rpm) | `RTerm-${{ steps.version.outputs.version }}-x64.rpm` |
-            | Linux ARM64 (AppImage) | `RTerm-${{ steps.version.outputs.version }}-arm64.AppImage` |
-            | Linux ARM64 (deb) | `RTerm-${{ steps.version.outputs.version }}-arm64.deb` |
-            | Linux ARM64 (rpm) | `RTerm-${{ steps.version.outputs.version }}-arm64.rpm` |
-
-            ## Install
-
-            **macOS:** After installing, run `xattr -cr /Applications/RTerm.app` to remove quarantine.
-
-            **Linux AppImage:** `chmod +x RTerm-*.AppImage && ./RTerm-*.AppImage`
-
-            **Linux deb:** `sudo dpkg -i RTerm-*.deb`
-
-            **Linux rpm:** `sudo rpm -i RTerm-*.rpm`
-
-            See [GyShell changelog](https://github.com/MrOrangeJJ/GyShell/releases/tag/v${{ steps.version.outputs.version }}) for details.
-
-            ---
-
-            Contact: rterm@hyperspace.ng
         run: |
           set -uo pipefail
-          printf '%s\n' "$RELEASE_BODY" > /tmp/release-notes.md
+          VERSION="${{ steps.version.outputs.version }}"
+          # Build the release body from CHANGELOG.md: extract this version's section
+          # (## vX.Y.Z ... up to the next "## v" heading). Fallback to a generic note
+          # if the section isn't found, so the release always has a real body and
+          # never a stale hardcoded template.
+          BODY_FILE="/tmp/release-notes.md"
+          {
+            echo "RTerm v${VERSION} — AI-Native Terminal App by Hyperspace Technologies"
+            echo ""
+          } > "$BODY_FILE"
+          SECTION=$(awk -v ver="$VERSION" '
+            $0 ~ "^## v" ver "( |$)" { inf=1; print; next }
+            inf && /^## v[0-9]/ { exit }
+            inf { print }
+          ' CHANGELOG.md || true)
+          if [ -n "$(printf '%s' "$SECTION" | tr -d '[:space:]')" ]; then
+            printf '%s\n' "$SECTION" >> "$BODY_FILE"
+          else
+            echo "See CHANGELOG.md for details of this release." >> "$BODY_FILE"
+          fi
+          # Append the Downloads + Install table (indented echo lines so the whole
+          # thing stays inside this run: | block — a column-0 heredoc would break YAML).
+          {
+            echo ""
+            echo "## Downloads"
+            echo ""
+            echo "| Platform | File |"
+            echo "|----------|------|"
+            echo "| macOS ARM64 | \`RTerm-${VERSION}-arm64.dmg\` |"
+            echo "| Windows x64 (Portable) | \`RTerm.Portable.${VERSION}-x64.exe\` |"
+            echo "| Windows x64 (Setup) | \`RTerm.Setup.${VERSION}-x64.exe\` |"
+            echo "| Linux x64 (AppImage) | \`RTerm-${VERSION}-x64.AppImage\` |"
+            echo "| Linux x64 (deb) | \`RTerm-${VERSION}-x64.deb\` |"
+            echo "| Linux x64 (pacman) | \`RTerm-${VERSION}-x64.pacman\` |"
+            echo "| Linux x64 (rpm) | \`RTerm-${VERSION}-x64.rpm\` |"
+            echo "| Linux ARM64 (AppImage) | \`RTerm-${VERSION}-arm64.AppImage\` |"
+            echo "| Linux ARM64 (deb) | \`RTerm-${VERSION}-arm64.deb\` |"
+            echo "| Linux ARM64 (rpm) | \`RTerm-${VERSION}-arm64.rpm\` |"
+            echo ""
+            echo "## Install"
+            echo ""
+            echo "**macOS:** After installing, run \`xattr -cr /Applications/RTerm.app\` to remove quarantine."
+            echo ""
+            echo "**Linux AppImage:** \`chmod +x RTerm-*.AppImage && ./RTerm-*.AppImage\`"
+            echo ""
+            echo "**Linux deb:** \`sudo dpkg -i RTerm-*.deb\`"
+            echo ""
+            echo "**Linux rpm:** \`sudo rpm -i RTerm-*.rpm\`"
+            echo ""
+            echo "---"
+            echo ""
+            echo "Contact: rterm@hyperspace.ng"
+          } >> "$BODY_FILE"
           ASSETS="dist/*.dmg dist/*.exe dist/*.AppImage dist/*.deb dist/*.pacman dist/*.rpm"
           # Resilient create/update: retries through transient GitHub API 5xx
           # (softprops/action-gh-release failed repeatedly with 503 Unicorn
           # pages on getReleaseByTag). gh CLI + explicit retry avoids that.
           OK=0
+
           for attempt in 1 2 3 4 5; do
             if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
               # Release already exists (e.g. a prior attempt published it

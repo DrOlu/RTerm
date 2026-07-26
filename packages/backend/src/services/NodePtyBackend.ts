@@ -1,4 +1,20 @@
-import * as pty from 'node-pty'
+// node-pty is loaded lazily (only when spawning a local PTY) so the standalone
+// CJS bundle can start without it being present (e.g., in a Node SEA single-binary
+// build where node-pty isn't embedded — SSH/WinRM terminals don't need local PTY).
+import { createRequire } from 'node:module'
+
+let pty: typeof import('node-pty') | null = null
+function loadPty(): typeof import('node-pty') {
+  if (pty) return pty
+  try {
+    // ESM-safe require: works under both tsx/ESM (tests) and the CJS app bundle.
+    const req = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
+    pty = req('node-pty')
+    return pty!
+  } catch (e) {
+    throw new Error(`node-pty is not available in this build (local PTY terminals are unavailable; SSH/WinRM/serial terminals still work): ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 import * as os from 'os'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -33,7 +49,7 @@ const execFileAsync = promisify(execFile)
 const GYSHELL_READY_MARKER = '__GYSHELL_READY__'
 
 interface PtyInstance {
-  pty: pty.IPty
+  pty: import('node-pty').IPty
   dataCallbacks: Set<(data: string) => void>
   exitCallbacks: Set<(code: number) => void>
   oscBuffer: string
@@ -426,7 +442,7 @@ export class NodePtyBackend implements TerminalBackend {
     } = this.buildShellIntegration(shell)
     const mergedEnv = { ...env, ...localeEnv, ...envOverrides }
 
-    const ptyProcess = pty.spawn(shell, args, {
+    const ptyProcess = loadPty().spawn(shell, args, {
       name: 'xterm-256color',
       cols: config.cols || 80,
       rows: config.rows || 24,
