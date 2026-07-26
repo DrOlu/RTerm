@@ -93,6 +93,10 @@ export async function manageTrigger(
       fireCount: 0,
     }
     m.upsertTrigger(entry)
+    // Sync the LIVE trigger engine too. createTriggerRuntime only loads persisted
+    // triggers once at startup, so without this a freshly-created trigger never fires
+    // until the backend restarts. (Bug: agent-created triggers silently never fired.)
+    try { engine?.upsert?.(entry) } catch { /* engine not wired in this runtime */ }
     const msg = `Created trigger "${entry.name}" (${entry.id}) [${entry.kind}] → ${entry.action} ${entry.playbookId}.`
     emit(context, 'manage_trigger', args, msg); return msg
   }
@@ -117,6 +121,7 @@ export async function manageTrigger(
       ...(args.cooldownSeconds !== undefined ? { cooldownSeconds: args.cooldownSeconds } : {}),
     }
     m.upsertTrigger(merged)
+    try { engine?.upsert?.(merged) } catch { /* engine not wired in this runtime */ }
     const msg = `Updated trigger "${merged.name}" (${merged.id}).`
     emit(context, 'manage_trigger', args, msg); return msg
   }
@@ -125,6 +130,7 @@ export async function manageTrigger(
     const key = args.id ?? args.name
     if (!key) { const msg = 'delete requires id or name.'; emit(context, 'manage_trigger', args, msg); return msg }
     const ok = m.deleteTrigger(key)
+    if (ok) { try { engine?.remove?.(key) } catch { /* engine not wired */ } }
     const msg = ok ? `Deleted trigger "${key}".` : `No trigger "${key}".`
     emit(context, 'manage_trigger', args, msg); return msg
   }
@@ -133,6 +139,12 @@ export async function manageTrigger(
     const key = args.id ?? args.name
     if (!key) { const msg = `${action} requires id or name.`; emit(context, 'manage_trigger', args, msg); return msg }
     const ok = m.setTriggerEnabled(key, action === 'enable')
+    if (ok) {
+      try {
+        const t = (m.listTriggers() as readonly TriggerEntry[]).find((x) => x.id === key || x.name === key)
+        if (t) engine?.upsert?.({ ...t, enabled: action === 'enable' })
+      } catch { /* engine not wired */ }
+    }
     const msg = ok ? `Trigger "${key}" ${action}d.` : `No trigger "${key}".`
     emit(context, 'manage_trigger', args, msg); return msg
   }

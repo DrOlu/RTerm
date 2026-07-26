@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.9.12 (2026-07-26)
+
+### Fix — Agent-Created Triggers Now Fire Immediately (No Restart Needed)
+
+**Event-driven triggers created via the agent's `manage_trigger` tool never fired until the backend
+restarted.** `createTriggerRuntime` only loads persisted triggers **once at startup**; the agent tool
+wrote new triggers to the `AutomationManager` store but never told the live `TriggerEngine`, so a
+freshly created pattern/threshold trigger silently did nothing.
+
+- **`manage_trigger` now syncs the live engine on every mutation:** `create`/`update` →
+  `engine.upsert()`, `delete` → `engine.remove()`, `enable`/`disable` → `engine.upsert({...t, enabled})`.
+  New triggers fire immediately; deleted/disabled ones stop.
+- **Regression tests added:** `create` must sync into the live engine so it fires without restart;
+  `delete` must stop it. trigger_tools suite 14/14 green.
+
+Validated end-to-end against the live gateway: the full Automation & Change-Management surface works —
+reusable scripts, cron scheduled tasks, Jinja config templates (render + versioned diff), multi-step
+playbooks (command/wait), approval-gated MOP changes (plan → approve → run → committed), and
+**auto-rollback on validation failure** (rolled_back). The full SRE/observability pillar passes a
+17/18-method live smoke (the one "failure" is the GitOps guard correctly rejecting a missing manifest
+with a clear message — export → inSync round-trips `true`). Integrations verified live: Telegram
+(message delivered), AWS (sts + EC2 inventory parsed via CloudInventory), NATS (server reachable;
+needs its own auth, which isn't in the vault — feature is wired, just needs credentials).
+
+**Verification:** backend typecheck exit 0; v2.9 suite 218 PASS / 0 FAIL; backend-unit 232 PASS / 0
+FAIL; automation 660 PASS / 0 FAIL.
+
 ## v2.9.11 (2026-07-26)
 
 ### Fix — Agent-Tool Session Recording Now Captures (Was 0 Events)

@@ -61,6 +61,28 @@ test('create requires name, kind, playbookId', async () => {
   if (!/requires playbookId/.test(await manageTrigger({ action: 'create', name: 'x', kind: 'pattern' } as any, ctx))) throw new Error('pb check')
 })
 
+// Regression: agent-created triggers must sync into the LIVE trigger engine (not just the
+// persisted store), or they never fire until the backend restarts.
+test('create syncs the new trigger into the live engine so it fires without restart', async () => {
+  const { ctx, engine } = mkContext()
+  await manageTrigger({ action: 'create', name: 'live-sync', kind: 'pattern', playbookId: 'pb1', match: 'SYNC_ME' }, ctx)
+  // The engine must already know the trigger (no restart) — feeding matching data should fire it.
+  engine!.handleTerminalData('h', 'this output contains SYNC_ME in it')
+  const fires = engine!.listFires?.() ?? []
+  if (!fires.some((f: any) => f.triggerName === 'live-sync')) throw new Error('live trigger did not fire after agent create (engine not synced)')
+})
+
+test('delete removes the trigger from the live engine too', async () => {
+  const { ctx, engine } = mkContext()
+  await manageTrigger({ action: 'create', name: 'del-sync', kind: 'pattern', playbookId: 'pb1', match: 'DEL_ME' }, ctx)
+  engine!.handleTerminalData('h', 'DEL_ME once')
+  await manageTrigger({ action: 'delete', name: 'del-sync' }, ctx)
+  const before = (engine!.listFires?.() ?? []).length
+  engine!.handleTerminalData('h', 'DEL_ME again')
+  const after = (engine!.listFires?.() ?? []).length
+  if (after !== before) throw new Error('trigger still firing after agent delete (engine not synced)')
+})
+
 test('list shows triggers with enabled state and condition', async () => {
   const { ctx } = mkContext([{ id: 't1', name: 'cpu', enabled: true, kind: 'threshold', action: 'run-playbook', playbookId: 'pb1', metric: 'cpu', op: 'gt', value: 90, createdAt: 1 }])
   const out = await manageTrigger({ action: 'list' }, ctx)
