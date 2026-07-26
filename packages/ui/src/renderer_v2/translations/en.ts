@@ -51,6 +51,7 @@ export const en = {
     alerts: "Alerts",
     oncall: "On-Call",
     cloud: "Cloud",
+    agentspan: "AgentSpan",
     version: "Version",
     language: "Language",
     tabDisplayMode: "Tab Display Mode",

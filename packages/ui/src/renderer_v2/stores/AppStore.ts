@@ -260,6 +260,7 @@ export type SettingsSection =
   | "alerts"
   | "oncall"
   | "cloud"
+  | "agentspan"
   | "version";
 
 export type McpToolSummary = Awaited<
@@ -546,6 +547,7 @@ export class AppStore {
       saveAlertChannels: action,
       saveOncallChannels: action,
       saveCloudAccounts: action,
+      saveAgentspanSettings: action,
       saveProfile: action,
       deleteProfile: action,
       setActiveProfile: action,
@@ -2383,6 +2385,23 @@ export class AppStore {
       }
     });
     await window.gyshell.settings.set({ cloud: { accounts } });
+  }
+
+  /**
+   * Persist the AgentSpan/Conductor bridge config (server URL + optional auth
+   * secretRef). Read by the agentspan-bridge plugin; auth is never inline.
+   */
+  async saveAgentspanSettings(agentspan: {
+    serverUrl?: string;
+    authSecretRef?: string;
+    enabled?: boolean;
+  }): Promise<void> {
+    runInAction(() => {
+      if (this.settings) {
+        this.settings = { ...this.settings, agentspan } as AppSettings;
+      }
+    });
+    await window.gyshell.settings.set({ agentspan });
   }
 
   setMobileWebStatus(status: {

@@ -1,5 +1,41 @@
 # Changelog
 
+## v2.9.9 (2026-07-26)
+
+### AgentSpan / Conductor Integration — Durable, Crash-Resilient Agents
+
+Adds an optional bridge to an [AgentSpan](https://github.com/agentspan-ai/agentspan) (Netflix
+Conductor) server, giving RTerm the one capability it didn't have: **durable agent execution —
+a crashed or restarted run resumes from the last completed step** (instead of just being marked
+`aborted` in the run ledger). Deployed as a **sidecar + plugin bridge** — no RTerm core changes.
+
+- **New `agentspan-bridge` plugin** (6 tools, 1 trigger, 1 panel), auto-integrated by the
+  plugin registry:
+  - `agentspan_health` / `agentspan_run` / `agentspan_status` / `agentspan_approve` /
+    `agentspan_list` / `agentspan_stop` — start durable agents (`AgentConfig`) or named Conductor
+    workflows, inspect per-task progress, respond to human-in-the-loop pauses, list executions,
+    and stop runs.
+  - `agentspan_execution_failed` trigger → proposes a remediation change on FAILED/TERMINATED/
+    TIMED_OUT.
+  - **AgentSpan Executions** dashboard panel.
+- **Dependency-free `conductorClient.mjs`** — a pure + injectable HTTP client for the AgentSpan
+  `/api/agent/*` lifecycle surface and Conductor `/api/workflow/*` engine surface (health,
+  start/compile, status, respond, stop, events, search, terminate, retry). AgentSpan standalone
+  auth (`X-Auth-Key`/`X-Auth-Secret`) supported via a vault `secretRef` — never inline.
+- **Settings → AgentSpan** UI section + `agentspan` settings block (schema v5) with a
+  `normalizeAgentspanSettings` migration guard: server URL, optional auth secretRef, enable
+  toggle. The plugin resolves config + auth from settings/vault on every call.
+- **Resilient by design:** when the AgentSpan server is down, every tool returns a clear
+  `{error, hint}` instead of crashing the agent.
+- **Docs:** `docs/agentspan-integration.md` — what AgentSpan adds (durability, plan-execute
+  determinism, Kafka/SQS/AMQP triggers, visual execution UI, multi-framework/multi-language
+  agents) vs what RTerm already has, plus sidecar setup.
+
+**Verification:** 26 new offline tests for the bridge (client URL/auth/errors + every endpoint,
+plugin glue, unreachable-server resilience) all pass; pluginRegistry 17/17; pluginSuite 56/56;
+migrations 18/18; v2.9 suite 217 PASS / 0 FAIL; backend-unit 232 PASS; backend + web typecheck
+exit 0.
+
 ## v2.9.8 (2026-07-26)
 
 ### Backend Typecheck Green + Release Notes from CHANGELOG

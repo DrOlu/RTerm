@@ -51,6 +51,7 @@ export const zh = {
     alerts: "告警",
     oncall: "值班",
     cloud: "云",
+    agentspan: "AgentSpan 代理",
     version: "版本",
     language: "语言",
     tabDisplayMode: "Tab 显示模式",

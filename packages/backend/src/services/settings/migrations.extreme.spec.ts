@@ -362,6 +362,27 @@ test('normalizeCloudSettings drops malformed + coerces unknown provider', () => 
   assertEqual(migrated.cloud!.accounts[0].provider, 'aws', 'unknown provider coerced to aws')
 })
 
+test('normalizeAgentspanSettings defaults + preserves + sanitizes', () => {
+  // missing block → default enabled, no serverUrl
+  const d = migrateBackendSettings({ ...DEFAULT_BACKEND_SETTINGS, schemaVersion: 4 } as any)
+  delete (d as any).agentspan
+  const def = migrateBackendSettings(d)
+  assertEqual(def.agentspan!.enabled, true, 'agentspan defaults to enabled')
+  assertEqual(def.agentspan!.serverUrl, undefined, 'no serverUrl by default (plugin falls back to localhost:6767)')
+  // valid block preserved
+  const m = migrateBackendSettings({
+    ...DEFAULT_BACKEND_SETTINGS,
+    schemaVersion: 4,
+    agentspan: { serverUrl: ' http://conductor:6767/ ', authSecretRef: 'as-auth', enabled: false },
+  } as any)
+  assertEqual(m.agentspan!.serverUrl, 'http://conductor:6767/', 'serverUrl trimmed of whitespace (trailing slash stripped by plugin)')
+  assertEqual(m.agentspan!.authSecretRef, 'as-auth', 'authSecretRef preserved (no inline secret)')
+  assertEqual(m.agentspan!.enabled, false, 'enabled=false preserved')
+  // garbage → safe defaults
+  const g = migrateBackendSettings({ ...DEFAULT_BACKEND_SETTINGS, schemaVersion: 4, agentspan: 'junk' } as any)
+  assertEqual(g.agentspan!.enabled, true, 'garbage block → enabled default')
+})
+
 function main() {
   let pass = 0, fail = 0
   for (const c of cases) {

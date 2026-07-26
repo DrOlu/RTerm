@@ -75,6 +75,11 @@ interface BackendSettings {
       enabled: boolean;
     }>;
   };
+  agentspan?: {
+    serverUrl?: string;
+    authSecretRef?: string;
+    enabled?: boolean;
+  };
   tools: {
     builtIn: Record<string, boolean>;
     skills?: Record<string, boolean>;

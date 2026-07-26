@@ -630,6 +630,21 @@ export interface CloudSettings {
   accounts: CloudAccountEntry[]
 }
 
+/**
+ * AgentSpan/Conductor bridge configuration. The agentspan-bridge plugin reads
+ * this to reach an AgentSpan (Conductor) server. Auth is optional and never
+ * inline — `authSecretRef` points at a vault key holding
+ * "AGENTSPAN_AUTH_KEY=…\nAGENTSPAN_AUTH_SECRET=…".
+ */
+export interface AgentspanSettings {
+  /** AgentSpan/Conductor server base URL (default http://localhost:6767). */
+  serverUrl?: string
+  /** vault key holding the AgentSpan standalone auth key/secret blob. */
+  authSecretRef?: string
+  /** enable/disable the bridge without removing config. */
+  enabled?: boolean
+}
+
 export interface BackendSettings {
   /** Settings schema version, used for migrations */
   schemaVersion: 5
@@ -722,6 +737,9 @@ export interface BackendSettings {
 
   /** Cloud-inventory accounts (aws/gcp/azure), credentials via vault. */
   cloud?: CloudSettings
+
+  /** AgentSpan/Conductor bridge (durable agent runtime), auth via vault. */
+  agentspan?: AgentspanSettings
 
   /** WebSocket gateway exposure policy */
   gateway: {

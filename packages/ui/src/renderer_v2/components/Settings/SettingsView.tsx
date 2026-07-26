@@ -27,6 +27,7 @@ import {
   Bell,
   PhoneCall,
   Cloud,
+  Workflow,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { AppStore } from "../../stores/AppStore";
@@ -918,6 +919,106 @@ function CloudPanel({ store }: { store: AppStore }) {
   );
 }
 
+/**
+ * AgentSpan panel — configure the AgentSpan/Conductor bridge (the
+ * agentspan-bridge plugin). Server URL + optional auth (via a vault secretRef,
+ * never inline). Saved via settings.set → the plugin resolves it on next call.
+ */
+function AgentspanPanel({ store }: { store: AppStore }) {
+  const cur = store.settings?.agentspan;
+  const [serverUrl, setServerUrl] = useState(cur?.serverUrl ?? "");
+  const [authSecretRef, setAuthSecretRef] = useState(cur?.authSecretRef ?? "");
+  const [enabled, setEnabled] = useState(cur?.enabled !== false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    setServerUrl(cur?.serverUrl ?? "");
+    setAuthSecretRef(cur?.authSecretRef ?? "");
+    setEnabled(cur?.enabled !== false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [store.settings?.agentspan]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await store.saveAgentspanSettings({
+        ...(serverUrl.trim() ? { serverUrl: serverUrl.trim() } : {}),
+        ...(authSecretRef.trim() ? { authSecretRef: authSecretRef.trim() } : {}),
+        enabled,
+      });
+      setSavedAt(Date.now());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <div className="settings-section-title">
+          {(store.i18n.t.settings as any).agentspan ?? "AgentSpan"}
+        </div>
+        <div className="settings-actions">
+          <button className="btn-primary" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="settings-section-desc">
+        Connect RTerm to an <strong>AgentSpan (Netflix Conductor)</strong> server
+        for <strong>durable, crash-resilient agent execution</strong> (runs
+        resume from the last completed step), plan-execute determinism, and
+        enterprise event triggers (Kafka/SQS/AMQP). Run the server with
+        <code> agentspan server start</code> (default <code>http://localhost:6767</code>).
+        Auth is optional and stored only as a vault <code>secretRef</code>.
+        {savedAt ? <span style={{ marginLeft: 8, opacity: 0.7 }}>Saved {new Date(savedAt).toLocaleTimeString()}</span> : null}
+      </div>
+
+      <div className="settings-subsection-header">Bridge</div>
+      <div className="connections-table">
+        <div className="connections-row" style={{ display: "block", padding: "10px 0" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            <input
+              className="editor-input"
+              style={{ width: 320 }}
+              placeholder="server URL (default http://localhost:6767)"
+              value={serverUrl}
+              onChange={(e) => setServerUrl(e.target.value)}
+            />
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+              <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+              enabled
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              className="editor-input"
+              style={{ width: 320 }}
+              placeholder="authSecretRef (vault key — optional)"
+              value={authSecretRef}
+              onChange={(e) => setAuthSecretRef(e.target.value)}
+            />
+            <span style={{ fontSize: 12, opacity: 0.7 }}>
+              vault key holding <code>AGENTSPAN_AUTH_KEY</code> + <code>AGENTSPAN_AUTH_SECRET</code> (only if the server has standalone auth on)
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="settings-subsection-header">What you get</div>
+      <div className="settings-section-desc">
+        Once configured, the agent gains 6 tools — <code>agentspan_health</code>,
+        <code> agentspan_run</code>, <code> agentspan_status</code>,
+        <code> agentspan_approve</code>, <code> agentspan_list</code>,
+        <code> agentspan_stop</code> — a failed-execution trigger, and an
+        executions dashboard panel. Ask the agent to "run X as a durable agent on
+        AgentSpan" and it will survive restarts and resume from the last step.
+      </div>
+    </>
+  );
+}
+
 function ThemeTile(props: {
   active?: boolean;
   theme: AppTheme;
@@ -1585,6 +1686,11 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
             "cloud",
             <Cloud size={16} strokeWidth={2} />,
             (t.settings as any).cloud ?? "Cloud",
+          )}
+          {renderNavItem(
+            "agentspan",
+            <Workflow size={16} strokeWidth={2} />,
+            (t.settings as any).agentspan ?? "AgentSpan",
           )}
           {renderNavItem(
             "version",
@@ -3394,6 +3500,10 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
 
             {store.settingsSection === "cloud" ? (
               <CloudPanel store={store} />
+            ) : null}
+
+            {store.settingsSection === "agentspan" ? (
+              <AgentspanPanel store={store} />
             ) : null}
 
             {store.settingsSection === "version" ? (

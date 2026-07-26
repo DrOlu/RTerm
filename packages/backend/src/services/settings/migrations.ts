@@ -1,4 +1,4 @@
-import type { AlertsSettings, BackendSettings, CloudSettings, CostSettings, OncallSettings, WsGatewayAccess } from "../../types";
+import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, OncallSettings, WsGatewayAccess } from "../../types";
 import { BUILTIN_TOOL_INFO } from "../AgentHelper/tools";
 import { normalizeAgentSettingState } from "./agentSettings";
 import { deepMerge, isObject } from "./objectMerge";
@@ -57,6 +57,10 @@ export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
   cloud: {
     accounts: [],
   },
+  agentspan: {
+    serverUrl: "",
+    enabled: true,
+  },
   gateway: {
     ws: {
       access: "localhost",
@@ -113,6 +117,7 @@ function pickBackendSnapshot(raw: unknown): Partial<BackendSettings> {
     alerts: raw.alerts,
     oncall: raw.oncall,
     cloud: raw.cloud,
+    agentspan: raw.agentspan,
     gateway: raw.gateway,
     layout: raw.layout,
     recursionLimit: raw.recursionLimit,
@@ -241,6 +246,7 @@ function normalizeBackendSettings(settings: BackendSettings): BackendSettings {
   next.alerts = normalizeAlertsSettings(next.alerts);
   next.oncall = normalizeOncallSettings(next.oncall);
   next.cloud = normalizeCloudSettings(next.cloud);
+  next.agentspan = normalizeAgentspanSettings(next.agentspan);
 
   next.schemaVersion = BACKEND_SETTINGS_SCHEMA_VERSION;
   return next;
@@ -450,6 +456,21 @@ export function normalizeCloudSettings(raw: unknown): CloudSettings {
     });
   }
   return { accounts };
+}
+
+/**
+ * Normalize the AgentSpan bridge block: coerce serverUrl to a trimmed string,
+ * keep the authSecretRef pointer (never inline), default enabled=true.
+ */
+export function normalizeAgentspanSettings(raw: unknown): AgentspanSettings {
+  const src = isObject(raw) ? (raw as Record<string, unknown>) : {};
+  const serverUrl = typeof src.serverUrl === "string" ? src.serverUrl.trim() : "";
+  const authSecretRef = typeof src.authSecretRef === "string" && src.authSecretRef.trim() ? src.authSecretRef.trim() : undefined;
+  return {
+    ...(serverUrl ? { serverUrl } : {}),
+    ...(authSecretRef ? { authSecretRef } : {}),
+    enabled: src.enabled !== false,
+  };
 }
 
 function migrateBackendToV3(
