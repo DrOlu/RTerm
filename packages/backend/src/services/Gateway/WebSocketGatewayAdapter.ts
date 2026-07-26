@@ -13,11 +13,14 @@ import type {
   ListFileTransfersOptions,
   StartFileTransferInput,
 } from "../FileTransferService";
+import { buildDescribePayload } from "./methodRegistry";
+import { OBSERVABILITY_METHODS } from "./observabilityBridge";
 
 type WebSocketRpcMethod =
   | "gateway:ping"
   | "gateway:isSameMachine"
   | "gateway:createSession"
+  | "gateway:describe"
   | "session:list"
   | "session:get"
   | "agent:exportHistory"
@@ -881,6 +884,19 @@ export class WebSocketGatewayAdapter {
         return { pong: true, ts: Date.now() };
       case "gateway:isSameMachine":
         return { sameMachine: this.isSameMachineBySocket.get(socket) === true };
+      case "gateway:describe": {
+        // Self-discovery: return the full method registry (core + this method +
+        // observability), so clients/agents/SDKs can introspect the surface
+        // without reading source. Optional category / prefix filters.
+        const obs = (OBSERVABILITY_METHODS as readonly string[]).map((name) => ({ name }))
+        const payload = buildDescribePayload(obs)
+        const category = typeof params.category === "string" && params.category ? params.category : undefined
+        const prefix = typeof params.prefix === "string" && params.prefix ? params.prefix : undefined
+        let methods = payload.methods
+        if (category) methods = methods.filter((mm) => mm.category === category)
+        if (prefix) methods = methods.filter((mm) => mm.name.startsWith(prefix))
+        return { version: payload.version, count: methods.length, total: payload.count, categories: payload.categories, methods }
+      }
       case "gateway:createSession": {
         const sessionId = await this.gateway.createSession();
         return { sessionId };

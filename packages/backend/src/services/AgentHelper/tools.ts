@@ -96,6 +96,7 @@ import {
   getDemSummarySchema, getDemSummary,
   collectInfraSchema, collectInfra,
   manageEtwSchema, manageEtw,
+  listGatewayMethodsSchema, listGatewayMethods,
 } from './tools/observability_tools'
 import { 
   skillToolSchema, 
@@ -370,6 +371,11 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: getLiveDashboardSchema
     },
     {
+      name: 'list_gateway_methods',
+      description: 'API self-discovery — list the WebSocket gateway RPC methods (names, categories, descriptions, params) from the shared registry. Optionally filter by category or name prefix. Use to answer "what can the gateway do?" accurately instead of guessing method names.',
+      schema: listGatewayMethodsSchema
+    },
+    {
       name: 'ingest_apm_spans',
       description: 'Ingest OTLP/HTTP-JSON distributed-trace spans into the APM trace store (feeds bottleneck/slowest-trace analysis and the dashboard APM section).',
       schema: ingestApmSpansSchema
@@ -452,6 +458,7 @@ export const toolImplementations = {
   getDemSummary,
   collectInfra,
   manageEtw,
+  listGatewayMethods,
   writeFile,
   editFile,
   writeAndEdit,

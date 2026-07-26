@@ -516,6 +516,10 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     description: "Live multi-client dashboard — read the current unified dashboard state/summary, or the number of connected dashboard subscribers.",
   },
   {
+    name: "list_gateway_methods",
+    description: "API self-discovery — list the WebSocket gateway RPC methods (names, categories, descriptions, params) from the shared registry. Optionally filter by category or name prefix. Use to answer \"what can the gateway do?\" accurately instead of guessing method names.",
+  },
+  {
     name: "ingest_apm_spans",
     description: "Ingest OTLP/HTTP-JSON distributed-trace spans into the APM trace store (feeds bottleneck/slowest-trace analysis and the dashboard APM section).",
   },

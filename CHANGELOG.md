@@ -1,5 +1,37 @@
 # Changelog
 
+## v3.0.0 (2026-07-26)
+
+### API Self-Discovery — `gateway:describe` + a Single-Source Method Registry
+
+The gateway now **describes itself**. Ask it what it can do and get a live, accurate answer —
+no more reading `WebSocketGatewayAdapter.ts` to learn the RPC method names.
+
+- **New `methodRegistry.ts`** — the single source of truth for the entire gateway RPC surface.
+  The adapter's dispatch, the `gateway:describe` endpoint, the agent tool, and the reference docs
+  all derive from this one registry, so they can never drift. Each method entry carries its
+  **name, category, description, the version it was introduced (`since`), and params** (a small
+  JSON-Schema-ish shape for client codegen / introspection). 123 methods across 12 categories
+  (gateway, session, agent, terminal, filesystem, system, models, skills, memory, settings,
+  tools, observability).
+- **New `gateway:describe` RPC** — returns the full registry (version, count, categories,
+  methods). Optional `category` and `prefix` filters (e.g. `category:"observability"` or
+  `prefix:"settings:"`). Self-lists `gateway:describe`.
+- **New `list_gateway_methods` agent tool** — the agent can now ask "what can the gateway do?"
+  and answer from the same live registry instead of a hardcoded, version-drifting list. Same
+  category/prefix filters.
+- **Tests (6/6 registry, 12/12 tools, 218/0 v29):** registry includes core + describe + all 52
+  observability methods, no duplicate names, valid categories + descriptions, **no drift** vs
+  `OBSERVABILITY_METHODS`, category/prefix filtering, total count. Agent tool listed in
+  `BUILTIN_TOOL_INFO` (tools-section visibility).
+
+**Why a major bump:** this changes the gateway's public contract surface in a forward-only way
+(it adds a first-class discovery endpoint + a documented registry clients can rely on), and it's
+the foundation for generated SDKs/CLIs that stay in sync automatically.
+
+**Verification:** backend typecheck exit 0; backend-unit 232 PASS; v2.9 suite 218 PASS / 0 FAIL;
+methodRegistry 6/6; web typecheck exit 0.
+
 ## v2.9.13 (2026-07-26)
 
 ### Fix — Version Check 403 + No GitHub in UI (Silent Background Updates)
@@ -56,6 +88,7 @@ needs its own auth, which isn't in the vault — feature is wired, just needs cr
 FAIL; automation 660 PASS / 0 FAIL.
 
 ## v2.9.11 (2026-07-26)
+
 
 ### Fix — Agent-Tool Session Recording Now Captures (Was 0 Events)
 

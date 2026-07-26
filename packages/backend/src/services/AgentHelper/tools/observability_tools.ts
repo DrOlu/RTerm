@@ -1,5 +1,26 @@
 import { z } from 'zod'
 import type { ToolExecutionContext } from '../types'
+import { buildDescribePayload } from '../../Gateway/methodRegistry'
+import { OBSERVABILITY_METHODS } from '../../Gateway/observabilityBridge'
+
+/** Self-discovery (v3.0.0): the agent asks "what can the gateway do?" and gets a
+ * live, accurate answer from the shared method registry — no hardcoded list. */
+export const listGatewayMethodsSchema = z.object({
+  category: z.string().optional().describe("Filter to one category (gateway/session/agent/terminal/filesystem/system/models/skills/memory/settings/tools/observability)."),
+  prefix: z.string().optional().describe("Filter to methods whose name starts with this prefix (e.g. 'observability:', 'settings:', 'terminal:')."),
+})
+export async function listGatewayMethods(args: z.infer<typeof listGatewayMethodsSchema>, context: ToolExecutionContext): Promise<string> {
+  const payload = buildDescribePayload((OBSERVABILITY_METHODS as readonly string[]).map((name) => ({ name })))
+  let methods = payload.methods
+  const category = typeof args.category === 'string' && args.category ? args.category : undefined
+  const prefix = typeof args.prefix === 'string' && args.prefix ? args.prefix : undefined
+  if (category) methods = methods.filter((mm) => mm.category === category)
+  if (prefix) methods = methods.filter((mm) => mm.name.startsWith(prefix))
+  const lines = methods.map((mm) => `- ${mm.name} [${mm.category}] ${mm.description}${mm.params ? ' (params: ' + Object.entries(mm.params).map(([k, v]) => `${k}${v.optional ? '?' : ''}:${v.type}`).join(', ') + ')' : ''}`)
+  const out = `Gateway methods (${methods.length} of ${payload.count}, registry v${payload.version}):\n${lines.join('\n')}`
+  emit(context, 'list_gateway_methods', args, out)
+  return out
+}
 
 /**
  * observability_* agent tools (v2.9.x) — let the agent drive the 9 platform
