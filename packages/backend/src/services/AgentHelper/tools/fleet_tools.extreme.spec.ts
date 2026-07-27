@@ -199,7 +199,7 @@ test('collect_facts wraps PowerShell facts for cmd-shell (winrm) windows targets
 
 test('collect_facts wraps windows template for a winrm target end-to-end', async () => {
   const term = new FakeTerm()
-  const t = term.addTab('wr1', 'win-srv', { remoteOs: 'windows', type: 'winrm' })
+  term.addTab('wr1', 'win-srv', { remoteOs: 'windows', type: 'winrm' })
   term.outputs['wr1|hostname'] = 'WIN-SRV'
   term.outputs['wr1|powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"'] = '5.1.20348'
   term.outputs['wr1|powershell -NoProfile -Command "[System.Environment]::OSVersion.VersionString"'] = 'Microsoft Windows NT 10.0.20348.0'
