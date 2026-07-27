@@ -312,6 +312,23 @@ export async function getCloudInventory(args: z.infer<typeof getCloudInventorySc
   return out
 }
 
+// ─── monitor status diagnostic ─────────────────────────────────────────────
+export const getMonitorStatusSchema = z.object({
+  format: z.enum(['report', 'summary']).optional().describe("'report' = full per-terminal JSON; 'summary' = compact text (default)."),
+})
+export async function getMonitorStatus(args: z.infer<typeof getMonitorStatusSchema>, context: ToolExecutionContext): Promise<string> {
+  const { o, msg } = obs(context, 'get_monitor_status', args)
+  if (!o) return msg!
+  let out: string
+  if (args.format === 'report') {
+    out = JSON.stringify(o.monitorStatus.report(), null, 2)
+  } else {
+    out = o.monitorStatus.summary()
+  }
+  emit(context, 'get_monitor_status', args, out)
+  return out
+}
+
 // ─── live dashboard ────────────────────────────────────────────────────────
 export const getLiveDashboardSchema = z.object({
   action: z.enum(['state', 'subscribers']).describe("'state' = current dashboard state; 'subscribers' = connected client count."),

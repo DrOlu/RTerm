@@ -38,6 +38,9 @@ export function createObservabilityBridge(deps: ObservabilityBridgeDeps) {
     dashboardState: async () => requireObs(deps).dashboard.state(),
     /** dashboard summary line. */
     dashboardSummary: async () => requireObs(deps).dashboard.summary(),
+    /** monitor-status diagnostic: why stats aren't displaying per terminal. */
+    monitorStatus: async () => requireObs(deps).monitorStatus.report(),
+    monitorStatusSummary: async () => ({ summary: requireObs(deps).monitorStatus.summary() }),
 
     // ── secrets vault (metadata only — never values) ────────────────────────
     secretsList: async (params: { labelKey?: string; labelValue?: string }) =>
@@ -212,6 +215,8 @@ export const OBSERVABILITY_METHODS = [
   'observability:metricsPrometheus',
   'observability:dashboardState',
   'observability:dashboardSummary',
+  'observability:monitorStatus',
+  'observability:monitorStatusSummary',
   'observability:secretsList',
   'observability:secretsSet',
   'observability:secretsDelete',

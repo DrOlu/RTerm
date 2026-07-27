@@ -1,6 +1,7 @@
 import {
   getMetrics, manageSecret, manageOncall, getCost, manageRecording,
   manageGitops, managePlaybookVersion, getCloudInventory, getLiveDashboard,
+  getMonitorStatus,
 } from './observability_tools'
 import { SecretsVault } from '../../secrets/secretsVault'
 import { EscalationService } from '../../oncall/escalationService'
@@ -31,6 +32,10 @@ function makeObs(): Observability {
     cloud: new CloudInventory(),
     liveDashboard: new LiveDashboardHub({ getState: () => ({}) }),
     dashboard: { summary: async () => '2 hosts, 0 down', state: async () => ({}) },
+    monitorStatus: {
+      report: () => ({ publisherWired: true, terminalCount: 1, entries: [{ terminalId: 'local-1', connected: true, platform: 'darwin', hasSession: false, inFlight: false, lastCollectAt: 0, lastCollectAgoMs: -1, diagnosis: 'no_monitor_session' }], issues: ['local-1: no_monitor_session'] }),
+      summary: () => 'publisher=wired\nterminals=1\nissues=1:\n  - local-1: no_monitor_session',
+    },
   } as unknown as Observability
 }
 
@@ -54,6 +59,7 @@ test('every tool reports a clear message when observability is not wired', async
     [getMetrics, {}], [manageSecret, { action: 'list' }], [manageOncall, { action: 'open_pages' }],
     [getCost, { action: 'summary' }], [manageRecording, { action: 'list' }], [manageGitops, { action: 'export' }],
     [managePlaybookVersion, { action: 'history', playbookId: 'x' }], [getCloudInventory, { action: 'summary' }],
+    [getMonitorStatus, {}],
     [getLiveDashboard, { action: 'state' }],
   ] as Array<[(a: any, c: ToolExecutionContext) => Promise<string>, any]>) {
     const out = await fn(args, c)
@@ -181,6 +187,17 @@ test('get_live_dashboard state + subscribers', async () => {
   const { c } = ctx(makeObs())
   includes(await getLiveDashboard({ action: 'state' }, c), '2 hosts')
   includes(await getLiveDashboard({ action: 'subscribers' }, c), '0 dashboard subscriber')
+})
+
+test('get_monitor_status summary (default) + report (json)', async () => {
+  const { c } = ctx(makeObs())
+  const summary = await getMonitorStatus({}, c)
+  includes(summary, 'publisher=wired')
+  includes(summary, 'no_monitor_session')
+  const report = await getMonitorStatus({ format: 'report' }, c)
+  const parsed = JSON.parse(report) as { publisherWired: boolean; entries: Array<{ diagnosis: string }> }
+  ok(parsed.publisherWired === true, 'report publisherWired')
+  ok(parsed.entries[0]?.diagnosis === 'no_monitor_session', 'report diagnosis')
 })
 
 async function main() {

@@ -105,6 +105,8 @@ interface MonitorSession {
   intervalMs: number
   ownerIdsByTerminalId: Map<string, Set<string>>
   inFlight: boolean
+  /** last time collectAndPublish ran (for the monitor-status diagnostic). */
+  lastCollectAt?: number
   previousCpuCounters?: CpuCounters[]
   previousNetCounters?: NetCounters
   previousSampleTime?: number
@@ -390,6 +392,7 @@ export class ResourceMonitorService {
       }
       const sourceTerminalId = session.sourceTerminalId || terminalIds[0]
       const snapshot = await this.collectSnapshot(sourceTerminalId)
+      session.lastCollectAt = Date.now()
       if (this.publisher) {
         terminalIds.forEach((terminalId) => {
           this.publisher?.(

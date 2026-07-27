@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.0.4 (2026-07-27)
+
+### Feature — monitor-status diagnostic over RPC + agent tool
+
+**"Why aren't stats displaying for terminal X?" is now a one-call answer.** The
+`MonitorStatusService` diagnostic (which reports per-terminal whether the publisher is
+wired, a monitor session exists, collection is stuck in-flight, the platform, and
+last-collect age) was previously internal-only. It's now exposed everywhere:
+
+- **`observability:monitorStatus`** — the full per-terminal JSON report.
+- **`observability:monitorStatusSummary`** — a compact text summary.
+- **`get_monitor_status` agent tool** — `format: 'summary'` (default) or `'report'`.
+- Self-listed by `gateway:describe` / `list_gateway_methods`.
+
+**Also fixed:** `ResourceMonitorService` now stamps `lastCollectAt` on every collection,
+so the diagnostic's "never_collected" / "stale_collection" / "collection_stuck" diagnoses
+are accurate (the field existed in the report but was never set).
+
+Verification: backend typecheck exit 0; 13/13 observability-tools tests (incl. new
+monitor-status cases + the observability-unavailable guard) pass; bridge test confirms
+both new methods are dispatchable; live E2E on a real backend (`monitorStatus` returns a
+valid report, `gateway:describe` self-lists both methods).
+
 ## v3.0.3 (2026-07-27)
 
 ### Fix — `/dashboard` "Upgrade Required" on the desktop app

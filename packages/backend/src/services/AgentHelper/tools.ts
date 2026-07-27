@@ -89,6 +89,7 @@ import {
   manageGitopsSchema, manageGitops,
   managePlaybookVersionSchema, managePlaybookVersion,
   getCloudInventorySchema, getCloudInventory,
+  getMonitorStatusSchema, getMonitorStatus,
   getLiveDashboardSchema, getLiveDashboard,
   ingestApmSpansSchema, ingestApmSpans,
   getApmSummarySchema, getApmSummary,
@@ -366,6 +367,11 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       schema: getCloudInventorySchema
     },
     {
+      name: 'get_monitor_status',
+      description: 'Monitor-status diagnostic — reports why stats aren\'t displaying per terminal (publisher wired, session exists, collection stuck in-flight, platform, last-collect age).',
+      schema: getMonitorStatusSchema
+    },
+    {
       name: 'get_live_dashboard',
       description: 'Live multi-client dashboard — read the current unified dashboard state/summary, or the number of connected dashboard subscribers.',
       schema: getLiveDashboardSchema
@@ -451,6 +457,7 @@ export const toolImplementations = {
   manageGitops,
   managePlaybookVersion,
   getCloudInventory,
+  getMonitorStatus,
   getLiveDashboard,
   ingestApmSpans,
   getApmSummary,
