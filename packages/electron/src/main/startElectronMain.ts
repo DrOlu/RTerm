@@ -49,6 +49,8 @@ import { ElectronAppSettingsMigration } from "../settings/ElectronAppSettingsMig
 import { cleanupDeprecatedCliLaunchers } from "./DeprecatedCliCleanupService";
 import { createObservability } from "../../../backend/src/services/observability";
 import { createObservabilityBridge } from "../../../backend/src/services/Gateway/observabilityBridge";
+import { renderLiveDashboardHtml } from "../../../backend/src/services/dashboard/renderDashboardHtml";
+import { dashboardHttpAuthorized } from "../../../backend/src/services/dashboard/dashboardHttpAuth";
 import {
   buildBuiltInToolStatusSummary,
   buildSkillStatusSummary,
@@ -480,12 +482,52 @@ export async function startElectronMain(): Promise<void> {
                   accessTokenService.verifyToken(token),
                 allowLocalhostWithoutToken: true,
               },
-              ipFilter,
-              // Observability bridge (v2.9.x): the 9 platform capabilities over RPC.
-              observabilityBridge: createObservabilityBridge({
-                observability: () => observabilityRef.current,
-                terminalService: () => terminalService,
-              }),
+               ipFilter,
+               // Browser dashboard on the SAME port as the WS gateway (v3.0.2+):
+               // /dashboard = live page (WS push), /dashboard/json = state. Auth
+               // mirrors the gateway (loopback open, remote needs a token).
+               httpRoutes: [
+                 {
+                   path: "/dashboard",
+                    handler: async (req, res) => {
+                      if (!(await dashboardHttpAuthorized(req, (t) => accessTokenService.verifyToken(t)))) {
+                        res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
+                        res.end("missing/invalid access token");
+                        return;
+                      }
+                      const state = observabilityRef.current
+                        ? await observabilityRef.current.dashboard.state()
+                        : ({ at: Date.now(), hosts: [], slos: [], uptime: [], incidents: [], apm: { bottleneckServices: [], slowestTraces: [] }, dem: { slowestPages: [], poorPages: [] }, clusters: [], capacity: [] } as never);
+                      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+                     res.end(
+                       renderLiveDashboardHtml(state, {
+                         title: "RTerm · Unified Dashboard",
+                         dataUrl: "/dashboard/json",
+                       }),
+                     );
+                   },
+                 },
+                 {
+                   path: "/dashboard/json",
+                    handler: async (req, res) => {
+                      if (!(await dashboardHttpAuthorized(req, (t) => accessTokenService.verifyToken(t)))) {
+                        res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
+                        res.end("missing/invalid access token");
+                        return;
+                      }
+                      const state = observabilityRef.current
+                        ? await observabilityRef.current.dashboard.state()
+                        : ({ at: Date.now(), hosts: [], slos: [], uptime: [], incidents: [], apm: { bottleneckServices: [], slowestTraces: [] }, dem: { slowestPages: [], poorPages: [] }, clusters: [], capacity: [] } as never);
+                      res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+                     res.end(JSON.stringify(state));
+                   },
+                 },
+               ],
+               // Observability bridge (v2.9.x): the 9 platform capabilities over RPC.
+               observabilityBridge: createObservabilityBridge({
+                 observability: () => observabilityRef.current,
+                 terminalService: () => terminalService,
+               }),
               terminalBridge: {
                 listTerminals: () =>
                   terminalService.getDisplayTerminals().map((terminal) => ({

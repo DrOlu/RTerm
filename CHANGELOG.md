@@ -1,4 +1,28 @@
 # Changelog
+
+## v3.0.3 (2026-07-27)
+
+### Fix — `/dashboard` "Upgrade Required" on the desktop app
+
+**The desktop RTerm app returned `426 Upgrade Required` for `http://localhost:17888/dashboard`.**
+v3.0.2 wired the dashboard `httpRoutes` only into the **headless gybackend** runtime
+(`startGyBackend.ts`), but the desktop app creates its gateway in
+**`startElectronMain.ts`** — which was never given the routes, so its gateway stayed a
+bare WebSocket-only server that answers plain HTTP with "Upgrade Required".
+
+- **Wired `/dashboard` + `/dashboard/json` into the Electron main runtime** (same live
+  page, same WS-push behaviour, same gateway-mirrored auth).
+- **Factored the dashboard HTTP auth into a shared `dashboardHttpAuth.ts`** used by BOTH
+  runtimes (loopback open, remote needs a token) — removes the duplication that let the
+  two drift.
+- **Regression guard** (`dashboardHttpAuth.extreme.spec`): asserts gybackend AND Electron
+  main both wire `httpRoutes` + `/dashboard` + `/dashboard/json` + the live renderer +
+  the shared auth helper, so this can't regress on one runtime again.
+
+Verification: backend typecheck exit 0; 5 new auth/regression tests pass; all 18
+Gateway/dashboard/liveui/sre suites green; backend + Electron bundles both build and the
+Electron main bundle contains the dashboard routes; live smoke on gybackend
+(`/dashboard` 200 HTML, `/dashboard/json` 200 JSON).
 ## v3.0.2 (2026-07-27)
 
 ### Feature — Live browser dashboard at `/dashboard` (same port as the WS gateway)

@@ -42,6 +42,7 @@ import { createTriggerRuntime } from "../../services/automation/triggerRuntime";
 import { createObservability } from "../../services/observability";
 import { createObservabilityBridge } from "../../services/Gateway/observabilityBridge";
 import { renderLiveDashboardHtml } from "../../services/dashboard/renderDashboardHtml";
+import { dashboardHttpAuthorized } from "../../services/dashboard/dashboardHttpAuth";
 import { ResourceMonitorService } from "../../services/ResourceMonitorService";
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
@@ -412,35 +413,6 @@ export async function startGyBackend(): Promise<void> {
     gatewayService.broadcastRaw("memory:updated", result.memory);
   };
 
-  /** Mirror the WS gateway's connection auth for plain-HTTP requests to the
-   * dashboard routes: loopback is open, remote callers must present a valid
-   * access token (Authorization: Bearer, x-access-token header, or
-   * ?access_token= query param). */
-  const dashboardHttpAuthorized = async (req: {
-    url?: string;
-    headers: Record<string, unknown>;
-    socket?: { remoteAddress?: string };
-  }): Promise<boolean> => {
-    const remote = String(req.socket?.remoteAddress ?? "");
-    if (/^(127\.|::1|::ffff:127\.)/.test(remote) || remote === "" || remote === "localhost") {
-      return true;
-    }
-    const authz = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
-    const bearer = /^Bearer\s+(.+)$/i.exec(authz)?.[1]?.trim();
-    const headerTok = typeof req.headers["x-access-token"] === "string" ? String(req.headers["x-access-token"]).trim() : "";
-    let queryTok = "";
-    try {
-      queryTok = new URL(req.url ?? "/", "http://localhost").searchParams.get("access_token")?.trim() ?? "";
-    } catch { /* ignore */ }
-    const token = bearer || headerTok || queryTok;
-    if (!token) return false;
-    try {
-      return await accessTokenService.verifyToken(token);
-    } catch {
-      return false;
-    }
-  };
-
   const wsGatewayControlService = new WebSocketGatewayControlService({
     createAdapter: (host, port, ipFilter) =>
       new WebSocketGatewayAdapter(gatewayService, {
@@ -459,7 +431,7 @@ export async function startGyBackend(): Promise<void> {
           {
             path: "/dashboard",
             handler: async (req, res) => {
-              if (!(await dashboardHttpAuthorized(req))) {
+              if (!(await dashboardHttpAuthorized(req, (t) => accessTokenService.verifyToken(t)))) {
                 res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
                 res.end("missing/invalid access token");
                 return;
@@ -477,7 +449,7 @@ export async function startGyBackend(): Promise<void> {
           {
             path: "/dashboard/json",
             handler: async (req, res) => {
-              if (!(await dashboardHttpAuthorized(req))) {
+              if (!(await dashboardHttpAuthorized(req, (t) => accessTokenService.verifyToken(t)))) {
                 res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
                 res.end("missing/invalid access token");
                 return;
