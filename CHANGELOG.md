@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.0.1 (2026-07-27)
+
+### Fix — `collect_facts` on WinRM / cmd-shell Windows Targets
+
+**`collect_facts` on WinRM (cmd/response-shell) Windows targets returned only `hostname`** — the
+`windows` fact template ran bare PowerShell commands (`$PSVersionTable…`, `[System.Environment]…`,
+`Get-CimInstance…`), but WinRM tabs execute via **cmd.exe**, so every PowerShell fact failed with a
+cmd syntax error. (SSH-to-Windows PowerShell hosts worked; WinRM didn't.)
+
+- **`isCmdShellTarget()`** — detects `tab.type === 'winrm'` (cmd/response shell).
+- **`wrapWindowsFactForCmdShell()`** — wraps PowerShell fact commands in
+  `powershell -NoProfile -Command "…"` for cmd-shell targets, leaving `hostname` and cmd-native
+  commands bare. Covers `$(...)`, `[...]`, `(Get-...)`, and verb-dash forms.
+- `collect_facts` applies the wrap when the target is Windows **and** a cmd-shell — so the template
+  now works on both PowerShell-host SSH and cmd-shell WinRM targets.
+- 2 regression tests (helper wrap + end-to-end WinRM template). fleet_tools suite 14/14, v2.9 suite
+  218 PASS / 0 FAIL, backend typecheck exit 0.
+
 ## v3.0.0 (2026-07-26)
 
 ### API Self-Discovery — `gateway:describe` + a Single-Source Method Registry
