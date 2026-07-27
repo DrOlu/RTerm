@@ -242,6 +242,29 @@ function classifyTarget(tab: TerminalTab, defaultClass?: string): string {
   return defaultClass ?? 'linux'
 }
 
+/**
+ * WinRM tabs execute via cmd.exe (command/response), NOT a PowerShell host —
+ * so the bare PowerShell fact commands in the `windows` template
+ * ($PSVersionTable…, [System.Environment]…, Get-CimInstance…) fail with cmd
+ * syntax errors. Wrap them in `powershell -NoProfile -Command "…"` for cmd-shell
+ * targets so the template works on both PowerShell-host SSH and cmd-shell WinRM.
+ */
+export function isCmdShellTarget(tab: TerminalTab): boolean {
+  const t = (tab.type ?? '').toLowerCase()
+  return t === 'winrm'
+}
+
+export function wrapWindowsFactForCmdShell(cmd: string): string {
+  // hostname works in cmd natively — leave it. Everything PowerShell gets wrapped.
+  const c = cmd.trim()
+  if (/^hostname$/i.test(c)) return c
+  const isPowerShell = c.startsWith('$') || c.startsWith('[') || c.startsWith('(') || /^(Get|Set|New|Invoke|Measure|Select|Where|ForEach|Write|Read|Test|Convert|Out|Start|Stop)-/i.test(c) || /::/.test(c)
+  if (!isPowerShell) return c
+  // Escape embedded double-quotes for cmd's outer double-quoted -Command arg.
+  const escaped = c.replace(/"/g, '\\"')
+  return `powershell -NoProfile -Command "${escaped}"`
+}
+
 export async function collectFacts(
   args: CollectFactsArgs,
   context: ToolExecutionContext,
@@ -289,7 +312,11 @@ export async function collectFacts(
   const perTarget = await Promise.allSettled(
     targetTabs.map(async (tab): Promise<Record<string, unknown>> => {
       const klass = classifyTarget(tab, args.defaultClass)
-      const commands = FACT_TEMPLATES[klass] ?? FACT_TEMPLATES.linux
+      let commands = FACT_TEMPLATES[klass] ?? FACT_TEMPLATES.linux
+      // WinRM/cmd-shell targets can't run bare PowerShell — wrap those commands.
+      if (klass === 'windows' && isCmdShellTarget(tab)) {
+        commands = commands.map(wrapWindowsFactForCmdShell)
+      }
       const facts: Record<string, string> = {}
       for (let i = 0; i < commands.length; i++) {
         const cmd = commands[i]

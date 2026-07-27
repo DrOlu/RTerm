@@ -179,6 +179,35 @@ test('collect_facts uses defaultClass hint for raw-shell network tabs', async ()
   if (!res.includes('"class": "network"')) throw new Error(`expected network class, got: ${res}`)
 })
 
+test('collect_facts wraps PowerShell facts for cmd-shell (winrm) windows targets', async () => {
+  const { wrapWindowsFactForCmdShell, isCmdShellTarget } = await import('./fleet_tools')
+  // isCmdShellTarget detects winrm tabs
+  const winrmTab = { id: 'w1', type: 'winrm' } as never
+  const sshTab = { id: 'w2', type: 'ssh' } as never
+  if (!isCmdShellTarget(winrmTab)) throw new Error('winrm tab not detected as cmd-shell')
+  if (isCmdShellTarget(sshTab)) throw new Error('ssh tab wrongly detected as cmd-shell')
+  // hostname stays bare (cmd-native)
+  if (wrapWindowsFactForCmdShell('hostname') !== 'hostname') throw new Error('hostname should stay bare')
+  // PowerShell commands get wrapped in powershell -NoProfile -Command "..."
+  const w1 = wrapWindowsFactForCmdShell('$PSVersionTable.PSVersion.ToString()')
+  if (!w1.startsWith('powershell -NoProfile -Command')) throw new Error(`$PSVersionTable not wrapped: ${w1}`)
+  const w2 = wrapWindowsFactForCmdShell('(Get-CimInstance Win32_OperatingSystem).LastBootUpTime')
+  if (!w2.startsWith('powershell -NoProfile -Command')) throw new Error(`Get-CimInstance not wrapped: ${w2}`)
+  // non-PowerShell cmd-native commands stay bare
+  if (wrapWindowsFactForCmdShell('ipconfig') !== 'ipconfig') throw new Error('ipconfig should stay bare')
+})
+
+test('collect_facts wraps windows template for a winrm target end-to-end', async () => {
+  const term = new FakeTerm()
+  const t = term.addTab('wr1', 'win-srv', { remoteOs: 'windows', type: 'winrm' })
+  term.outputs['wr1|hostname'] = 'WIN-SRV'
+  term.outputs['wr1|powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString()"'] = '5.1.20348'
+  term.outputs['wr1|powershell -NoProfile -Command "[System.Environment]::OSVersion.VersionString"'] = 'Microsoft Windows NT 10.0.20348.0'
+  const res = await collectFacts({ targets: ['win-srv'] }, ctx(term))
+  if (!res.includes('WIN-SRV')) throw new Error(`expected hostname fact, got: ${res}`)
+  if (!res.includes('5.1.20348')) throw new Error(`expected wrapped PS version fact, got: ${res}`)
+})
+
 test('collect_facts with no targets inventories all open tabs', async () => {
   const term = new FakeTerm()
   term.addTab('a', 'host-a', { remoteOs: 'unix' })
