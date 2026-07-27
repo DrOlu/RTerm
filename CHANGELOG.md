@@ -1,4 +1,33 @@
 # Changelog
+## v3.0.2 (2026-07-27)
+
+### Feature — Live browser dashboard at `/dashboard` (same port as the WS gateway)
+
+**The unified dashboard is now visible in any browser.** The gateway serves a live
+dashboard page on the **same port** as the WebSocket RPC endpoint (default 17888) — no
+new listener. Open `http://localhost:17888/dashboard` and watch fleet health, SLOs,
+incidents, APM, DEM, k8s clusters, and capacity update **in real time**.
+
+- **Same-port HTTP + true WS push.** A new `httpRoutes` option on
+  `WebSocketGatewayAdapter` lets the default server factory create ONE node `http.Server`:
+  plain HTTP requests hit a route table, WS upgrades hit the WSS on the same socket.
+  With no routes configured the adapter is byte-identical to before (fully backwards
+  compatible). ESM-safe `node:http` loading via `createRequire`.
+- **Live page, no reloads.** `renderLiveDashboardHtml()` renders initial state
+  server-side (first paint works before WS connects), then an embedded client subscribes
+  via `observability:liveDashboardSubscribe` and updates each section **in place** on
+  every monitor-snapshot push — no meta-refresh. Falls back to polling
+  `/dashboard/json` every 5s if WS is unavailable, and keeps retrying the socket.
+- **Auth mirrors the WS gateway** — loopback is open; remote callers need a valid
+  access token (`Authorization: Bearer`, `x-access-token`, or `?access_token=`).
+- Startup logs the dashboard URL (`[gybackend] Live dashboard: http://…/dashboard`).
+
+Verification: backend typecheck exit 0; 10 new tests (5 httpRoutes end-to-end incl.
+WS-still-works on the shared port, 5 live-renderer incl. XSS escaping and
+classic-renderer regression) — all pass; all 17 Gateway/dashboard/liveui/sre suites
+green. Live-verified: `/dashboard` (200 HTML), `/dashboard/json` (state), 404s, WS
+subscribe + APM ingestion reflected in a push event, and a real browser render.
+
 
 ## v3.0.1 (2026-07-27)
 

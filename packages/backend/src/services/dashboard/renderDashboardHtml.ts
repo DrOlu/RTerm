@@ -18,6 +18,9 @@ export interface RenderOptions {
   refreshSeconds?: number
   /** the URL the JS fetch loop re-pulls (default same path). */
   dataUrl?: string
+  /** when true, the page renders all sections with stable ids and a live JS
+   * client can update them in place (WebSocket push + fetch fallback). */
+  live?: boolean
 }
 
 function esc(s: unknown): string {
@@ -45,6 +48,7 @@ export function renderDashboardHtml(state: DashboardState, opts: RenderOptions =
   const title = opts.title ?? 'RTerm · Unified Dashboard'
   const refresh = opts.refreshSeconds ?? 10
   const dataUrl = opts.dataUrl ?? ''
+  const live = opts.live === true
 
   const hostRows = state.hosts.map((h) => {
     const g = h.golden
@@ -127,16 +131,18 @@ export function renderDashboardHtml(state: DashboardState, opts: RenderOptions =
     </tr>`).join('\n')
 
   const section = (id: string, label: string, rows: string, emptyMsg: string) =>
-    rows
-      ? `<section id="${id}"><h2>${label}</h2><table>${rows}</table></section>`
-      : `<section id="${id}"><h2>${label}</h2><p class="empty">${esc(emptyMsg)}</p></section>`
+    live
+      ? `<section><h2>${label}</h2><div id="${id}">${rows ? `<table>${rows}</table>` : `<p class="empty">${esc(emptyMsg)}</p>`}</div></section>`
+      : rows
+        ? `<section id="${id}"><h2>${label}</h2><table>${rows}</table></section>`
+        : `<section id="${id}"><h2>${label}</h2><p class="empty">${esc(emptyMsg)}</p></section>`
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-${refresh > 0 ? `<meta http-equiv="refresh" content="${refresh}">` : ''}
+${refresh > 0 && !live ? `<meta http-equiv="refresh" content="${refresh}">` : ''}
 <title>${esc(title)}</title>
 <style>
   :root {
@@ -178,16 +184,18 @@ ${refresh > 0 ? `<meta http-equiv="refresh" content="${refresh}">` : ''}
 <header>
   <h1>RTerm · Unified Dashboard</h1>
   <span class="sub">${esc(title)}</span>
-  <span class="live">LIVE · updated ${esc(new Date(state.at).toISOString().slice(11, 19))} UTC</span>
+  <span class="live" id="live-indicator">LIVE · updated ${esc(new Date(state.at).toISOString().slice(11, 19))} UTC</span>
 </header>
 <main>
   <div class="grid">
-    <section class="span2" id="fleet">
+    <section class="span2">
       <h2>Fleet health</h2>
+      <div id="fleet">
       <table>
         <tr><th>host</th><th>state</th><th>cpu</th><th>mem</th><th>disk</th><th>cpu trend</th><th>disk full in</th></tr>
         ${hostRows || '<tr><td class="empty">No hosts reporting yet.</td></tr>'}
       </table>
+      </div>
     </section>
 
     ${section('slo', 'SLO board', sloRows ? `<tr><th>slo</th><th>sli</th><th>burn rate</th><th>budget</th><th>status</th></tr>${sloRows}` : '', 'No SLOs defined yet.')}
@@ -202,9 +210,129 @@ ${refresh > 0 ? `<meta http-equiv="refresh" content="${refresh}">` : ''}
 </main>
 <footer>
   RTerm Unified Dashboard · ${state.hosts.length} hosts · ${state.slos.length} SLOs · ${state.incidents.length} open incidents
-  ${refresh > 0 ? `· auto-refresh ${refresh}s` : ''}
+  ${refresh > 0 && !live ? `· auto-refresh ${refresh}s` : ''}
   ${dataUrl ? `· data: ${esc(dataUrl)}` : ''}
 </footer>
+${live ? liveDashboardClientScript(dataUrl || '/dashboard/json') : ''}
 </body>
 </html>`
+}
+
+/** The browser-side live client: subscribes to dashboard pushes over the
+ * gateway WebSocket (observability:liveDashboardSubscribe) and re-renders each
+ * section in place; falls back to polling the JSON endpoint when WS is
+ * unavailable. All rendering is plain DOM string building (no deps). */
+function liveDashboardClientScript(jsonUrl: string): string {
+  return `<script>
+(function () {
+  'use strict';
+  var JSON_URL = ${JSON.stringify(jsonUrl)};
+  var wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/';
+  var indicator = document.getElementById('live-indicator');
+  var pollTimer = null;
+  var rpcId = 0;
+
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function pct(v) { return typeof v === 'number' ? v.toFixed(1) + '%' : '\\u2014'; }
+  function num(v, d) { return typeof v === 'number' ? v.toFixed(d == null ? 1 : d) : '\\u2014'; }
+  function badge(state) {
+    var c = state === 'up' ? 'ok' : state === 'degraded' ? 'warn' : state === 'down' ? 'bad' : 'mute';
+    return '<span class="badge ' + c + '">' + esc(state) + '</span>';
+  }
+  function sev(sev) {
+    var c = sev === 'sev1' || sev === 'sev2' ? 'bad' : sev === 'sev3' ? 'warn' : 'mute';
+    return '<span class="badge ' + c + '">' + esc(sev) + '</span>';
+  }
+  function setSection(id, tableHtml, emptyMsg) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = tableHtml || '<p class="empty">' + esc(emptyMsg) + '</p>';
+  }
+  function render(s) {
+    if (!s || typeof s !== 'object') return;
+    var hostRows = (s.hosts || []).map(function (h) {
+      var g = h.golden || {};
+      var up = (s.uptime || []).find(function (u) { return u.target && u.target.name === h.host; });
+      return '<tr><td class="host">' + esc(h.host) + '</td><td>' + (up ? badge(up.state) : '<span class="badge mute">\\u2014</span>') + '</td><td>' + pct(g.cpuPercent) + '</td><td>' + pct(g.memPercent) + '</td><td>' + pct(g.diskPercentMax) + '</td><td>' + num(g.cpuTrendPerDay, 2) + '/d</td><td>' + (g.diskDaysToFull !== undefined ? num(g.diskDaysToFull, 1) + 'd' : '\\u2014') + '</td></tr>';
+    }).join('');
+    setSection('fleet', '<table><tr><th>host</th><th>state</th><th>cpu</th><th>mem</th><th>disk</th><th>cpu trend</th><th>disk full in</th></tr>' + hostRows + '</table>', 'No hosts reporting yet.');
+
+    var sloRows = (s.slos || []).map(function (e) {
+      return '<tr class="' + (e.fastBurning ? 'row-bad' : '') + '"><td class="host">' + esc(e.sloId) + '</td><td>' + (e.sli !== undefined ? (e.sli * 100).toFixed(2) + '%' : '\\u2014') + '</td><td>' + (e.burnRate !== undefined ? e.burnRate.toFixed(2) + 'x' : '\\u2014') + '</td><td>' + (e.errorBudgetRemaining !== undefined ? (e.errorBudgetRemaining * 100).toFixed(0) + '%' : '\\u2014') + '</td><td><span class="badge ' + (e.fastBurning ? 'bad' : 'ok') + '">' + (e.fastBurning ? 'FAST-BURNING' : 'healthy') + '</span></td></tr>';
+    }).join('');
+    setSection('slo', sloRows ? '<table><tr><th>slo</th><th>sli</th><th>burn rate</th><th>budget</th><th>status</th></tr>' + sloRows + '</table>' : '', 'No SLOs defined yet.');
+
+    var upRows = (s.uptime || []).map(function (u) {
+      return '<tr><td class="host">' + esc(u.target && u.target.name) + '</td><td>' + badge(u.state) + '</td><td>' + u.consecutiveFailures + '</td><td>' + (u.lastLatencyMs !== undefined ? u.lastLatencyMs + 'ms' : '\\u2014') + '</td><td>' + esc(u.lastError || '') + '</td></tr>';
+    }).join('');
+    setSection('uptime', upRows ? '<table><tr><th>host</th><th>state</th><th>failures</th><th>latency</th><th>error</th></tr>' + upRows + '</table>' : '', 'No watchdog targets yet.');
+
+    var incRows = (s.incidents || []).map(function (i) {
+      return '<tr><td class="host">' + esc(i.title) + '</td><td>' + sev(i.severity) + '</td><td><span class="badge ' + (i.status === 'open' ? 'bad' : i.status === 'mitigated' ? 'warn' : 'ok') + '">' + esc(i.status) + '</span></td><td>' + esc((i.affected || []).join(', ') || '\\u2014') + '</td><td class="dim">' + esc((i.rca || '').slice(0, 120)) + '</td></tr>';
+    }).join('');
+    setSection('incidents', incRows ? '<table><tr><th>incident</th><th>sev</th><th>status</th><th>affected</th><th>rca</th></tr>' + incRows + '</table>' : '', 'No open incidents.');
+
+    var apmSvc = ((s.apm && s.apm.bottleneckServices) || []).map(function (x) {
+      return '<tr><td class="host">' + esc(x.service) + '</td><td>' + x.spanCount + '</td><td>' + x.errorCount + '</td><td>' + (x.errorRate * 100).toFixed(1) + '%</td><td>' + (x.p95Ms !== undefined ? num(x.p95Ms, 0) + 'ms' : '\\u2014') + '</td></tr>';
+    }).join('');
+    setSection('apm-svc', apmSvc ? '<table><tr><th>service</th><th>spans</th><th>errors</th><th>error rate</th><th>p95</th></tr>' + apmSvc + '</table>' : '', 'No APM spans ingested yet.');
+
+    var apmTr = ((s.apm && s.apm.slowestTraces) || []).map(function (t) {
+      return '<tr><td class="host dim">' + esc(String(t.traceId).slice(0, 16)) + '</td><td>' + esc(t.rootService) + '</td><td>' + t.spanCount + '</td><td>' + num(t.totalDurationMs, 0) + 'ms</td><td>' + (t.hasError ? '<span class="badge bad">error</span>' : '<span class="badge ok">ok</span>') + '</td></tr>';
+    }).join('');
+    setSection('apm-trace', apmTr ? '<table><tr><th>trace</th><th>root</th><th>spans</th><th>duration</th><th>status</th></tr>' + apmTr + '</table>' : '', 'No traces yet.');
+
+    var demRows = ((s.dem && s.dem.slowestPages) || []).map(function (p) {
+      return '<tr><td class="host">' + esc(p.page) + '</td><td>' + p.sessions + '</td><td>' + (p.p75LcpMs !== undefined ? num(p.p75LcpMs, 0) + 'ms' : '\\u2014') + '</td><td>' + (p.p75InpMs !== undefined ? num(p.p75InpMs, 0) + 'ms' : '\\u2014') + '</td><td>' + (p.errorRate * 100).toFixed(1) + '%</td></tr>';
+    }).join('');
+    setSection('dem', demRows ? '<table><tr><th>page</th><th>sessions</th><th>p75 lcp</th><th>p75 inp</th><th>error rate</th></tr>' + demRows + '</table>' : '', 'No RUM sessions yet.');
+
+    var clRows = (s.clusters || []).map(function (c) {
+      return '<tr><td class="host">' + esc(c.context) + '</td><td>' + c.runningPods + '/' + c.totalPods + '</td><td>' + c.notReadyPods + '</td><td>' + c.crashLoopPods + '</td><td>' + c.totalRestarts + '</td><td>' + c.nodesReady + '/' + c.nodesTotal + '</td></tr>';
+    }).join('');
+    setSection('clusters', clRows ? '<table><tr><th>context</th><th>pods</th><th>not ready</th><th>crashloop</th><th>restarts</th><th>nodes</th></tr>' + clRows + '</table>' : '', 'No clusters reporting yet.');
+
+    var capRows = (s.capacity || []).map(function (c) {
+      return '<tr class="' + (c.daysToFull !== undefined && c.daysToFull < 30 ? 'row-bad' : '') + '"><td class="host">' + esc(c.host) + '</td><td>' + pct(c.diskPercent) + '</td><td>' + (c.daysToFull !== undefined ? num(c.daysToFull, 1) + ' days' : '\\u2014') + '</td></tr>';
+    }).join('');
+    setSection('capacity', capRows ? '<table><tr><th>host</th><th>disk</th><th>full in</th></tr>' + capRows + '</table>' : '', 'No capacity data yet.');
+
+    if (indicator) {
+      var t = new Date(s.at || Date.now()).toISOString().slice(11, 19);
+      indicator.textContent = 'LIVE \\u00b7 updated ' + t + ' UTC';
+    }
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(function () {
+      fetch(JSON_URL).then(function (r) { return r.json(); }).then(render).catch(function () {});
+    }, 5000);
+  }
+
+  function connect() {
+    var ws;
+    try { ws = new WebSocket(wsUrl); } catch (e) { startPolling(); return; }
+    ws.onopen = function () {
+      rpcId += 1;
+      ws.send(JSON.stringify({ type: 'gateway:rpc', id: 'dash-' + rpcId, method: 'observability:liveDashboardSubscribe', params: {} }));
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    };
+    ws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (msg && msg.type === 'gateway:event' && msg.event === 'observability:dashboard' && msg.data) render(msg.data);
+    };
+    ws.onclose = function () { startPolling(); setTimeout(connect, 5000); };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} };
+  }
+  connect();
+})();
+</` + `script>`
+}
+
+/** Render the dashboard as a LIVE page: initial state inlined, then the
+ * embedded client keeps every section current via gateway WebSocket pushes
+ * (falling back to polling the JSON endpoint). Served on /dashboard. */
+export function renderLiveDashboardHtml(state: DashboardState, opts: RenderOptions = {}): string {
+  return renderDashboardHtml(state, { ...opts, live: true, refreshSeconds: 0 })
 }

@@ -8,6 +8,13 @@ import {
   type IWebSocketConnectionLike,
 } from "./WebSocketClientTransport";
 import { WebSocketServer } from "ws";
+import { createRequire } from "node:module";
+
+/** ESM/CJS-safe require for node builtins loaded lazily inside the shared
+ * HTTP+WS server factory. */
+const nodeRequire = createRequire(
+  typeof __filename !== "undefined" ? __filename : import.meta.url,
+);
 import type {
   FileTransferTaskSnapshot,
   ListFileTransfersOptions,
@@ -119,6 +126,27 @@ export type WebSocketServerFactory = (options: {
   port: number;
 }) => IWebSocketServerLike;
 
+/** Minimal request/response surface an HTTP route handler needs (satisfied by
+ * node's IncomingMessage/ServerResponse). */
+export interface HttpRouteRequest {
+  url?: string;
+  headers: Record<string, unknown>;
+  socket?: { remoteAddress?: string };
+}
+export interface HttpRouteResponse {
+  writeHead(status: number, headers?: Record<string, string>): void;
+  end(body?: string): void;
+}
+/** An HTTP route served on the SAME port as the WebSocket gateway (e.g.
+ * /dashboard). The adapter's default server factory matches on URL pathname. */
+export interface WebSocketHttpRoute {
+  path: string;
+  handler: (
+    req: HttpRouteRequest,
+    res: HttpRouteResponse,
+  ) => void | Promise<void>;
+}
+
 export interface IWebSocketGatewayAdapterLogger {
   info(message: string): void;
   warn(message: string, error?: unknown): void;
@@ -136,6 +164,11 @@ export interface WebSocketGatewayAdapterOptions {
   port: number;
   accessTokenAuth?: WebSocketAccessTokenAuth;
   ipFilter?: WebSocketIpFilter;
+  /** optional HTTP routes served on the same port as the WS gateway (e.g.
+   * /dashboard). Served by the default server factory. NOTE: when a custom
+   * `serverFactory` is injected it owns the whole listener — httpRoutes are
+   * ignored in that case. */
+  httpRoutes?: WebSocketHttpRoute[];
   agentBridge?: {
     exportHistory?: (
       sessionId: string,
@@ -391,12 +424,86 @@ class WebSocketRpcError extends Error {
   }
 }
 
-export function createDefaultWebSocketServerFactory(): WebSocketServerFactory {
+/**
+ * Default server factory. When `httpRoutes` are provided (e.g. /dashboard),
+ * creates ONE node http.Server that serves those routes on plain HTTP requests
+ * and upgrades WebSocket connections on the same port; otherwise it's the
+ * classic standalone WebSocketServer. The returned facade routes 'connection'
+ * to the WSS and closes both servers on stop().
+ */
+export function createDefaultWebSocketServerFactory(
+  httpRoutes?: WebSocketHttpRoute[],
+): WebSocketServerFactory {
   return ({ host, port }) => {
-    return new WebSocketServer({
-      host,
-      port,
-    }) as unknown as IWebSocketServerLike;
+    if (!httpRoutes || httpRoutes.length === 0) {
+      return new WebSocketServer({
+        host,
+        port,
+      }) as unknown as IWebSocketServerLike;
+    }
+    // Shared HTTP+WS server: HTTP requests hit the route table, upgrades hit the WSS.
+    // (`as any` for noServer: the ws ServerOptions overloads don't type it.)
+    const wss = new WebSocketServer({ noServer: true } as any);
+    const routes = httpRoutes;
+    // ESM-safe require of node:http (top-level createRequire; no bare require
+    // in the ESM bundle, no per-request dynamic import).
+    const http = nodeRequire("node:http") as typeof import("node:http");
+    const httpServer = http.createServer(
+      (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
+        void (async () => {
+          let pathname = "/";
+          try {
+            pathname = new URL(
+              req.url ?? "/",
+              `http://${String(req.headers.host ?? "localhost")}`,
+            ).pathname;
+          } catch { /* keep default */ }
+          const route = routes.find((r) => r.path === pathname);
+          if (!route) {
+            res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+            res.end("not found");
+            return;
+          }
+          try {
+            await route.handler(
+              req as unknown as HttpRouteRequest,
+              res as unknown as HttpRouteResponse,
+            );
+          } catch (e) {
+            if (!res.headersSent) {
+              res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+            }
+            res.end(e instanceof Error ? e.message : String(e));
+          }
+        })();
+      },
+    );
+    httpServer.on("upgrade", (req, socket, head) => {
+      // `as any`: noServer-mode methods (handleUpgrade/emit) aren't on the
+      // typed WebSocketServer surface used elsewhere in this file.
+      (wss as any).handleUpgrade(req, socket, head, (ws: unknown) => {
+        (wss as any).emit("connection", ws, req);
+      });
+    });
+    httpServer.listen(port, host);
+    const facade: IWebSocketServerLike & { address?: () => { port?: number } | null } = {
+      on(event: "connection" | "error", listener: never): void {
+        if (event === "connection") {
+          (wss as unknown as { on(e: string, l: unknown): void }).on("connection", listener);
+        } else {
+          httpServer.on("error", listener as (err: unknown) => void);
+        }
+      },
+      close(callback?: (error?: Error) => void): void {
+        wss.close(() => {
+          httpServer.close(() => callback?.());
+        });
+      },
+      // Expose the bound address so tests (and callers using port 0) can
+      // discover the ephemeral port. Not part of IWebSocketServerLike.
+      address: () => httpServer.address() as { port?: number } | null,
+    };
+    return facade;
   };
 }
 
@@ -417,7 +524,8 @@ export class WebSocketGatewayAdapter {
     private options: WebSocketGatewayAdapterOptions,
   ) {
     this.serverFactory =
-      options.serverFactory ?? createDefaultWebSocketServerFactory();
+      options.serverFactory ??
+      createDefaultWebSocketServerFactory(options.httpRoutes);
     this.logger = options.logger ?? console;
   }
 
