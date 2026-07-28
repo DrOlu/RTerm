@@ -149,6 +149,18 @@ export const normalizePersistedTerminalConfig = (
       ...(typeof raw.passphrase === 'string'
         ? { passphrase: raw.passphrase }
         : {}),
+      // v3.0.6: carry the algorithm preset through persistence/reconnect — dropping
+      // it reverted Cisco/legacy tabs to 'modern' on reopen/reconnect, which broke
+      // the handshake AND made SFTP init run on devices with no SFTP (the
+      // "SFTP unavailable: Not connected" bug).
+      ...(raw.algorithmsPreset === 'legacy' || raw.algorithmsPreset === 'cisco' || raw.algorithmsPreset === 'modern'
+        ? { algorithmsPreset: raw.algorithmsPreset }
+        : {}),
+      // v3.0.6: carry the SSH handshake ready-timeout override too (slow legacy
+      // negotiation); without it a per-connection override was lost on reopen.
+      ...(typeof raw.readyTimeout === 'number' && Number.isFinite(raw.readyTimeout) && raw.readyTimeout > 0
+        ? { readyTimeout: raw.readyTimeout }
+        : {}),
       ...(isObject(raw.proxy) ? { proxy: raw.proxy as any } : {}),
       ...(Array.isArray(raw.tunnels) ? { tunnels: raw.tunnels as any } : {}),
       ...(isObject(raw.jumpHost) ? { jumpHost: raw.jumpHost as any } : {}),

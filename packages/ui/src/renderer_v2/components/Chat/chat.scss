@@ -217,6 +217,38 @@ body.chat-drag-selection-suppressed * {
   overflow-y: auto;
   overflow-x: hidden;
   background: transparent;
+
+  /* v3.0.6: make the chat scrollbar wide, always-visible, and easy to grab with
+   * a mouse (like a real slider) instead of the thin auto-hiding overlay that
+   * was hard to drag. Webkit (Electron/Chrome) gets a full styled track+thumb. */
+  scrollbar-width: auto; /* Firefox: normal-width, grabbable */
+  scrollbar-color: color-mix(in srgb, var(--accent) 40%, transparent) color-mix(in srgb, var(--panel-bg) 50%, transparent);
+
+  &::-webkit-scrollbar {
+    width: 14px; /* wide enough to grab reliably */
+    display: block;
+  }
+  &::-webkit-scrollbar-track {
+    background: color-mix(in srgb, var(--panel-bg) 55%, transparent);
+    border-left: 1px solid var(--border, rgba(148, 178, 255, 0.1));
+  }
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--accent) 38%, transparent);
+    border-radius: 8px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    min-height: 40px;
+    cursor: grab;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--accent) 60%, transparent);
+    background-clip: padding-box;
+  }
+  &::-webkit-scrollbar-thumb:active {
+    background: color-mix(in srgb, var(--accent) 75%, transparent);
+    background-clip: padding-box;
+    cursor: grabbing;
+  }
 }
 
 .message-list {

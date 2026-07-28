@@ -67,8 +67,8 @@ const run = async (): Promise<void> => {
       );
       assertEqual(
         connectConfig.readyTimeout,
-        20_000,
-        "direct SSH connections should preserve the existing ready timeout",
+        60_000,
+        "direct SSH connections use the 60s ready timeout (raised for slow legacy negotiation)",
       );
     },
   );

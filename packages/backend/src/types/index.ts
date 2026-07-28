@@ -133,6 +133,9 @@ export interface SSHConnectionEntry {
   algorithmsPreset?: 'modern' | 'legacy' | 'cisco'
   /** TERM value requested for the remote shell/PTY (e.g. `vt100` for some network equipment). */
   termType?: string
+  /** Optional SSH handshake ready-timeout in ms (v3.0.6). Overrides the default
+   * (60s). Raise further for very slow legacy negotiation; lower for fast LAN. */
+  readyTimeout?: number
   /** Optional group/folder id this connection belongs to (see automation.groups). */
   groupId?: string
   /** Free-form operator notes for this connection (per-device knowledge). */
@@ -801,6 +804,9 @@ export interface SSHConnectionConfig extends BaseConnectionConfig {
    * Leave unset to use the harness default.
    */
   termType?: string
+  /** Optional SSH handshake ready-timeout in ms (v3.0.6). Overrides the default
+   * (60s). Raise further for very slow legacy negotiation; lower for fast LAN. */
+  readyTimeout?: number
 }
 
 export interface GenericConnectionConfig extends BaseConnectionConfig {

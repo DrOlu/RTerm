@@ -1,5 +1,37 @@
 # Changelog
 
+## v3.0.7 (2026-07-28)
+
+### Fix — chat scrollbar grabbable; legacy/Cisco SSH reconnect + slow-negotiation
+
+**1. Chat vertical scrollbar now drags like a real slider.** It was the thin
+auto-hiding overlay that was nearly impossible to grab with a mouse. The chat scroll
+track is now a **wide (14px), always-visible, grabbable scrollbar** (styled track +
+thumb, hover/active accent, `cursor: grab/grabbing`) — the same feel as the terminal's
+scrollbar.
+
+**2. "SFTP unavailable: Not connected" on Cisco/legacy reconnect — fixed.** Reconnecting
+or re-opening a Cisco/legacy tab dropped the connection's `algorithmsPreset`
+(`normalizePersistedTerminalConfig` didn't carry it), so it fell back to `modern`
+algorithms and — worse — ran SFTP init on a device with no SFTP subsystem, printing
+`SFTP unavailable: Not connected`. Manual fresh connects worked because they used the
+saved connection (which still had the preset). **The preset is now carried through
+persistence + reconnect** (verified in your live state: the tab had `preset: <dropped>`).
+
+**3. Slow legacy SSH negotiation no longer times out.** The handshake ready-timeout was
+**20s** — old devices (small DH groups, SHA-1, CBC) negotiate slower than that and the
+connection was cut mid-handshake. Raised the default to **60s** and added a
+per-connection **`readyTimeout`** override (Settings → connection) to tune it further.
+
+**4. Broader legacy algorithm coverage.** Expanded the `legacy` + `cisco` presets with
+additional host-key (`ssh-rsa1`, `x509v3-*`), cipher (`rijndael*-cbc`), and KEX
+(`diffie-hellman-group-exchange-sha512`) variants that some very old daemons require.
+
+Verification: node + web typecheck exit 0; 5 new legacy-fix tests + all 30 backend/UI
+suites green (incl. sshBackend, terminal persistence, chat); Electron bundle builds;
+live-confirmed the Cisco XE tab (`show version` → IOS XE 17.18.03a) and the dropped-preset
+state in your persisted tabs.
+
 ## v3.0.6 (2026-07-28)
 
 ### Fix — chat scroll stuck after "Prev user" navigation + Top/Bottom buttons
