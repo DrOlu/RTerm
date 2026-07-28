@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.0.8 (2026-07-28)
+
+### Fix — legacy/Cisco SSH presets offered algorithms ssh2 can't load (Test workflow)
+
+The `legacy` + `cisco` algorithm presets (added in v3.0.7 #4) advertised
+algorithms the bundled `ssh2` (1.17.x) does not actually implement. Because the
+preset arrays are passed straight to `ConnectConfig.algorithms`, ssh2 throws on
+connect and the `sshAlgorithmPresets.extreme` suite — which guards exactly this —
+failed the Test workflow.
+
+Removed the unsupported entries:
+- KEX: `diffie-hellman-group-exchange-sha512` (legacy)
+- host key: `ssh-rsa1`, `x509v3-sign-rsa`, `x509v3-ssh-rsa`, `x509v3-sign-dss` (legacy); `x509v3-ssh-rsa`, `x509v3-sign-rsa` (cisco)
+- cipher: `rijndael128/192/256-cbc`, `rijndael-cbc@lysator.liu.se` (legacy); `rijndael128/192/256-cbc` (cisco)
+
+All algorithms ssh2 *does* support stay, so old-daemon coverage is unaffected —
+the removed names were never loadable by ssh2 in the first place. The 18-case
+`sshAlgorithmPresets.extreme` suite now passes (0 failures).
+
 ## v3.0.7 (2026-07-28)
 
 ### Fix — chat scrollbar grabbable; legacy/Cisco SSH reconnect + slow-negotiation

@@ -97,8 +97,6 @@ const LEGACY_ALGORITHMS = {
     'diffie-hellman-group-exchange-sha256',
     'diffie-hellman-group-exchange-sha1',
     'diffie-hellman-group1-sha1',
-    // v3.0.6: group-exchange with SHA-256/512 used by some mid-age daemons.
-    'diffie-hellman-group-exchange-sha512',
   ],
   serverHostKey: [
     'rsa-sha2-512',
@@ -109,11 +107,6 @@ const LEGACY_ALGORITHMS = {
     'ecdsa-sha2-nistp384',
     'ecdsa-sha2-nistp521',
     'ssh-dss',
-    // v3.0.6: additional legacy host-key algos some very old daemons offer.
-    'ssh-rsa1',
-    'x509v3-sign-rsa',
-    'x509v3-ssh-rsa',
-    'x509v3-sign-dss',
   ],
   cipher: [
     'aes128-ctr',
@@ -128,11 +121,6 @@ const LEGACY_ALGORITHMS = {
     'aes192-cbc',
     'aes256-cbc',
     '3des-cbc',
-    // v3.0.6: rijndael/serpent/twofish variants a few ancient servers still use.
-    'rijndael128-cbc',
-    'rijndael192-cbc',
-    'rijndael256-cbc',
-    'rijndael-cbc@lysator.liu.se',
   ],
   hmac: [
     'hmac-sha2-256',
@@ -172,7 +160,7 @@ const CISCO_ALGORITHMS = {
     'ecdh-sha2-nistp384',
     'ecdh-sha2-nistp521',
   ],
-  serverHostKey: ['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512', 'ssh-ed25519', 'ssh-dss', 'x509v3-ssh-rsa', 'x509v3-sign-rsa'],
+  serverHostKey: ['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512', 'ssh-ed25519', 'ssh-dss'],
   cipher: [
     'aes128-cbc',
     'aes192-cbc',
@@ -181,9 +169,6 @@ const CISCO_ALGORITHMS = {
     'aes128-ctr',
     'aes192-ctr',
     'aes256-ctr',
-    'rijndael128-cbc',
-    'rijndael192-cbc',
-    'rijndael256-cbc',
   ],
   hmac: [
     'hmac-sha1',
