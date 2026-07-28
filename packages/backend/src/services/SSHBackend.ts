@@ -97,8 +97,6 @@ const LEGACY_ALGORITHMS = {
     'diffie-hellman-group-exchange-sha256',
     'diffie-hellman-group-exchange-sha1',
     'diffie-hellman-group1-sha1',
-    // v3.0.6: group-exchange with SHA-256/512 used by some mid-age daemons.
-    'diffie-hellman-group-exchange-sha512',
   ],
   serverHostKey: [
     'rsa-sha2-512',
@@ -109,11 +107,6 @@ const LEGACY_ALGORITHMS = {
     'ecdsa-sha2-nistp384',
     'ecdsa-sha2-nistp521',
     'ssh-dss',
-    // v3.0.6: additional legacy host-key algos some very old daemons offer.
-    'ssh-rsa1',
-    'x509v3-sign-rsa',
-    'x509v3-ssh-rsa',
-    'x509v3-sign-dss',
   ],
   cipher: [
     'aes128-ctr',
@@ -128,11 +121,6 @@ const LEGACY_ALGORITHMS = {
     'aes192-cbc',
     'aes256-cbc',
     '3des-cbc',
-    // v3.0.6: rijndael/serpent/twofish variants a few ancient servers still use.
-    'rijndael128-cbc',
-    'rijndael192-cbc',
-    'rijndael256-cbc',
-    'rijndael-cbc@lysator.liu.se',
   ],
   hmac: [
     'hmac-sha2-256',
@@ -172,7 +160,7 @@ const CISCO_ALGORITHMS = {
     'ecdh-sha2-nistp384',
     'ecdh-sha2-nistp521',
   ],
-  serverHostKey: ['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512', 'ssh-ed25519', 'ssh-dss', 'x509v3-ssh-rsa', 'x509v3-sign-rsa'],
+  serverHostKey: ['ssh-rsa', 'rsa-sha2-256', 'rsa-sha2-512', 'ssh-ed25519', 'ssh-dss'],
   cipher: [
     'aes128-cbc',
     'aes192-cbc',
@@ -181,9 +169,6 @@ const CISCO_ALGORITHMS = {
     'aes128-ctr',
     'aes192-ctr',
     'aes256-ctr',
-    'rijndael128-cbc',
-    'rijndael192-cbc',
-    'rijndael256-cbc',
   ],
   hmac: [
     'hmac-sha1',
@@ -201,11 +186,63 @@ const CISCO_ALGORITHMS = {
   ],
 };
 
+/**
+ * Filter an algorithm list to only those the installed ssh2 actually supports.
+ * ssh2 throws on any offered algorithm it can't use, so offering an unsupported
+ * one (e.g. ssh-rsa1, rijndael128-cbc — not in ssh2 1.17) crashes the connect.
+ * We intersect each preset with ssh2's SUPPORTED_* constants so presets survive
+ * ssh2 upgrades/downgrades. ssh2's lists are read-only defaults, so fall back to
+ * the unfiltered list if the constants can't be loaded (best-effort).
+ */
+interface SupportedAlgos {
+  kex: Set<string>
+  serverHostKey: Set<string>
+  cipher: Set<string>
+  hmac: Set<string>
+}
+let supportedAlgosCache: SupportedAlgos | null | undefined
+
+/** Load ssh2's SUPPORTED_* constants once (lazily). Returns null if unavailable. */
+function loadSupportedAlgos(): SupportedAlgos | null {
+  if (supportedAlgosCache !== undefined) return supportedAlgosCache
+  try {
+    // Same synchronous, ESM-safe pattern the spec uses (createRequire), with a
+    // try/catch fallback so a missing/unloadable constants module never throws.
+    const req = createRequire(
+      typeof __filename !== 'undefined' ? __filename : import.meta.url,
+    )
+    const consts = req('ssh2/lib/protocol/constants.js') as Record<string, string[]>
+    supportedAlgosCache = {
+      kex: new Set(consts.SUPPORTED_KEX ?? []),
+      serverHostKey: new Set(consts.SUPPORTED_SERVER_HOST_KEY ?? []),
+      cipher: new Set(consts.SUPPORTED_CIPHER ?? []),
+      hmac: new Set(consts.SUPPORTED_MAC ?? []),
+    }
+  } catch {
+    supportedAlgosCache = null
+  }
+  return supportedAlgosCache
+}
+
+/** Filter a preset to only the algorithms the installed ssh2 supports. If the
+ * constants can't be read, return the preset unchanged (best-effort). */
+function filterToSupported<T extends { kex: string[]; serverHostKey: string[]; cipher: string[]; hmac: string[] }>(preset: T): T {
+  const sup = loadSupportedAlgos()
+  if (!sup) return preset
+  return {
+    ...preset,
+    kex: preset.kex.filter((a) => sup.kex.has(a)),
+    serverHostKey: preset.serverHostKey.filter((a) => sup.serverHostKey.has(a)),
+    cipher: preset.cipher.filter((a) => sup.cipher.has(a)),
+    hmac: preset.hmac.filter((a) => sup.hmac.has(a)),
+  }
+}
+
 function resolveSshAlgorithms(
   preset: SSHConnectionConfig['algorithmsPreset'],
 ): ssh2.ConnectConfig['algorithms'] | undefined {
-  if (preset === 'legacy') return LEGACY_ALGORITHMS as ssh2.ConnectConfig['algorithms'];
-  if (preset === 'cisco') return CISCO_ALGORITHMS as ssh2.ConnectConfig['algorithms'];
+  if (preset === 'legacy') return filterToSupported(LEGACY_ALGORITHMS) as ssh2.ConnectConfig['algorithms'];
+  if (preset === 'cisco') return filterToSupported(CISCO_ALGORITHMS) as ssh2.ConnectConfig['algorithms'];
   // 'modern' / undefined → ssh2 built-in defaults
   return undefined;
 }

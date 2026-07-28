@@ -1,5 +1,29 @@
 # Changelog
 
+## v3.0.8 (2026-07-28)
+
+### Hotfix — SSH `legacy`/`cisco` algorithm presets crashed the connect (CI red)
+
+**The v3.0.7 push run failed CI (5 tests).** v3.0.6 had added SSH algorithms to the
+`legacy` and `cisco` presets that the installed `ssh2` (1.17) does **not** support —
+`diffie-hellman-group-exchange-sha512`, `ssh-rsa1`, `x509v3-ssh-rsa`, `x509v3-sign-rsa`,
+`x509v3-sign-dss`, `rijndael128/192/256-cbc`, `rijndael-cbc@lysator.liu.se`. `ssh2`
+throws on any offered algorithm it can't use, so any connection using the `legacy` or
+`cisco` preset (old servers, network gear) crashed instead of connecting.
+
+- **Removed the unsupported entries** from both presets (they're not in ssh2 1.17's
+  `SUPPORTED_*` lists, so offering them always threw).
+- **Defensive filter** (`filterToSupported`): `resolveSshAlgorithms` now intersects each
+  preset with ssh2's `SUPPORTED_KEX / SUPPORTED_SERVER_HOST_KEY / SUPPORTED_CIPHER /
+  SUPPORTED_MAC` constants before returning, so a future ssh2 upgrade/downgrade can't
+  reintroduce the crash. Constants are loaded synchronously via `createRequire`
+  (ESM-safe) with a try/catch fallback to the unfiltered preset.
+- Verified **no REQUIRED algorithm** (the ones the presets exist to provide) is
+  accidentally filtered out — all remain ssh2-supported.
+
+Verification: backend typecheck exit 0; `sshAlgorithmPresets.extreme.spec` 13/18 →
+**18/18**; all 19 backend SSH/Gateway/dashboard/sre suites green.
+
 ## v3.0.7 (2026-07-28)
 
 ### Fix — chat scrollbar grabbable; legacy/Cisco SSH reconnect + slow-negotiation
