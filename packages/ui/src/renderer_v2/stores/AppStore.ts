@@ -308,6 +308,14 @@ export interface TerminalTabModel {
   remoteOs?: TerminalListEntry["remoteOs"];
   systemInfo?: TerminalListEntry["systemInfo"];
   monitorIdentity?: string;
+  /** auto-reconnect state from the backend (v3.0.5). */
+  reconnectState?: {
+    scheduled: boolean;
+    attempt: number;
+    attempts: number;
+    nextDelayMs: number;
+    gaveUp?: boolean;
+  };
 }
 type TerminalListPayload = Awaited<
   ReturnType<Window["gyshell"]["terminal"]["list"]>
@@ -1646,6 +1654,7 @@ export class AppStore {
           remoteOs: item.remoteOs ?? existing.remoteOs,
           systemInfo: item.systemInfo ?? existing.systemInfo,
           monitorIdentity: item.monitorIdentity ?? existing.monitorIdentity,
+          reconnectState: item.reconnectState ?? undefined,
           capabilities: resolveTerminalConnectionCapabilities({
             type: item.type,
           }),
@@ -1670,6 +1679,7 @@ export class AppStore {
         lastExitCode: item.lastExitCode,
         remoteOs: item.remoteOs,
         systemInfo: item.systemInfo,
+        reconnectState: item.reconnectState ?? undefined,
       };
     });
 

@@ -40,6 +40,9 @@ interface ChatMessageListProps {
   searchTargetMessageId?: string | null;
   searchTargetVersion?: number;
   searchMatchedMessageIds?: ReadonlySet<string>;
+  /** user-message navigation target (v3.0.5): scroll this message into view. */
+  userNavTargetMessageId?: string | null;
+  userNavTargetVersion?: number;
 }
 
 interface ObservedChatRowProps {
@@ -105,6 +108,8 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
     searchTargetMessageId = null,
     searchTargetVersion = -1,
     searchMatchedMessageIds,
+    userNavTargetMessageId = null,
+    userNavTargetVersion = -1,
   }) => {
     const scrollRef = React.useRef<HTMLDivElement | null>(null);
     const viewportWidthRef = React.useRef<number | null>(null);
@@ -431,6 +436,30 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       scheduleScrollMetricSync,
       searchTargetMessageId,
       searchTargetVersion,
+      virtualLayout.heights,
+      virtualLayout.offsets,
+    ]);
+
+    // User-message navigation (v3.0.5): scroll the target user message into view.
+    React.useLayoutEffect(() => {
+      if (!userNavTargetMessageId) return;
+      const element = scrollRef.current;
+      if (!element) return;
+      const targetIndex = renderItemIndexById.get(userNavTargetMessageId);
+      if (typeof targetIndex !== "number") return;
+      const targetTop = virtualLayout.offsets[targetIndex] || 0;
+      const targetHeight = virtualLayout.heights[targetIndex] || 120;
+      const nextScrollTop = Math.max(
+        0,
+        targetTop - Math.max(0, (element.clientHeight - targetHeight) / 2),
+      );
+      element.scrollTop = nextScrollTop;
+      scheduleScrollMetricSync();
+    }, [
+      renderItemIndexById,
+      scheduleScrollMetricSync,
+      userNavTargetMessageId,
+      userNavTargetVersion,
       virtualLayout.heights,
       virtualLayout.offsets,
     ]);

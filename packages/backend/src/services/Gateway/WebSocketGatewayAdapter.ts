@@ -72,6 +72,8 @@ type WebSocketRpcMethod =
   | "skills:setEnabled"
   | "memory:get"
   | "memory:setContent"
+  | "memory:search"
+  | "memory:append"
   | "agentSettings:get"
   | "agentSettings:saveCurrent"
   | "agentSettings:apply"
@@ -370,6 +372,19 @@ export interface WebSocketGatewayAdapterOptions {
       | Promise<{ filePath: string; content: string }>;
     setContent?: (
       content: string,
+    ) =>
+      | { filePath: string; content: string }
+      | Promise<{ filePath: string; content: string }>;
+    /** v3.0.5: search memory entries by query (relevance-ranked). */
+    search?: (
+      query: string,
+      limit?: number,
+    ) =>
+      | Array<{ text: string; score: number }>
+      | Promise<Array<{ text: string; score: number }>>;
+    /** v3.0.5: append a note with dedupe + size cap; returns the new snapshot. */
+    append?: (
+      note: string,
     ) =>
       | { filePath: string; content: string }
       | Promise<{ filePath: string; content: string }>;
@@ -1803,6 +1818,33 @@ export class WebSocketGatewayAdapter {
           throw new WebSocketRpcError("BAD_REQUEST", "content must be string.");
         }
         return await this.options.memoryBridge.setContent(content);
+      }
+      case "memory:search": {
+        if (!this.options.memoryBridge?.search) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "memory:search is not available on this websocket gateway.",
+          );
+        }
+        const query = params.query;
+        if (typeof query !== "string") {
+          throw new WebSocketRpcError("BAD_REQUEST", "query must be string.");
+        }
+        const limit = typeof params.limit === "number" ? params.limit : undefined;
+        return { results: await this.options.memoryBridge.search(query, limit) };
+      }
+      case "memory:append": {
+        if (!this.options.memoryBridge?.append) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "memory:append is not available on this websocket gateway.",
+          );
+        }
+        const note = params.note;
+        if (typeof note !== "string" || note.trim() === "") {
+          throw new WebSocketRpcError("BAD_REQUEST", "note must be a non-empty string.");
+        }
+        return await this.options.memoryBridge.append(note);
       }
       case "agentSettings:get": {
         if (!this.options.agentSettingsBridge?.get) {

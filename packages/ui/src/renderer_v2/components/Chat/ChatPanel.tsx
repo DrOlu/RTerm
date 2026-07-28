@@ -34,6 +34,7 @@ import { SeamlessOverlayCard } from "./ChatBanner";
 import { resolveFloatingMenuPlacement } from "../../lib/menuPlacement";
 import { isLinux, isWindows } from "../../platform/platform";
 import { resolveSeamlessOverlayMessages } from "./chatRenderModel";
+import { anchorFor, resolveUserMessageNavTarget } from "./userMessageNav";
 import {
   CHAT_PANEL_SESSION_TITLE_CHAR_LIMIT,
   formatChatPanelSessionTitle,
@@ -192,6 +193,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
     const [findOpen, setFindOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResultIndex, setSearchResultIndex] = useState(-1);
+    // User-message navigation (v3.0.5): jump back/forward through user messages.
+    const [userNavTargetId, setUserNavTargetId] = useState<string | null>(null);
+    const [userNavVersion, setUserNavVersion] = useState(0);
     const [exportMenuStyle, setExportMenuStyle] = useState<
       React.CSSProperties | undefined
     >(undefined);
@@ -235,6 +239,30 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       searchResultIndex >= 0
         ? searchResultMessageIds[searchResultIndex] || null
         : null;
+    // Ordered user-message anchors for the active session (oldest → newest).
+    const userAnchors = React.useMemo(() => {
+      if (!activeSession) return [] as string[];
+      return activeSession.messageIds.filter(
+        (id) => activeSession.messagesById.get(id)?.role === "user",
+      );
+    }, [activeSession]);
+    const userNavAnchor = React.useMemo(
+      () => anchorFor(userAnchors, userNavTargetId),
+      [userAnchors, userNavTargetId],
+    );
+    const handleUserNav = useCallback(
+      (direction: "previous" | "next" | "latest") => {
+        const target = resolveUserMessageNavTarget(
+          userAnchors,
+          userNavTargetId,
+          direction,
+        );
+        if (!target) return;
+        setUserNavTargetId(target.id);
+        setUserNavVersion((v) => v + 1);
+      },
+      [userAnchors, userNavTargetId],
+    );
     const searchResultMessageIdSet = React.useMemo(
       () => new Set(searchResultMessageIds),
       [searchResultMessageIds],
@@ -985,6 +1013,43 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           />
         ) : null}
 
+        {userAnchors.length > 0 && (
+          <div className="user-msg-nav" role="navigation" aria-label="User message navigation">
+            <button
+              type="button"
+              className="user-msg-nav-btn"
+              title="Previous user message"
+              onClick={() => handleUserNav("previous")}
+              disabled={userNavAnchor !== null && userNavAnchor.index <= 1}
+            >
+              ↑ Prev user
+            </button>
+            <span className="user-msg-nav-pos">
+              {userNavAnchor
+                ? `User ${userNavAnchor.index}/${userNavAnchor.total}`
+                : `${userAnchors.length} user`}
+            </span>
+            <button
+              type="button"
+              className="user-msg-nav-btn"
+              title="Next user message"
+              onClick={() => handleUserNav("next")}
+              disabled={userNavAnchor === null || userNavAnchor.index >= userNavAnchor.total}
+            >
+              ↓ Next user
+            </button>
+            <button
+              type="button"
+              className="user-msg-nav-btn user-msg-nav-latest"
+              title="Jump to latest user message"
+              onClick={() => handleUserNav("latest")}
+              disabled={userNavAnchor !== null && userNavAnchor.index >= userNavAnchor.total}
+            >
+              ⇣ Latest
+            </button>
+          </div>
+        )}
+
         <ChatMessageList
           store={store}
           sessionId={activeSessionId}
@@ -999,6 +1064,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           searchTargetMessageId={activeSearchMessageId}
           searchTargetVersion={searchResultIndex}
           searchMatchedMessageIds={searchResultMessageIdSet}
+          userNavTargetMessageId={userNavTargetId}
+          userNavTargetVersion={userNavVersion}
         />
 
         {store.chatDisplayMode === "seamless" &&

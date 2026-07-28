@@ -305,6 +305,46 @@ export class WinRMTransport {
     }
   }
 
+  /**
+   * Run a command on an EXISTING (persistent) shell, streaming output chunks to
+   * `onChunk` as they arrive instead of buffering everything. The shell is left
+   * open for the next command (persistent runspace). The caller owns the shell's
+   * lifecycle (createShell/deleteShell) and must serialize commands per shell.
+   */
+  async runCommandOnShell(
+    shellId: string,
+    command: string,
+    opts?: {
+      timeoutMs?: number
+      signal?: AbortSignal
+      onChunk?: (stream: 'stdout' | 'stderr', text: string) => void
+    },
+  ): Promise<WinRMCommandResult> {
+    const deadline = Date.now() + (opts?.timeoutMs ?? 120000)
+    const commandId = await this.sendCommand(shellId, command)
+    let stdout = ''
+    let stderr = ''
+    let exitCode = 0
+    for (;;) {
+      if (opts?.signal?.aborted) throw new Error('AbortError')
+      if (Date.now() > deadline) {
+        throw new Error(`WinRM command timed out after ${opts?.timeoutMs ?? 120000}ms`)
+      }
+      const r = await this.receive(shellId, commandId)
+      stdout += r.stdout
+      stderr += r.stderr
+      if (opts?.onChunk) {
+        if (r.stdout) opts.onChunk('stdout', r.stdout)
+        if (r.stderr) opts.onChunk('stderr', r.stderr)
+      }
+      if (r.done) {
+        exitCode = r.exitCode ?? 0
+        break
+      }
+    }
+    return { stdout, stderr, exitCode }
+  }
+
   /** Lightweight connectivity probe: create then immediately delete a shell. */
   async ping(): Promise<void> {
     const shellId = await this.createShell()

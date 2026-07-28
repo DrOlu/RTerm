@@ -10,7 +10,7 @@ import type { XTermSearchHandle } from "./terminalSearchHandle";
 import { resolveFloatingMenuPlacement } from "../../lib/menuPlacement";
 import {
   getTerminalConnectionIconKind,
-  resolveTerminalRuntimeIndicatorState,
+  resolveTerminalTabIndicator,
 } from "../../lib/terminalConnectionModel";
 import { isLinux, isWindows } from "../../platform/platform";
 import { CompactPanelTabSelect } from "../Layout/CompactPanelTabSelect";
@@ -83,11 +83,17 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
       : "generic";
     const ActiveIcon = resolveTerminalTabIcon(activeIconKind);
     const activeRuntimeIndicatorState = activeTab
-      ? resolveTerminalRuntimeIndicatorState(
+      ? resolveTerminalTabIndicator(
           activeTab.config.type,
           activeTab.runtimeState || "initializing",
+          activeTab,
         )
       : "inactive";
+    const activeReconnectTitle = activeTab?.reconnectState?.scheduled
+      ? `reconnecting (attempt ${activeTab.reconnectState.attempt ?? 1})…`
+      : activeTab?.reconnectState?.gaveUp
+        ? "reconnect failed — click to retry"
+        : activeTab?.runtimeState || "initializing";
     const resolvedCommandDraftShortcut = resolveCommandDraftShortcut(
       store.settings?.terminal?.commandDraftShortcut ??
         getDefaultCommandDraftShortcut(),
@@ -280,10 +286,16 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                 const iconKind = getTerminalConnectionIconKind(tab.config.type);
                 const Icon = resolveTerminalTabIcon(iconKind);
                 const runtimeIndicatorState =
-                  resolveTerminalRuntimeIndicatorState(
+                  resolveTerminalTabIndicator(
                     tab.config.type,
                     tab.runtimeState || "initializing",
+                    tab,
                   );
+                const runtimeTitle = tab.reconnectState?.scheduled
+                  ? `reconnecting (attempt ${tab.reconnectState.attempt ?? 1})…`
+                  : tab.reconnectState?.gaveUp
+                    ? "reconnect failed — click to retry"
+                    : tab.runtimeState || "initializing";
                 return {
                   value: tab.id,
                   label: tab.title,
@@ -297,7 +309,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                   trailing: (
                     <span
                       className={`tab-runtime-state tab-runtime-state-${runtimeIndicatorState}`}
-                      title={tab.runtimeState || "initializing"}
+                      title={runtimeTitle}
                     />
                   ),
                   trailingMeasureKey: runtimeIndicatorState,
@@ -324,7 +336,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                 activeTab ? (
                   <span
                     className={`tab-runtime-state tab-runtime-state-${activeRuntimeIndicatorState}`}
-                    title={activeTab.runtimeState || "initializing"}
+                    title={activeReconnectTitle}
                   />
                 ) : null
               }
@@ -361,10 +373,16 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                 const iconKind = getTerminalConnectionIconKind(tab.config.type);
                 const Icon = resolveTerminalTabIcon(iconKind);
                 const runtimeIndicatorState =
-                  resolveTerminalRuntimeIndicatorState(
+                  resolveTerminalTabIndicator(
                     tab.config.type,
                     runtimeState,
+                    tab,
                   );
+                const runtimeTitle = tab.reconnectState?.scheduled
+                  ? `reconnecting (attempt ${tab.reconnectState.attempt ?? 1})…`
+                  : tab.reconnectState?.gaveUp
+                    ? "reconnect failed — click to retry"
+                    : runtimeState;
 
                 return (
                   <div
@@ -386,7 +404,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = observer(
                     <span className="tab-title">{tab.title}</span>
                     <span
                       className={`tab-runtime-state tab-runtime-state-${runtimeIndicatorState}`}
-                      title={runtimeState}
+                      title={runtimeTitle}
                     />
                     <button
                       className="tab-close"

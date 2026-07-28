@@ -51,6 +51,7 @@ import { createObservability } from "../../../backend/src/services/observability
 import { createObservabilityBridge } from "../../../backend/src/services/Gateway/observabilityBridge";
 import { renderLiveDashboardHtml } from "../../../backend/src/services/dashboard/renderDashboardHtml";
 import { dashboardHttpAuthorized } from "../../../backend/src/services/dashboard/dashboardHttpAuth";
+import { searchMemory, appendMemoryNote } from "../../../backend/src/memory/memoryManager";
 import {
   buildBuiltInToolStatusSummary,
   buildSkillStatusSummary,
@@ -858,6 +859,24 @@ export async function startElectronMain(): Promise<void> {
                     settingsService.getSettings().agentSettings
                       ?.activeProfileId || null,
                   );
+                  gatewayService.broadcastRaw("memory:updated", snapshot);
+                  return snapshot;
+                },
+                search: async (query: string, limit?: number) => {
+                  const { content } = await memoryService.getMemorySnapshot(
+                    settingsService.getSettings().agentSettings
+                      ?.activeProfileId || null,
+                  );
+                  return searchMemory(content, query, limit ?? 10);
+                },
+                append: async (note: string) => {
+                  const profileId =
+                    settingsService.getSettings().agentSettings
+                      ?.activeProfileId || null;
+                  const { content } =
+                    await memoryService.getMemorySnapshot(profileId);
+                  const next = appendMemoryNote(content, note);
+                  const snapshot = await memoryService.writeMemory(next, profileId);
                   gatewayService.broadcastRaw("memory:updated", snapshot);
                   return snapshot;
                 },

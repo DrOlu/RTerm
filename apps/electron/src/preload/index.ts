@@ -527,6 +527,14 @@ interface TerminalSummary {
   remoteOs?: "unix" | "windows";
   systemInfo?: TerminalSystemInfo;
   monitorIdentity?: string;
+  /** auto-reconnect state (v3.0.5). */
+  reconnectState?: {
+    scheduled: boolean;
+    attempt: number;
+    attempts: number;
+    nextDelayMs: number;
+    gaveUp?: boolean;
+  };
 }
 
 // Connection Config Types

@@ -38,6 +38,8 @@ export interface SerialPortLike {
   write(data: Buffer | string, cb?: (err?: Error | null) => void): void
   close(cb?: (err?: Error | null) => void): void
   set(opts: { rts?: boolean; cts?: boolean; dtr?: boolean }, cb?: (err?: Error | null) => void): void
+  /** send a break signal (network-gear password recovery / ROMMON). */
+  break?(opts?: { duration?: number }, cb?: (err?: Error | null) => void): void
 }
 
 export interface SerialPortConstructor {
@@ -162,5 +164,35 @@ export class SerialBackend implements TerminalBackend {
     const inst = this.instances.get(ptyId)
     if (!inst) return undefined
     return inst.ready ? 'ready' : undefined
+  }
+
+  // --- Serial-specific controls (v3.0.5) ---
+
+  /** Send a BREAK signal (Cisco password recovery / ROMMON). Default 500ms. */
+  sendBreak(ptyId: string, durationMs = 500): boolean {
+    const inst = this.instances.get(ptyId)
+    if (!inst || typeof inst.port.break !== 'function') return false
+    try {
+      inst.port.break({ duration: durationMs }, (err) => {
+        if (err) inst.dataCallback?.(`\x1b[31m✘ Break failed: ${err.message}\x1b[0m\r\n`)
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Set modem control lines (DTR/RTS/CTS). */
+  setControlLines(ptyId: string, lines: { rts?: boolean; cts?: boolean; dtr?: boolean }): boolean {
+    const inst = this.instances.get(ptyId)
+    if (!inst || typeof inst.port.set !== 'function') return false
+    try {
+      inst.port.set(lines, (err) => {
+        if (err) inst.dataCallback?.(`\x1b[31m✘ set() failed: ${err.message}\x1b[0m\r\n`)
+      })
+      return true
+    } catch {
+      return false
+    }
   }
 }

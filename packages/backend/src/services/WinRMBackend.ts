@@ -31,6 +31,12 @@ interface WinRMInstance {
   ready: boolean
   /** Set if spawn's probe failed; the tab is exited/unreachable. */
   failed: boolean
+  /** persistent runspace (created lazily, reused across commands). */
+  persistentShellId?: string
+  /** serialize commands on the persistent shell (one WS-Man command per shell). */
+  commandQueue: Promise<unknown>
+  /** persistent cwd tracked across commands (best-effort). */
+  cwd?: string
 }
 
 const DEFAULT_WINRM_TIMEOUT_MS = 120_000
@@ -46,7 +52,7 @@ export class WinRMBackend implements TerminalBackend {
     const cfg = config as WinRMConnectionConfig
     const ptyId = `winrm-${randomUUID()}`
     const transport = this.buildTransport(cfg)
-    const instance: WinRMInstance = { config: cfg, transport, ready: false, failed: false }
+    const instance: WinRMInstance = { config: cfg, transport, ready: false, failed: false, commandQueue: Promise.resolve() }
     this.instances.set(ptyId, instance)
 
     // Verify reachability in the background so the tab flips to ready/exited
@@ -96,7 +102,9 @@ export class WinRMBackend implements TerminalBackend {
     })
   }
 
-  /** Direct command execution — the path TerminalService uses for winrm tabs. */
+  /** Direct command execution — the path TerminalService uses for winrm tabs.
+   * Uses a persistent runspace (reused across commands) + streams output live,
+   * and tracks the working directory so `cd` persists between commands. */
   async executeCommand(
     ptyId: string,
     command: string,
@@ -116,23 +124,104 @@ export class WinRMBackend implements TerminalBackend {
       throw new Error('WinRM session is still initializing; try again shortly.')
     }
 
+    // Serialize commands on the persistent shell (one WS-Man command per shell).
+    const run = instance.commandQueue.then(() =>
+      this.executeOnPersistentShell(instance, command, options),
+    )
+    instance.commandQueue = run.catch(() => { /* keep the queue alive */ })
+    return run
+  }
+
+  /** Lazily create (or recreate) the persistent runspace. */
+  private async ensurePersistentShell(instance: WinRMInstance): Promise<string> {
+    if (instance.persistentShellId) return instance.persistentShellId
+    const shellId = await instance.transport.createShell()
+    instance.persistentShellId = shellId
+    // Seed the cwd from the fresh runspace.
+    try {
+      const r = await instance.transport.runCommandOnShell(shellId, 'cd', { timeoutMs: 10000 })
+      const cwd = r.stdout.trim()
+      if (cwd) instance.cwd = cwd
+    } catch { /* best-effort */ }
+    return shellId
+  }
+
+  private async executeOnPersistentShell(
+    instance: WinRMInstance,
+    command: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     // Surface the command echo to the command/response log view.
     instance.dataCallback?.(`\r\n\x1b[36m❯ ${command}\x1b[0m\r\n`)
 
-    const result = await instance.transport.runCommand(command, {
-      timeoutMs: options?.timeoutMs ?? DEFAULT_WINRM_TIMEOUT_MS,
-      signal: options?.signal,
-    })
-
-    // Render captured output into the log view (stdout + stderr).
-    if (result.stdout) instance.dataCallback?.(result.stdout)
-    if (result.stderr) {
-      instance.dataCallback?.(`\x1b[33m${result.stderr}\x1b[0m`)
+    let result: { stdout: string; stderr: string; exitCode: number }
+    // WinRM cmd-shells do NOT persist cwd/env across Command invocations (verified
+    // live). So we (a) run each command inside the tracked cwd by prepending
+    // `cd /d <cwd> &`, and (b) update the tracked cwd when the user `cd`s, giving
+    // an effective persistent working directory across commands.
+    const cwdPrefix = instance.cwd ? `cd /d ${instance.cwd} & ` : ''
+    const isCd = /^\s*(cd|chdir)\s+/i.test(command)
+    try {
+      const shellId = await this.ensurePersistentShell(instance)
+      result = await instance.transport.runCommandOnShell(shellId, cwdPrefix + command, {
+        timeoutMs: options?.timeoutMs ?? DEFAULT_WINRM_TIMEOUT_MS,
+        signal: options?.signal,
+        onChunk: (stream, text) => {
+          // Stream output live to the tab instead of buffering it all.
+          if (text) instance.dataCallback?.(stream === 'stderr' ? `\x1b[33m${text}\x1b[0m` : text)
+        },
+      })
+      // Update the tracked cwd. For an explicit `cd`, resolve the target against
+      // the current cwd; otherwise re-read the cwd (a command may have changed it).
+      if (isCd && result.exitCode === 0) {
+        const target = command.replace(/^\s*(cd|chdir)\s+\/?d?\s*/i, '').replace(/"/g, '').trim()
+        instance.cwd = this.resolveWinCwd(instance.cwd, target)
+      } else if (result.exitCode === 0) {
+        // Re-read cwd within the tracked dir so relative moves are captured.
+        const probe = await instance.transport
+          .runCommandOnShell(shellId, `${cwdPrefix}cd`, { timeoutMs: 10000 })
+          .catch(() => null)
+        const probeCwd = probe?.stdout.trim().split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[A-Za-z]:\\/.test(l)).pop()
+        if (probeCwd) instance.cwd = probeCwd
+      }
+    } catch (error) {
+      // The persistent shell may have died (server restart, idle timeout) — drop
+      // it and retry once on a fresh runspace before surfacing the error.
+      instance.persistentShellId = undefined
+      const shellId = await this.ensurePersistentShell(instance)
+      result = await instance.transport.runCommandOnShell(shellId, cwdPrefix + command, {
+        timeoutMs: options?.timeoutMs ?? DEFAULT_WINRM_TIMEOUT_MS,
+        signal: options?.signal,
+        onChunk: (stream, text) => {
+          if (text) instance.dataCallback?.(stream === 'stderr' ? `\x1b[33m${text}\x1b[0m` : text)
+        },
+      })
     }
+
     instance.dataCallback?.(
       `\r\n\x1b[2m[exit ${result.exitCode}]\x1b[0m\r\n`,
     )
     return result
+  }
+
+  /** Resolve a `cd` target (absolute or relative) against the tracked cwd. */
+  private resolveWinCwd(currentCwd: string | undefined, target: string): string {
+    if (!target) return currentCwd ?? ''
+    // Absolute (X:\...) → normalize slashes, strip trailing slash.
+    if (/^[A-Za-z]:[\\/]/.test(target)) {
+      return target.replace(/\//g, '\\').replace(/\\+$/, '')
+    }
+    // Drive-only (C:) → drive root.
+    if (/^[A-Za-z]:$/.test(target)) return `${target}\\`
+    // Relative (.., .\x, subdir) → resolve against current cwd.
+    const base = (currentCwd ?? 'C:\\').replace(/\\+$/, '')
+    const parts = base.split('\\').filter(Boolean)
+    for (const seg of target.replace(/\//g, '\\').split('\\')) {
+      if (seg === '' || seg === '.') continue
+      if (seg === '..') parts.pop()
+      else parts.push(seg)
+    }
+    return parts.join('\\')
   }
 
   private async waitForReady(instance: WinRMInstance, timeoutMs: number): Promise<boolean> {
@@ -163,8 +252,11 @@ export class WinRMBackend implements TerminalBackend {
     const instance = this.instances.get(ptyId)
     if (!instance) return
     this.instances.delete(ptyId)
-    // WinRM is stateless per command — nothing to close. Notify exit so the
-    // tab UI can update.
+    // Close the persistent runspace (best-effort), then notify exit.
+    if (instance.persistentShellId) {
+      void instance.transport.deleteShell(instance.persistentShellId)
+      instance.persistentShellId = undefined
+    }
     instance.exitCallback?.(0)
   }
 
@@ -178,10 +270,9 @@ export class WinRMBackend implements TerminalBackend {
     if (instance) instance.exitCallback = callback
   }
 
-  getCwd(_ptyId: string): string | undefined {
-    // No persistent cwd across stateless commands; report undefined so the
-    // UI doesn't show a misleading path.
-    return undefined
+  getCwd(ptyId: string): string | undefined {
+    // Persistent cwd tracked across commands on the runspace (best-effort).
+    return this.instances.get(ptyId)?.cwd
   }
 
   getHomeDir(_ptyId: string): Promise<string | undefined> {

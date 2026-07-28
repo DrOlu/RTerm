@@ -5,6 +5,7 @@ import {
 } from "@langchain/core/messages";
 import type { TerminalTab, SSHConnectionEntry, WinRMConnectionEntry } from "../../types";
 import { z } from "zod";
+import { recallForPrompt } from "../../memory/memoryManager";
 
 /**
  * Prompt constants and utilities for AgentService_v2
@@ -740,19 +741,32 @@ export function createCompactionSummaryUserPrompt(params: {
 function buildMemoryPromptBlock(opts: {
   memoryFilePath: string;
   memoryContent: string;
+  /** the current user input — used to recall the most relevant entries when the
+   * memory file is too large to inject whole (v3.0.5). */
+  userInput?: string;
 }): string {
   const normalizedContent = String(opts.memoryContent || "").replace(
     /\r\n/g,
     "\n",
   );
+  // v3.0.5: cap the injected memory so a large memory.md doesn't blow up the
+  // context — recall only the most relevant entries when it exceeds the cap.
+  const recalled = recallForPrompt(normalizedContent, {
+    query: opts.userInput,
+    maxChars: 12_000,
+  });
+  const truncated = recalled.length < normalizedContent.length;
   return [
     GLOBAL_MEMORY_TAG.trim(),
     `Memory file absolute path: ${opts.memoryFilePath}`,
     "If you need to add or modify memory, use edit_file to edit this exact file path directly. Use write_file only when intentionally replacing the full memory file.",
     "If you need to re-read memory later, use the read_file tool to read this exact file path directly.",
+    truncated
+      ? "(Memory file is large — only the most relevant entries are shown below; read the full file with read_file if needed.)"
+      : "",
     "",
-    "# Full MEMORY.md Content",
-    normalizedContent,
+    truncated ? "# Relevant MEMORY.md entries" : "# Full MEMORY.md Content",
+    recalled,
   ].join("\n");
 }
 

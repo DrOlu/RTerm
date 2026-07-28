@@ -43,6 +43,7 @@ import { createObservability } from "../../services/observability";
 import { createObservabilityBridge } from "../../services/Gateway/observabilityBridge";
 import { renderLiveDashboardHtml } from "../../services/dashboard/renderDashboardHtml";
 import { dashboardHttpAuthorized } from "../../services/dashboard/dashboardHttpAuth";
+import { searchMemory, appendMemoryNote } from "../../memory/memoryManager";
 import { ResourceMonitorService } from "../../services/ResourceMonitorService";
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
@@ -762,6 +763,21 @@ export async function startGyBackend(): Promise<void> {
               settingsService.getSettings().agentSettings?.activeProfileId ||
                 null,
             );
+            gatewayService.broadcastRaw("memory:updated", snapshot);
+            return snapshot;
+          },
+          search: async (query: string, limit?: number) => {
+            const { content } = await memoryService.getMemorySnapshot(
+              settingsService.getSettings().agentSettings?.activeProfileId || null,
+            );
+            return searchMemory(content, query, limit ?? 10);
+          },
+          append: async (note: string) => {
+            const profileId =
+              settingsService.getSettings().agentSettings?.activeProfileId || null;
+            const { content } = await memoryService.getMemorySnapshot(profileId);
+            const next = appendMemoryNote(content, note);
+            const snapshot = await memoryService.writeMemory(next, profileId);
             gatewayService.broadcastRaw("memory:updated", snapshot);
             return snapshot;
           },

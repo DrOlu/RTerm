@@ -860,6 +860,19 @@ export interface TerminalTab {
   lastExitCode?: number
   remoteOs?: 'unix' | 'windows'
   systemInfo?: TerminalSystemInfo
+  /** auto-reconnect state (v3.0.5): present while a reconnect is being scheduled/attempted. */
+  reconnectState?: {
+    /** whether a reconnect attempt is currently scheduled. */
+    scheduled: boolean
+    /** the attempt number that will fire / fired next (1-based). */
+    attempt: number
+    /** attempts fired so far. */
+    attempts: number
+    /** delay (ms) before the next attempt. */
+    nextDelayMs: number
+    /** whether the schedule gave up (max attempts reached). */
+    gaveUp?: boolean
+  }
 }
 
 export interface TerminalSystemInfo {

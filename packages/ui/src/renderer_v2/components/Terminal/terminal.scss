@@ -292,3 +292,13 @@
 .terminal-layer.is-active {
   display: block;
 }
+
+/* Reconnecting indicator (v3.0.5) — pulsing cyan for auto-reconnect */
+.tab-runtime-state-reconnecting {
+  background: #4fd8e8;
+  animation: rterm-reconnect-pulse 1.1s ease-in-out infinite;
+}
+@keyframes rterm-reconnect-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.05); }
+}

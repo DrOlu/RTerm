@@ -1,5 +1,56 @@
 # Changelog
 
+## v3.0.5 (2026-07-28)
+
+### Terminal & Session Core, chat navigation, visual cues, and memory
+
+A foundational release touching the terminal core, the chat UX, and agent memory.
+
+**Terminal & Session Core**
+- **SSH auto-reconnect with exponential backoff + jitter** — a dropped SSH tab now
+  reconnects itself (1s→2s→5s→…→60s cap, ±20% jitter, up to 10 attempts) instead of
+  waiting for a manual click. New pure `AutoReconnect` scheduler wired into
+  `TerminalService.handleExit`; manual kill cancels it, successful reconnect resets it.
+  The tab's `reconnectState` flows to the UI (see visual cues).
+- **WinRM: persistent-shell reuse + streaming + effective cwd persistence** — commands
+  now run on a reused runspace (no more 4-round-trip create/delete per command) with
+  **live streaming output** (`runCommandOnShell` + `onChunk`), serialized per shell, and
+  an **effective persistent working directory** (each command runs in the tracked cwd via
+  `cd /d <cwd> &`; explicit `cd` is resolved and tracked, so `cd` sticks across commands).
+  Dead shells auto-recreate once. Verified live against a real Windows host.
+- **Serial: BREAK signal + DTR/RTS/CTS control** (`sendBreak`, `setControlLines`) for
+  network-gear console work (password recovery, ROMMON).
+- **Chunked ring buffer** — terminal scrollback now stores output as fixed-size chunks
+  and drops whole old chunks on overflow, replacing the O(n) `string.slice` re-copy on
+  every chunk once full. Same logical content + monotonic offset, far less GC churn on
+  chatty tabs (build logs, `tail -f`).
+
+**Chat navigation (find your own messages fast)**
+- New **user-message navigation bar** above the chat: **↑ Prev user / ↓ Next user / ⇣ Latest**
+  buttons + a "User N/M" position readout. Walks back/forward through *your* messages no
+  matter how long the session, or jumps straight to your latest — no more scrolling to
+  find what you asked. Pure logic (`userMessageNav`) + scroll-into-view.
+
+**Visual cues**
+- **Reconnecting indicator**: a pulsing-cyan dot + "reconnecting (attempt N)…" tooltip on
+  the tab while an SSH session is auto-reconnecting; "reconnect failed — click to retry"
+  when it gives up. Wired backend `TerminalTab.reconnectState` → IPC → preload → UI.
+
+**Memory improvements**
+- **Relevance-capped recall**: the whole `memory.md` used to be injected into every system
+  prompt. Now only the most relevant entries are injected when the file exceeds 12K chars
+  (ranked against the current input), so large memory files stop bloating context.
+- **`memory:search` + `memory:append` RPC** — search memory entries (relevance-ranked) and
+  append a note with **dedupe + a 40K size cap** (oldest entries pruned, title preserved).
+  Wired in both the gybackend and Electron runtimes.
+
+**Verification:** both typechecks green; **35 new tests pass** (autoReconnect 7,
+chunkedRingBuffer 7, memoryManager 9, userMessageNav 10, autoReconnect integration 2);
+all 22 terminal/Gateway/dashboard/sre/liveui suites + terminal-persistence/SSH/PTY/serial
+regressions green. **Live-verified:** WinRM persistent-shell reuse + effective cwd
+persistence + cwd-scoped execution + streaming against a real Windows host; Cisco IOS-XE
+SSH connect + `show version`.
+
 ## v3.0.4 (2026-07-27)
 
 ### Feature — monitor-status diagnostic over RPC + agent tool

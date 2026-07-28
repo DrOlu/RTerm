@@ -997,3 +997,41 @@ body.chat-drag-selection-suppressed * {
   margin-top: 6px;
   opacity: 0.8;
 }
+
+/* User-message navigation bar (v3.0.5) */
+.user-msg-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border, rgba(148, 178, 255, 0.12));
+  background: var(--panel-alt, rgba(13, 19, 34, 0.6));
+  flex: 0 0 auto;
+}
+.user-msg-nav-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(148, 178, 255, 0.18));
+  background: transparent;
+  color: var(--fg, rgba(244, 247, 255, 0.9));
+  cursor: pointer;
+  white-space: nowrap;
+}
+.user-msg-nav-btn:hover:not(:disabled) {
+  background: rgba(79, 216, 232, 0.12);
+  border-color: rgba(79, 216, 232, 0.4);
+}
+.user-msg-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.user-msg-nav-latest {
+  margin-left: auto;
+}
+.user-msg-nav-pos {
+  font-size: 10.5px;
+  color: var(--fg-muted, rgba(160, 174, 215, 0.7));
+  min-width: 56px;
+  text-align: center;
+}

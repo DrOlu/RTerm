@@ -714,13 +714,14 @@ export class ElectronGatewayIpcAdapter {
             type: terminal.type,
             cols: terminal.cols,
             rows: terminal.rows,
-            runtimeState: terminal.runtimeState,
-            lastExitCode: terminal.lastExitCode,
-            remoteOs: terminal.remoteOs,
-            systemInfo: terminal.systemInfo,
-            monitorIdentity:
-              this.terminalService.getMonitorIdentity(terminal.id) ?? undefined,
-          })),
+             runtimeState: terminal.runtimeState,
+             lastExitCode: terminal.lastExitCode,
+             remoteOs: terminal.remoteOs,
+             systemInfo: terminal.systemInfo,
+             reconnectState: terminal.reconnectState ?? undefined,
+             monitorIdentity:
+               this.terminalService.getMonitorIdentity(terminal.id) ?? undefined,
+           })),
       };
     });
 

@@ -36,3 +36,18 @@ export const resolveTerminalRuntimeIndicatorState = (
   return runtimeState
 }
 
+/** v3.0.5: is the tab currently auto-reconnecting (reconnectState.scheduled)? */
+export const isTerminalReconnecting = (tab: {
+  reconnectState?: { scheduled?: boolean; gaveUp?: boolean } | null
+}): boolean => tab.reconnectState?.scheduled === true
+
+/** The trailing indicator state including the reconnecting variant (v3.0.5). */
+export const resolveTerminalTabIndicator = (
+  type: string,
+  runtimeState: 'initializing' | 'ready' | 'exited',
+  tab?: { reconnectState?: { scheduled?: boolean; gaveUp?: boolean } | null },
+): 'initializing' | 'ready' | 'exited' | 'inactive' | 'reconnecting' => {
+  if (isTerminalReconnecting(tab ?? {})) return 'reconnecting'
+  return resolveTerminalRuntimeIndicatorState(type, runtimeState)
+}
+

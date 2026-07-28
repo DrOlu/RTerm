@@ -29,6 +29,8 @@ import { WinRMBackend } from './WinRMBackend'
 import { SerialBackend } from './SerialBackend'
 import { escapeShellPathList } from './ShellUtility'
 import { TerminalStateStore, type PersistedTerminalRecord } from './terminal/TerminalStateStore'
+import { AutoReconnect } from './terminal/autoReconnect'
+import { ChunkedRingBuffer } from './terminal/chunkedRingBuffer'
 import { v4 as uuidv4 } from 'uuid'
 import {
   resolveTerminalConnectionCapabilities,
@@ -77,9 +79,24 @@ function stripTerminalControlSequences(s: string): string {
     .replace(OTHER_CONTROL_CHAR_PATTERN, '')
 }
 
+/** Logical scrollback buffer shape. v3.0.5: backed by ChunkedRingBuffer (chunked
+ * storage, O(1)-ish appends, no O(n) re-slice on overflow) — the `content`
+ * getter materializes the joined string for reads, matching the old contract. */
 interface RingBuffer {
-  content: string
+  readonly content: string
   offset: number
+  append(data: string): void
+}
+
+/** Adapt a ChunkedRingBuffer to the legacy RingBuffer interface (append + content getter). */
+function makeRingBuffer(maxSize: number): RingBuffer {
+  const buf = new ChunkedRingBuffer({ maxSize })
+  return {
+    get content() { return buf.content() },
+    get offset() { return buf.offset },
+    set offset(_v: number) { /* offset is derived from appends; setter kept for shape compat */ },
+    append: (data: string) => buf.append(data),
+  }
 }
 
 export type TerminalRuntimeState = NonNullable<TerminalTab['runtimeState']>
@@ -206,6 +223,7 @@ export class TerminalService {
   private commandTrackingPromptSyncPollIntervalMs = 50
   private syntheticCommandQuietWindowMs = 1000
   private readonly terminalIdsBeingKilled = new Set<string>()
+  private readonly autoReconnect = new AutoReconnect({ maxAttempts: 10 })
   private readonly terminalClosedListeners = new Set<TerminalClosedListener>()
   /** Optional session logger (records terminal output to disk per session). */
   private sessionLogger: import('./automation/sessionLogService').SessionLogService | null = null
@@ -646,7 +664,7 @@ export class TerminalService {
     this.terminals.set(config.id, tab)
     this.terminalConfigs.set(config.id, config)
     this.releaseReservedTitleForTerminal(config.id, reservedTitle)
-    this.buffers.set(config.id, { content: '', offset: 0 })
+    this.buffers.set(config.id, makeRingBuffer(MAX_BUFFER_SIZE))
     this.headlessPtys.set(config.id, headless)
     if (config.type === 'local' && !this.primaryLocalTerminalId) {
       this.primaryLocalTerminalId = config.id
@@ -744,6 +762,9 @@ export class TerminalService {
         runtime.ptyId
       )
       this.hydrateTerminalRuntimeMetadata(terminalId)
+      // Successful (re)connect — clear any auto-reconnect schedule/attempts.
+      this.autoReconnect.clear(terminalId)
+      tab.reconnectState = undefined
       this.publishTerminalTabsChanged()
       this.schedulePersistTerminalState()
 
@@ -756,6 +777,49 @@ export class TerminalService {
       this.publishTerminalTabsChanged()
       this.schedulePersistTerminalState()
       throw error
+    }
+  }
+
+  /** Schedule an auto-reconnect for a dropped SSH tab with backoff. Updates
+   * tab.reconnectState so the UI can show "reconnecting (attempt N)…". */
+  private scheduleSshAutoReconnect(terminalId: string): void {
+    const tab = this.terminals.get(terminalId)
+    if (!tab || tab.type !== 'ssh') return
+    const state = this.autoReconnect.schedule(
+      terminalId,
+      () => {
+        // On fire: attempt the reconnect. On failure, handleExit will run again
+        // (the tab flips back to exited) and schedule the next attempt.
+        const t = this.terminals.get(terminalId)
+        if (!t || t.type !== 'ssh') return
+        void this.reconnectTerminal(terminalId).catch(() => {
+          // reconnectTerminal throws on failure; the tab is back in 'exited'
+          // and handleExit already scheduled the next attempt (if any remain).
+        })
+      },
+      (attempts) => {
+        // Gave up after max attempts.
+        const t = this.terminals.get(terminalId)
+        if (t) {
+          t.reconnectState = {
+            scheduled: false,
+            attempt: attempts,
+            attempts,
+            nextDelayMs: 0,
+            gaveUp: true,
+          }
+          this.publishTerminalTabsChanged()
+        }
+      },
+    )
+    if (state && tab) {
+      tab.reconnectState = {
+        scheduled: true,
+        attempt: state.nextAttempt,
+        attempts: state.attemptsFired,
+        nextDelayMs: state.nextDelayMs,
+      }
+      this.publishTerminalTabsChanged()
     }
   }
 
@@ -889,14 +953,8 @@ export class TerminalService {
       const buffer = this.buffers.get(terminalId)
       let currentOffset = 0
       if (buffer) {
-        buffer.content += cleanedData
-        buffer.offset += cleanedData.length
+        buffer.append(cleanedData)
         currentOffset = buffer.offset
-
-        if (buffer.content.length > MAX_BUFFER_SIZE) {
-          const trimAmount = buffer.content.length - MAX_BUFFER_SIZE
-          buffer.content = buffer.content.slice(trimAmount)
-        }
       }
 
       this.sendToRenderer('terminal:data', { terminalId, data: cleanedData, offset: currentOffset })
@@ -933,14 +991,8 @@ export class TerminalService {
     const buffer = this.buffers.get(terminalId)
     let currentOffset = 0
     if (buffer) {
-      buffer.content += data
-      buffer.offset += data.length
+      buffer.append(data)
       currentOffset = buffer.offset
-
-      if (buffer.content.length > MAX_BUFFER_SIZE) {
-        const trimAmount = buffer.content.length - MAX_BUFFER_SIZE
-        buffer.content = buffer.content.slice(trimAmount)
-      }
     }
 
     this.sendToRenderer('terminal:data', { terminalId, data, offset: currentOffset })
@@ -1210,6 +1262,10 @@ export class TerminalService {
           rows: tab.rows
         } as TerminalConfig)
       }
+      // Auto-reconnect SSH tabs on unexpected exit (not a user-initiated kill).
+      if (tab.type === 'ssh' && !this.terminalIdsBeingKilled.has(terminalId)) {
+        this.scheduleSshAutoReconnect(terminalId)
+      }
     }
     
     this.sendToRenderer('terminal:exit', { terminalId, code })
@@ -1300,6 +1356,8 @@ export class TerminalService {
 
   kill(terminalId: string): void {
     this.pendingResizeByTerminal.delete(terminalId)
+    // Cancel any pending auto-reconnect — a manual close is intentional.
+    this.autoReconnect.clear(terminalId)
     const terminal = this.terminals.get(terminalId)
     if (terminal) {
       const backend = this.getBackend(terminal.type)
