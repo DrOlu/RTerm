@@ -196,6 +196,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
     // User-message navigation (v3.0.5): jump back/forward through user messages.
     const [userNavTargetId, setUserNavTargetId] = useState<string | null>(null);
     const [userNavVersion, setUserNavVersion] = useState(0);
+    const chatListRef = useRef<import("./ChatMessageList").ChatMessageListHandle | null>(null);
     const [exportMenuStyle, setExportMenuStyle] = useState<
       React.CSSProperties | undefined
     >(undefined);
@@ -1013,28 +1014,30 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           />
         ) : null}
 
-        {userAnchors.length > 0 && (
-          <div className="user-msg-nav" role="navigation" aria-label="User message navigation">
+        {(
+          <div className="user-msg-nav" role="navigation" aria-label="Chat navigation">
             <button
               type="button"
               className="user-msg-nav-btn"
               title="Previous user message"
               onClick={() => handleUserNav("previous")}
-              disabled={userNavAnchor !== null && userNavAnchor.index <= 1}
+              disabled={userAnchors.length === 0 || (userNavAnchor !== null && userNavAnchor.index <= 1)}
             >
               ↑ Prev user
             </button>
             <span className="user-msg-nav-pos">
               {userNavAnchor
                 ? `User ${userNavAnchor.index}/${userNavAnchor.total}`
-                : `${userAnchors.length} user`}
+                : userAnchors.length > 0
+                  ? `${userAnchors.length} user`
+                  : ""}
             </span>
             <button
               type="button"
               className="user-msg-nav-btn"
               title="Next user message"
               onClick={() => handleUserNav("next")}
-              disabled={userNavAnchor === null || userNavAnchor.index >= userNavAnchor.total}
+              disabled={userAnchors.length === 0 || userNavAnchor === null || userNavAnchor.index >= userNavAnchor.total}
             >
               ↓ Next user
             </button>
@@ -1043,9 +1046,26 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
               className="user-msg-nav-btn user-msg-nav-latest"
               title="Jump to latest user message"
               onClick={() => handleUserNav("latest")}
-              disabled={userNavAnchor !== null && userNavAnchor.index >= userNavAnchor.total}
+              disabled={userAnchors.length === 0 || (userNavAnchor !== null && userNavAnchor.index >= userNavAnchor.total)}
             >
               ⇣ Latest
+            </button>
+            <span className="user-msg-nav-sep" aria-hidden="true" />
+            <button
+              type="button"
+              className="user-msg-nav-btn"
+              title="Scroll to top"
+              onClick={() => chatListRef.current?.scrollToTop()}
+            >
+              ⇤ Top
+            </button>
+            <button
+              type="button"
+              className="user-msg-nav-btn"
+              title="Scroll to bottom"
+              onClick={() => chatListRef.current?.scrollToBottom()}
+            >
+              ⇥ Bottom
             </button>
           </div>
         )}
@@ -1066,6 +1086,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           searchMatchedMessageIds={searchResultMessageIdSet}
           userNavTargetMessageId={userNavTargetId}
           userNavTargetVersion={userNavVersion}
+          listRef={chatListRef}
         />
 
         {store.chatDisplayMode === "seamless" &&

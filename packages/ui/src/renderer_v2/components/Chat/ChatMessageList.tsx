@@ -43,6 +43,13 @@ interface ChatMessageListProps {
   /** user-message navigation target (v3.0.5): scroll this message into view. */
   userNavTargetMessageId?: string | null;
   userNavTargetVersion?: number;
+  /** imperative scroll commands (top/bottom). */
+  listRef?: React.MutableRefObject<ChatMessageListHandle | null>;
+}
+
+export interface ChatMessageListHandle {
+  scrollToTop: () => void;
+  scrollToBottom: () => void;
 }
 
 interface ObservedChatRowProps {
@@ -110,8 +117,13 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
     searchMatchedMessageIds,
     userNavTargetMessageId = null,
     userNavTargetVersion = -1,
+    listRef,
   }) => {
     const scrollRef = React.useRef<HTMLDivElement | null>(null);
+    // v3.0.5: suppress the auto-scroll-disable during programmatic jumps (user-msg
+    // nav, top/bottom buttons) so the scroll listener doesn't misinterpret them as
+    // a user scroll-up and latch auto-scroll off (the "can't get back to bottom" bug).
+    const programmaticScrollRef = React.useRef(false);
     const viewportWidthRef = React.useRef<number | null>(null);
     const rowHeightsRef = React.useRef<Map<string, number>>(new Map());
     const scrollFrameRef = React.useRef<number | null>(null);
@@ -210,10 +222,14 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
         element.scrollHeight - nextScrollTop - nextViewportHeight <
         BOTTOM_AUTO_SCROLL_THRESHOLD_PX;
 
-      shouldAutoScrollRef.current = isAtBottom;
+      // Only let the at-bottom flag drive auto-scroll when this scroll change came
+      // from the user (wheel/drag/keyboard), not from our own programmatic jumps.
+      if (!programmaticScrollRef.current) {
+        shouldAutoScrollRef.current = isAtBottom;
+        setShouldAutoScroll(isAtBottom);
+      }
       setScrollTop(nextScrollTop);
       setViewportHeight(nextViewportHeight);
-      setShouldAutoScroll(isAtBottom);
     }, []);
 
     const scheduleScrollMetricSync = React.useCallback(() => {
@@ -224,8 +240,48 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       });
     }, [syncScrollMetrics]);
 
-    const handleRowHeightChange = React.useCallback(
-      (itemId: string, height: number) => {
+    // Programmatic scroll helper: set scrollTop without tripping the
+    // auto-scroll-disable, then re-sync metrics once the flag is cleared.
+    const scrollToProgrammatic = React.useCallback(
+      (top: number) => {
+        const element = scrollRef.current;
+        if (!element) return;
+        programmaticScrollRef.current = true;
+        element.scrollTop = Math.max(0, top);
+        // Release the guard on the next frame, then re-sync so the (now correct)
+        // metrics are captured without having flipped auto-scroll off.
+        window.requestAnimationFrame(() => {
+          programmaticScrollRef.current = false;
+          syncScrollMetrics();
+        });
+      },
+      [syncScrollMetrics],
+    );
+
+    // Imperative scroll commands for the top/bottom buttons.
+    React.useEffect(() => {
+      if (!listRef) return;
+      listRef.current = {
+        scrollToTop: () => {
+          shouldAutoScrollRef.current = false;
+          setShouldAutoScroll(false);
+          scrollToProgrammatic(0);
+        },
+        scrollToBottom: () => {
+          const element = scrollRef.current;
+          if (!element) return;
+          shouldAutoScrollRef.current = true;
+          setShouldAutoScroll(true);
+          scrollToProgrammatic(element.scrollHeight - element.clientHeight);
+        },
+      };
+    return () => {
+      listRef.current = null;
+    };
+    }, [listRef, scrollToProgrammatic]);
+
+  const handleRowHeightChange = React.useCallback(
+    (itemId: string, height: number) => {
         const nextHeight = Math.ceil(height);
         const itemIndex = renderItemIndexByIdRef.current.get(itemId);
         const currentHeight =
@@ -440,7 +496,8 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       virtualLayout.offsets,
     ]);
 
-    // User-message navigation (v3.0.5): scroll the target user message into view.
+    // User-message navigation (v3.0.5): scroll the target user message into view
+    // WITHOUT disabling auto-scroll (programmatic jump, not a user scroll).
     React.useLayoutEffect(() => {
       if (!userNavTargetMessageId) return;
       const element = scrollRef.current;
@@ -453,11 +510,10 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
         0,
         targetTop - Math.max(0, (element.clientHeight - targetHeight) / 2),
       );
-      element.scrollTop = nextScrollTop;
-      scheduleScrollMetricSync();
+      scrollToProgrammatic(nextScrollTop);
     }, [
       renderItemIndexById,
-      scheduleScrollMetricSync,
+      scrollToProgrammatic,
       userNavTargetMessageId,
       userNavTargetVersion,
       virtualLayout.heights,

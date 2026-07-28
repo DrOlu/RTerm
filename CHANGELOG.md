@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.0.6 (2026-07-28)
+
+### Fix — chat scroll stuck after "Prev user" navigation + Top/Bottom buttons
+
+**The chat scroll broke after using the "Prev user" arrow**: once you jumped to a
+previous user message, the chat would not scroll back to the bottom — the auto-scroll
+latched off and never re-engaged. Root cause: the programmatic scroll-to-message ran
+through the same `scroll` listener that disables auto-scroll on a user scroll-up, so the
+nav jump was misread as "user scrolled up" and auto-scroll turned off for good.
+
+- **Programmatic-scroll guard.** `ChatMessageList` now marks its own scroll jumps
+  (user-message nav, top/bottom buttons) as *programmatic* and skips the
+  auto-scroll-disable for them — only a real user scroll (wheel/drag/keyboard) toggles
+  auto-scroll. You can jump anywhere and still get back to the bottom.
+- **Top / Bottom buttons.** A one-click **⇤ Top** and **⇥ Bottom** now sit in the chat
+  nav bar (next to Prev/Next/Latest user), scrolling instantly to the very top or bottom
+  of the conversation. Bottom also re-engages auto-scroll.
+- **Always-present nav bar.** The chat nav bar (Prev user / Next user / Latest / Top /
+  Bottom) now renders whenever a chat is open, not just when there are user messages —
+  so Top/Bottom are always one click away.
+
+Verification: web typecheck exit 0; 7 userMessageNav tests + all 5 chat suites + all 19
+backend Gateway/dashboard/liveui/sre/observability suites green; Electron bundle builds
+with the fix included.
+
 ## v3.0.5 (2026-07-28)
 
 ### Terminal & Session Core, chat navigation, visual cues, and memory

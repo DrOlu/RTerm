@@ -1035,3 +1035,9 @@ body.chat-drag-selection-suppressed * {
   min-width: 56px;
   text-align: center;
 }
+.user-msg-nav-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border, rgba(148, 178, 255, 0.18));
+  margin: 0 4px;
+}
