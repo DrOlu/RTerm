@@ -1,4 +1,4 @@
-import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, OncallSettings, WsGatewayAccess } from "../../types";
+import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, OncallSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
 import { BUILTIN_TOOL_INFO } from "../AgentHelper/tools";
 import { normalizeAgentSettingState } from "./agentSettings";
 import { deepMerge, isObject } from "./objectMerge";
@@ -61,6 +61,12 @@ export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
     serverUrl: "",
     enabled: true,
   },
+  webIntel: {
+    restUrl: "",
+    enabled: true,
+    autoStart: true,
+    warmupOnInit: false,
+  },
   gateway: {
     ws: {
       access: "localhost",
@@ -118,6 +124,7 @@ function pickBackendSnapshot(raw: unknown): Partial<BackendSettings> {
     oncall: raw.oncall,
     cloud: raw.cloud,
     agentspan: raw.agentspan,
+    webIntel: raw.webIntel,
     gateway: raw.gateway,
     layout: raw.layout,
     recursionLimit: raw.recursionLimit,
@@ -247,6 +254,7 @@ function normalizeBackendSettings(settings: BackendSettings): BackendSettings {
   next.oncall = normalizeOncallSettings(next.oncall);
   next.cloud = normalizeCloudSettings(next.cloud);
   next.agentspan = normalizeAgentspanSettings(next.agentspan);
+  next.webIntel = normalizeWebIntelSettings(next.webIntel);
 
   next.schemaVersion = BACKEND_SETTINGS_SCHEMA_VERSION;
   return next;
@@ -470,6 +478,19 @@ export function normalizeAgentspanSettings(raw: unknown): AgentspanSettings {
     ...(serverUrl ? { serverUrl } : {}),
     ...(authSecretRef ? { authSecretRef } : {}),
     enabled: src.enabled !== false,
+  };
+}
+
+export function normalizeWebIntelSettings(raw: unknown): WebIntelSettings {
+  const src = isObject(raw) ? (raw as Record<string, unknown>) : {};
+  const restUrl = typeof src.restUrl === "string" ? src.restUrl.trim() : "";
+  const token = typeof src.token === "string" && src.token.trim() ? src.token.trim() : undefined;
+  return {
+    ...(restUrl ? { restUrl } : {}),
+    ...(token ? { token } : {}),
+    enabled: src.enabled !== false,
+    autoStart: src.autoStart !== false,
+    warmupOnInit: src.warmupOnInit === true,
   };
 }
 

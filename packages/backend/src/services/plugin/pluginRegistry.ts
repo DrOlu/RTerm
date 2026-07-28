@@ -78,14 +78,25 @@ export interface PluginContext {
   registerTool: (tool: PluginToolDefinition) => void
   /** register an event-driven trigger the plugin provides. */
   registerTrigger: (trigger: PluginTriggerDefinition) => void
-  /** register a dashboard panel the plugin provides. */
-  registerPanel: (name: string, render: () => Promise<string> | string) => void
+  /** register a dashboard panel the plugin provides. Accepts either
+   * `registerPanel(name, render)` or the object form
+   * `registerPanel({ name, title?, render })` used by existing plugins. */
+  registerPanel: (
+    nameOrDef: string | { name: string; title?: string; render: () => Promise<string> | string },
+    render?: () => Promise<string> | string,
+  ) => void
   /** run a command on a host (the agent's exec path, policy-gated). */
   exec: (command: string, opts?: { host?: string }) => Promise<string>
+  /** spawn a local child process (sidecar daemons). Optional — only present in
+   * runtimes that allow it; plugins must degrade gracefully when it's absent. */
+  spawnProcess?: (command: string, args: string[], opts?: { env?: Record<string, string>; detached?: boolean; stdio?: string }) => unknown
   /** read a ledger's data (metrics/incidents/etc.). */
   readLedger: (name: string, query?: Record<string, unknown>) => unknown
   /** log a line to the RTerm log. */
   log: (line: string) => void
+  /** optional live settings snapshot (or a getter) for plugins that read config blocks. */
+  settings?: Record<string, unknown>
+  getSettings?: () => Record<string, unknown>
 }
 
 export type PluginRegisterFn = (ctx: PluginContext) => void | Promise<void>
@@ -295,14 +306,24 @@ export class PluginRegistry {
     exec: PluginContext['exec'],
     readLedger: PluginContext['readLedger'],
     log: PluginContext['log'],
+    spawnProcess?: PluginContext['spawnProcess'],
+    getSettings?: PluginContext['getSettings'],
   ): PluginContext {
     return {
       registerTool: (tool) => { record.tools.push(tool) },
       registerTrigger: (trigger) => { record.triggers.push(trigger) },
-      registerPanel: (name, render) => { record.panels.push({ name, render }) },
+      registerPanel: (nameOrDef, render) => {
+        if (typeof nameOrDef === 'string') {
+          if (typeof render === 'function') record.panels.push({ name: nameOrDef, render })
+        } else if (nameOrDef && typeof nameOrDef === 'object' && typeof nameOrDef.render === 'function') {
+          record.panels.push({ name: nameOrDef.name, render: nameOrDef.render })
+        }
+      },
       exec,
       readLedger,
       log,
+      ...(spawnProcess ? { spawnProcess } : {}),
+      ...(getSettings ? { getSettings, get settings() { return getSettings() } } : {}),
     }
   }
 }

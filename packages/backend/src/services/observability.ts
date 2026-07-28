@@ -529,6 +529,19 @@ const reviewService = new ReviewService({
         return {}
       },
       (line) => { try { deps.onLog?.(line) } catch { /* best-effort */ } },
+      // Real child_process spawn for sidecar daemons (web-intel's wigolo serve).
+      (command, args, opts) => {
+        // Lazy ESM-safe require so this only loads when a plugin actually spawns.
+        const req = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
+        const cp = req('node:child_process') as typeof import('node:child_process')
+        return cp.spawn(command, args, {
+          env: opts?.env as NodeJS.ProcessEnv | undefined,
+          detached: opts?.detached ?? false,
+          stdio: (opts?.stdio as never) ?? 'ignore',
+        })
+      },
+      // Live settings snapshot for plugins that read config blocks (webIntel, agentspan, …).
+      () => (deps.settingsService?.getSettings?.() as Record<string, unknown>) ?? {},
     ),
     onLog: deps.onLog,
   })

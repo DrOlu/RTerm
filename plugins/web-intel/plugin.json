@@ -1,0 +1,28 @@
+{
+  "name": "web-intel",
+  "version": "1.0.0",
+  "description": "Local-first web intelligence for RTerm's agent via wigolo — multi-engine web search, clean-page fetch, site crawl, structured extract, similar-pages, cache, research, and page-watch → RTerm trigger automation. Keyless search/fetch/crawl, $0/query, local-first. Synthesis uses RTerm's own agent (no LLM key needed). Lean by default: the daemon starts lazily with no browser-engine/model warmup (~1.5 GB stays opt-in).",
+  "entry": "index.mjs",
+  "tools": [
+    "webintel_health",
+    "web_search",
+    "web_fetch",
+    "web_crawl",
+    "web_research",
+    "web_find_similar",
+    "web_watch_add",
+    "web_watch_list",
+    "web_watch_remove"
+  ],
+  "triggers": [
+    "webintel_page_changed"
+  ],
+  "panels": [
+    "web-intel"
+  ],
+  "permissions": [
+    "exec",
+    "spawnProcess",
+    "readLedger:metrics"
+  ]
+}

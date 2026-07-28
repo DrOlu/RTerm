@@ -648,6 +648,26 @@ export interface AgentspanSettings {
   enabled?: boolean
 }
 
+/**
+ * Web-intel (wigolo) configuration. The web-intel plugin reads this to reach the
+ * local wigolo daemon. Synthesis uses RTerm's own agent — no LLM key is stored.
+ * Lean by default: warmupOnInit=false keeps the ~1.5 GB browser-engine/model
+ * download opt-in.
+ */
+export interface WebIntelSettings {
+  /** wigolo daemon base URL (default http://127.0.0.1:3333). */
+  restUrl?: string
+  /** bearer token (optional; only if the daemon uses WIGOLO_API_TOKEN). */
+  token?: string
+  /** master switch (default true). */
+  enabled?: boolean
+  /** start the daemon on first use (default true). */
+  autoStart?: boolean
+  /** download the full browser engine + on-device models in the background
+   * (default false = lean; search/fetch/crawl work keyless without them). */
+  warmupOnInit?: boolean
+}
+
 export interface BackendSettings {
   /** Settings schema version, used for migrations */
   schemaVersion: 5
@@ -743,6 +763,8 @@ export interface BackendSettings {
 
   /** AgentSpan/Conductor bridge (durable agent runtime), auth via vault. */
   agentspan?: AgentspanSettings
+  /** Web-intel (wigolo) web-intelligence plugin config. */
+  webIntel?: WebIntelSettings
 
   /** WebSocket gateway exposure policy */
   gateway: {

@@ -1,5 +1,55 @@
 # Changelog
 
+## v3.0.9 (2026-07-28)
+
+### Feature — `web-intel` plugin: local-first web intelligence for RTerm's agent (via wigolo)
+
+RTerm's agent now has first-class web tools it didn't have: multi-engine search, clean-page
+fetch, site crawl, structured extract, similar-pages, research, and page-watch → RTerm
+trigger automation. Built as a first-class plugin following the `agentspan-bridge` pattern
+(split client from glue, settings-driven, resilient).
+
+**Plugin `plugins/web-intel/` (9 tools / 1 trigger / 1 panel):**
+- `webintel_health` — daemon status + lean-vs-full warmup + auto-start state.
+- `web_search` — multi-engine ranked search with citations (keyless, $0).
+- `web_fetch` — clean markdown + metadata + links (tiered router escalates to browser).
+- `web_crawl` — multi-page crawl (BFS/DFS/sitemap/map).
+- `web_research` — decompose a question → ranked evidence + citations. **Synthesis uses
+  RTerm's own agent — no LLM key is needed or stored.**
+- `web_find_similar` — pages similar to a URL/concept.
+- `web_watch_add` / `web_watch_list` / `web_watch_remove` — watch a vendor/CVE/status page
+  for changes; the `webintel_page_changed` trigger fires so a playbook/MOP can react.
+- Panel `web-intel` — watched pages + daemon status.
+
+**Lean by default (stock RTerm stays lean):**
+- The wigolo daemon starts **lazily on first use** (`npx -y wigolo serve`) — nothing is
+  downloaded at install time.
+- Default is `WIGOLO_NO_WARMUP=1` — the ~1.5 GB browser engine + on-device models are
+  **not** downloaded until a tool that needs them actually runs, or until the user sets
+  `webIntel.warmupOnInit: true` (which kicks off a background `wigolo init`).
+- Search/fetch/crawl work keyless without the heavy models.
+
+**Settings block `webIntel`** (schema v5 + `normalizeWebIntelSettings`):
+`{enabled, restUrl, token, autoStart, warmupOnInit}` — defaults keep everything lean and
+local. Token is optional (only if the daemon uses `WIGOLO_API_TOKEN`).
+
+**Plugin infrastructure upgrades (shared):**
+- `PluginContext.spawnProcess` — plugins can now spawn local sidecar daemons (used by
+  web-intel for `wigolo serve`); optional, plugins degrade gracefully when absent.
+- `PluginContext.settings` / `getSettings` — live settings snapshots for plugins that
+  read config blocks.
+- `registerPanel` now accepts both the `(name, render)` form and the object form
+  `{name, title?, render}` used by existing plugins (pre-existing signature drift fixed).
+
+**Resilient:** if the daemon is down and can't auto-start, every tool returns a clear
+`{error, hint}` instead of throwing — the agent stays usable (the agentspan-bridge
+pattern).
+
+Verification: backend typecheck exit 0; 21/21 web-intel offline tests (client URL/auth/
+error mapping, every endpoint, lean-by-default spawn plan, start/stop/status, tool
+wiring, unreachable-daemon resilience, result normalization, trigger match); all 74
+plugin + settings + agentspan-bridge suites green.
+
 ## v3.0.8 (2026-07-28)
 
 ### Fix — legacy/Cisco SSH presets offered algorithms ssh2 can't load (Test workflow)
