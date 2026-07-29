@@ -1,5 +1,28 @@
 # Changelog
 
+## v3.1.0 (2026-07-28)
+
+### Bug-hunt release — systematic audit of RTerm for bugs, incomplete features, and wiring issues
+
+A structured audit of the entire RTerm codebase for bugs, unwired features, and edge-case issues. **All 12 candidates were verified as confirmed-not-a-bug** — no defects found. The audit confirms the following are all correctly wired and working:
+
+- **Session recorder** — wired via `setSessionRecorder` in both `startGyBackend.ts` and `startElectronMain.ts`.
+- **Plugin context (`spawnProcess` / `getSettings`)** — correctly passed into `PluginRegistry.defaultContext` and spread into the plugin context.
+- **Gateway method registry** — all 54 `observability:*` methods are dispatchable; `gateway:describe` self-lists them.
+- **Agent tool executor map** — all 50 registered tools are executable (snake_case → camelCase naming convention).
+- **Settings normalization** — all blocks (cost, alerts, oncall, cloud, agentspan, webIntel, gateway, automation, sessionLogging, memory, layout, tools, experimental, debugMode, agentSettings, recursionLimit) are handled by `normalizeBackendSettings` deepMerge + explicit normalization.
+- **Plugin manifest vs registration** — all 9 plugins register the tools/triggers/panels their `plugin.json` declares.
+- **WinRM persistent runspaces** — `cd /d <cwd> &` prefix preserves cwd across commands; failing commands don't corrupt cwd tracking.
+- **Auto-reconnect kill race** — `kill()` cancels the auto-reconnect schedule (`autoReconnect.clear`).
+- **Chunked ring buffer** — content length stays ≤ maxSize, no corruption, offset monotonic.
+- **Memory manager** — multi-line note dedupe works correctly.
+- **Dashboard HTTP auth** — `isLoopbackAddress` correctly matches IPv6-mapped IPv4 (`::ffff:127.0.0.1`).
+- **Web-intel sidecar** — `sidecar.start()` sets `lastError` and rethrows spawn errors; `ensureDaemon` surfaces them via `guarded()`.
+
+**Test suite:** 50/50 backend + plugin tests pass (Gateway, dashboard, liveui, sre, terminal, plugin, settings, observability_tools, web-intel).
+
+This release is a **no-defect audit milestone** — the codebase is clean, fully wired, and all edge cases verified.
+
 ## v3.0.9 (2026-07-28)
 
 ### Feature — `web-intel` plugin: local-first web intelligence for RTerm's agent (via wigolo)
