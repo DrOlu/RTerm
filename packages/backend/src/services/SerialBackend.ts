@@ -42,9 +42,14 @@ export interface SerialPortLike {
   break?(opts?: { duration?: number }, cb?: (err?: Error | null) => void): void
 }
 
-export interface SerialPortConstructor {
-  new (path: string, opts: any): SerialPortLike
-}
+/**
+ * The serialport constructor. Across versions the export shape and call
+ * signature differ:
+ *  - v9:  the module itself IS the constructor, called `new SerialPort(path, opts)`.
+ *  - v10+: the class is the `SerialPort` named export, called `new SerialPort({path, ...opts})`.
+ * We normalise both to a single factory taking `(path, opts)`.
+ */
+export type SerialPortFactory = (path: string, opts: any) => SerialPortLike
 
 interface SerialInstance {
   config: SerialConnectionConfig
@@ -54,23 +59,39 @@ interface SerialInstance {
   ready: boolean
 }
 
-let injectedSerial: SerialPortConstructor | null = null
-let lazySerial: SerialPortConstructor | null | undefined
+let injectedSerial: SerialPortFactory | null = null
+let lazySerial: SerialPortFactory | null | undefined
+
+/** Call a serialport constructor/factory, tolerating both `new Ctor(path, opts)`
+ * (v9 + class-injected test fakes) and the v10+ object form `new Ctor({path, ...opts})`. */
+function constructPort(Ctor: any, path: string, opts: any): SerialPortLike {
+  try {
+    return new Ctor(path, opts)
+  } catch (e: any) {
+    // v10+ throws a TypeError (`"path" is not defined`) for the positional form.
+    if (e instanceof TypeError) return new Ctor({ path, ...opts })
+    throw e
+  }
+}
 
 export class SerialBackend implements TerminalBackend {
   private instances = new Map<string, SerialInstance>()
 
-  /** For tests: inject a fake serialport constructor. */
-  static setSerialModuleForTest(mod: SerialPortConstructor | null): void {
+  /** For tests: inject a fake serialport constructor/factory. */
+  static setSerialModuleForTest(mod: SerialPortFactory | null): void {
     injectedSerial = mod
   }
 
-  private loadSerial(): SerialPortConstructor | null {
+  private loadSerial(): SerialPortFactory | null {
     if (injectedSerial) return injectedSerial
     if (lazySerial !== undefined) return lazySerial
     try {
       // Lazy require so the module isn't loaded when serial isn't used.
-      lazySerial = require('serialport') as unknown as SerialPortConstructor
+      // Export shape differs by version: v9 exports the constructor AS the
+      // module; v10+ puts it on the `SerialPort` named export. Resolve the class.
+      const mod = require('serialport')
+      const Ctor = typeof mod?.SerialPort === 'function' ? mod.SerialPort : mod
+      lazySerial = ((path: string, opts: any) => constructPort(Ctor, path, opts)) as SerialPortFactory
     } catch {
       lazySerial = null
     }
@@ -82,14 +103,14 @@ export class SerialBackend implements TerminalBackend {
       throw new Error('SerialBackend only supports serial connections')
     }
     const cfg = config as unknown as SerialConnectionConfig
-    const SerialPort = this.loadSerial()
-    if (!SerialPort) {
+    const createPort = this.loadSerial()
+    if (!createPort) {
       throw new Error(
         'Serial port support requires the `serialport` npm package, which is not installed. Install it in RTerm to use serial console connections.',
       )
     }
     const ptyId = `serial-${randomUUID()}`
-    const port = new SerialPort(cfg.path, {
+    const port = constructPort(createPort as any, cfg.path, {
       baudRate: cfg.baudRate,
       dataBits: cfg.dataBits ?? 8,
       parity: cfg.parity ?? 'none',

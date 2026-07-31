@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.1.1 (2026-07-31)
+
+### Bug fixes — serial transport, standalone transports
+
+- **Serial backend — `SerialPort is not a constructor`.** `SerialBackend.loadSerial()`
+  returned `require('serialport')` (the module namespace) but `spawn()` called it as a
+  constructor. Across serialport versions the export shape and call signature differ —
+  v9 exports the constructor *as* the module and accepts `new SerialPort(path, opts)`;
+  v10+ puts the class on the `SerialPort` named export and only accepts
+  `new SerialPort({ path, ...opts })`. The backend now (a) resolves the class from
+  `mod.SerialPort ?? mod` and (b) constructs via a tolerant helper that tries the
+  positional form and falls back to the object form on a `TypeError`. Serial console
+  connections now open correctly on serialport v9 through v13+ (no version pin needed).
+  File: `packages/backend/src/services/SerialBackend.ts`. Regression-covered by
+  `serialBackend.extreme.spec.ts` (8/8).
+
+- **Standalone `neuralos` / `rterm-backend` npm — missing transports.** The standalone
+  gybackend bundle marks `ssh2` / `serialport` / `node-pty` as external (resolved from
+  `node_modules` at runtime), but `serialport` was not declared in any `package.json`, so
+  a fresh `npm i -g neuralos` had no serial support (and SSH/node-pty only resolved via
+  incidental hoisting). `serialport` is now declared as an `optionalDependencies` entry in
+  the root `package.json` (native addon — installs where it compiles, skipped elsewhere),
+  matching how `ssh2` and `node-pty` are provided. File: `package.json`.
+
+**Verification:** backend typecheck exit 0; `serialBackend.extreme.spec.ts` 8/8; the
+constructor helper verified against real serialport v9.2.8 (positional) and v13.0.0
+(object-form fallback).
+
 ## v3.1.0 (2026-07-28)
 
 ### Bug-hunt release — systematic audit of RTerm for bugs, incomplete features, and wiring issues
