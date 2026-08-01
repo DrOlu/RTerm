@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.1.2 (2026-07-31)
+
+### Feature — comprehensive NATS event mesh (auth, JetStream, KV, request/reply)
+
+`NatsEventBus` rewritten from a thin core-pub/sub adapter into a full NATS client
+covering the entire feature surface. The trigger mesh (terminal output + monitor
+snapshots → fleet-wide pattern/threshold triggers) works unchanged; everything below
+is additive and backward compatible.
+
+- **Authentication** (`NatsAuthOptions`) — the previous build connected with no auth,
+  so it couldn't reach any authenticated server. Now supports every NATS auth scheme:
+  static **token**, **username/password**, **NKey** (seed signing), **JWT** (jwt+seed),
+  **.creds** bundle, and **TLS mutual-auth** (cert/key/ca). Resolved via
+  `buildAuthenticator()` (token/user-pass/NKey/JWT/creds) + `buildTls()`; secrets can be
+  inline or `secretRef` pointers resolved through the vault.
+- **Core pub/sub** — generic `publish()`/`subscribe()` with optional **queue groups**
+  (load-balance across instances) and **headers** (MsgHdrs both directions).
+- **Request/Reply** — `request()` (timeout + headers) and `respond()` for NATS-native RPC.
+- **JetStream** — `streamAdd/Info/List/Purge/Delete`, durable `jsPublish()` (awaits
+  PubAck: stream + seq + duplicate), `jsConsume()` (ordered/durable, ack/nak), and
+  `jsFetch()` (pull batch). New deps `@nats-io/jetstream` + `@nats-io/kv` (v3.4.0).
+- **Key-Value** — `kvCreateBucket`/`kvBucket`, `kvPut`/`kvGet`/`kvDelete`, `kvKeys`,
+  `kvWatch` (change feed), built on JetStream.
+- **Connection lifecycle** — reconnect/disconnect/error/lame-duck status handlers
+  (`onReconnect`/`onDisconnect`/`onError`), configurable `maxReconnectAttempts`,
+  `reconnectTimeWait`, `timeout`; idempotent connect + clean drain/close.
+- **Settings** — `resolveNatsOptions` now passes through `auth`, `queue`, and the
+  reconnect/timeout knobs (still returns null when disabled/unconfigured).
+
+File: `packages/backend/src/services/automation/natsEventBus.ts` (rewritten).
+Tests: new `natsEventBus.comprehensive.extreme.spec.ts` (20 tests: 7 auth, 3 pub/sub,
+2 request/reply, 4 JetStream, 2 KV, 2 settings) — **20/20**; existing
+`natsEventBus.extreme.spec.ts` (11/11) + `natsTriggerMesh.extreme.spec.ts` (4/4) stay
+green. Backend typecheck exit 0.
+
 ## v3.1.1 (2026-07-31)
 
 ### Bug fixes — serial transport, standalone transports
