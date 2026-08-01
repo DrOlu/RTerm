@@ -1,0 +1,252 @@
+/**
+ * synapse-bridge — RTerm ↔ Synapse mesh interop.
+ *
+ * Lets RTerm speak the Synapse protocol (v0.3.0) over a shared NATS server:
+ * discover live mesh agents, dispatch tasks to them, and register RTerm itself
+ * as a mesh agent (bidirectional federation). Built on the same NatsEventBus
+ * conventions (auth, request/reply, JetStream) added in v3.1.2.
+ *
+ * Config (settings.synapse, or env):
+ *   url        — NATS server (default nats://localhost:4222)
+ *   servers    — array of urls (takes precedence)
+ *   prefix     — mesh subject prefix (default "mesh")
+ *   agentId    — this instance's mesh agent id (default "rterm-001")
+ *   auth       — { token | username/password | nkeySeed | jwt/jwtSeed | creds | tls* }
+ *   enabled    — master switch (default true when a server is configured)
+ *
+ * Secrets may be inline or `secretRef` pointers resolved via the vault.
+ */
+
+import { createRequire } from 'node:module'
+import { randomUUID } from 'node:crypto'
+
+const require = createRequire(import.meta.url)
+const enc = new TextEncoder()
+const dec = new TextDecoder()
+const j = (v) => enc.encode(JSON.stringify(v))
+const uj = (b) => JSON.parse(dec.decode(b))
+
+// ─── config resolution ──────────────────────────────────────────────────────
+
+export function resolveConfig(ctx = {}, env = process.env) {
+  const s = (typeof ctx.getSettings === 'function' ? ctx.getSettings() : ctx.settings) || {}
+  const block = s.synapse || {}
+  const servers = Array.isArray(block.servers) && block.servers.length > 0
+    ? block.servers
+    : (block.url || env.SYNAPSE_NATS_URL || env.NATS_URL || 'nats://localhost:4222')
+  return {
+    servers,
+    prefix: block.prefix || 'mesh',
+    agentId: block.agentId || env.SYNAPSE_AGENT_ID || 'rterm-001',
+    auth: block.auth || undefined,
+    enabled: block.enabled !== false,
+  }
+}
+
+/** Resolve auth secrets through the vault when secretRef-style values are used. */
+function resolveAuth(ctx, auth) {
+  if (!auth) return undefined
+  const out = { ...auth }
+  if (out.passwordSecretRef && typeof ctx.getSecret === 'function') {
+    try { out.password = ctx.getSecret(out.passwordSecretRef); delete out.passwordSecretRef } catch { /* leave unset */ }
+  }
+  if (out.tokenSecretRef && typeof ctx.getSecret === 'function') {
+    try { out.token = ctx.getSecret(out.tokenSecretRef); delete out.tokenSecretRef } catch { /* leave unset */ }
+  }
+  return out
+}
+
+// ─── transport (lazy NATS connection) ───────────────────────────────────────
+
+function loadTransport() {
+  try { return require('@nats-io/transport-node') } catch {
+    throw new Error('NATS transport (@nats-io/transport-node) is not available in this build')
+  }
+}
+
+function buildAuthenticator(t, auth) {
+  if (!auth) return undefined
+  const e = new TextEncoder()
+  if (auth.creds) return t.credsAuthenticator(typeof auth.creds === 'string' ? e.encode(auth.creds) : auth.creds)
+  if (auth.jwt) return t.jwtAuthenticator(auth.jwt, typeof auth.jwtSeed === 'string' ? e.encode(auth.jwtSeed) : auth.jwtSeed)
+  if (auth.nkeySeed) return t.nkeyAuthenticator(typeof auth.nkeySeed === 'string' ? e.encode(auth.nkeySeed) : auth.nkeySeed)
+  if (auth.token) return t.tokenAuthenticator(auth.token)
+  if (auth.username !== undefined) return t.usernamePasswordAuthenticator(auth.username, auth.password ?? '')
+  return undefined
+}
+
+let _conn = null
+async function connectMesh(ctx) {
+  if (_conn && !_conn.isClosed()) return _conn
+  const cfg = resolveConfig(ctx)
+  const t = loadTransport()
+  const auth = buildAuthenticator(t, resolveAuth(ctx, cfg.auth))
+  const copts = { servers: cfg.servers, name: cfg.agentId, ...(auth ? { authenticator: auth } : {}) }
+  const connectFn = (typeof ctx.natsConnect === 'function') ? ctx.natsConnect : (o) => t.connect(o)
+  _conn = await connectFn(copts)
+  return _conn
+}
+
+/** Test hook: inject a fake connection. */
+export function __setConnForTest(c) { _conn = c }
+
+// ─── Synapse envelope ───────────────────────────────────────────────────────
+
+export function envelope(type, payload, cfg, extra = {}) {
+  return {
+    v: '0.3.0',
+    id: randomUUID(),
+    type,
+    ts: new Date().toISOString(),
+    from: cfg.agentId,
+    trace: { trace_id: randomUUID(), span_id: randomUUID() },
+    payload,
+    ...extra,
+  }
+}
+
+// ─── core ops ───────────────────────────────────────────────────────────────
+
+export async function discoverAgents(ctx, filter = {}) {
+  const cfg = resolveConfig(ctx)
+  const nc = await connectMesh(ctx)
+  const msg = await nc.request(`${cfg.prefix}.registry.discover`, j(envelope('discover', filter, cfg)), { timeout: 4000 })
+  const reply = uj(msg.data)
+  const agents = Array.isArray(reply) ? reply : (reply.payload?.agents ?? reply.payload ?? reply)
+  return Array.isArray(agents) ? agents : []
+}
+
+export async function dispatchTask(ctx, target, skill, input = {}, opts = {}) {
+  const cfg = resolveConfig(ctx)
+  const nc = await connectMesh(ctx)
+  const env = envelope('request', { skill, input }, cfg, { to: target, task_id: randomUUID() })
+  const msg = await nc.request(`${cfg.prefix}.agent.${target}.inbox`, j(env), { timeout: opts.timeout ?? 30000 })
+  return uj(msg.data)
+}
+
+export async function registerSelf(ctx, manifest = {}) {
+  const cfg = resolveConfig(ctx)
+  const nc = await connectMesh(ctx)
+  const payload = {
+    agent_id: cfg.agentId,
+    name: manifest.name || 'RTerm / neuralOS',
+    type: 'agent',
+    capabilities: manifest.capabilities || ['ops-automation', 'playbooks', 'fleet-orchestration', 'mop-changes'],
+    skills: manifest.skills || [],
+    endpoint: `${cfg.prefix}.agent.${cfg.agentId}.inbox`,
+    availability: 'online',
+    ...manifest,
+  }
+  nc.publish(`${cfg.prefix}.registry.register`, j(envelope('register', payload, cfg)))
+  return { registered: cfg.agentId, endpoint: payload.endpoint }
+}
+
+// ─── plugin registration ────────────────────────────────────────────────────
+
+async function guarded(fn, log) {
+  try { return await fn() } catch (e) {
+    const msg = e?.message ?? String(e)
+    log?.(`[synapse] ${msg}`)
+    return { error: msg, hint: 'Is the NATS server running and the synapse block configured? (settings.synapse.url, default nats://localhost:4222).' }
+  }
+}
+
+export function register(ctx) {
+  const { registerTool, registerTrigger, registerPanel, log } = ctx
+  const cfg = resolveConfig(ctx)
+
+  registerTool({
+    name: 'synapse_health',
+    description: 'Check connectivity to the Synapse mesh (NATS server) and report the configured agent id + subject prefix.',
+    params: {},
+    handler: async () => guarded(async () => {
+      const nc = await connectMesh(ctx)
+      return { connected: !nc.isClosed(), agentId: cfg.agentId, prefix: cfg.prefix, servers: cfg.servers }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_discover',
+    description: 'Discover live Synapse mesh agents and their skills via the registry (mesh.registry.discover). Optional filter by capabilities/skill_ids/availability.',
+    params: {
+      capabilities: { type: 'array', description: 'Capabilities to match (all-of)', optional: true },
+      skill_ids: { type: 'array', description: 'Skill ids to match (all-of)', optional: true },
+      availability: { type: 'string', description: 'e.g. online', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      const filter = {}
+      if (p?.capabilities) filter.capabilities = p.capabilities
+      if (p?.skill_ids) filter.skill_ids = p.skill_ids
+      if (p?.availability) filter.availability = p.availability
+      const agents = await discoverAgents(ctx, filter)
+      return { count: agents.length, agents }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_dispatch',
+    description: 'Dispatch a task to a Synapse mesh agent (mesh.agent.{id}.inbox) and await its response. The task is durably tracked in the mesh.',
+    params: {
+      target: { type: 'string', description: 'Target agent id (e.g. grip-cli-001)' },
+      skill: { type: 'string', description: 'Skill id from the target manifest' },
+      input: { type: 'object', description: 'Input payload for the skill', optional: true },
+      timeout: { type: 'number', description: 'Reply timeout ms (default 30000)', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      if (!p?.target || !p?.skill) return { error: 'synapse_dispatch needs target and skill' }
+      const response = await dispatchTask(ctx, p.target, p.skill, p.input ?? {}, { timeout: p.timeout })
+      return { target: p.target, skill: p.skill, response }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_register',
+    description: 'Register this RTerm/neuralOS instance as a Synapse mesh agent (mesh.registry.register) so other mesh agents can discover and dispatch to it.',
+    params: {
+      name: { type: 'string', optional: true },
+      capabilities: { type: 'array', optional: true },
+      skills: { type: 'array', optional: true },
+    },
+    handler: async (p) => guarded(async () => registerSelf(ctx, p ?? {}), log),
+  })
+
+  registerTool({
+    name: 'synapse_agents_summary',
+    description: 'Compact summary of live Synapse mesh agents (id, name, skill count, first skills) for quick situational awareness.',
+    params: {},
+    handler: async () => guarded(async () => {
+      const agents = await discoverAgents(ctx, {})
+      return {
+        count: agents.length,
+        agents: agents.map((a) => ({
+          id: a.id ?? a.agent_id ?? a.name,
+          name: a.name,
+          skillCount: (a.skills ?? a.capabilities ?? []).length,
+          skills: (a.skills ?? a.capabilities ?? []).slice(0, 5).map((s) => (typeof s === 'string' ? s : s.id ?? s.name)),
+        })),
+      }
+    }, log),
+  })
+
+  registerTrigger({
+    name: 'synapse_mesh_event',
+    description: 'Fires when a Synapse mesh event (task failure, reputation penalty, approval request) is observed. Use for cross-mesh remediation.',
+    match: (event) => event?.source === 'synapse',
+    action: 'propose-change',
+  })
+
+  registerPanel({
+    name: 'synapse-mesh-agents',
+    title: 'Synapse Mesh Agents',
+    render: (data) => {
+      const rows = (Array.isArray(data) ? data : []).map((a) =>
+        `<tr><td>${a.id ?? ''}</td><td>${a.name ?? ''}</td><td>${a.skillCount ?? ''}</td></tr>`
+      ).join('')
+      return `<div class="synapse-mesh"><h3>Synapse Mesh Agents</h3><p>Agent: ${cfg.agentId} · Prefix: ${cfg.prefix}</p><table><thead><tr><th>Id</th><th>Name</th><th>Skills</th></tr></thead><tbody>${rows}</tbody></table></div>`
+    },
+  })
+
+  log(`[synapse] synapse-bridge registered: 5 tools, 1 trigger, 1 panel (agent=${cfg.agentId}, prefix=${cfg.prefix})`)
+}
+
+export default { register, resolveConfig, envelope, discoverAgents, dispatchTask, registerSelf }

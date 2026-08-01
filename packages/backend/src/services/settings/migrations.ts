@@ -1,4 +1,4 @@
-import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, NatsSettings, OncallSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
+import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, NatsSettings, NumbatSettings, OncallSettings, SynapseSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
 import { BUILTIN_TOOL_INFO } from "../AgentHelper/tools";
 import { normalizeAgentSettingState } from "./agentSettings";
 import { deepMerge, isObject } from "./objectMerge";
@@ -126,6 +126,8 @@ function pickBackendSnapshot(raw: unknown): Partial<BackendSettings> {
     agentspan: raw.agentspan,
     webIntel: raw.webIntel,
     nats: raw.nats,
+    synapse: raw.synapse,
+    numbat: raw.numbat,
     gateway: raw.gateway,
     layout: raw.layout,
     recursionLimit: raw.recursionLimit,
@@ -257,6 +259,8 @@ function normalizeBackendSettings(settings: BackendSettings): BackendSettings {
   next.agentspan = normalizeAgentspanSettings(next.agentspan);
   next.webIntel = normalizeWebIntelSettings(next.webIntel);
   next.nats = normalizeNatsSettings(next.nats);
+  next.synapse = normalizeSynapseSettings(next.synapse);
+  next.numbat = normalizeNumbatSettings(next.numbat);
 
   next.schemaVersion = BACKEND_SETTINGS_SCHEMA_VERSION;
   return next;
@@ -534,6 +538,49 @@ export function normalizeNatsSettings(raw: unknown): NatsSettings {
     ...(num(src.reconnectTimeWait) !== undefined ? { reconnectTimeWait: num(src.reconnectTimeWait) } : {}),
     ...(num(src.timeout) !== undefined ? { timeout: num(src.timeout) } : {}),
     ...(hasAuth ? { auth } : {}),
+  };
+}
+
+export function normalizeSynapseSettings(raw: unknown): SynapseSettings {
+  const src = isObject(raw) ? (raw as Record<string, unknown>) : {};
+  const url = typeof src.url === "string" && src.url.trim() ? src.url.trim() : undefined;
+  const servers = Array.isArray(src.servers)
+    ? (src.servers as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim())
+    : undefined;
+  const prefix = typeof src.prefix === "string" && src.prefix.trim() ? src.prefix.trim() : undefined;
+  const agentId = typeof src.agentId === "string" && src.agentId.trim() ? src.agentId.trim() : undefined;
+
+  const rawAuth = isObject(src.auth) ? (src.auth as Record<string, unknown>) : undefined;
+  const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
+  const authKeys = ["token", "tokenSecretRef", "username", "password", "passwordSecretRef", "nkeySeed", "jwt", "jwtSeed", "creds", "tlsCert", "tlsKey", "tlsCa"] as const;
+  const auth = rawAuth
+    ? Object.fromEntries(authKeys.filter((k) => str(rawAuth[k])).map((k) => [k, str(rawAuth[k])]))
+    : undefined;
+  const hasAuth = auth && Object.keys(auth).length > 0;
+
+  return {
+    enabled: src.enabled !== false,
+    ...(url ? { url } : {}),
+    ...(servers && servers.length > 0 ? { servers } : {}),
+    ...(prefix ? { prefix } : {}),
+    ...(agentId ? { agentId } : {}),
+    ...(hasAuth ? { auth: auth as SynapseSettings["auth"] } : {}),
+  };
+}
+
+export function normalizeNumbatSettings(raw: unknown): NumbatSettings {
+  const src = isObject(raw) ? (raw as Record<string, unknown>) : {};
+  const binaryPath = typeof src.binaryPath === "string" && src.binaryPath.trim() ? src.binaryPath.trim() : undefined;
+  const recordsPath = typeof src.recordsPath === "string" && src.recordsPath.trim() ? src.recordsPath.trim() : undefined;
+  const ingestToken = typeof src.ingestToken === "string" && src.ingestToken.trim() ? src.ingestToken.trim() : undefined;
+  const sev = typeof src.minSeverity === "string" ? src.minSeverity.toLowerCase() : "";
+  const minSeverity = (["info", "low", "medium", "high", "critical"].includes(sev) ? sev : undefined) as NumbatSettings["minSeverity"];
+  return {
+    enabled: src.enabled !== false,
+    ...(binaryPath ? { binaryPath } : {}),
+    ...(recordsPath ? { recordsPath } : {}),
+    ...(ingestToken ? { ingestToken } : {}),
+    ...(minSeverity ? { minSeverity } : {}),
   };
 }
 

@@ -1,5 +1,47 @@
 # Changelog
 
+## v3.1.4 (2026-08-01)
+
+### Feature — two new bridge plugins: `synapse-bridge` + `numbat-bridge`
+
+Two production bridge plugins that turn RTerm into a first-class citizen of two
+complementary ecosystems. Both are opt-in (settings-gated), ship with full unit tests,
+and follow the established plugin pattern (tools + trigger + panel).
+
+**`synapse-bridge` — RTerm ↔ Synapse mesh interop.** RTerm now speaks the Synapse
+protocol (v0.3.0) over a shared NATS server, building on the v3.1.2 auth/request-reply/
+JetStream transport. Discover live mesh agents, dispatch tasks to them, and register
+RTerm itself as a mesh agent (bidirectional federation).
+- Tools: `synapse_health`, `synapse_discover` (registry query with capability/skill/
+  availability filters), `synapse_dispatch` (send a task to `mesh.agent.{id}.inbox`,
+  await the durable response), `synapse_register` (register RTerm as a mesh agent),
+  `synapse_agents_summary`.
+- Trigger `synapse_mesh_event` + panel `synapse-mesh-agents`.
+- Config `settings.synapse` (url/servers/prefix/agentId/auth incl. vault secretRef).
+- Tests: `synapse-bridge.extreme.spec.mjs` — **10/10** (config, envelope shape, register
+  wiring, discover+dispatch round-trips, register-self, trigger match).
+
+**`numbat-bridge` — RTerm ↔ Numbat (endpoint AI-agent detection/EDR).** Numbat detects
+(endpoint visibility, CEL rules, forensics); RTerm responds. Deploy Numbat to hosts and
+ingest its findings to fire governed actions.
+- Tools: `numbat_health`, `numbat_deploy` (inventory/scan/install-monitor/install-enforce/
+  status/uninstall via the policy-gated exec path), `numbat_ingest` (normalize NDJSON
+  events/findings/enforcement/indicators → emit a trigger event per finding),
+  `numbat_findings_summary` (by severity/rule/agent).
+- Trigger `numbat_finding` (medium+ severity) + panel `numbat-findings`.
+- Config `settings.numbat` (binaryPath/recordsPath/ingestToken/minSeverity).
+- Tests: `numbat-bridge.extreme.spec.mjs` — **11/11** (config, record normalization +
+  severity gating, NDJSON parsing, deploy-command builder, register wiring, ingest→trigger,
+  trigger match).
+
+**Settings:** added `synapse?: SynapseSettings` and `numbat?: NumbatSettings` to the
+`BackendSettings` type, the `pickBackendSnapshot` whitelist, and `normalizeSynapseSettings`
+/ `normalizeNumbatSettings` — so both blocks persist across save/load (the v3.1.3 lesson).
+Verified both survive `migrateBackendSettings` with auth intact.
+
+Plugin count: 9 → **11**. Backend typecheck (all workspaces) exit 0; full automation suite
+green (both new specs wired into `test:automation-extreme`).
+
 ## v3.1.3 (2026-08-01)
 
 ### Bug fix — `settings.nats` was stripped on save/load (NATS mesh couldn't be configured)

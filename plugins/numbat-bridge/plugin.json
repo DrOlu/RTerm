@@ -1,0 +1,21 @@
+{
+  "name": "numbat-bridge",
+  "version": "1.0.0",
+  "description": "Numbat bridge for RTerm — deploy Numbat (endpoint AI-agent detection/EDR) to hosts, ingest its findings (NDJSON events/findings/enforcement/indicators), and fire RTerm triggers to auto-remediate (isolate host, kill agent, open incident, run playbook). Numbat detects; RTerm responds. Config in Settings (numbat block).",
+  "entry": "index.mjs",
+  "tools": [
+    "numbat_health",
+    "numbat_deploy",
+    "numbat_ingest",
+    "numbat_findings_summary"
+  ],
+  "triggers": [
+    "numbat_finding"
+  ],
+  "panels": [
+    "numbat-findings"
+  ],
+  "permissions": [
+    "exec"
+  ]
+}

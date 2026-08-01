@@ -706,6 +706,56 @@ export interface NatsSettings {
   }
 }
 
+/**
+ * Synapse mesh bridge configuration (synapse-bridge plugin). RTerm speaks the
+ * Synapse protocol (v0.3.0) over a shared NATS server to discover/dispatch mesh
+ * agents and register itself. Auth optional; secrets inline or via vault secretRef.
+ */
+export interface SynapseSettings {
+  /** master switch (default true when a server is configured). */
+  enabled?: boolean
+  /** NATS server url (default nats://localhost:4222). */
+  url?: string
+  /** multiple server urls (takes precedence over `url`). */
+  servers?: string[]
+  /** mesh subject prefix (default "mesh"). */
+  prefix?: string
+  /** this instance's mesh agent id (default "rterm-001"). */
+  agentId?: string
+  /** auth options (token / user-pass / nkey / jwt / creds / tls). */
+  auth?: {
+    token?: string
+    tokenSecretRef?: string
+    username?: string
+    password?: string
+    passwordSecretRef?: string
+    nkeySeed?: string
+    jwt?: string
+    jwtSeed?: string
+    creds?: string
+    tlsCert?: string
+    tlsKey?: string
+    tlsCa?: string
+  }
+}
+
+/**
+ * Numbat bridge configuration (numbat-bridge plugin). Deploy Numbat (endpoint
+ * AI-agent detection/EDR) to hosts and ingest its findings to fire RTerm triggers.
+ */
+export interface NumbatSettings {
+  /** master switch (default true). */
+  enabled?: boolean
+  /** path to the numbat binary (default "numbat" on PATH). */
+  binaryPath?: string
+  /** local NDJSON records file to read (default ~/.numbat/records.ndjson). */
+  recordsPath?: string
+  /** bearer token the HTTP ingest endpoint requires (vault secretRef ok). */
+  ingestToken?: string
+  /** only ingest findings at/above this severity (info|low|medium|high|critical). */
+  minSeverity?: 'info' | 'low' | 'medium' | 'high' | 'critical'
+}
+
 export interface BackendSettings {
   /** Settings schema version, used for migrations */
   schemaVersion: 5
@@ -805,6 +855,10 @@ export interface BackendSettings {
   webIntel?: WebIntelSettings
   /** NATS event-mesh (fleet-wide triggers), auth optional. */
   nats?: NatsSettings
+  /** Synapse mesh bridge (discover/dispatch/register mesh agents). */
+  synapse?: SynapseSettings
+  /** Numbat bridge (endpoint AI-agent detection → triggers). */
+  numbat?: NumbatSettings
 
   /** WebSocket gateway exposure policy */
   gateway: {
