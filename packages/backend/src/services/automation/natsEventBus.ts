@@ -385,7 +385,7 @@ export class NatsEventBus {
     opts?: { durable?: string; queue?: string; batch?: number },
   ): Promise<() => void> {
     const js = await this.jetstream()
-    const c = await js.consumers.get(stream, opts?.durable ? { name: opts.durable } : undefined)
+    const c = await js.consumers.get(stream, opts?.durable)
     const messages = await c.consume({ max_messages: opts?.batch } as never)
     let stopped = false
     const loop = (async () => {
@@ -404,7 +404,7 @@ export class NatsEventBus {
   /** Fetch a batch of messages from a stream (pull). */
   async jsFetch(stream: string, opts?: { durable?: string; batch?: number; expires?: number }): Promise<Array<{ payload: unknown; subject: string }>> {
     const js = await this.jetstream()
-    const c = await js.consumers.get(stream, opts?.durable ? { name: opts.durable } : undefined)
+    const c = await js.consumers.get(stream, opts?.durable)
     const messages = await c.fetch({ max_messages: opts?.batch ?? 10, expires: opts?.expires ?? 2000 } as never)
     const out: Array<{ payload: unknown; subject: string }> = []
     for await (const m of messages) {
