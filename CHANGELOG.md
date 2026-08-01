@@ -1,5 +1,24 @@
 # Changelog
 
+## v3.1.3 (2026-08-01)
+
+### Bug fix — `settings.nats` was stripped on save/load (NATS mesh couldn't be configured)
+
+The v3.1.2 comprehensive NATS mesh had a wiring gap that made it **impossible to
+configure**: `pickBackendSnapshot` (settings/migrations) whitelists which settings keys
+survive a save/load cycle, and `nats` wasn't in the list — so any `nats` block written to
+`settings.json` was **silently deleted** the next time the daemon normalized + persisted
+settings (e.g. on shutdown). The bus never saw its config, so it never connected.
+
+- Added `nats?: NatsSettings` to the `BackendSettings` type (`packages/backend/src/types/index.ts`).
+- Added `nats: raw.nats` to `pickBackendSnapshot` so the block survives migration.
+- Added `normalizeNatsSettings` (url/servers/prefix/queue/reconnect/timeout + full auth
+  sub-block: token/user-pass/nkey/jwt/creds/tls) and applied it in `normalizeBackendSettings`.
+
+Regression test: `normalizeNatsSettings preserves nats block + auth through migration` in
+`migrations.extreme.spec.ts` (block + auth preserved, `enabled=false` honored, garbage auth
+dropped) — **19/19**. Backend typecheck (all workspaces) exit 0.
+
 ## v3.1.2 (2026-07-31)
 
 ### Feature — comprehensive NATS event mesh (auth, JetStream, KV, request/reply)

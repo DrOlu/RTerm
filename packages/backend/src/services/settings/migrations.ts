@@ -1,4 +1,4 @@
-import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, OncallSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
+import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, NatsSettings, OncallSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
 import { BUILTIN_TOOL_INFO } from "../AgentHelper/tools";
 import { normalizeAgentSettingState } from "./agentSettings";
 import { deepMerge, isObject } from "./objectMerge";
@@ -125,6 +125,7 @@ function pickBackendSnapshot(raw: unknown): Partial<BackendSettings> {
     cloud: raw.cloud,
     agentspan: raw.agentspan,
     webIntel: raw.webIntel,
+    nats: raw.nats,
     gateway: raw.gateway,
     layout: raw.layout,
     recursionLimit: raw.recursionLimit,
@@ -255,6 +256,7 @@ function normalizeBackendSettings(settings: BackendSettings): BackendSettings {
   next.cloud = normalizeCloudSettings(next.cloud);
   next.agentspan = normalizeAgentspanSettings(next.agentspan);
   next.webIntel = normalizeWebIntelSettings(next.webIntel);
+  next.nats = normalizeNatsSettings(next.nats);
 
   next.schemaVersion = BACKEND_SETTINGS_SCHEMA_VERSION;
   return next;
@@ -491,6 +493,47 @@ export function normalizeWebIntelSettings(raw: unknown): WebIntelSettings {
     enabled: src.enabled !== false,
     autoStart: src.autoStart !== false,
     warmupOnInit: src.warmupOnInit === true,
+  };
+}
+
+export function normalizeNatsSettings(raw: unknown): NatsSettings {
+  const src = isObject(raw) ? (raw as Record<string, unknown>) : {};
+  const url = typeof src.url === "string" && src.url.trim() ? src.url.trim() : undefined;
+  const servers = Array.isArray(src.servers)
+    ? (src.servers as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim())
+    : undefined;
+  const prefix = typeof src.prefix === "string" && src.prefix.trim() ? src.prefix.trim() : undefined;
+  const queue = typeof src.queue === "string" && src.queue.trim() ? src.queue.trim() : undefined;
+  const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
+  const rawAuth = isObject(src.auth) ? (src.auth as Record<string, unknown>) : undefined;
+  const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
+  const auth = rawAuth
+    ? {
+        ...(str(rawAuth.token) ? { token: str(rawAuth.token) } : {}),
+        ...(str(rawAuth.username) ? { username: str(rawAuth.username) } : {}),
+        ...(str(rawAuth.password) ? { password: str(rawAuth.password) } : {}),
+        ...(str(rawAuth.nkeySeed) ? { nkeySeed: str(rawAuth.nkeySeed) } : {}),
+        ...(str(rawAuth.jwt) ? { jwt: str(rawAuth.jwt) } : {}),
+        ...(str(rawAuth.jwtSeed) ? { jwtSeed: str(rawAuth.jwtSeed) } : {}),
+        ...(str(rawAuth.creds) ? { creds: str(rawAuth.creds) } : {}),
+        ...(str(rawAuth.tlsCert) ? { tlsCert: str(rawAuth.tlsCert) } : {}),
+        ...(str(rawAuth.tlsKey) ? { tlsKey: str(rawAuth.tlsKey) } : {}),
+        ...(str(rawAuth.tlsCa) ? { tlsCa: str(rawAuth.tlsCa) } : {}),
+      }
+    : undefined;
+
+  const hasAuth = auth && Object.keys(auth).length > 0;
+  return {
+    enabled: src.enabled !== false,
+    ...(url ? { url } : {}),
+    ...(servers && servers.length > 0 ? { servers } : {}),
+    ...(prefix ? { prefix } : {}),
+    ...(queue ? { queue } : {}),
+    ...(num(src.maxReconnectAttempts) !== undefined ? { maxReconnectAttempts: num(src.maxReconnectAttempts) } : {}),
+    ...(num(src.reconnectTimeWait) !== undefined ? { reconnectTimeWait: num(src.reconnectTimeWait) } : {}),
+    ...(num(src.timeout) !== undefined ? { timeout: num(src.timeout) } : {}),
+    ...(hasAuth ? { auth } : {}),
   };
 }
 

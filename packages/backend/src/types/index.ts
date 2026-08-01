@@ -668,6 +668,44 @@ export interface WebIntelSettings {
   warmupOnInit?: boolean
 }
 
+/**
+ * NATS event-mesh configuration. The NatsEventBus reads this to connect to a
+ * NATS server and federate trigger events (terminal output + monitor snapshots)
+ * across backend instances. Auth is optional (open servers need none); secrets
+ * may be inline or `secretRef` pointers resolved through the vault.
+ */
+export interface NatsSettings {
+  /** master switch (default true when a server is configured). */
+  enabled?: boolean
+  /** single server url, e.g. "nats://localhost:4222". */
+  url?: string
+  /** multiple server urls (takes precedence over `url`). */
+  servers?: string[]
+  /** subject prefix (default "rterm"). */
+  prefix?: string
+  /** default queue group for subscriptions (load-balance across instances). */
+  queue?: string
+  /** max reconnect attempts (-1 = unlimited). */
+  maxReconnectAttempts?: number
+  /** reconnect wait between attempts (ms). */
+  reconnectTimeWait?: number
+  /** connect timeout (ms). */
+  timeout?: number
+  /** auth options (token / user-pass / nkey / jwt / creds / tls). */
+  auth?: {
+    token?: string
+    username?: string
+    password?: string
+    nkeySeed?: string
+    jwt?: string
+    jwtSeed?: string
+    creds?: string
+    tlsCert?: string
+    tlsKey?: string
+    tlsCa?: string
+  }
+}
+
 export interface BackendSettings {
   /** Settings schema version, used for migrations */
   schemaVersion: 5
@@ -765,6 +803,8 @@ export interface BackendSettings {
   agentspan?: AgentspanSettings
   /** Web-intel (wigolo) web-intelligence plugin config. */
   webIntel?: WebIntelSettings
+  /** NATS event-mesh (fleet-wide triggers), auth optional. */
+  nats?: NatsSettings
 
   /** WebSocket gateway exposure policy */
   gateway: {

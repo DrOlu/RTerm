@@ -383,6 +383,29 @@ test('normalizeAgentspanSettings defaults + preserves + sanitizes', () => {
   assertEqual(g.agentspan!.enabled, true, 'garbage block → enabled default')
 })
 
+test('normalizeNatsSettings preserves nats block + auth through migration', () => {
+  // the v3.1.2 regression: pickBackendSnapshot dropped `nats` so the block was
+  // stripped on every save/load. It must survive with auth intact.
+  const m = migrateBackendSettings({
+    ...DEFAULT_BACKEND_SETTINGS,
+    schemaVersion: 5,
+    nats: { enabled: true, url: 'nats://localhost:4222', prefix: 'rterm', queue: 'workers', auth: { username: 'admin', password: 'secret' } },
+  } as any)
+  assertEqual(Boolean(m.nats), true, 'nats block survives migration')
+  assertEqual(m.nats!.url, 'nats://localhost:4222', 'url preserved')
+  assertEqual(m.nats!.prefix, 'rterm', 'prefix preserved')
+  assertEqual(m.nats!.queue, 'workers', 'queue preserved')
+  assertEqual(m.nats!.auth?.username, 'admin', 'auth.username preserved')
+  assertEqual(m.nats!.auth?.password, 'secret', 'auth.password preserved')
+  // disabled flag honored
+  const off = migrateBackendSettings({ ...DEFAULT_BACKEND_SETTINGS, schemaVersion: 5, nats: { enabled: false, url: 'nats://x:4222' } } as any)
+  assertEqual(off.nats!.enabled, false, 'enabled=false preserved')
+  // garbage auth dropped, url kept
+  const g = migrateBackendSettings({ ...DEFAULT_BACKEND_SETTINGS, schemaVersion: 5, nats: { url: 'nats://y:4222', auth: 'junk' } } as any)
+  assertEqual(g.nats!.url, 'nats://y:4222', 'url kept')
+  assertEqual(g.nats!.auth, undefined, 'garbage auth dropped')
+})
+
 function main() {
   let pass = 0, fail = 0
   for (const c of cases) {
