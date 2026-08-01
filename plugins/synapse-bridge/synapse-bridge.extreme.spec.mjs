@@ -69,12 +69,12 @@ test('envelope has Synapse v0.3.0 shape', () => {
 
 // ─── register wiring ────────────────────────────────────────────────────────
 
-test('register wires 5 tools, 1 trigger, 1 panel', () => {
+test('register wires 11 tools, 1 trigger, 1 panel (full-duplex)', () => {
   const conn = fakeConn()
   const { tools, triggers, panels, ctx } = mkCtx({}, conn)
   register(ctx)
-  eq(tools.size, 5, 'tool count')
-  for (const n of ['synapse_health', 'synapse_discover', 'synapse_dispatch', 'synapse_register', 'synapse_agents_summary']) assert(tools.has(n), `missing ${n}`)
+  eq(tools.size, 11, 'tool count')
+  for (const n of ['synapse_health', 'synapse_discover', 'synapse_dispatch', 'synapse_register', 'synapse_agents_summary', 'synapse_serve', 'synapse_emit', 'synapse_subscribe', 'synapse_reputation', 'synapse_request_approval', 'synapse_approve']) assert(tools.has(n), `missing ${n}`)
   eq(triggers.length, 1, 'trigger count')
   eq(triggers[0].name, 'synapse_mesh_event', 'trigger name')
   eq(panels.length, 1, 'panel count')

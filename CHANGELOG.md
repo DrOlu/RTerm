@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.1.6 (2026-08-01)
+
+### Feature — full-duplex Synapse agent (responder, emit/subscribe, reputation, governance)
+
+The synapse-bridge goes from a Synapse *client* (register/discover/dispatch) to a **full
+Synapse agent** speaking all six primitives plus both normative extensions. New module
+`plugins/synapse-bridge/synapseAgent.mjs` + 6 new tools (5 → 11).
+
+- **Responder (respond primitive).** `synapse_serve` starts RTerm as a full mesh agent:
+  it listens on `mesh.agent.{id}.inbox` and `respond()`s to incoming Synapse requests by
+  mapping them to RTerm skills (playbooks/tools). **Federation is now genuinely
+  bidirectional** — other agents can discover *and task* RTerm. `buildRespond` builds
+  correct respond envelopes (output XOR error, `in_reply_to`); `executeSkill` maps skill
+  ids to handlers with `3001 SKILL_NOT_FOUND` on miss.
+- **Emit/Subscribe primitives.** `synapse_emit` publishes formal Synapse `emit` events on
+  `mesh.event.{type}`; `synapse_subscribe` listens on `mesh.event.*` / `mesh.task.*`
+  streams (wildcard-aware) and feeds the local reputation store + `synapse_mesh_event` trigger.
+- **EXT-REPUTATION.** A local `ReputationStore` maintains a `ReputationRecord` per
+  `(agent, skill)`: successes/failures/timeouts/skill_not_found, latency, `success_rate`,
+  `speed_score`, `freshness`, and a composite `score` per **Formula 11.5** (weights
+  0.7/0.2/0.1, lying-penalty × confidence). Three consecutive `SKILL_NOT_FOUND` flags a
+  lying-agent (`misleading_capabilities`) and zeroes the score. `synapse_reputation` reads
+  records + `discover-ranked`.
+- **EXT-GOVERNANCE.** `synapse_request_approval` publishes `mesh.approval.{taskId}.request`
+  and awaits the response (agent side, for gated dispatches); `synapse_approve` listens on
+  `mesh.approval.*.request` and answers each per a policy (approver side) — so other agents
+  route gated actions through RTerm for approval. Denied → `4003 GOVERNANCE_DENIED` path.
+
+Tests: new `synapseAgent.extreme.spec.mjs` — **13/13** (respond envelope shape + output/error
+exclusivity, executeSkill + SKILL_NOT_FOUND, live responder round-trip, emit, subscribe,
+score formula high/low/lying-zero, ReputationStore ranked + task_update feed,
+requestApproval/round-trip, respondApproval, live approver). Existing synapse-bridge spec
+updated for 11 tools — **12/12**. Full automation suite green (spec wired into
+`test:automation-extreme`).
+
 ## v3.1.5 (2026-08-01)
 
 ### Bug fixes — latent connection-state bugs (NATS, synapse-bridge, serial)

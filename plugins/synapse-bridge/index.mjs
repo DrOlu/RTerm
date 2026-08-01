@@ -19,6 +19,12 @@
 
 import { createRequire } from 'node:module'
 import { randomUUID } from 'node:crypto'
+import {
+  startResponder, buildRespond, executeSkill,
+  emitEvent, subscribeEvents,
+  ReputationStore, computeScore, updateRecord, newRecord,
+  requestApproval, respondApproval, startApprover,
+} from './synapseAgent.mjs'
 
 const require = createRequire(import.meta.url)
 const enc = new TextEncoder()
@@ -255,6 +261,109 @@ export function register(ctx) {
     }, log),
   })
 
+  // ─── full-duplex agent capabilities (responder, emit/subscribe, reputation, governance) ───
+  const repStore = new ReputationStore()
+  let responderStop = null
+
+  registerTool({
+    name: 'synapse_serve',
+    description: 'Start RTerm as a full Synapse agent: listen on mesh.agent.{id}.inbox and respond() to incoming Synapse requests by mapping them to RTerm skills (playbooks/tools via ctx.rtermSkills / getRtermSkills). Bidirectional federation — other agents can now task RTerm.',
+    params: {
+      skills: { type: 'object', description: 'Map of skillId -> async (input, ctx) => output, the skills RTerm serves', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      const nc = await connectMesh(ctx)
+      const serveCtx = { ...ctx, rtermSkills: p?.skills ?? ctx.rtermSkills ?? {} }
+      if (responderStop) responderStop() // idempotent: restart with fresh skills
+      responderStop = await startResponder(nc, cfg, serveCtx, log)
+      const skillIds = Object.keys(serveCtx.rtermSkills)
+      return { serving: true, inbox: `${cfg.prefix}.agent.${cfg.agentId}.inbox`, skills: skillIds, note: 'RTerm is now a full Synapse agent (responder live)' }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_emit',
+    description: 'Emit a formal Synapse event on mesh.event.{type} (fire-and-forget broadcast to subscribers).',
+    params: {
+      type: { type: 'string', description: 'Event type, e.g. ops.change.committed' },
+      payload: { type: 'object', description: 'Event payload' },
+    },
+    handler: async (p) => guarded(async () => {
+      if (!p?.type) return { error: 'synapse_emit needs a type' }
+      const nc = await connectMesh(ctx)
+      emitEvent(nc, cfg, p.type, p.payload ?? {})
+      return { emitted: `${cfg.prefix}.event.${p.type}` }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_subscribe',
+    description: 'Subscribe to Synapse event/task subjects (supports wildcards, e.g. mesh.event.> or mesh.task.>.update). Events feed the local reputation store and the synapse_mesh_event trigger.',
+    params: {
+      subject: { type: 'string', description: 'Subject pattern, e.g. mesh.event.> or mesh.task.>.update' },
+    },
+    handler: async (p) => guarded(async () => {
+      const subject = p?.subject ?? `${cfg.prefix}.task.>.update`
+      const nc = await connectMesh(ctx)
+      const stop = await subscribeEvents(nc, subject, (env, subj) => {
+        repStore.handleTaskUpdate(env)
+        if (typeof ctx.emitEvent === 'function') ctx.emitEvent({ source: 'synapse', subject: subj, env })
+      })
+      return { subscribed: subject, note: 'events feed the reputation store + synapse_mesh_event trigger' }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_reputation',
+    description: 'Read the local Synapse reputation store (EXT-REPUTATION): per (agent, skill) success_rate, speed_score, freshness, composite score. Optionally record an outcome or list ranked agents.',
+    params: {
+      agent: { type: 'string', optional: true },
+      skill: { type: 'string', optional: true },
+      minScore: { type: 'number', description: 'Only agents at/above this score (discover-ranked)', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      if (p?.agent && p?.skill) {
+        const rec = repStore.get(p.agent, p.skill)
+        return rec ?? { error: `no record for ${p.agent}::${p.skill}` }
+      }
+      const ranked = repStore.ranked(p?.minScore ?? 0)
+      return { count: ranked.length, agents: ranked.map((r) => ({ agent: r.agent_id, skill: r.skill, score: Number(r.score.toFixed(3)), successRate: Number(r.success_rate.toFixed(3)), speedScore: Number(r.speed_score.toFixed(3)), confidence: r.confidence })) }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_request_approval',
+    description: 'Request governance approval for a gated action (EXT-GOVERNANCE): publish mesh.approval.{taskId}.request and await the response. Use before a high-risk dispatched task.',
+    params: {
+      originalRequest: { type: 'object', description: 'The original request payload being gated' },
+      policyId: { type: 'string', optional: true },
+      ruleId: { type: 'string', optional: true },
+      reason: { type: 'string', description: 'Why approval is required' },
+      taskId: { type: 'string', optional: true },
+      timeout: { type: 'number', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      const nc = await connectMesh(ctx)
+      const r = await requestApproval(nc, cfg, { taskId: p?.taskId, originalRequest: p?.originalRequest, policyId: p?.policyId, ruleId: p?.ruleId, reason: p?.reason ?? 'RTerm action requires mesh approval', timeout: p?.timeout })
+      return r.approved ? { approved: true, approver: r.approver, taskId: r.taskId } : { approved: false, taskId: r.taskId, note: 'denied or timed out' }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_approve',
+    description: 'Act as a governance approver (EXT-GOVERNANCE): listen on mesh.approval.*.request and answer each per a policy (allow-all, deny-all, or a decide map). Other agents route their gated actions through RTerm for approval.',
+    params: {
+      policy: { type: 'string', description: 'allow-all | deny-all (default allow-all)', optional: true },
+    },
+    handler: async (p) => guarded(async () => {
+      const nc = await connectMesh(ctx)
+      const policy = p?.policy ?? 'allow-all'
+      const decide = async () => ({ approved: policy !== 'deny-all', approver: `did:mesh:${cfg.agentId}` })
+      await startApprover(nc, cfg, decide, log)
+      return { approver: cfg.agentId, policy, listening: `${cfg.prefix}.approval.*.request` }
+    }, log),
+  })
+
   registerTrigger({
     name: 'synapse_mesh_event',
     description: 'Fires when a Synapse mesh event (task failure, reputation penalty, approval request) is observed. Use for cross-mesh remediation.',
@@ -273,7 +382,7 @@ export function register(ctx) {
     },
   })
 
-  log(`[synapse] synapse-bridge registered: 5 tools, 1 trigger, 1 panel (agent=${cfg.agentId}, prefix=${cfg.prefix})`)
+  log(`[synapse] synapse-bridge registered: 11 tools, 1 trigger, 1 panel (agent=${cfg.agentId}, prefix=${cfg.prefix}, full-duplex)`)
 }
 
 export default { register, resolveConfig, envelope, discoverAgents, dispatchTask, registerSelf }
