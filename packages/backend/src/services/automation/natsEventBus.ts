@@ -166,24 +166,43 @@ export class NatsEventBus {
     return tls
   }
 
-  /** Connect to NATS (idempotent). Wires lifecycle event handlers. */
+  /** Connect to NATS (idempotent). Wires lifecycle event handlers.
+   * Concurrent callers share one in-flight attempt; a failed attempt clears the
+   * slot so the next call retries (no permanent half-connected state). */
+  private connectPromise: Promise<void> | null = null
+
   async connect(): Promise<void> {
-    if (this.conn) return
-    const connectFn = this.opts.connectFn ?? ((o: ConnectionOptions) => connect(o))
-    const authenticator = this.buildAuthenticator()
-    const tls = this.buildTls()
-    const copts: ConnectionOptions = {
-      servers: this.opts.servers,
-      name: this.opts.name ?? 'rterm-backend',
-      ...(authenticator ? { authenticator } : {}),
-      ...(tls ? { tls } : {}),
-      ...(this.opts.maxReconnectAttempts !== undefined ? { maxReconnectAttempts: this.opts.maxReconnectAttempts } : {}),
-      ...(this.opts.reconnectTimeWait !== undefined ? { reconnectTimeWait: this.opts.reconnectTimeWait } : {}),
-      ...(this.opts.timeout !== undefined ? { timeout: this.opts.timeout } : {}),
+    if (this.conn && !this.conn.isClosed()) return
+    if (this.conn) { // closed connection lingering — clear it before reconnecting
+      this.conn = null
     }
-    this.conn = await connectFn(copts)
-    this.wireStatusHandlers(this.conn)
-    this.log(`[nats] connected to ${Array.isArray(this.opts.servers) ? this.opts.servers.join(',') : this.opts.servers}`)
+    if (this.connectPromise) return this.connectPromise
+    const attempt = (async () => {
+      const connectFn = this.opts.connectFn ?? ((o: ConnectionOptions) => connect(o))
+      const authenticator = this.buildAuthenticator()
+      const tls = this.buildTls()
+      const copts: ConnectionOptions = {
+        servers: this.opts.servers,
+        name: this.opts.name ?? 'rterm-backend',
+        ...(authenticator ? { authenticator } : {}),
+        ...(tls ? { tls } : {}),
+        ...(this.opts.maxReconnectAttempts !== undefined ? { maxReconnectAttempts: this.opts.maxReconnectAttempts } : {}),
+        ...(this.opts.reconnectTimeWait !== undefined ? { reconnectTimeWait: this.opts.reconnectTimeWait } : {}),
+        ...(this.opts.timeout !== undefined ? { timeout: this.opts.timeout } : {}),
+      }
+      const c = await connectFn(copts)
+      // Guard: a freshly-resolved connection that's already closed is useless.
+      if (c.isClosed()) throw new Error('NATS connection closed immediately after connect')
+      this.conn = c
+      this.wireStatusHandlers(c)
+      this.log(`[nats] connected to ${Array.isArray(this.opts.servers) ? this.opts.servers.join(',') : this.opts.servers}`)
+    })()
+    this.connectPromise = attempt
+    try {
+      await attempt
+    } finally {
+      this.connectPromise = null // success: conn is set; failure: next call retries
+    }
   }
 
   /** Attach reconnect/disconnect/error/lame-duck handlers (best-effort). */

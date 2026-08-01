@@ -57,6 +57,8 @@ interface SerialInstance {
   dataCallback?: (data: string) => void
   exitCallback?: (code: number) => void
   ready: boolean
+  /** set when the port errored (distinguishes 'failed' from 'not-found' in getInitializationState). */
+  failed?: boolean
 }
 
 let injectedSerial: SerialPortFactory | null = null
@@ -76,6 +78,8 @@ function constructPort(Ctor: any, path: string, opts: any): SerialPortLike {
 
 export class SerialBackend implements TerminalBackend {
   private instances = new Map<string, SerialInstance>()
+  /** ids whose port errored (removed from instances but remembered as 'failed'). */
+  private failedIds = new Set<string>()
 
   /** For tests: inject a fake serialport constructor/factory. */
   static setSerialModuleForTest(mod: SerialPortFactory | null): void {
@@ -135,7 +139,13 @@ export class SerialBackend implements TerminalBackend {
     })
     port.on('error', (err: Error) => {
       instance.dataCallback?.(`\x1b[31m✘ Serial error: ${err.message}\x1b[0m\r\n`)
+      instance.failed = true
       instance.exitCallback?.(-1)
+      // Clean up the failed instance so it doesn't leak in the map (a dead port
+      // is never usable again), but remember it failed so getInitializationState
+      // can still report 'failed' (vs 'not-found').
+      this.instances.delete(ptyId)
+      this.failedIds.add(ptyId)
     })
 
     return Promise.resolve(ptyId)
@@ -151,6 +161,7 @@ export class SerialBackend implements TerminalBackend {
   }
 
   kill(ptyId: string): void {
+    this.failedIds.delete(ptyId)
     const inst = this.instances.get(ptyId)
     if (!inst) return
     this.instances.delete(ptyId)
@@ -183,8 +194,9 @@ export class SerialBackend implements TerminalBackend {
 
   getInitializationState(ptyId: string): 'ready' | 'failed' | undefined {
     const inst = this.instances.get(ptyId)
-    if (!inst) return undefined
-    return inst.ready ? 'ready' : undefined
+    if (inst) return inst.ready ? 'ready' : undefined
+    if (this.failedIds.has(ptyId)) return 'failed'
+    return undefined
   }
 
   // --- Serial-specific controls (v3.0.5) ---

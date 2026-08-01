@@ -1,5 +1,45 @@
 # Changelog
 
+## v3.1.5 (2026-08-01)
+
+### Bug fixes — latent connection-state bugs (NATS, synapse-bridge, serial)
+
+A systematic bug-hunt across the v3.1.x surface found three latent connection-state
+bugs. All fixed with regression tests; full suite green.
+
+- **synapse-bridge — stale connection reused across configs.** `connectMesh` cached a
+  single module-level `_conn` for the whole process, so a settings change (different
+  NATS server, auth, or agentId) silently reused the **previous** connection to the wrong
+  server. And a failed connect left `_conn` set to a dead connection that was never
+  retried. Fixed: the connection cache is now **keyed by config fingerprint**
+  (servers + agentId + auth keys) — a config change opens a new connection — and a failed
+  attempt is evicted so the next call retries. File: `plugins/synapse-bridge/index.mjs`.
+  Tests: `connection is keyed by config — a settings change opens a NEW connection`,
+  `a failed connect is not cached — the next call retries` (synapse-bridge spec **12/12**).
+
+- **natsEventBus — `connect()` raced and could leave a half-connected state.** Concurrent
+  `connect()` calls each opened their own connection (no mutex); a connection that resolved
+  already-closed was accepted; and a closed-lingering `conn` blocked reconnect. Fixed:
+  an in-flight `connectPromise` mutex (concurrent callers share one attempt), a DOA guard
+  (reject a connection closed immediately after connect), and clear-on-close before
+  reconnecting. File: `packages/backend/src/services/automation/natsEventBus.ts`. Tests:
+  `concurrent connect() calls share one in-flight attempt`, `a failed connect clears state
+  so the next call retries`, `a connection that resolves already-closed is rejected`
+  (natsEventBus spec **14/14**).
+
+- **SerialBackend — errored ports leaked in the instance map + indistinguishable state.**
+  On port `error`, the instance stayed in `instances` (a dead port, never cleaned up →
+  leak), and `getInitializationState` returned `undefined` for both "failed" and
+  "not-found" (indistinguishable). Fixed: on error the instance is removed (no leak) but
+  its id is remembered in a `failedIds` set so `getInitializationState` returns `'failed'`
+  (distinct from not-found `undefined`); `kill` clears the marker. File:
+  `packages/backend/src/services/SerialBackend.ts`. Test: `port error cleans up the
+  instance (no leak) and getInitializationState reports failed` (serialBackend spec **9/9**).
+
+**Verification:** backend typecheck (all workspaces) exit 0; full automation suite green
+(serial 9/9, natsEventBus 14/14 + comprehensive 20/20, synapse-bridge 12/12, numbat-bridge
+11/11, all other suites unchanged).
+
 ## v3.1.4 (2026-08-01)
 
 ### Feature — two new bridge plugins: `synapse-bridge` + `numbat-bridge`

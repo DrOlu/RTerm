@@ -49,6 +49,51 @@ test('connect is idempotent and reports connected', async () => {
   if (!bus.connected) throw new Error('bus should be connected')
 })
 
+test('concurrent connect() calls share one in-flight attempt (no duplicate connections)', async () => {
+  let attempts = 0
+  const { conn } = fakeConnection()
+  const bus = new NatsEventBus({
+    servers: 'nats://fake:4222',
+    connectFn: async () => { attempts++; await new Promise((r) => setTimeout(r, 20)); return conn },
+  })
+  // fire 5 concurrent connects — only ONE underlying connectFn should run
+  await Promise.all([bus.connect(), bus.connect(), bus.connect(), bus.connect(), bus.connect()])
+  if (attempts !== 1) throw new Error(`expected 1 connect attempt for concurrent calls, got ${attempts}`)
+  if (!bus.connected) throw new Error('bus should be connected after concurrent connect')
+})
+
+test('a failed connect clears state so the next call retries (no permanent half-connected)', async () => {
+  let attempts = 0
+  const { conn } = fakeConnection()
+  const bus = new NatsEventBus({
+    servers: 'nats://fake:4222',
+    connectFn: async () => {
+      attempts++
+      if (attempts === 1) throw new Error('server down')
+      return conn
+    },
+  })
+  // first attempt fails
+  let threw = false
+  try { await bus.connect() } catch { threw = true }
+  if (!threw) throw new Error('expected first connect to throw')
+  if (bus.connected) throw new Error('bus must not report connected after a failed attempt')
+  // retry succeeds (state was cleared, not stuck)
+  await bus.connect()
+  if (!bus.connected) throw new Error('bus should connect on retry')
+  if (attempts !== 2) throw new Error(`expected 2 attempts (fail + retry), got ${attempts}`)
+})
+
+test('a connection that resolves already-closed is rejected (connect throws)', async () => {
+  const { conn } = fakeConnection()
+  ;(conn as any).isClosed = () => true // simulate a DOA connection
+  const bus = new NatsEventBus({ servers: 'nats://fake:4222', connectFn: async () => conn })
+  let threw = false
+  try { await bus.connect() } catch { threw = true }
+  if (!threw) throw new Error('expected connect to reject an already-closed connection')
+  if (bus.connected) throw new Error('bus must not report connected for a DOA connection')
+})
+
 test('publishTermData publishes JSON to <prefix>.term.data', async () => {
   const { conn, published } = fakeConnection()
   const bus = await mkBus(conn)

@@ -75,20 +75,47 @@ function buildAuthenticator(t, auth) {
   return undefined
 }
 
-let _conn = null
+// Connection cache keyed by config fingerprint — a settings change (different
+// server/auth/agentId) opens a NEW connection instead of reusing a stale one to
+// the wrong server. A failed connect clears the slot so the next call retries.
+const _conns = new Map() // key -> Promise<conn> | conn
+function _configKey(cfg) {
+  const servers = Array.isArray(cfg.servers) ? cfg.servers.join(',') : cfg.servers
+  const authKeys = cfg.auth ? Object.keys(cfg.auth).sort().join(',') : ''
+  return `${servers}|${cfg.agentId}|${authKeys}`
+}
+
 async function connectMesh(ctx) {
-  if (_conn && !_conn.isClosed()) return _conn
   const cfg = resolveConfig(ctx)
+  const key = _configKey(cfg)
+  const existing = _conns.get(key)
+  if (existing) {
+    const c = await existing
+    if (c && !c.isClosed()) return c
+    _conns.delete(key) // stale/closed — fall through and reconnect
+  }
   const t = loadTransport()
   const auth = buildAuthenticator(t, resolveAuth(ctx, cfg.auth))
   const copts = { servers: cfg.servers, name: cfg.agentId, ...(auth ? { authenticator: auth } : {}) }
   const connectFn = (typeof ctx.natsConnect === 'function') ? ctx.natsConnect : (o) => t.connect(o)
-  _conn = await connectFn(copts)
-  return _conn
+  const p = (async () => {
+    try {
+      return await connectFn(copts)
+    } catch (e) {
+      _conns.delete(key) // don't cache a failed attempt — allow retry
+      throw e
+    }
+  })()
+  _conns.set(key, p)
+  return p
 }
 
-/** Test hook: inject a fake connection. */
-export function __setConnForTest(c) { _conn = c }
+/** Test hook: inject a fake connection for a given config (or clear all with null). */
+export function __setConnForTest(c, cfg) {
+  if (c === null || c === undefined) { _conns.clear(); return }
+  const key = _configKey(cfg ?? resolveConfig({ settings: {} }))
+  _conns.set(key, Promise.resolve(c))
+}
 
 // ─── Synapse envelope ───────────────────────────────────────────────────────
 

@@ -161,6 +161,51 @@ test('synapse_mesh_event trigger matches only synapse-source events', () => {
   assert(!t.match({}), 'rejects empty')
 })
 
+// ─── connection cache (config-keyed, the stale-connection bug fix) ──────────
+
+test('connection is keyed by config — a settings change opens a NEW connection (no stale reuse)', async () => {
+  __setConnForTest(null)
+  const connA = fakeConn()
+  const connB = fakeConn()
+  const connsMade = []
+  // ctx whose natsConnect returns a different fake per call, tracking which config connected
+  const mkCtxMulti = (settings) => ({
+    settings: { synapse: settings },
+    natsConnect: async (copts) => { connsMade.push(copts); return connsMade.length === 1 ? connA : connB },
+    registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
+  })
+  // connect with config A (server A)
+  const { discoverAgents: dA } = await import('./index.mjs')
+  connA._on('mesh.registry.discover', () => [])
+  await dA(mkCtxMulti({ url: 'nats://a:4222' }), {})
+  if (connsMade.length !== 1) throw new Error(`expected 1 connection for config A, got ${connsMade.length}`)
+  // same config A again — must REUSE (no new connection)
+  await dA(mkCtxMulti({ url: 'nats://a:4222' }), {})
+  if (connsMade.length !== 1) throw new Error(`expected reuse for same config A, got ${connsMade.length} connections`)
+  // config B (different server) — must open a NEW connection (the bug was reusing A's)
+  connB._on('mesh.registry.discover', () => [])
+  await dA(mkCtxMulti({ url: 'nats://b:4222' }), {})
+  if (connsMade.length !== 2) throw new Error(`expected a NEW connection for config B, got ${connsMade.length}`)
+})
+
+test('a failed connect is not cached — the next call retries', async () => {
+  __setConnForTest(null)
+  const conn = fakeConn()
+  conn._on('mesh.registry.discover', () => [])
+  let attempts = 0
+  const ctx = {
+    settings: { synapse: { url: 'nats://a:4222' } },
+    natsConnect: async () => { attempts++; if (attempts === 1) throw new Error('down'); return conn },
+    registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
+  }
+  const { discoverAgents } = await import('./index.mjs')
+  let threw = false
+  try { await discoverAgents(ctx, {}) } catch { threw = true }
+  if (!threw) throw new Error('expected first attempt to throw')
+  await discoverAgents(ctx, {}) // retry succeeds
+  if (attempts !== 2) throw new Error(`expected 2 attempts (fail + retry), got ${attempts}`)
+})
+
 // ─── runner ─────────────────────────────────────────────────────────────────
 async function main() {
   let pass = 0, fail = 0

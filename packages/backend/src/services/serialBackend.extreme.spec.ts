@@ -113,6 +113,28 @@ test('getRemoteOs is undefined (unknown OS over serial)', async () => {
   if (b.getRemoteOs('any') !== undefined) throw new Error('serial remoteOs should be undefined')
 })
 
+test('port error cleans up the instance (no leak) and getInitializationState reports failed', async () => {
+  let created: FakePort | null = null
+  class FakeSerialCtor { constructor(path: string, opts: any) { created = new FakePort(path, opts); return created as any } }
+  SerialBackend.setSerialModuleForTest(FakeSerialCtor as any)
+  const b = new SerialBackend()
+  let exitCode: number | null = null
+  const ptyId = await b.spawn(fakeCfg())
+  b.onExit(ptyId, (c) => { exitCode = c })
+  // before error: instance exists, state not-yet-ready
+  if (b.getInitializationState(ptyId) !== undefined) throw new Error('expected undefined before open')
+  created!.emit('error', new Error('No such file or directory'))
+  if (exitCode !== -1) throw new Error(`expected exit -1, got ${exitCode}`)
+  // bug fix: the errored instance must be removed (no leak) …
+  // …but getInitializationState must still report 'failed' (not conflate with not-found)
+  if (b.getInitializationState(ptyId) !== 'failed') throw new Error(`expected 'failed', got ${b.getInitializationState(ptyId)}`)
+  // a never-spawned id is genuinely not-found (undefined, distinct from 'failed')
+  if (b.getInitializationState('serial-never') !== undefined) throw new Error('expected undefined for never-spawned id')
+  // kill on the failed id is a safe no-op and clears the failed marker
+  b.kill(ptyId)
+  if (b.getInitializationState(ptyId) !== undefined) throw new Error('expected undefined after kill cleared failed marker')
+})
+
 async function main() {
   let pass = 0, fail = 0
   for (const c of cases) {
