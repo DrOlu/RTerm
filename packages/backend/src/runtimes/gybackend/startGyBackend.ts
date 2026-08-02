@@ -323,8 +323,13 @@ export async function startGyBackend(): Promise<void> {
   // The PluginRegistry (inside observability) discovers + loads + registers all
   // plugins from the plugins/ dir. We collect their tools and inject them into
   // the agent's tool executor + tool schema list.
-  try {
-    const pluginRecords = await observability.pluginRegistry.reload();
+  // Non-blocking: a 10s timeout prevents a hanging plugin's register() (e.g. a
+  // NATS connect that never resolves) from blocking the boot. Tools are wired
+  // whenever the reload completes (or skipped on timeout, with a warning).
+  Promise.race([
+    observability.pluginRegistry.reload(),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('plugin reload timeout (10s)')), 10000)),
+  ]).then((pluginRecords) => {
     const pluginTools: Array<{ name: string; description: string; params: any; handler: (params: any) => Promise<any> }> = [];
     for (const record of pluginRecords) {
       if (record.error || !record.enabled) continue;
@@ -339,11 +344,13 @@ export async function startGyBackend(): Promise<void> {
     }
     if (pluginTools.length > 0) {
       agentService.setPluginTools(pluginTools);
-      console.log(`[gybackend] Wired ${pluginTools.length} plugin tools from ${pluginRecords.filter(r => !r.error && r.enabled).length} plugins into the agent.`);
+      console.log(`[gybackend] Wired ${pluginTools.length} plugin tools from ${pluginRecords.filter((r: any) => !r.error && r.enabled).length} plugins into the agent.`);
+    } else {
+      console.log('[gybackend] No plugin tools found to wire.');
     }
-  } catch (e) {
-    console.warn('[gybackend] Plugin tool wiring failed:', e instanceof Error ? e.message : String(e));
-  }
+  }).catch((e) => {
+    console.warn('[gybackend] Plugin tool wiring skipped:', e instanceof Error ? e.message : String(e));
+  });
 
   // Session logging: record terminal output per session to disk when enabled.
   if (settingsService.getSettings().sessionLogging?.enabled) {

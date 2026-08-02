@@ -722,6 +722,8 @@ export interface SynapseSettings {
   prefix?: string
   /** this instance's mesh agent id (default "rterm-001"). */
   agentId?: string
+  /** auto-start the full-duplex responder on boot (default true when enabled). */
+  autoServe?: boolean
   /** auth options (token / user-pass / nkey / jwt / creds / tls). */
   auth?: {
     token?: string

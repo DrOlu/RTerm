@@ -415,10 +415,17 @@ export function register(ctx) {
   // ─── auto-start the full-duplex responder on boot (when enabled + autoServe) ───
   // Makes "be tasked by them" always-on, not opt-in per session. Best-effort: a
   // failed auto-start logs but never blocks plugin registration (server may be down).
+  // Wrapped in setTimeout(0) to ensure register() returns synchronously BEFORE the
+  // async NATS connect — so PluginRegistry.loadFromDir() never hangs on the auto-serve.
   if (cfg.enabled && cfg.autoServe) {
-    serveSkills(defaultServeSkills())
-      .then((skills) => log(`[synapse] auto-started responder on ${cfg.prefix}.agent.${cfg.agentId}.inbox (skills: ${skills.join(', ')})`))
-      .catch((e) => log(`[synapse] auto-serve deferred: ${e?.message ?? e} (responder will start on first synapse_serve call)`))
+    setTimeout(() => {
+      Promise.race([
+        serveSkills(defaultServeSkills()),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('auto-serve connect timeout (5s)')), 5000)),
+      ])
+        .then((skills) => log(`[synapse] auto-started responder on ${cfg.prefix}.agent.${cfg.agentId}.inbox (skills: ${skills.join(', ')})`))
+        .catch((e) => log(`[synapse] auto-serve deferred: ${e?.message ?? e} (responder will start on first synapse_serve call)`))
+    }, 0)
   }
 }
 

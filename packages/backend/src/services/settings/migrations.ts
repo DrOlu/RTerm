@@ -560,6 +560,7 @@ export function normalizeSynapseSettings(raw: unknown): SynapseSettings {
 
   return {
     enabled: src.enabled !== false,
+    autoServe: src.autoServe !== false,
     ...(url ? { url } : {}),
     ...(servers && servers.length > 0 ? { servers } : {}),
     ...(prefix ? { prefix } : {}),

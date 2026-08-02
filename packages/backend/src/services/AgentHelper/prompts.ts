@@ -330,6 +330,10 @@ export interface BuiltInToolInfo {
   description: string;
   defaultEnabled?: boolean;
   experimental?: boolean;
+  /** when true, the tool is hidden from the settings summary (it's an internal
+   * implementation detail of a user-facing capability, e.g. write_file/edit_file
+   * are the implementation of the create_or_edit capability). */
+  hiddenFromSettings?: boolean;
 }
 export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
@@ -367,10 +371,12 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "write_file",
     description: WRITE_FILE_TOOL_DESCRIPTION,
+    hiddenFromSettings: true,
   },
   {
     name: "edit_file",
     description: EDIT_FILE_TOOL_DESCRIPTION,
+    hiddenFromSettings: true,
   },
   {
     name: "skill",
@@ -515,6 +521,10 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "get_live_dashboard",
     description: "Live multi-client dashboard — read the current unified dashboard state/summary, or the number of connected dashboard subscribers.",
+  },
+  {
+    name: "get_monitor_status",
+    description: "Monitor-status diagnostic — reports why stats aren't displaying per terminal (publisher wired, session exists, collection stuck in-flight, platform, last-collect age).",
   },
   {
     name: "list_gateway_methods",

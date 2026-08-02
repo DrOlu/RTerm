@@ -1,5 +1,5 @@
 import { buildToolsForModel } from '../tools'
-import { buildBuiltInToolStatusSummary } from '../../Gateway/toolingSummary'
+import { buildBuiltInToolStatusSummary, buildBuiltInToolSettingsSummary } from '../../Gateway/toolingSummary'
 import { computeReadFileSupport, getEnabledBuiltInTools } from './model_config'
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
@@ -71,7 +71,7 @@ const run = async (): Promise<void> => {
   })
 
   await runCase('built-in status summary keeps one file mutation capability', () => {
-    const names = buildBuiltInToolStatusSummary({ create_or_edit: true }).map((tool) => tool.name)
+    const names = buildBuiltInToolSettingsSummary({ create_or_edit: true }).map((tool) => tool.name)
     assertIncludes(names, 'create_or_edit', 'create_or_edit should stay user-visible as the capability')
     assertNotIncludes(names, 'write_file', 'write_file should not become a settings row')
     assertNotIncludes(names, 'edit_file', 'edit_file should not become a settings row')

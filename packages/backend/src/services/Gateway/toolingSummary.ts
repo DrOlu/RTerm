@@ -37,3 +37,14 @@ export function buildBuiltInToolStatusSummary(
     ...(tool.experimental ? { experimental: true } : {})
   }))
 }
+
+/** The settings-UI view: hides internal implementation-detail tools (write_file,
+ * edit_file) that are the implementation of a user-facing capability
+ * (create_or_edit). The full summary (above) includes them for the tools section. */
+export function buildBuiltInToolSettingsSummary(
+  enabledMap: Record<string, boolean> | undefined
+): BuiltInToolStatusSummary[] {
+  return buildBuiltInToolStatusSummary(enabledMap).filter(
+    (tool) => !BUILTIN_TOOL_INFO.find((t) => t.name === tool.name)?.hiddenFromSettings,
+  )
+}
