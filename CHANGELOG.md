@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.1.9 (2026-08-02)
+
+### Bug fix — plugin tool wiring race condition (fixes v3.1.8)
+
+v3.1.8 wired plugin tools into the agent but had a race: `createObservability()`
+fired a `void pluginRegistry.reload().catch(() => {})` (fire-and-forget) that
+raced with the new `await observability.pluginRegistry.reload()` in
+`startGyBackend`. The race caused the awaited reload to hang, so plugin tools
+were never wired and the "Wired N plugin tools" log line never appeared.
+
+Fix: removed the fire-and-forget `reload()` from `createObservability()` —
+`startGyBackend` now owns the sole `reload()` call (awaited, then tools wired).
+
 ## v3.1.8 (2026-08-02)
 
 ### Feature — plugin tools wired into the agent (all 11 plugins now callable in chat)
