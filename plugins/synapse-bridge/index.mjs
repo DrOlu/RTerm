@@ -46,6 +46,8 @@ export function resolveConfig(ctx = {}, env = process.env) {
     agentId: block.agentId || env.SYNAPSE_AGENT_ID || 'rterm-001',
     auth: block.auth || undefined,
     enabled: block.enabled !== false,
+    /** auto-start the full-duplex responder on boot (default true when enabled). */
+    autoServe: block.autoServe !== false,
   }
 }
 
@@ -264,20 +266,46 @@ export function register(ctx) {
   // ─── full-duplex agent capabilities (responder, emit/subscribe, reputation, governance) ───
   const repStore = new ReputationStore()
   let responderStop = null
+  let servingSkills = []
+
+  /** Start (or restart) the responder with the given skills. Idempotent. */
+  async function serveSkills(skills) {
+    const nc = await connectMesh(ctx)
+    const serveCtx = { ...ctx, rtermSkills: skills ?? ctx.rtermSkills ?? {} }
+    if (responderStop) responderStop()
+    responderStop = await startResponder(nc, cfg, serveCtx, log)
+    servingSkills = Object.keys(serveCtx.rtermSkills)
+    return servingSkills
+  }
+
+  /** Default skills RTerm serves when auto-starting (status + discover + dispatch). */
+  function defaultServeSkills() {
+    return {
+      status: async () => ({ up: true, agent: cfg.agentId, ts: new Date().toISOString() }),
+      discover: async (inp) => ({ agents: await discoverAgents(ctx, inp ?? {}) }),
+      ...(ctx.rtermSkills ?? {}),
+    }
+  }
 
   registerTool({
     name: 'synapse_serve',
-    description: 'Start RTerm as a full Synapse agent: listen on mesh.agent.{id}.inbox and respond() to incoming Synapse requests by mapping them to RTerm skills (playbooks/tools via ctx.rtermSkills / getRtermSkills). Bidirectional federation — other agents can now task RTerm.',
+    description: 'Start RTerm as a full Synapse agent: listen on mesh.agent.{id}.inbox and respond() to incoming Synapse requests by mapping them to RTerm skills (playbooks/tools via ctx.rtermSkills / getRtermSkills). Bidirectional federation — other agents can now task RTerm. Idempotent; auto-starts on boot when synapse.enabled and autoServe are true.',
     params: {
-      skills: { type: 'object', description: 'Map of skillId -> async (input, ctx) => output, the skills RTerm serves', optional: true },
+      skills: { type: 'object', description: 'Map of skillId -> async (input, ctx) => output, the skills RTerm serves (defaults to status+discover)', optional: true },
     },
     handler: async (p) => guarded(async () => {
+      const skills = await serveSkills(p?.skills ?? defaultServeSkills())
+      return { serving: true, inbox: `${cfg.prefix}.agent.${cfg.agentId}.inbox`, skills, note: 'RTerm is now a full Synapse agent (responder live)' }
+    }, log),
+  })
+
+  registerTool({
+    name: 'synapse_serve_status',
+    description: 'Report whether the Synapse responder is live (serving on mesh.agent.{id}.inbox) and which skills it serves.',
+    params: {},
+    handler: async () => guarded(async () => {
       const nc = await connectMesh(ctx)
-      const serveCtx = { ...ctx, rtermSkills: p?.skills ?? ctx.rtermSkills ?? {} }
-      if (responderStop) responderStop() // idempotent: restart with fresh skills
-      responderStop = await startResponder(nc, cfg, serveCtx, log)
-      const skillIds = Object.keys(serveCtx.rtermSkills)
-      return { serving: true, inbox: `${cfg.prefix}.agent.${cfg.agentId}.inbox`, skills: skillIds, note: 'RTerm is now a full Synapse agent (responder live)' }
+      return { serving: responderStop !== null, connected: !nc.isClosed(), inbox: `${cfg.prefix}.agent.${cfg.agentId}.inbox`, skills: servingSkills, autoServe: cfg.autoServe }
     }, log),
   })
 
@@ -382,7 +410,16 @@ export function register(ctx) {
     },
   })
 
-  log(`[synapse] synapse-bridge registered: 11 tools, 1 trigger, 1 panel (agent=${cfg.agentId}, prefix=${cfg.prefix}, full-duplex)`)
+  log(`[synapse] synapse-bridge registered: 12 tools, 1 trigger, 1 panel (agent=${cfg.agentId}, prefix=${cfg.prefix}, full-duplex)`)
+
+  // ─── auto-start the full-duplex responder on boot (when enabled + autoServe) ───
+  // Makes "be tasked by them" always-on, not opt-in per session. Best-effort: a
+  // failed auto-start logs but never blocks plugin registration (server may be down).
+  if (cfg.enabled && cfg.autoServe) {
+    serveSkills(defaultServeSkills())
+      .then((skills) => log(`[synapse] auto-started responder on ${cfg.prefix}.agent.${cfg.agentId}.inbox (skills: ${skills.join(', ')})`))
+      .catch((e) => log(`[synapse] auto-serve deferred: ${e?.message ?? e} (responder will start on first synapse_serve call)`))
+  }
 }
 
 export default { register, resolveConfig, envelope, discoverAgents, dispatchTask, registerSelf }

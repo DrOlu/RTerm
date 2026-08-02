@@ -9,9 +9,28 @@ function eq(a, b, m) { if (a !== b) throw new Error(`${m ?? 'eq'}: expected ${JS
 function fakeConn() {
   const published = []
   const requests = new Map()
+  const subs = new Map()
   return {
     isClosed: () => false,
     publish(subject, data) { published.push({ subject, data: JSON.parse(new TextDecoder().decode(data)) }) },
+    subscribe(subject) {
+      const sub = {
+        async *[Symbol.asyncIterator]() {
+          while (true) {
+            const m = await new Promise((res) => {
+              const l = subs.get(subject) ?? []; subs.set(subject, l); l.push(res)
+            })
+            yield m
+          }
+        },
+        unsubscribe: () => subs.delete(subject),
+      }
+      return sub
+    },
+    _deliver(subject, env) {
+      const data = new TextEncoder().encode(JSON.stringify(env))
+      for (const fn of subs.get(subject) ?? []) fn({ data, subject, respond: (p) => { published.push({ subject: '_reply', env: JSON.parse(new TextDecoder().decode(p)) }) } })
+    },
     async request(subject, data, _opts) {
       const h = requests.get(subject)
       const reply = h ? h(JSON.parse(new TextDecoder().decode(data))) : { ok: true }
@@ -69,12 +88,12 @@ test('envelope has Synapse v0.3.0 shape', () => {
 
 // ─── register wiring ────────────────────────────────────────────────────────
 
-test('register wires 11 tools, 1 trigger, 1 panel (full-duplex)', () => {
+test('register wires 12 tools, 1 trigger, 1 panel (full-duplex)', () => {
   const conn = fakeConn()
   const { tools, triggers, panels, ctx } = mkCtx({}, conn)
   register(ctx)
-  eq(tools.size, 11, 'tool count')
-  for (const n of ['synapse_health', 'synapse_discover', 'synapse_dispatch', 'synapse_register', 'synapse_agents_summary', 'synapse_serve', 'synapse_emit', 'synapse_subscribe', 'synapse_reputation', 'synapse_request_approval', 'synapse_approve']) assert(tools.has(n), `missing ${n}`)
+  eq(tools.size, 12, 'tool count')
+  for (const n of ['synapse_health', 'synapse_discover', 'synapse_dispatch', 'synapse_register', 'synapse_agents_summary', 'synapse_serve', 'synapse_serve_status', 'synapse_emit', 'synapse_subscribe', 'synapse_reputation', 'synapse_request_approval', 'synapse_approve']) assert(tools.has(n), `missing ${n}`)
   eq(triggers.length, 1, 'trigger count')
   eq(triggers[0].name, 'synapse_mesh_event', 'trigger name')
   eq(panels.length, 1, 'panel count')
@@ -83,6 +102,7 @@ test('register wires 11 tools, 1 trigger, 1 panel (full-duplex)', () => {
 // ─── discover ───────────────────────────────────────────────────────────────
 
 test('synapse_discover returns agents from registry', async () => {
+  __setConnForTest(null)
   const conn = fakeConn()
   conn._on('mesh.registry.discover', () => [
     { id: 'grip-cli-001', name: 'Grip CLI', skills: [{ id: 'himalaya' }] },
@@ -204,6 +224,50 @@ test('a failed connect is not cached — the next call retries', async () => {
   if (!threw) throw new Error('expected first attempt to throw')
   await discoverAgents(ctx, {}) // retry succeeds
   if (attempts !== 2) throw new Error(`expected 2 attempts (fail + retry), got ${attempts}`)
+})
+
+// ─── auto-start responder on boot (serveSkills + autoServe) ─────────────────
+
+test('autoServe: register() auto-starts the responder when enabled+autoServe (default skills)', async () => {
+  __setConnForTest(null)
+  const conn = fakeConn()
+  conn._on('mesh.registry.discover', () => [])
+  const { tools, logs, ctx } = mkCtx({}, conn)
+  register(ctx)
+  // auto-start is async (serveSkills → connectMesh → startResponder) — wait for it to settle
+  await new Promise((r) => setTimeout(r, 100))
+  const r = await tools.get('synapse_serve_status').handler({})
+  eq(r.serving, true, 'responder auto-started (serving=true)')
+  assert(r.skills.includes('status'), 'default skills include status')
+  assert(r.skills.includes('discover'), 'default skills include discover')
+  eq(r.autoServe, true, 'autoServe true by default')
+})
+
+test('autoServe: disabled when synapse.autoServe=false (no auto-start)', async () => {
+  __setConnForTest(null)
+  const conn = fakeConn()
+  const { tools, ctx } = mkCtx({ autoServe: false }, conn)
+  register(ctx)
+  await new Promise((r) => setTimeout(r, 20))
+  const r = await tools.get('synapse_serve_status').handler({})
+  eq(r.serving, false, 'responder NOT auto-started when autoServe=false')
+})
+
+test('autoServe: a failed auto-start does not break register (best-effort)', async () => {
+  __setConnForTest(null)
+  let failConnect = true
+  const conn = fakeConn()
+  const ctx = {
+    settings: { synapse: { url: 'nats://down:4222' } },
+    natsConnect: async () => { if (failConnect) throw new Error('server down'); return conn },
+    registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
+  }
+  // register() must not throw even though the auto-start connection fails
+  const { register } = await import('./index.mjs')
+  let threw = false
+  try { register(ctx) } catch { threw = true }
+  assert(!threw, 'register() must not throw on auto-serve connection failure')
+  await new Promise((r) => setTimeout(r, 20)) // let the auto-start promise reject (handled)
 })
 
 // ─── runner ─────────────────────────────────────────────────────────────────

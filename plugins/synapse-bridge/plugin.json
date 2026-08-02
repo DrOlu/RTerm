@@ -1,7 +1,7 @@
 {
   "name": "synapse-bridge",
   "version": "1.0.0",
-  "description": "Synapse mesh bridge for RTerm — full-duplex Synapse agent: discover live agents, dispatch tasks, register RTerm as a mesh agent, AND serve as one (respond to inbound requests), emit/subscribe mesh events, EXT-REPUTATION scoring, and EXT-GOVERNANCE approvals. Speaks the Synapse protocol (v0.3.0) over a shared NATS server using the v3.1.2 auth/request-reply/JetStream transport. Config in Settings (synapse block); secrets via the vault.",
+  "description": "Synapse mesh bridge for RTerm — full-duplex Synapse agent (auto-started on boot): discover live agents, dispatch tasks, register RTerm as a mesh agent, AND serve as one (respond to inbound requests, auto-started), emit/subscribe mesh events, EXT-REPUTATION scoring, and EXT-GOVERNANCE approvals. Speaks the Synapse protocol (v0.3.0) over a shared NATS server using the v3.1.2 auth/request-reply/JetStream transport. Config in Settings (synapse block); secrets via the vault.",
   "entry": "index.mjs",
   "tools": [
     "synapse_health",
@@ -10,6 +10,7 @@
     "synapse_register",
     "synapse_agents_summary",
     "synapse_serve",
+    "synapse_serve_status",
     "synapse_emit",
     "synapse_subscribe",
     "synapse_reputation",

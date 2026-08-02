@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.1.7 (2026-08-02)
+
+### Feature — always-on full-duplex Synapse agent (auto-start responder on boot)
+
+Makes "be tasked by them" **always-on** instead of opt-in per session, and makes
+`synapse_serve` reliably invocable + verifiable.
+
+- **Auto-start on boot (`synapse.autoServe`, default true).** When `synapse.enabled` and
+  `autoServe` are true, the plugin **auto-starts the full-duplex responder** inside
+  `register()` — RTerm listens on `mesh.agent.{id}.inbox` and responds to inbound Synapse
+  requests from boot, no manual `synapse_serve` call needed. Best-effort: a failed
+  auto-start (server down) logs a deferral and never blocks plugin registration; the
+  responder still starts on the first `synapse_serve` call. Set `autoServe: false` to opt out.
+- **Default serve skills.** When auto-starting (or calling `synapse_serve` with no skills),
+  RTerm serves a sensible default set: `status` (liveness) + `discover` (mesh discovery),
+  plus any `ctx.rtermSkills`. No empty-skill responder.
+- **`synapse_serve_status` (new tool).** Report whether the responder is live, connected,
+  which skills it serves, and the autoServe flag — makes the always-on responder verifiable.
+- **`synapse_serve` made idempotent + reliable.** Restarts cleanly with fresh skills on
+  repeat calls; the shared `serveSkills` helper drives both the tool and the boot auto-start.
+
+Tools 11 → 12. Tests: 3 new autoServe tests (`register() auto-starts the responder when
+enabled+autoServe`, `disabled when autoServe=false`, `a failed auto-start does not break
+register`) — **15/15** synapse-bridge spec, full automation suite green.
+
 ## v3.1.6 (2026-08-01)
 
 ### Feature — full-duplex Synapse agent (responder, emit/subscribe, reputation, governance)
