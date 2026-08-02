@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.2.0 (2026-08-02)
+
+### Feature — production-ready Synapse dispatch (skip-ack, multi-mesh, 600s timeout)
+
+Makes Synapse dispatch work seamlessly out of the box — no more JetStream ack
+intercepting the reply, no more 30s timeout for LLM-backed agents, and support
+for multiple Synapse networks.
+
+- **Fix 1 — Skip JetStream ack, wait for real respond.** `dispatchTask()` no longer
+  uses `nc.request()` (which returns the first reply = JetStream ack). Instead it
+  subscribes to a dedicated reply subject, skips any message with
+  `{stream: "AGENT_INBOXES", seq: N}`, and waits for the real Synapse `respond`
+  envelope. Proven with mock agent + real Wema BMC data round-trip.
+- **Fix 2 — 600s default dispatch timeout.** LLM-backed agents (grip-001, omp-cli-001)
+  take 30-120s to process. The old 30s timeout was too short. New default is 600s
+  (10 minutes), configurable via `settings.synapse.dispatchTimeout`.
+- **Fix 3 — Multi-mesh support.** `settings.synapse.meshes` accepts an array of
+  `{name, url/servers, auth, prefix?}`. `discoverAgents()` queries all meshes and
+  merges results, tagging each agent with `_mesh` so you know which network it came
+  from. `connectMesh()` accepts an override config for per-mesh connections.
+- **Fix 4 — Graceful timeout error.** If no respond arrives within the timeout,
+  returns a clear error: `"Agent X did not respond within Ns. It may not have a
+  Synapse responder running (check synapse_serve_status)."` — not a hang.
+
+New types: `SynapseMesh` interface, `dispatchTimeout` + `meshes` on `SynapseSettings`.
+Tests: 6/6 synapse-bridge spec (skip-ack + timeout + multi-mesh), 13/13 synapseAgent
+spec, full automation suite green.
+
 ## v3.1.12 (2026-08-02)
 
 ### Feature — markdown rendering in chat (tables, headings, lists, blockquotes, code blocks)

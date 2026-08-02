@@ -722,8 +722,6 @@ export interface SynapseSettings {
   prefix?: string
   /** this instance's mesh agent id (default "rterm-001"). */
   agentId?: string
-  /** auto-start the full-duplex responder on boot (default true when enabled). */
-  autoServe?: boolean
   /** auth options (token / user-pass / nkey / jwt / creds / tls). */
   auth?: {
     token?: string
@@ -739,6 +737,26 @@ export interface SynapseSettings {
     tlsKey?: string
     tlsCa?: string
   }
+  /** auto-start the full-duplex responder on boot (default true). */
+  autoServe?: boolean
+  /** dispatch timeout in ms (default 600000 = 10min for LLM-backed agents). */
+  dispatchTimeout?: number
+  /** multiple meshes (v3.2.0). Each: {name, url/servers, auth, prefix?}. */
+  meshes?: SynapseMesh[]
+}
+
+/** A single Synapse mesh configuration (for multi-mesh support, v3.2.0). */
+export interface SynapseMesh {
+  /** mesh name (for tagging discovered agents). */
+  name?: string
+  /** NATS server url. */
+  url?: string
+  /** multiple server urls. */
+  servers?: string[]
+  /** mesh subject prefix (default "mesh"). */
+  prefix?: string
+  /** auth options. */
+  auth?: SynapseSettings['auth']
 }
 
 /**

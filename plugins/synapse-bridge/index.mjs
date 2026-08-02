@@ -46,8 +46,11 @@ export function resolveConfig(ctx = {}, env = process.env) {
     agentId: block.agentId || env.SYNAPSE_AGENT_ID || 'rterm-001',
     auth: block.auth || undefined,
     enabled: block.enabled !== false,
-    /** auto-start the full-duplex responder on boot (default true when enabled). */
     autoServe: block.autoServe !== false,
+    /** dispatch timeout in ms (default 600s = 10min for LLM-backed agents). */
+    dispatchTimeout: block.dispatchTimeout ?? 600000,
+    /** multiple meshes (v3.2.0). Each: {name, url/servers, auth, prefix?}. */
+    meshes: Array.isArray(block.meshes) ? block.meshes : undefined,
   }
 }
 
@@ -93,8 +96,8 @@ function _configKey(cfg) {
   return `${servers}|${cfg.agentId}|${authKeys}`
 }
 
-async function connectMesh(ctx) {
-  const cfg = resolveConfig(ctx)
+async function connectMesh(ctx, overrideCfg) {
+  const cfg = overrideCfg || resolveConfig(ctx)
   const key = _configKey(cfg)
   const existing = _conns.get(key)
   if (existing) {
@@ -144,19 +147,67 @@ export function envelope(type, payload, cfg, extra = {}) {
 
 export async function discoverAgents(ctx, filter = {}) {
   const cfg = resolveConfig(ctx)
-  const nc = await connectMesh(ctx)
-  const msg = await nc.request(`${cfg.prefix}.registry.discover`, j(envelope('discover', filter, cfg)), { timeout: 4000 })
-  const reply = uj(msg.data)
-  const agents = Array.isArray(reply) ? reply : (reply.payload?.agents ?? reply.payload ?? reply)
-  return Array.isArray(agents) ? agents : []
+  const meshes = cfg.meshes || [{ url: cfg.servers, auth: cfg.auth, prefix: cfg.prefix }]
+  const allAgents = []
+  for (const mesh of meshes) {
+    try {
+      const meshCfg = { ...cfg, servers: mesh.servers || (mesh.url ? [mesh.url] : cfg.servers), auth: mesh.auth || cfg.auth, prefix: mesh.prefix || cfg.prefix }
+      const nc = await connectMesh(ctx, meshCfg)
+      const msg = await nc.request(`${meshCfg.prefix}.registry.discover`, j(envelope('discover', filter, meshCfg)), { timeout: 5000 })
+      const reply = uj(msg.data)
+      const agents = Array.isArray(reply) ? reply : (reply.payload?.agents ?? reply.payload ?? reply)
+      if (Array.isArray(agents)) {
+        for (const a of agents) { if (typeof a === 'object') a._mesh = mesh.name || 'default' }
+        allAgents.push(...agents)
+      }
+    } catch { /* mesh unreachable — skip */ }
+  }
+  return allAgents
 }
 
 export async function dispatchTask(ctx, target, skill, input = {}, opts = {}) {
   const cfg = resolveConfig(ctx)
+  const timeout = opts.timeout ?? cfg.dispatchTimeout ?? 600000
   const nc = await connectMesh(ctx)
-  const env = envelope('request', { skill, input }, cfg, { to: target, task_id: randomUUID() })
-  const msg = await nc.request(`${cfg.prefix}.agent.${target}.inbox`, j(env), { timeout: opts.timeout ?? 30000 })
-  return uj(msg.data)
+  const reqEnv = envelope('request', { skill, input }, cfg, { to: target, task_id: randomUUID() })
+  const inbox = `${cfg.prefix}.agent.${target}.inbox`
+  const replySubject = `_INBOX.synapse.${randomUUID().slice(0, 12)}`
+
+  // Subscribe to the reply subject and collect messages, skipping JetStream acks.
+  // The JetStream ack is always {stream: "AGENT_INBOXES", seq: N} — skip it.
+  // The real respond is a Synapse envelope with {type: "respond", ...} — return it.
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const sub = nc.subscribe(replySubject, { max: 10 })
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true
+        try { sub.unsubscribe() } catch {}
+        resolve({ error: `Agent ${target} did not respond within ${Math.round(timeout / 1000)}s. It may not have a Synapse responder running (check synapse_serve_status).`, task_id: reqEnv.task_id })
+      }
+    }, timeout)
+
+    ;(async () => {
+      for await (const msg of sub) {
+        if (settled) break
+        try {
+          const parsed = uj(msg.data)
+          const isJetStreamAck = parsed.stream === 'AGENT_INBOXES' && typeof parsed.seq === 'number'
+          if (isJetStreamAck) continue // skip the ack, wait for the real respond
+          // This is the respond envelope
+          settled = true
+          clearTimeout(timer)
+          try { sub.unsubscribe() } catch {}
+          resolve(parsed)
+        } catch {
+          // non-JSON — skip
+        }
+      }
+    })().catch(() => {})
+
+    // Publish the request with the reply subject
+    nc.publish(inbox, j(reqEnv), { reply: replySubject })
+  })
 }
 
 export async function registerSelf(ctx, manifest = {}) {

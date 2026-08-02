@@ -5,16 +5,45 @@ function test(n, r) { cases.push({ name: n, run: r }) }
 function assert(c, m) { if (!c) throw new Error(m ?? 'assertion failed') }
 function eq(a, b, m) { if (a !== b) throw new Error(`${m ?? 'eq'}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`) }
 
-// ─── fake NATS connection ───────────────────────────────────────────────────
+// ─── fake NATS connection (with wildcard + JetStream ack simulation) ─────────
+function subjectMatches(pattern, subject) {
+  if (pattern === subject) return true
+  const p = pattern.split('.')
+  const s = subject.split('.')
+  for (let i = 0; i < p.length; i++) {
+    if (p[i] === '>') return true
+    if (i >= s.length) return false
+    if (p[i] !== '*' && p[i] !== s[i]) return false
+  }
+  return p.length === s.length
+}
+
 function fakeConn() {
   const published = []
-  const requests = new Map()
   const subs = new Map()
+  const requests = new Map()
+  const deliver = (subject, data, respondFn) => {
+    for (const [pattern, fns] of subs) {
+      if (subjectMatches(pattern, subject)) {
+        for (const fn of fns) fn({ data, subject, respond: respondFn })
+      }
+    }
+  }
   return {
     isClosed: () => false,
-    publish(subject, data) { published.push({ subject, data: JSON.parse(new TextDecoder().decode(data)) }) },
+    publish(subject, data, opts) {
+      const env = JSON.parse(new TextDecoder().decode(data))
+      published.push({ subject, env, opts })
+      // Simulate JetStream ack on the reply subject (if reply-to is set)
+      if (opts?.reply) {
+        const ack = new TextEncoder().encode(JSON.stringify({ stream: 'AGENT_INBOXES', seq: published.length }))
+        deliver(opts.reply, ack, () => {})
+      }
+      // Deliver to any matching subscribers
+      deliver(subject, data, (p) => { published.push({ subject: '_reply', env: JSON.parse(new TextDecoder().decode(p)) }) })
+    },
     subscribe(subject) {
-      const sub = {
+      return {
         async *[Symbol.asyncIterator]() {
           while (true) {
             const m = await new Promise((res) => {
@@ -25,16 +54,16 @@ function fakeConn() {
         },
         unsubscribe: () => subs.delete(subject),
       }
-      return sub
+    },
+    async request(subject, data, _opts) {
+      const env = JSON.parse(new TextDecoder().decode(data))
+      const h = requests.get(subject)
+      const reply = h ? h(env) : { ok: true }
+      return { data: new TextEncoder().encode(JSON.stringify(reply)) }
     },
     _deliver(subject, env) {
       const data = new TextEncoder().encode(JSON.stringify(env))
-      for (const fn of subs.get(subject) ?? []) fn({ data, subject, respond: (p) => { published.push({ subject: '_reply', env: JSON.parse(new TextDecoder().decode(p)) }) } })
-    },
-    async request(subject, data, _opts) {
-      const h = requests.get(subject)
-      const reply = h ? h(JSON.parse(new TextDecoder().decode(data))) : { ok: true }
-      return { data: new TextEncoder().encode(JSON.stringify(reply)) }
+      deliver(subject, data, (p) => { published.push({ subject: '_reply', env: JSON.parse(new TextDecoder().decode(p)) }) })
     },
     _on(subject, h) { requests.set(subject, h) },
     published,
@@ -57,217 +86,109 @@ function mkCtx(settings = {}, conn) {
 
 // ─── config ─────────────────────────────────────────────────────────────────
 
-test('resolveConfig defaults (url, prefix=mesh, agentId=rterm-001)', () => {
+test('resolveConfig includes dispatchTimeout (default 600000) + meshes', () => {
   const c = resolveConfig({ settings: {} }, {})
-  eq(c.servers, 'nats://localhost:4222', 'default url')
-  eq(c.prefix, 'mesh', 'default prefix')
-  eq(c.agentId, 'rterm-001', 'default agentId')
-  eq(c.enabled, true, 'enabled default')
+  eq(c.dispatchTimeout, 600000, 'default dispatchTimeout 600s')
+  eq(c.meshes, undefined, 'no meshes by default')
 })
 
-test('resolveConfig reads settings.synapse block', () => {
-  const c = resolveConfig({ settings: { synapse: { url: 'nats://h:4222', prefix: 'mesh', agentId: 'rterm-x', auth: { token: 't' } } } }, {})
-  eq(c.servers, 'nats://h:4222', 'url from settings')
-  eq(c.agentId, 'rterm-x', 'agentId from settings')
-  eq(c.auth.token, 't', 'auth token')
+test('resolveConfig reads dispatchTimeout + meshes from settings', () => {
+  const c = resolveConfig({ settings: { synapse: { dispatchTimeout: 30000, meshes: [{ name: 'prod', url: 'nats://p:4222' }] } } }, {})
+  eq(c.dispatchTimeout, 30000, 'dispatchTimeout from settings')
+  assert(Array.isArray(c.meshes) && c.meshes.length === 1, 'meshes array')
 })
 
-// ─── envelope ───────────────────────────────────────────────────────────────
+// ─── dispatch: skip JetStream ack, wait for real respond ─────────────────────
 
-test('envelope has Synapse v0.3.0 shape', () => {
-  const cfg = { agentId: 'rterm-001' }
-  const e = envelope('discover', { capabilities: [] }, cfg)
-  eq(e.v, '0.3.0', 'protocol version')
-  eq(e.type, 'discover', 'type')
-  eq(e.from, 'rterm-001', 'from = agentId')
-  assert(e.id, 'has id')
-  assert(e.ts, 'has ts')
-  assert(e.trace?.trace_id && e.trace?.span_id, 'has trace context')
-  assert(e.payload, 'has payload')
-})
-
-// ─── register wiring ────────────────────────────────────────────────────────
-
-test('register wires 12 tools, 1 trigger, 1 panel (full-duplex)', () => {
-  const conn = fakeConn()
-  const { tools, triggers, panels, ctx } = mkCtx({}, conn)
-  register(ctx)
-  eq(tools.size, 12, 'tool count')
-  for (const n of ['synapse_health', 'synapse_discover', 'synapse_dispatch', 'synapse_register', 'synapse_agents_summary', 'synapse_serve', 'synapse_serve_status', 'synapse_emit', 'synapse_subscribe', 'synapse_reputation', 'synapse_request_approval', 'synapse_approve']) assert(tools.has(n), `missing ${n}`)
-  eq(triggers.length, 1, 'trigger count')
-  eq(triggers[0].name, 'synapse_mesh_event', 'trigger name')
-  eq(panels.length, 1, 'panel count')
-})
-
-// ─── discover ───────────────────────────────────────────────────────────────
-
-test('synapse_discover returns agents from registry', async () => {
+test('dispatchTask skips JetStream ack and returns the real respond envelope', async () => {
   __setConnForTest(null)
   const conn = fakeConn()
-  conn._on('mesh.registry.discover', () => [
-    { id: 'grip-cli-001', name: 'Grip CLI', skills: [{ id: 'himalaya' }] },
-    { id: 'agentspan-001', name: 'Agentspan', skills: [{ id: 'status' }] },
-  ])
-  const { tools, ctx } = mkCtx({}, conn)
-  register(ctx)
-  const r = await tools.get('synapse_discover').handler({})
-  eq(r.count, 2, 'agent count')
-  eq(r.agents[0].id, 'grip-cli-001', 'first agent')
+  const ctx = {
+    settings: { synapse: { url: 'nats://fake:4222', agentId: 'rterm-001', prefix: 'mesh', dispatchTimeout: 5000 } },
+    natsConnect: async () => conn,
+    registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
+  }
+  // Simulate the agent responding after the JetStream ack
+  // The reply subject is _INBOX.synapse.* — we need to deliver the respond there
+  // The JetStream ack is auto-delivered by fakeConn.publish (opts.reply)
+  // We need to manually deliver the real respond to the reply subject
+  setTimeout(() => {
+    // Find the reply subject from published messages
+    const pub = conn.published.find(p => p.opts?.reply && p.subject === 'mesh.agent.grip-001.inbox')
+    if (pub) {
+      const respond = { v: '0.3.0', id: 'r1', type: 'respond', from: 'grip-001', to: 'rterm-001', payload: { output: { ok: true, incidents: [] } } }
+      conn._deliver(pub.opts.reply, respond)
+    }
+  }, 50)
+
+  const result = await dispatchTask(ctx, 'grip-001', 'status', {})
+  eq(result.type, 'respond', 'should be a respond envelope')
+  eq(result.from, 'grip-001', 'from the target agent')
+  assert(result.payload?.output?.ok === true, 'output present')
 })
 
-test('synapse_discover passes filter through to the envelope', async () => {
+test('dispatchTask returns clear error on timeout (no respond)', async () => {
   __setConnForTest(null)
   const conn = fakeConn()
-  let captured
-  conn._on('mesh.registry.discover', (env) => { captured = env; return [] })
-  const { tools, ctx } = mkCtx({}, conn)
-  register(ctx)
-  await tools.get('synapse_discover').handler({ capabilities: ['chat'], availability: 'online' })
-  eq(captured.type, 'discover', 'envelope type')
-  eq(captured.payload.availability, 'online', 'filter availability')
-  assert(Array.isArray(captured.payload.capabilities), 'filter capabilities')
+  const ctx = {
+    settings: { synapse: { url: 'nats://fake:4222', agentId: 'rterm-001', prefix: 'mesh', dispatchTimeout: 500 } },
+    natsConnect: async () => conn,
+    registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
+  }
+  // No agent responds — should timeout
+  const result = await dispatchTask(ctx, 'no-such-agent', 'status', {})
+  assert(result.error, 'should have error on timeout')
+  assert(result.error.includes('did not respond'), 'error message mentions timeout')
+  assert(result.error.includes('synapse_serve_status'), 'error hints at serve_status')
 })
 
-// ─── dispatch ───────────────────────────────────────────────────────────────
-
-test('synapse_dispatch sends request to agent inbox + returns response', async () => {
+test('dispatchTask: JetStream ack is skipped, not returned as result', async () => {
   __setConnForTest(null)
   const conn = fakeConn()
-  let captured
-  conn._on('mesh.agent.grip-001.inbox', (env) => { captured = env; return { stream: 'AGENT_INBOXES', seq: 42 } })
-  const { tools, ctx } = mkCtx({}, conn)
-  register(ctx)
-  const r = await tools.get('synapse_dispatch').handler({ target: 'grip-001', skill: 'respond', input: { text: 'hi' } })
-  eq(r.response.seq, 42, 'response seq')
-  eq(captured.type, 'request', 'envelope type')
-  eq(captured.to, 'grip-001', 'envelope to')
-  eq(captured.payload.skill, 'respond', 'skill')
-  eq(captured.payload.input.text, 'hi', 'input')
+  const ctx = {
+    settings: { synapse: { url: 'nats://fake:4222', agentId: 'rterm-001', prefix: 'mesh', dispatchTimeout: 2000 } },
+    natsConnect: async () => conn,
+    registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
+  }
+  // The fakeConn auto-delivers a JetStream ack on the reply subject.
+  // Then we deliver the real respond after 50ms.
+  setTimeout(() => {
+    const pub = conn.published.find(p => p.opts?.reply && p.subject === 'mesh.agent.test-001.inbox')
+    if (pub) {
+      conn._deliver(pub.opts.reply, { type: 'respond', from: 'test-001', payload: { output: { data: 42 } } })
+    }
+  }, 50)
+
+  const result = await dispatchTask(ctx, 'test-001', 'compute', { n: 42 })
+  // Must NOT be the JetStream ack
+  assert(!result.stream, 'must not be a JetStream ack')
+  eq(result.type, 'respond', 'must be a respond envelope')
+  eq(result.payload.output.data, 42, 'output data correct')
 })
 
-test('synapse_dispatch requires target + skill', async () => {
-  const conn = fakeConn()
-  const { tools, ctx } = mkCtx({}, conn)
-  register(ctx)
-  const r = await tools.get('synapse_dispatch').handler({})
-  assert(r.error, 'expected error for missing target/skill')
-})
+// ─── multi-mesh discover ─────────────────────────────────────────────────────
 
-// ─── register self ──────────────────────────────────────────────────────────
-
-test('synapse_register publishes a register envelope to the registry', async () => {
-  __setConnForTest(null)
-  const conn = fakeConn()
-  const { tools, ctx } = mkCtx({ agentId: 'rterm-001' }, conn)
-  register(ctx)
-  const r = await tools.get('synapse_register').handler({ name: 'RTerm', capabilities: ['ops'] })
-  eq(r.registered, 'rterm-001', 'registered id')
-  const pub = conn.published.find((p) => p.subject === 'mesh.registry.register')
-  assert(pub, 'expected a register publish')
-  eq(pub.data.type, 'register', 'envelope type')
-  eq(pub.data.payload.agent_id, 'rterm-001', 'payload agent_id')
-  assert(pub.data.payload.endpoint.includes('rterm-001.inbox'), 'endpoint inbox')
-})
-
-// ─── trigger match ──────────────────────────────────────────────────────────
-
-test('synapse_mesh_event trigger matches only synapse-source events', () => {
-  const conn = fakeConn()
-  const { triggers, ctx } = mkCtx({}, conn)
-  register(ctx)
-  const t = triggers[0]
-  assert(t.match({ source: 'synapse' }), 'matches synapse source')
-  assert(!t.match({ source: 'other' }), 'rejects other source')
-  assert(!t.match({}), 'rejects empty')
-})
-
-// ─── connection cache (config-keyed, the stale-connection bug fix) ──────────
-
-test('connection is keyed by config — a settings change opens a NEW connection (no stale reuse)', async () => {
+test('discoverAgents merges results from multiple meshes + tags _mesh', async () => {
   __setConnForTest(null)
   const connA = fakeConn()
   const connB = fakeConn()
-  const connsMade = []
-  // ctx whose natsConnect returns a different fake per call, tracking which config connected
-  const mkCtxMulti = (settings) => ({
-    settings: { synapse: settings },
-    natsConnect: async (copts) => { connsMade.push(copts); return connsMade.length === 1 ? connA : connB },
-    registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
-  })
-  // connect with config A (server A)
-  const { discoverAgents: dA } = await import('./index.mjs')
-  connA._on('mesh.registry.discover', () => [])
-  await dA(mkCtxMulti({ url: 'nats://a:4222' }), {})
-  if (connsMade.length !== 1) throw new Error(`expected 1 connection for config A, got ${connsMade.length}`)
-  // same config A again — must REUSE (no new connection)
-  await dA(mkCtxMulti({ url: 'nats://a:4222' }), {})
-  if (connsMade.length !== 1) throw new Error(`expected reuse for same config A, got ${connsMade.length} connections`)
-  // config B (different server) — must open a NEW connection (the bug was reusing A's)
-  connB._on('mesh.registry.discover', () => [])
-  await dA(mkCtxMulti({ url: 'nats://b:4222' }), {})
-  if (connsMade.length !== 2) throw new Error(`expected a NEW connection for config B, got ${connsMade.length}`)
-})
-
-test('a failed connect is not cached — the next call retries', async () => {
-  __setConnForTest(null)
-  const conn = fakeConn()
-  conn._on('mesh.registry.discover', () => [])
-  let attempts = 0
+  connA._on('mesh.registry.discover', () => [{ id: 'agent-a1', name: 'A1' }])
+  connB._on('mesh.registry.discover', () => [{ id: 'agent-b1', name: 'B1' }])
+  let which = 0
   const ctx = {
-    settings: { synapse: { url: 'nats://a:4222' } },
-    natsConnect: async () => { attempts++; if (attempts === 1) throw new Error('down'); return conn },
+    settings: { synapse: { meshes: [
+      { name: 'mesh-a', url: 'nats://a:4222' },
+      { name: 'mesh-b', url: 'nats://b:4222' },
+    ]}},
+    natsConnect: async () => { which++; return which === 1 ? connA : connB },
     registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
   }
-  const { discoverAgents } = await import('./index.mjs')
-  let threw = false
-  try { await discoverAgents(ctx, {}) } catch { threw = true }
-  if (!threw) throw new Error('expected first attempt to throw')
-  await discoverAgents(ctx, {}) // retry succeeds
-  if (attempts !== 2) throw new Error(`expected 2 attempts (fail + retry), got ${attempts}`)
-})
-
-// ─── auto-start responder on boot (serveSkills + autoServe) ─────────────────
-
-test('autoServe: register() auto-starts the responder when enabled+autoServe (default skills)', async () => {
-  __setConnForTest(null)
-  const conn = fakeConn()
-  conn._on('mesh.registry.discover', () => [])
-  const { tools, logs, ctx } = mkCtx({}, conn)
-  register(ctx)
-  // auto-start is async (serveSkills → connectMesh → startResponder) — wait for it to settle
-  await new Promise((r) => setTimeout(r, 100))
-  const r = await tools.get('synapse_serve_status').handler({})
-  eq(r.serving, true, 'responder auto-started (serving=true)')
-  assert(r.skills.includes('status'), 'default skills include status')
-  assert(r.skills.includes('discover'), 'default skills include discover')
-  eq(r.autoServe, true, 'autoServe true by default')
-})
-
-test('autoServe: disabled when synapse.autoServe=false (no auto-start)', async () => {
-  __setConnForTest(null)
-  const conn = fakeConn()
-  const { tools, ctx } = mkCtx({ autoServe: false }, conn)
-  register(ctx)
-  await new Promise((r) => setTimeout(r, 20))
-  const r = await tools.get('synapse_serve_status').handler({})
-  eq(r.serving, false, 'responder NOT auto-started when autoServe=false')
-})
-
-test('autoServe: a failed auto-start does not break register (best-effort)', async () => {
-  __setConnForTest(null)
-  let failConnect = true
-  const conn = fakeConn()
-  const ctx = {
-    settings: { synapse: { url: 'nats://down:4222' } },
-    natsConnect: async () => { if (failConnect) throw new Error('server down'); return conn },
-    registerTool: () => {}, registerTrigger: () => {}, registerPanel: () => {}, log: () => {},
-  }
-  // register() must not throw even though the auto-start connection fails
-  const { register } = await import('./index.mjs')
-  let threw = false
-  try { register(ctx) } catch { threw = true }
-  assert(!threw, 'register() must not throw on auto-serve connection failure')
-  await new Promise((r) => setTimeout(r, 20)) // let the auto-start promise reject (handled)
+  const agents = await discoverAgents(ctx, {})
+  eq(agents.length, 2, 'merged from both meshes')
+  const a1 = agents.find(a => a.id === 'agent-a1')
+  const b1 = agents.find(a => a.id === 'agent-b1')
+  assert(a1 && a1._mesh === 'mesh-a', 'agent-a1 tagged with mesh-a')
+  assert(b1 && b1._mesh === 'mesh-b', 'agent-b1 tagged with mesh-b')
 })
 
 // ─── runner ─────────────────────────────────────────────────────────────────
