@@ -1,5 +1,5 @@
 import { buildToolsForModel } from '../tools'
-import { buildBuiltInToolStatusSummary, buildBuiltInToolSettingsSummary } from '../../Gateway/toolingSummary'
+import { buildBuiltInToolSettingsSummary } from '../../Gateway/toolingSummary'
 import { computeReadFileSupport, getEnabledBuiltInTools } from './model_config'
 
 const assertEqual = <T>(actual: T, expected: T, message: string): void => {
