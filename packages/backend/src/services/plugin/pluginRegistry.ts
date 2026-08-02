@@ -59,6 +59,8 @@ export interface PluginManifest {
 export interface PluginToolDefinition {
   name: string
   description: string
+  /** optional tool parameter schema (for toolsForModel injection). */
+  params?: Record<string, unknown>
   /** the tool handler: (args) => result string or object. */
   handler: (args: Record<string, unknown>) => Promise<unknown> | unknown
 }

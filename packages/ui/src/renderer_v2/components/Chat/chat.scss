@@ -668,12 +668,123 @@ body.chat-drag-selection-suppressed * {
     word-break: break-word;
   }
 
+  // ─── Tables (GitHub-style) ──────────────────────────────────────────
   table {
     display: block;
     max-width: 100%;
     overflow-x: auto;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 13px;
+    line-height: 1.5;
+    border-radius: var(--radius-sm, 6px);
+    border: 1px solid var(--border);
   }
 
+  thead {
+    background: color-mix(in srgb, var(--fg) 5%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+
+  th {
+    text-align: left;
+    font-weight: 600;
+    padding: 8px 13px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    color: var(--fg);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+  }
+
+  td {
+    padding: 7px 13px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    color: var(--fg-muted);
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  tbody tr:hover td {
+    background: color-mix(in srgb, var(--accent) 4%, transparent);
+  }
+
+  // ─── Headings ──────────────────────────────────────────────────────
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 650;
+    line-height: 1.3;
+    margin-top: 1.2em;
+    margin-bottom: 0.5em;
+    color: var(--fg);
+  }
+
+  h1 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  h2 { font-size: 1.3em; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); padding-bottom: 0.25em; }
+  h3 { font-size: 1.15em; }
+  h4 { font-size: 1em; }
+  h5 { font-size: 0.9em; color: var(--fg-muted); }
+  h6 { font-size: 0.85em; color: var(--fg-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  // ─── Lists ──────────────────────────────────────────────────────────
+  ul, ol {
+    padding-left: 1.6em;
+    margin: 0.4em 0 0.6em;
+  }
+
+  li {
+    margin-bottom: 0.25em;
+  }
+
+  li > p {
+    margin-bottom: 0.3em;
+  }
+
+  // ─── Task lists (GFM checkbox) ─────────────────────────────────────
+  li:has(> input[type="checkbox"]) {
+    list-style: none;
+    padding-left: 0;
+    margin-left: -1.2em;
+  }
+
+  input[type="checkbox"] {
+    margin-right: 0.4em;
+    accent-color: var(--accent);
+  }
+
+  // ─── Blockquotes ──────────────────────────────────────────────────
+  blockquote {
+    margin: 0.6em 0;
+    padding: 0.3em 0 0.3em 1em;
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 4%, transparent);
+    border-radius: 0 var(--radius-sm, 4px) var(--radius-sm, 4px) 0;
+    color: var(--fg-muted);
+
+    p {
+      margin-bottom: 0.3em;
+    }
+
+    p:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  // ─── Horizontal rules ──────────────────────────────────────────────
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1.2em 0;
+  }
+
+  // ─── Strikethrough + emphasis (GFM) ──────────────────────────────
+  del { color: var(--fg-faint); }
+  strong { font-weight: 650; }
+  em { font-style: italic; }
+
+  // ─── Links ─────────────────────────────────────────────────────────
   a {
     color: var(--accent);
     text-decoration: none;

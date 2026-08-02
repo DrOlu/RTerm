@@ -338,7 +338,7 @@ export async function startGyBackend(): Promise<void> {
           name: tool.name,
           description: tool.description ?? '',
           params: tool.params ?? {},
-          handler: tool.handler,
+          handler: tool.handler as (params: any) => Promise<any>,
         });
       }
     }

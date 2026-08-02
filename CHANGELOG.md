@@ -1,17 +1,27 @@
 # Changelog
 
-## v3.1.9 (2026-08-02)
+## v3.1.12 (2026-08-02)
 
-### Bug fix — plugin tool wiring race condition (fixes v3.1.8)
+### Feature — markdown rendering in chat (tables, headings, lists, blockquotes, code blocks)
 
-v3.1.8 wired plugin tools into the agent but had a race: `createObservability()`
-fired a `void pluginRegistry.reload().catch(() => {})` (fire-and-forget) that
-raced with the new `await observability.pluginRegistry.reload()` in
-`startGyBackend`. The race caused the awaited reload to hang, so plugin tools
-were never wired and the "Wired N plugin tools" log line never appeared.
+The chat panel already used `ReactMarkdown` + `remarkGfm` + `rehypeRaw` to render
+assistant messages, but the CSS for most markdown elements was minimal or missing.
+Tables had no borders/padding, headings were unstyled, lists had no indentation,
+blockquotes were plain, and horizontal rules were absent.
 
-Fix: removed the fire-and-forget `reload()` from `createObservability()` —
-`startGyBackend` now owns the sole `reload()` call (awaited, then tools wired).
+Added comprehensive GitHub-style markdown CSS to `chat.scss`:
+- **Tables**: bordered, with header row background, cell padding, hover highlight,
+  horizontal scroll for wide tables, rounded corners
+- **Headings** (h1–h6): proper font sizes, bottom borders on h1/h2 (GitHub style),
+  muted colors for h5/h6, consistent spacing
+- **Lists** (ul/ol): proper indentation, li spacing, nested paragraph handling
+- **Task lists** (GFM checkboxes): list-style removed, accent-colored checkboxes
+- **Blockquotes**: left accent border, subtle background, rounded corners, muted text
+- **Horizontal rules**: clean border-top
+- **Strikethrough/emphasis**: muted strikethrough, bold strong, italic em
+
+Also fixed a type error in `PluginToolDefinition` (added optional `params` field)
+and the handler cast in `startGyBackend.ts`.
 
 ## v3.1.8 (2026-08-02)
 
