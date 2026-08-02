@@ -456,18 +456,38 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       }
     };
 
+    const [isStopping, setIsStopping] = useState(false);
+
     const stopCurrentRun = async () => {
       if (!activeSessionId) return;
+      // Edge case 4: debounce multiple rapid stop clicks — ignore if already stopping.
+      if (isStopping) return;
+      setIsStopping(true);
       // Optimistically stop thinking in UI immediately (prevents re-send)
       store.chat.setThinking(false, activeSessionId);
       store.chat.stopQueue(activeSessionId);
-      // Await the backend stop — this prevents the 10s freeze where the UI
-      // is stuck waiting for the async stopTask to resolve.
+      // Edge case 3: cancel any pending tool approval by denying it.
+      // This prevents the agent from hanging on an approval that will never come.
+      try {
+        const messages = activeSession?.messagesById;
+        if (messages) {
+          for (const [, msg] of messages) {
+            if (msg.type === 'ask' && msg.backendMessageId) {
+              try {
+                await window.gyshell.agent.replyMessage(msg.backendMessageId, { decision: 'deny' });
+                store.chat.removeMessage(msg.id, activeSessionId);
+              } catch { /* approval may have already been answered */ }
+            }
+          }
+        }
+      } catch { /* ignore */ }
+      // Await the backend stop — this prevents the 10s freeze.
       try {
         await window.gyshell.agent.stopTask(activeSessionId);
       } catch {
         // Backend may have already finished — ignore errors
       }
+      setIsStopping(false);
     };
 
     const renderPrimaryAction = () => (

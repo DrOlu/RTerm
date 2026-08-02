@@ -3978,6 +3978,14 @@ export class AppStore {
 
     const session = this.chat.sessions.find((s) => s.id === targetSessionId);
     const wasBusy = !!session?.isSessionBusy;
+    // Edge case 1: reject send if the session is still busy (backend hasn't confirmed
+    // completion yet, even if the UI's isThinking flag may have been optimistically
+    // cleared by a stop). This prevents the race where isThinking clears before the
+    // backend's task_complete event arrives.
+    if (mode === "normal" && wasBusy) {
+      console.warn("[AppStore] Session is still busy (backend not confirmed), ignoring message.");
+      return false;
+    }
     if (mode === "queue" && session?.isSessionBusy) {
       console.warn("[AppStore] Session is busy, ignoring message.");
       return false;

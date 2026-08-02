@@ -207,6 +207,8 @@ export class TerminalService {
   /** Buffered writes for terminals that aren't writable yet (prevents keystroke loss during reconnection). */
   private pendingWrites: Map<string, string> = new Map()
   private pendingWriteTimers: Map<string, NodeJS.Timeout> = new Map()
+  private pendingWriteRetries: Map<string, number> = new Map()
+  private static readonly MAX_WRITE_RETRIES = 3
   private selectionByTerminal: Map<string, string> = new Map()
   private tasksByTerminal: Map<string, Record<string, CommandTask>> = new Map()
   private activeTaskByTerminal: Map<string, string> = new Map()
@@ -886,22 +888,28 @@ export class TerminalService {
   private handleData(terminalId: string, data: string): void {
     const sanitizedData = stripInternalControlMarkers(data)
     const tab = this.terminals.get(terminalId)
-    // Session recording (asciinema): feed live output into any active recording for this terminal.
-    const recordingId = this.activeRecordings.get(terminalId)
-    if (recordingId && this.sessionRecorder && sanitizedData) {
-      try {
-        this.sessionRecorder.out(recordingId, sanitizedData)
-      } catch { /* recording may have been stopped/limit hit — drop the chunk */ }
-    }
-    // Session logging (records raw terminal output per session to disk).
-    if (this.sessionLogger && tab) {
-      if (!this.sessionLogStarted.has(terminalId)) {
-        this.sessionLogStarted.add(terminalId)
-        const cfg = this.terminalConfigs.get(terminalId)
-        this.sessionLogger.start(terminalId, { title: tab.title || terminalId, type: tab.type })
-        void cfg
+    // Edge case 2: batch session recording + logging with setImmediate to prevent
+    // event loop blocking under heavy output (e.g., cat of a large file).
+    // The OSC processing and renderer send stay synchronous (time-sensitive).
+    if (sanitizedData) {
+      const recordingId = this.activeRecordings.get(terminalId)
+      if (recordingId || (this.sessionLogger && tab)) {
+        const captureData = sanitizedData
+        const captureTab = tab
+        const captureId = recordingId
+        setImmediate(() => {
+          if (captureId && this.sessionRecorder) {
+            try { this.sessionRecorder.out(captureId, captureData) } catch { /* recording stopped */ }
+          }
+          if (this.sessionLogger && captureTab) {
+            if (!this.sessionLogStarted.has(terminalId)) {
+              this.sessionLogStarted.add(terminalId)
+              this.sessionLogger.start(terminalId, { title: captureTab.title || terminalId, type: captureTab.type })
+            }
+            this.sessionLogger.write(terminalId, captureData)
+          }
+        })
       }
-      this.sessionLogger.write(terminalId, sanitizedData)
     }
     if (tab) {
       let shouldPublishTabsChanged = false
@@ -1298,14 +1306,29 @@ export class TerminalService {
     if (terminal && this.canWriteToTerminal(terminal)) {
       const backend = this.getBackend(terminal.type)
       backend.write(terminal.ptyId, data)
+      // Reset retry counter on successful write
+      this.pendingWriteRetries.delete(terminalId)
     } else if (terminal) {
+      // Edge case 5: if the terminal is exited (connection dead), drop the buffer
+      // instead of retrying forever — the user will need to reconnect.
+      if (terminal.runtimeState === 'exited') {
+        this.pendingWrites.delete(terminalId)
+        this.pendingWriteRetries.delete(terminalId)
+        const timer = this.pendingWriteTimers.get(terminalId)
+        if (timer) { clearTimeout(timer); this.pendingWriteTimers.delete(terminalId) }
+        return
+      }
       // Terminal exists but isn't writable (e.g., SSH reconnecting, state transitioning).
-      // Buffer the write and retry once the terminal becomes ready — this prevents
-      // the "keystrokes disappear" freeze where the user types but nothing appears
-      // because the PTY isn't ready yet.
+      // Buffer the write and retry — but only up to MAX_WRITE_RETRIES times.
+      const retries = this.pendingWriteRetries.get(terminalId) ?? 0
+      if (retries >= TerminalService.MAX_WRITE_RETRIES) {
+        // Max retries reached — drop the buffer (terminal is stuck, not just transitioning)
+        this.pendingWrites.delete(terminalId)
+        this.pendingWriteRetries.delete(terminalId)
+        return
+      }
       const pending = this.pendingWrites.get(terminalId) ?? ''
       this.pendingWrites.set(terminalId, pending + data)
-      // Set a one-time retry: check in 500ms if the terminal is now writable.
       if (!this.pendingWriteTimers.has(terminalId)) {
         const timer = setTimeout(() => {
           this.pendingWriteTimers.delete(terminalId)
@@ -1313,8 +1336,12 @@ export class TerminalService {
           const buffered = this.pendingWrites.get(terminalId)
           if (term && buffered && this.canWriteToTerminal(term)) {
             this.pendingWrites.delete(terminalId)
+            this.pendingWriteRetries.delete(terminalId)
             const b = this.getBackend(term.type)
             b.write(term.ptyId, buffered)
+          } else {
+            // Increment retry counter — the next write() call will check the limit
+            this.pendingWriteRetries.set(terminalId, retries + 1)
           }
         }, 500)
         this.pendingWriteTimers.set(terminalId, timer as unknown as NodeJS.Timeout)
@@ -1382,6 +1409,7 @@ export class TerminalService {
     this.pendingResizeByTerminal.delete(terminalId)
     // Clean up pending write buffers (prevents stale data on reconnected tabs)
     this.pendingWrites.delete(terminalId)
+    this.pendingWriteRetries.delete(terminalId)
     const writeTimer = this.pendingWriteTimers.get(terminalId)
     if (writeTimer) { clearTimeout(writeTimer); this.pendingWriteTimers.delete(terminalId) }
     // Cancel any pending auto-reconnect — a manual close is intentional.
