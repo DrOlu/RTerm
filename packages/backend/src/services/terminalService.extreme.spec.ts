@@ -35,6 +35,7 @@ class FakeBackend implements TerminalBackend {
   getInitializationState() { return 'ready' as const }
   async getSystemInfo() { return undefined }
   getCwd() { return undefined }
+  async getHomeDir(): Promise<string | undefined> { return undefined }
   getCommandTrackingToken() { return undefined }
   startCommandTracking() {}
   stopCommandTracking() {}
@@ -163,13 +164,12 @@ test('handleData defers session recording/logging via setImmediate (does not blo
 
   // Set up a recorder to detect if recording is deferred
   let recordingCalled = false
-  let recordingCalledImmediate = false
 
   // @ts-expect-error: inject a fake session recorder
   service.sessionRecorder = {
     out: () => { recordingCalled = true },
     start: () => 'rec-1',
-    stop: () => {},
+    stop: () => ({ id: 'rec-1', terminalId: 'test-batch', startedAt: 0, width: 80, height: 24, events: [] }),
   }
   // @ts-expect-error: start recording
   service.activeRecordings.set('test-batch', 'rec-1')
