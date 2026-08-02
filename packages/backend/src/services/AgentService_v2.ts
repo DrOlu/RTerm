@@ -393,6 +393,10 @@ export class AgentService_v2 {
   private unfinishedBackgroundFileTransferProvider: UnfinishedRunBackgroundFileTransferProvider | null =
     null;
   private imageAttachmentService: ImageAttachmentService | null = null;
+  /** Plugin tools: name → handler (injected from PluginRegistry at boot). */
+  private pluginTools: Map<string, (params: any) => Promise<any>> = new Map();
+  /** Plugin tool schemas (for toolsForModel injection). */
+  private pluginToolSchemas: any[] = [];
   private passChatTempExportService = new PassChatTempExportService();
   private fallbackCompactionHistoryExportService: PassChatTempExportService | null =
     null;
@@ -456,6 +460,19 @@ export class AgentService_v2 {
   /** Wire the observability handle (v2.9.x) so the observability_* agent tools work. */
   setObservability(obs: import("./observability").Observability | null): void {
     this.observability = obs ?? undefined;
+  }
+
+  /** Wire plugin tools (from PluginRegistry) so the agent can call them in chat.
+   * Each plugin tool has: name, description, params (schema), handler (async fn).
+   * The tools are injected into toolsForModel (so the model sees them) and
+   * pluginTools (so the dispatch switch's default case can call them). */
+  setPluginTools(tools: Array<{ name: string; description: string; params: any; handler: (params: any) => Promise<any> }>): void {
+    this.pluginTools = new Map(tools.map((t) => [t.name, t.handler]))
+    this.pluginToolSchemas = tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      schema: t.params || {},
+    }))
   }
 
   /** Wire a session-log handle so list_session_logs / read_session_log work. */
@@ -724,6 +741,8 @@ export class AgentService_v2 {
       compactionItem?.apiKey ? compactionItem.profile : undefined,
     );
     const toolsForModel = buildToolsForModel(readFileSupport);
+    // Inject plugin tool schemas so the model knows they exist and can call them.
+    const allToolsForModel = [...toolsForModel, ...this.pluginToolSchemas];
 
     return {
       profileId,
@@ -738,7 +757,7 @@ export class AgentService_v2 {
       compactionModelSupportsStructuredOutput,
       compactionModelSupportsObjectToolChoice,
       readFileSupport,
-      toolsForModel,
+      toolsForModel: allToolsForModel,
       globalMaxTokens:
         typeof globalItem.maxTokens === "number"
           ? globalItem.maxTokens
@@ -2250,8 +2269,27 @@ export class AgentService_v2 {
           }
           break;
         }
-        default:
-          result = `Tool "${toolCall.name}" is not supported.`;
+        default: {
+          // Plugin tool dispatch: if the tool name matches a registered plugin
+          // tool, call its handler. Otherwise, "not supported."
+          const pluginHandler = this.pluginTools.get(toolCall.name)
+          if (pluginHandler) {
+            try {
+              const pluginArgs = typeof toolCall.args === "string"
+                ? JSON.parse(toolCall.args)
+                : (toolCall.args || {})
+              const pluginResult = await pluginHandler(pluginArgs)
+              result = typeof pluginResult === "string"
+                ? pluginResult
+                : JSON.stringify(pluginResult)
+            } catch (err) {
+              result = `Plugin tool "${toolCall.name}" error: ${(err as Error).message}`
+            }
+          } else {
+            result = `Tool "${toolCall.name}" is not supported.`
+          }
+          break;
+        }
       }
 
       toolMessage.content = result;

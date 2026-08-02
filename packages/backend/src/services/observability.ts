@@ -545,7 +545,10 @@ const reviewService = new ReviewService({
     ),
     onLog: deps.onLog,
   })
-  void pluginRegistry.reload().catch(() => {})
+  // Plugin loading is now owned by startGyBackend (which awaits reload() and
+  // wires the tools into the agent). The fire-and-forget reload here was racing
+  // with the awaited reload in startGyBackend, causing the wiring to hang.
+  // void pluginRegistry.reload().catch(() => {})
 
   // --- Prometheus / OTel metrics export (v2.9.0): RTerm observed by other tools ---
   const prometheusRegistry = new PrometheusRegistry({ prefix: 'rterm' })

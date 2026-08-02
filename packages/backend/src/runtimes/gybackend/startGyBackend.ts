@@ -319,6 +319,32 @@ export async function startGyBackend(): Promise<void> {
   // Wire the session recorder so terminal output feeds live recordings (asciinema).
   terminalService.setSessionRecorder(observability.recording);
 
+  // Wire plugin tools into the agent so the model can call them in chat.
+  // The PluginRegistry (inside observability) discovers + loads + registers all
+  // plugins from the plugins/ dir. We collect their tools and inject them into
+  // the agent's tool executor + tool schema list.
+  try {
+    const pluginRecords = await observability.pluginRegistry.reload();
+    const pluginTools: Array<{ name: string; description: string; params: any; handler: (params: any) => Promise<any> }> = [];
+    for (const record of pluginRecords) {
+      if (record.error || !record.enabled) continue;
+      for (const tool of record.tools) {
+        pluginTools.push({
+          name: tool.name,
+          description: tool.description ?? '',
+          params: tool.params ?? {},
+          handler: tool.handler,
+        });
+      }
+    }
+    if (pluginTools.length > 0) {
+      agentService.setPluginTools(pluginTools);
+      console.log(`[gybackend] Wired ${pluginTools.length} plugin tools from ${pluginRecords.filter(r => !r.error && r.enabled).length} plugins into the agent.`);
+    }
+  } catch (e) {
+    console.warn('[gybackend] Plugin tool wiring failed:', e instanceof Error ? e.message : String(e));
+  }
+
   // Session logging: record terminal output per session to disk when enabled.
   if (settingsService.getSettings().sessionLogging?.enabled) {
     const logDir = path.join(

@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.1.8 (2026-08-02)
+
+### Feature — plugin tools wired into the agent (all 11 plugins now callable in chat)
+
+Fixes the gap where plugin tools were discovered and registered by the PluginRegistry
+but never wired into the agent's tool executor. The agent's `switch` dispatch had a
+`default: "Tool not supported"` that now checks the plugin tools map first.
+
+- **`AgentService_v2.setPluginTools()`** — new method: accepts an array of
+  `{name, description, params, handler}` and stores them in a `pluginTools` map +
+  `pluginToolSchemas` array. The schemas are injected into `toolsForModel` (so the
+  model sees the tools and can call them) and the handlers are dispatched in the
+  `default` case of the tool dispatch switch.
+- **`startGyBackend.ts`** — after `observability.pluginRegistry.reload()`, collects
+  all plugin tools from enabled plugin records and calls `agentService.setPluginTools()`.
+  Logs how many tools were wired. Best-effort: a failure logs a warning but doesn't
+  block startup.
+- **Tool dispatch `default` case** — now checks `this.pluginTools.get(toolCall.name)`
+  before returning "not supported". Plugin tool results are JSON-stringified if not
+  already a string.
+
+This makes all 11 plugins' tools (synapse_serve, numbat_deploy, web_search,
+agentspan_run, patch_status, sop_search, etc.) callable by the agent in chat on
+both the standalone daemon (neuralos/rterm-backend npm) and the desktop app.
+
 ## v3.1.7 (2026-08-02)
 
 ### Feature — always-on full-duplex Synapse agent (auto-start responder on boot)
