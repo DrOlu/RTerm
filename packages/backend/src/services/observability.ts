@@ -493,9 +493,13 @@ const reviewService = new ReviewService({
   // where plugins ship alongside the gybackend binary). The bundle is at bin/gybackend.js,
   // so the plugins are at ../plugins/ relative to the bundle file. We check that the
   // directory actually exists before adding it (in the source/unbundled case it won't).
+  // In the standalone bundle (bin/gybackend.cjs), dirname = .../neuralos/bin/,
+  // so '..' = .../neuralos/ (package root), and 'plugins' = .../neuralos/plugins/.
+  // In the source tree (packages/backend/src/services/observability.ts), dirname is
+  // deeper, so '../..' is needed — but we guard with existsSync so the wrong one is skipped.
   const bundlePluginRoot = typeof __filename !== 'undefined'
-    ? path.join(path.dirname(__filename), '..', '..', 'plugins')
-    : new URL('../../plugins/', import.meta.url).pathname
+    ? path.join(path.dirname(__filename), '..', 'plugins')
+    : new URL('../plugins/', import.meta.url).pathname
   const scanRoots = [pluginScanRoot, './plugins']
   try {
     const req = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
