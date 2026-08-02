@@ -204,6 +204,9 @@ export class TerminalService {
   private pendingResizeByTerminal: Map<string, TerminalResizeTarget> = new Map()
   private buffers: Map<string, RingBuffer> = new Map()
   private headlessPtys: Map<string, TerminalType> = new Map()
+  /** Buffered writes for terminals that aren't writable yet (prevents keystroke loss during reconnection). */
+  private pendingWrites: Map<string, string> = new Map()
+  private pendingWriteTimers: Map<string, NodeJS.Timeout> = new Map()
   private selectionByTerminal: Map<string, string> = new Map()
   private tasksByTerminal: Map<string, Record<string, CommandTask>> = new Map()
   private activeTaskByTerminal: Map<string, string> = new Map()
@@ -1295,6 +1298,27 @@ export class TerminalService {
     if (terminal && this.canWriteToTerminal(terminal)) {
       const backend = this.getBackend(terminal.type)
       backend.write(terminal.ptyId, data)
+    } else if (terminal) {
+      // Terminal exists but isn't writable (e.g., SSH reconnecting, state transitioning).
+      // Buffer the write and retry once the terminal becomes ready — this prevents
+      // the "keystrokes disappear" freeze where the user types but nothing appears
+      // because the PTY isn't ready yet.
+      const pending = this.pendingWrites.get(terminalId) ?? ''
+      this.pendingWrites.set(terminalId, pending + data)
+      // Set a one-time retry: check in 500ms if the terminal is now writable.
+      if (!this.pendingWriteTimers.has(terminalId)) {
+        const timer = setTimeout(() => {
+          this.pendingWriteTimers.delete(terminalId)
+          const term = this.terminals.get(terminalId)
+          const buffered = this.pendingWrites.get(terminalId)
+          if (term && buffered && this.canWriteToTerminal(term)) {
+            this.pendingWrites.delete(terminalId)
+            const b = this.getBackend(term.type)
+            b.write(term.ptyId, buffered)
+          }
+        }, 500)
+        this.pendingWriteTimers.set(terminalId, timer as unknown as NodeJS.Timeout)
+      }
     }
   }
 
@@ -1356,6 +1380,10 @@ export class TerminalService {
 
   kill(terminalId: string): void {
     this.pendingResizeByTerminal.delete(terminalId)
+    // Clean up pending write buffers (prevents stale data on reconnected tabs)
+    this.pendingWrites.delete(terminalId)
+    const writeTimer = this.pendingWriteTimers.get(terminalId)
+    if (writeTimer) { clearTimeout(writeTimer); this.pendingWriteTimers.delete(terminalId) }
     // Cancel any pending auto-reconnect — a manual close is intentional.
     this.autoReconnect.clear(terminalId)
     const terminal = this.terminals.get(terminalId)

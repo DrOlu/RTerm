@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.2.1 (2026-08-02)
+
+### Bug fixes — terminal freeze + chat re-trigger + stop button freeze
+
+Three user-reported bugs fixed, all in the terminal/chat interaction layer.
+
+- **Terminal freeze (keystrokes disappear).** When a terminal wasn't writable
+  (SSH reconnecting, state transitioning), `write()` silently dropped keystrokes.
+  Added a pending-write buffer: keystrokes are buffered and retried 500ms later
+  when the terminal becomes writable. Cleaned up on kill/close. File:
+  `TerminalService.ts` (`pendingWrites` + `pendingWriteTimers`).
+
+- **Chat re-trigger (response cleared + new task starts).** `handleSendNormal`
+  didn't check `isThinking` before sending — pressing Enter while the agent was
+  still thinking (or just finished and the flag hadn't cleared) sent a new
+  message that cleared the previous response and triggered a new task. Added
+  an `if (isThinking) return` guard. File: `ChatPanel.tsx`.
+
+- **Stop button freeze (10s rolling circle).** `stopCurrentRun` called
+  `stopTask()` without awaiting it — the UI froze waiting for the async stop
+  to resolve. Made `stopCurrentRun` async: optimistically sets `isThinking =
+  false` first (prevents re-send), then awaits `stopTask` with a try/catch
+  (backend may have already finished). File: `ChatPanel.tsx`.
+
+Verified: typecheck (all workspaces) exit 0; full automation suite green;
+layout/UI tests green (10/10).
+
 ## v3.2.0 (2026-08-02)
 
 ### Feature — production-ready Synapse dispatch (skip-ack, multi-mesh, 600s timeout)

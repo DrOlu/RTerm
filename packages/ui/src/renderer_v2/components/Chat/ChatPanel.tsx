@@ -329,6 +329,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
     const handleSendNormal = async (draft: ComposerDraft) => {
       if (!draft.text.trim() && draft.images.length === 0) return;
       if (!activeSessionId) return;
+      // Prevent sending while the agent is still thinking — this is the re-trigger bug.
+      // The user's Enter key should be ignored (not queued) while a task is running.
+      if (isThinking) return;
       const sent = await store.sendChatMessage(
         activeSessionId,
         {
@@ -453,12 +456,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       }
     };
 
-    const stopCurrentRun = () => {
-      if (activeSessionId) {
-        store.chat.stopQueue(activeSessionId);
-        window.gyshell.agent.stopTask(activeSessionId);
-        // Optimistically stop thinking in UI
-        store.chat.setThinking(false, activeSessionId);
+    const stopCurrentRun = async () => {
+      if (!activeSessionId) return;
+      // Optimistically stop thinking in UI immediately (prevents re-send)
+      store.chat.setThinking(false, activeSessionId);
+      store.chat.stopQueue(activeSessionId);
+      // Await the backend stop — this prevents the 10s freeze where the UI
+      // is stuck waiting for the async stopTask to resolve.
+      try {
+        await window.gyshell.agent.stopTask(activeSessionId);
+      } catch {
+        // Backend may have already finished — ignore errors
       }
     };
 
@@ -1150,6 +1158,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
                   handleQueueAdd(draft);
                   return;
                 }
+                // Guard: don't send while the agent is thinking (prevents re-trigger).
+                // This is the second line of defense — handleSendNormal also checks,
+                // but RichInput's Enter handler can fire before that guard runs.
+                if (isThinking) return;
                 void handleSendNormal(draft);
               }}
               onInput={(draft) => checkInputEmpty(draft)}

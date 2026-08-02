@@ -805,8 +805,13 @@ export class ChatStore {
 
     if (type === "ADD_MESSAGE" && update.message?.role === "user") {
       runInAction(() => {
-        session.isThinking = true;
-        session.isSessionBusy = true;
+        // Only set isThinking if the session isn't already done — a late
+        // ADD_MESSAGE event arriving after DONE would otherwise re-set
+        // isThinking=true, causing a stale "thinking" state (the re-trigger bug).
+        if (!session.isSessionBusy || session.isThinking) {
+          session.isThinking = true;
+          session.isSessionBusy = true;
+        }
       });
     }
 
