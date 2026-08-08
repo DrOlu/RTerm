@@ -5,6 +5,8 @@
  * canRunInParallel is a pure function — testable without any NATS/backend/PTY.
  * executeToolByName delegates to toolImplementations — tested with fakes.
  */
+export {}
+
 
 // Import the functions from AgentService_v2 (they're module-level constants)
 // Since AgentService_v2 is a large file, we test the logic directly.
