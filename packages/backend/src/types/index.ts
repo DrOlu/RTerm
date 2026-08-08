@@ -50,6 +50,10 @@ export interface ModelProfile {
   reviewModelId?: string
   /** how strict the review is: 'strict' (block on any issue), 'advisory' (flag but allow), 'auto-approve' (skip review for low-risk actions). */
   reviewMode?: 'strict' | 'advisory' | 'auto-approve'
+  /** Per-model OpenAI-compatible request-body overrides (v3.2.4). Typed values
+   * merged over runtime defaults; runtime-owned fields (model, messages, tools,
+   * stream) are protected and cannot be overridden. */
+  requestParams?: Record<string, string | number | boolean | object>
 }
 
 export interface ExperimentalFlags {

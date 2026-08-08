@@ -35,6 +35,7 @@ class FakeBackend implements TerminalBackend {
   getInitializationState() { return 'ready' as const }
   async getSystemInfo() { return undefined }
   getCwd() { return undefined }
+  async getHomeDir() { return undefined }
   getCommandTrackingToken() { return undefined }
   startCommandTracking() {}
   stopCommandTracking() {}
@@ -50,8 +51,6 @@ class FakeBackend implements TerminalBackend {
   async deletePath() {}
   async renamePath() {}
   async getStat() { return undefined }
-
-  // Helper: emit data to the terminal
   emitData(ptyId: string, data: string) { this.dataCallbacks.get(ptyId)?.(data) }
   emitExit(ptyId: string, code: number) { this.exitCallbacks.get(ptyId)?.(code) }
 }
@@ -163,15 +162,17 @@ test('handleData defers session recording/logging via setImmediate (does not blo
 
   // Set up a recorder to detect if recording is deferred
   let recordingCalled = false
-  let recordingCalledImmediate = false
 
-  // @ts-expect-error: inject a fake session recorder
-  service.sessionRecorder = {
+  // Inject a fake session recorder that matches the SessionRecorder class shape.
+  // The real start() returns a string (the recordingId).
+  const fakeRecorder = {
     out: () => { recordingCalled = true },
     start: () => 'rec-1',
     stop: () => {},
   }
-  // @ts-expect-error: start recording
+  // @ts-expect-error: inject fake recorder (not a full SessionRecorder instance)
+  service.sessionRecorder = fakeRecorder
+  // @ts-expect-error: set active recording
   service.activeRecordings.set('test-batch', 'rec-1')
 
   // Emit data

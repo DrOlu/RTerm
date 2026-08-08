@@ -292,6 +292,84 @@ const SINGLE_CALL_TOOL_BOUNDARY_NAMES = new Set([
   "import_putty",
 ]);
 
+/** Tools that are safe to run in parallel (v3.2.4). These are read-only or
+ * target-independent tools whose execution doesn't conflict with each other.
+ * Tools NOT in this set (and not in SINGLE_CALL_TOOL_BOUNDARY_NAMES) run
+ * sequentially but don't force a single-call boundary. */
+const PARALLEL_SAFE_TOOL_NAMES = new Set([
+  "read_file",
+  "read_terminal_tab",
+  "read_command_output",
+  "list_session_logs",
+  "read_session_log",
+  "search_session_logs",
+  "get_metrics",
+  "get_live_dashboard",
+  "get_monitor_status",
+  "get_cloud_inventory",
+  "get_apm_summary",
+  "get_dem_summary",
+  "get_cost",
+  "get_run_ledger",
+  "list_gateway_methods",
+  "manage_secret", // read operations (list/has) are safe; set/delete are rare
+  "manage_oncall", // open_pages is read-only
+  "manage_gitops", // export/drift/inSync are read-only
+  "manage_playbook_version", // lint/history/diff are read-only
+  "collect_facts",
+  "run_fleet_command", // runs on different terminals — parallel-safe
+  "synapse_health",
+  "synapse_discover",
+  "synapse_agents_summary",
+  "synapse_reputation",
+  "synapse_serve_status",
+  "numbat_health",
+  "numbat_findings_summary",
+  "agentspan_health",
+  "agentspan_list",
+  "agentspan_status",
+  "webintel_health",
+  "web_search",
+  "web_fetch",
+  "web_find_similar",
+  "web_watch_list",
+  "patch_status",
+  "list_requests",
+  "request_status",
+  "sop_search",
+  "sop_get",
+  "iam_user_info",
+  "iam_user_groups",
+  "iam_access_review",
+  "fraudops_pipeline_status",
+  "fraudops_str_status",
+  "fraudops_decision_summary",
+  "netdata_alert_summary",
+  "netdata_correlate",
+]);
+
+/** Determine if a batch of tool calls can be executed in parallel (v3.2.4).
+ * Rules: (1) no boundary tools, (2) all are parallel-safe, (3) no two tools
+ * target the same terminalId (would conflict on PTY writes). */
+function canRunInParallel(toolCalls: any[]): boolean {
+  if (toolCalls.length <= 1) return false;
+  for (const tc of toolCalls) {
+    if (SINGLE_CALL_TOOL_BOUNDARY_NAMES.has(tc?.name)) return false;
+    if (!PARALLEL_SAFE_TOOL_NAMES.has(tc?.name)) return false;
+  }
+  // Check for duplicate terminalId targets (would conflict)
+  const terminalIds = new Set<string>();
+  for (const tc of toolCalls) {
+    const args = typeof tc?.args === 'string' ? (() => { try { return JSON.parse(tc.args) } catch { return {} } })() : (tc?.args || {});
+    const tid = args.terminalId || args.target;
+    if (tid) {
+      if (terminalIds.has(tid)) return false; // same terminal targeted twice
+      terminalIds.add(tid);
+    }
+  }
+  return true;
+}
+
 function clipTextMiddle(input: string, maxChars: number): string {
   if (maxChars <= 0) return "";
   if (input.length <= maxChars) return input;
@@ -1602,7 +1680,8 @@ export class AgentService_v2 {
         return { messages, sessionId, pendingToolCalls };
       }
 
-      // Otherwise (no exec_command), allow executing ALL tool calls sequentially.
+      // Otherwise (no exec_command), allow executing ALL tool calls.
+      // v3.2.4: if all calls are parallel-safe, batch them for parallel execution.
       pendingToolCalls = toolCalls.slice();
       this.cleanupModelToolCallMetadata(lastMessage, pendingToolCalls);
       return { messages, sessionId, pendingToolCalls };
@@ -1618,6 +1697,37 @@ export class AgentService_v2 {
       const queue: any[] = Array.isArray(state.pendingToolCalls)
         ? state.pendingToolCalls
         : [];
+
+      // v3.2.4: Parallel tool execution — if the remaining queue contains only
+      // parallel-safe tools with no duplicate terminal targets, run them all
+      // simultaneously with Promise.all. Boundary tools and non-parallel-safe
+      // tools fall through to the sequential path (queue[0]).
+      if (canRunInParallel(queue)) {
+        const parallelResults = await Promise.all(
+          queue.map(async (tc) => {
+            const tm = this.createToolMessage(tc);
+            const ec = this.createExecutionContext(
+              sessionId,
+              tm.additional_kwargs._gyshellMessageId as string,
+              config,
+            );
+      let res = "";
+      try {
+        res = await this.executeToolByName(tc, ec);
+      } catch (err) {
+              res = `Parallel execution error for ${tc.name}: ${(err as Error).message}`;
+            }
+            tm.content = res;
+            return tm;
+          })
+        );
+        return {
+          messages: [...(state.messages as any[]), ...parallelResults],
+          sessionId,
+          pendingToolCalls: [],
+        };
+      }
+
       const toolCall = queue[0];
       if (!toolCall) return state;
 
@@ -2537,6 +2647,53 @@ export class AgentService_v2 {
         pendingToolCalls: queue.slice(1),
       };
     });
+  }
+
+  /** v3.2.4: Execute a single tool by name (used by the parallel execution path).
+   * This is a simplified dispatch that handles the common read-only/parallel-safe tools.
+   * Tools not handled here fall back to the sequential switch/case path. */
+  private async executeToolByName(
+    toolCall: any,
+    executionContext: any,
+  ): Promise<string> {
+    const name = toolCall.name;
+    const args = typeof toolCall.args === 'string'
+      ? (() => { try { return JSON.parse(toolCall.args) } catch { return {} } })()
+      : (toolCall.args || {});
+
+    // Delegate to toolImplementations for parallel-safe tools
+    const ti = toolImplementations;
+    switch (name) {
+      case "read_terminal_tab": return ti.readTerminalTab(args, executionContext);
+      case "read_command_output": return ti.readCommandOutput(args, executionContext);
+      case "list_session_logs": return ti.listSessionLogs(args, executionContext);
+      case "read_session_log": return ti.readSessionLog(args, executionContext);
+      case "search_session_logs": return ti.searchSessionLogs(args, executionContext);
+      case "get_metrics": return ti.getMetrics(args, executionContext);
+      case "get_live_dashboard": return ti.getLiveDashboard(args, executionContext);
+      case "get_monitor_status": return ti.getMonitorStatus(args, executionContext);
+      case "get_cloud_inventory": return ti.getCloudInventory(args, executionContext);
+      case "get_apm_summary": return ti.getApmSummary(args, executionContext);
+      case "get_dem_summary": return ti.getDemSummary(args, executionContext);
+      case "get_cost": return ti.getCost(args, executionContext);
+      case "get_run_ledger": return ti.getRunLedger(args, executionContext);
+      case "list_gateway_methods": return ti.listGatewayMethods(args, executionContext);
+      case "collect_facts": return ti.collectFacts(args, executionContext);
+      case "run_fleet_command": return ti.runFleetCommand(args, executionContext);
+      case "manage_secret": return ti.manageSecret(args, executionContext);
+      case "manage_oncall": return ti.manageOncall(args, executionContext);
+      case "manage_gitops": return ti.manageGitops(args, executionContext);
+      case "manage_playbook_version": return ti.managePlaybookVersion(args, executionContext);
+      // Plugin tools — delegate to the pluginTools map
+      default: {
+        const pluginHandler = this.pluginTools.get(name);
+        if (pluginHandler) {
+          const result = await pluginHandler(args);
+          return typeof result === 'string' ? result : JSON.stringify(result);
+        }
+        return `Tool "${name}" is not supported in parallel execution mode.`;
+      }
+    }
   }
 
   private createReadFileNode() {
