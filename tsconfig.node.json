@@ -11,5 +11,11 @@
     "packages/backend/src/**/*",
     "packages/electron/src/**/*",
     "packages/shared/src/**/*"
+  ],
+  "exclude": [
+    "**/*.spec.ts",
+    "**/*.extreme.spec.ts",
+    "**/*.spec.mjs",
+    "**/*.extreme.spec.mjs"
   ]
 }
