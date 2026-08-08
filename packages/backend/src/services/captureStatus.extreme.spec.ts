@@ -10,7 +10,6 @@ function test(name: string, run: () => void) { tests.push({ name, run }) }
 function assertEqual<T>(actual: T, expected: T, message: string): void {
   if (actual !== expected) throw new Error(`${message}. expected=${String(expected)} actual=${String(actual)}`)
 }
-function assertTrue(cond: boolean, message: string): void { if (!cond) throw new Error(message) }
 
 // ─── Simulate the captureStatus logic from finalizeActiveTask ────────────────
 const MAX_BUFFER_SIZE = 200000

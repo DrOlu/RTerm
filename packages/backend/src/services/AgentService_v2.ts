@@ -370,6 +370,50 @@ function canRunInParallel(toolCalls: any[]): boolean {
   return true;
 }
 
+/**
+ * v3.2.5 Feature 2: Reconcile streamed tool calls before dispatch.
+ * Validates that all tool calls have unique IDs, complete arguments, and
+ * valid names. Drops or repairs invalid entries so multi-call turns
+ * aren't silently merged or dropped.
+ *
+ * Checks:
+ * 1. Duplicate IDs — keep only the first occurrence
+ * 2. Missing/empty name — drop the call
+ * 3. Missing args (null/undefined) — default to {}
+ * 4. String args that aren't valid JSON — default to {}
+ * 5. Duplicate (name + args) pairs — keep only the first
+ */
+function reconcileToolCalls(toolCalls: any[]): any[] {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return []
+  const seen = new Set<string>()
+  const result: any[] = []
+  for (const tc of toolCalls) {
+    if (!tc || typeof tc !== 'object') continue
+    // Check name
+    if (!tc.name || typeof tc.name !== 'string') continue
+    // Normalize args
+    let args = tc.args
+    if (args == null) {
+      args = {}
+    } else if (typeof args === 'string') {
+      try { args = JSON.parse(args) } catch { args = {} }
+    }
+    // Check for duplicate ID
+    const id = tc.id || ''
+    if (id) {
+      if (seen.has(id)) continue // duplicate ID — drop
+      seen.add(id)
+    }
+    // Check for duplicate (name + JSON.stringify(args))
+    const dedupKey = `${tc.name}::${JSON.stringify(args)}`
+    if (seen.has(dedupKey)) continue // duplicate call — drop
+    seen.add(dedupKey)
+    // Reconstruct the cleaned tool call
+    result.push({ ...tc, args })
+  }
+  return result
+}
+
 function clipTextMiddle(input: string, maxChars: number): string {
   if (maxChars <= 0) return "";
   if (input.length <= maxChars) return input;
@@ -1645,9 +1689,11 @@ export class AgentService_v2 {
         return { messages, sessionId, pendingToolCalls };
       }
 
-      const toolCalls: any[] = Array.isArray((lastMessage as any).tool_calls)
-        ? (lastMessage as any).tool_calls
-        : [];
+      const toolCalls: any[] = reconcileToolCalls(
+        Array.isArray((lastMessage as any).tool_calls)
+          ? (lastMessage as any).tool_calls
+          : []
+      );
 
       // Always clean tool-call chunk/invalid metadata to prevent context bloat,
       // and then decide how many tool calls we keep/enqueue.
