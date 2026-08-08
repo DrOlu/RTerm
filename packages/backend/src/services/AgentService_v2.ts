@@ -4463,12 +4463,34 @@ export class AgentService_v2 {
         lastCheckpointOffset: 0,
         lastProfileMaxTokens: this.getEffectiveMaxTokensForSession(sessionId),
       };
+
+      // v3.2.5 Feature 3: Update the reading frontier to the current message count.
+      // This is the durable marker for emergency context recovery — if the agent
+      // crashes mid-task, recovery can resume from this offset instead of re-reading
+      // the entire history. The frontier is set at graph exit (here), not after
+      // every intermediate step, so it reflects the last known-good complete state.
+      const previousFrontier = session.lastCheckpointOffset || 0;
+      const newFrontier = messages.length;
+
       this.updateSessionFromMessages(
         session,
         messages,
         this.getEffectiveMaxTokensForSession(sessionId),
       );
+
+      // Only update the frontier if the message count increased (forward progress).
+      // If it decreased (e.g., compaction removed messages), keep the frontier
+      // at the new position — it marks where we last had a complete state.
+      session.lastCheckpointOffset = newFrontier;
+
       this.chatHistoryService.saveSession(session);
+
+      // Log the frontier update for debugging (only if it changed)
+      if (newFrontier !== previousFrontier) {
+        console.log(
+          `[AgentService_v2] Reading frontier updated: ${previousFrontier} -> ${newFrontier} messages (session ${sessionId}).`,
+        );
+      }
     } catch (error) {
       console.warn(
         "[AgentService_v2] Failed to save session from checkpoint:",
