@@ -328,6 +328,8 @@ export const PROBE_CONNECTIVITY_DESCRIPTION = [
 export interface BuiltInToolInfo {
   name: string;
   description: string;
+  /** v3.2.5: short, user-friendly description for the Settings UI (full description goes to the agent). */
+  shortDescription?: string;
   defaultEnabled?: boolean;
   experimental?: boolean;
   /** when true, the tool is hidden from the settings summary (it's an internal
@@ -339,34 +341,42 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "exec_command",
     description: EXEC_COMMAND_DESCRIPTION,
+    shortDescription: "Run a command on a terminal (SSH/WinRM/local)",
   },
   {
     name: "read_terminal_tab",
     description: READ_TERMINAL_TAB_DESCRIPTION,
+    shortDescription: "Read terminal output",
   },
   {
     name: "read_command_output",
     description: READ_COMMAND_OUTPUT_DESCRIPTION,
+    shortDescription: "Read background command output",
   },
   {
     name: "read_file",
     description: READ_FILE_DESCRIPTION,
+    shortDescription: "Read a file from a host",
   },
   {
     name: "write_stdin",
     description: WRITE_STDIN_TOOL_DESCRIPTION,
+    shortDescription: "Send keystrokes to a terminal",
   },
   {
     name: "reconnect_terminal_tab",
     description: RECONNECT_TERMINAL_TAB_DESCRIPTION,
+    shortDescription: "Reconnect a disconnected terminal",
   },
   {
     name: "open_terminal_tab",
     description: OPEN_TERMINAL_TAB_DESCRIPTION,
+    shortDescription: "Open a new terminal tab",
   },
   {
     name: "create_or_edit",
     description: CREATE_OR_EDIT_TOOL_DESCRIPTION,
+    shortDescription: "Create or edit a file",
   },
   {
     name: "write_file",
@@ -381,18 +391,22 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "skill",
     description: "Load a skill to get detailed instructions for a specific task. Skills provide specialized knowledge, step-by-step guidance, and may include supporting files (scripts, references).",
+    shortDescription: "Load a skill for task guidance",
   },
   {
     name: "create_skill",
     description: "Create a new skill in GyShell skills. This tool only creates new skills and does not modify or overwrite existing ones. If the skill name already exists, the call must fail and you should choose a different name. If you need to modify an existing skill, use edit_file to edit that skill's md file directly, or write_file only when intentionally replacing the full file.",
+    shortDescription: "Create a new skill",
   },
   {
     name: "wait",
     description: WAIT_TOOL_DESCRIPTION,
+    shortDescription: "Pause for a fixed duration",
   },
   {
     name: "wait_terminal_idle",
     description: WAIT_TERMINAL_IDLE_DESCRIPTION,
+    shortDescription: "Wait for terminal output to stabilize",
   },
   {
     name: "copy_between_tabs",
@@ -409,86 +423,107 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "manage_ssh_connection",
     description: MANAGE_SSH_CONNECTION_DESCRIPTION,
+    shortDescription: "Manage SSH connections",
   },
   {
     name: "manage_winrm_connection",
     description: MANAGE_WINRM_CONNECTION_DESCRIPTION,
+    shortDescription: "Manage WinRM connections",
   },
   {
     name: "manage_serial_connection",
     description: MANAGE_SERIAL_CONNECTION_DESCRIPTION,
+    shortDescription: "Manage serial connections",
   },
   {
     name: "list_session_logs",
     description: LIST_SESSION_LOGS_DESCRIPTION,
+    shortDescription: "List recorded sessions",
   },
   {
     name: "read_session_log",
     description: READ_SESSION_LOG_DESCRIPTION,
+    shortDescription: "Read a session log",
   },
   {
     name: "search_session_logs",
     description: SEARCH_SESSION_LOGS_DESCRIPTION,
+    shortDescription: "Search session logs",
   },
   {
     name: "get_run_ledger",
     description: GET_RUN_LEDGER_DESCRIPTION,
+    shortDescription: "Query agent run audit ledger",
   },
   {
     name: "run_fleet_command",
     description: RUN_FLEET_COMMAND_DESCRIPTION,
+    shortDescription: "Run a command on multiple terminals",
   },
   {
     name: "collect_facts",
     description: COLLECT_FACTS_DESCRIPTION,
+    shortDescription: "Inventory terminal tabs",
   },
   {
     name: "probe_connectivity",
     description: PROBE_CONNECTIVITY_DESCRIPTION,
+    shortDescription: "Probe SSH reachability",
   },
   {
     name: "manage_device_memory",
     description: MANAGE_DEVICE_MEMORY_DESCRIPTION,
+    shortDescription: "Per-host memory and incidents",
   },
   {
     name: "manage_script",
     description: MANAGE_SCRIPT_DESCRIPTION,
+    shortDescription: "Manage reusable scripts",
   },
   {
     name: "manage_group",
     description: MANAGE_GROUP_DESCRIPTION,
+    shortDescription: "Manage connection groups",
   },
   {
     name: "manage_scheduled_task",
     description: MANAGE_SCHEDULED_TASK_DESCRIPTION,
+    shortDescription: "Manage cron tasks",
   },
   {
     name: "manage_template",
     description: MANAGE_TEMPLATE_DESCRIPTION,
+    shortDescription: "Manage Jinja templates",
   },
   {
     name: "import_putty",
     description: IMPORT_PUTTY_DESCRIPTION,
+    shortDescription: "Import PuTTY sessions",
   },
   {
     name: "manage_playbook",
     description: MANAGE_PLAYBOOK_DESCRIPTION,
+    shortDescription: "Manage playbooks",
   },
   {
     name: "run_playbook",
     description: RUN_PLAYBOOK_DESCRIPTION,
+    shortDescription: "Execute a playbook",
   },
   {
     name: "manage_change",
     description: MANAGE_CHANGE_DESCRIPTION,
+    shortDescription: "Drive MOP changes (plan/approve/run)",
   },
   {
     name: "manage_trigger",
     description: MANAGE_TRIGGER_DESCRIPTION,
+    shortDescription: "Manage event triggers",
   },
   {
     name: "get_metrics",
     description: "Read host metrics as Prometheus exposition text (for a scraper) or a one-line dashboard summary. Use to answer \"how are my hosts doing\" or to feed an external Prometheus/OTel collector.",
+    shortDescription: "Read host metrics",
   },
   {
     name: "manage_secret",
@@ -533,6 +568,7 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "ingest_apm_spans",
     description: "Ingest OTLP/HTTP-JSON distributed-trace spans into the APM trace store (feeds bottleneck/slowest-trace analysis and the dashboard APM section).",
+    shortDescription: "Ingest APM trace spans",
   },
   {
     name: "get_apm_summary",
