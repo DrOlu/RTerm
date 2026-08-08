@@ -184,7 +184,7 @@ test('executeToolByName dispatches to plugin tools via pluginTools map', async (
   const name = 'synapse_health'
   const handler = pluginTools.get(name)
   assertTrue(!!handler, 'plugin handler should exist')
-  const result = await handler({})
+  const result = await handler!({})
   assertEqual(result.connected, true, 'plugin tool should return its result')
 })
 
