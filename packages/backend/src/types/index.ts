@@ -1035,6 +1035,8 @@ export interface CommandResult {
   stdoutDelta: string
   exitCode?: number
   history_command_match_id: string
+  /** v3.2.5: capture status — tells the agent if output is complete, partial, or truncated. */
+  captureStatus?: 'complete' | 'partial' | 'display-truncated'
 }
 
 export type TerminalCommandTrackingMode = 'windows-powershell-sidecar'
@@ -1067,6 +1069,8 @@ export interface CommandTask {
   displayMode?: 'synthetic-transcript'
   type: 'wait' | 'nowait'
   status: 'running' | 'finished' | 'aborted' | 'timeout'
+  /** v3.2.5: capture status — distinguishes complete, partial, and display-truncated output. */
+  captureStatus?: 'complete' | 'partial' | 'display-truncated'
   startOffset: number
   endOffset?: number
   exitCode?: number

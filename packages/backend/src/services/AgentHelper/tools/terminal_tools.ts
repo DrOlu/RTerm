@@ -385,10 +385,15 @@ export async function runCommand(
       })
       finalResult = `The command has been running for over 120s and has been switched to nowait mode (running in the background). You can use read_command_output to check its progress. history_command_match_id=${historyCommandMatchId}, terminalId=${bestMatch.id}`
     } else {
+      const captureNote = result.captureStatus === 'partial'
+        ? '\n[Note: Some output may have been lost during capture. Use read_command_output to retrieve the full output if needed.]'
+        : result.captureStatus === 'display-truncated'
+        ? '\n[Note: Output was truncated for display. Use read_command_output to retrieve the full output if needed.]'
+        : ''
       finalResult = `The command has finished executing. The following is the output (history_command_match_id=${historyCommandMatchId}):
 <terminal_content>
 ${truncatedOutput}
-</terminal_content>`
+</terminal_content>${captureNote}`
     }
 
     context.sendEvent(sessionId, {

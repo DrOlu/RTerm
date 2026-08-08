@@ -2474,6 +2474,20 @@ export class TerminalService {
     task.exitCode = options?.exitCode
     task.endOffset = task.startOffset + task.output.length
 
+    // v3.2.5: Set captureStatus so the agent knows whether output is complete,
+    // partial (some output was lost/not captured), or display-truncated (the
+    // full output was captured but the display/return was clipped for size).
+    if (task.capturedOutput !== undefined && task.capturedOutput.length < (task.output || '').length) {
+      // Captured output is shorter than the resolved output — some was lost
+      task.captureStatus = 'partial'
+    } else if ((task.output || '').length > MAX_BUFFER_SIZE) {
+      // Output exceeds the buffer size — it was truncated for display
+      task.captureStatus = 'display-truncated'
+    } else {
+      // Full output was captured and fits within the buffer
+      task.captureStatus = 'complete'
+    }
+
     this.stopCommandTrackingWatcher(taskId)
     this.activeTaskByTerminal.delete(terminalId)
     this.pendingTaskFinishByTerminal.delete(terminalId)
@@ -2489,7 +2503,8 @@ export class TerminalService {
       callback({
         stdoutDelta: task.output,
         exitCode: options?.exitCode,
-        history_command_match_id: taskId
+        history_command_match_id: taskId,
+        captureStatus: task.captureStatus,
       })
     }
   }
