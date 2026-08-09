@@ -466,7 +466,7 @@ const createRuntime = (
       canCopy: selectionText.trim().length > 0,
       canPaste: true,
       canRename: true,
-    } as any);
+    });
   };
 
   const onContextMenuAction = (data: {

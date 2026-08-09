@@ -648,7 +648,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           canCopy: selectionText.trim().length > 0,
           canPaste: true,
           canRename: !!activeSessionId,
-        } as any);
+        });
       };
 
       const onContextMenuAction = (data: {

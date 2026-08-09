@@ -734,6 +734,7 @@ export interface GyShellAPI {
     }>;
     createTab: (config: TerminalConfig) => Promise<{ id: string }>;
     reconnect: (terminalId: string) => Promise<{ id: string }>;
+    setTitle: (terminalId: string, title: string) => Promise<void>;
     write: (terminalId: string, data: string) => Promise<void>;
     writeBroadcast: (terminalIds: string[], data: string) => Promise<string[]>;
     writePaths: (terminalId: string, paths: string[]) => Promise<void>;
@@ -882,9 +883,10 @@ export interface GyShellAPI {
       id: string;
       canCopy: boolean;
       canPaste: boolean;
+      canRename?: boolean;
     }) => Promise<void>;
     onContextMenuAction: (
-      callback: (data: { id: string; action: "copy" | "paste" }) => void,
+      callback: (data: { id: string; action: "copy" | "paste" | "rename" }) => void,
     ) => () => void;
   };
 
@@ -1161,6 +1163,8 @@ const api: GyShellAPI = {
     createTab: (config) => ipcRenderer.invoke("terminal:createTab", config),
     reconnect: (terminalId) =>
       ipcRenderer.invoke("terminal:reconnect", terminalId),
+    setTitle: (terminalId, title) =>
+      ipcRenderer.invoke("terminal:setTitle", terminalId, title),
     write: (terminalId, data) =>
       ipcRenderer.invoke("terminal:write", terminalId, data),
     writeBroadcast: (terminalIds, data) =>
