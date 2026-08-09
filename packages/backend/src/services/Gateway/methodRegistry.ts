@@ -56,6 +56,7 @@ export const CORE_METHODS: GatewayMethod[] = [
   m('terminal:resize', 'terminal', 'Resize a terminal (cols/rows).', '1.0.0', { terminalId: { type: 'string' }, cols: { type: 'number' }, rows: { type: 'number' } }),
   m('terminal:kill', 'terminal', 'Kill/close a terminal tab.', '1.0.0', { terminalId: { type: 'string' } }),
   m('terminal:reconnect', 'terminal', 'Reconnect a disconnected SSH tab in place.', '1.0.0', { terminalId: { type: 'string' } }),
+  m('terminal:setTitle', 'terminal', 'Rename a terminal tab.', '1.0.0', { terminalId: { type: 'string' }, title: { type: 'string' } }),
   m('terminal:setSelection', 'terminal', 'Set the active/selected terminal tab.', '1.0.0', { terminalId: { type: 'string' } }),
   m('terminal:getBufferDelta', 'terminal', 'Read terminal output from an offset (delta).', '1.0.0', { terminalId: { type: 'string' }, fromOffset: { type: 'number' } }),
   m('terminal:generateCommandDraft', 'terminal', 'Draft a command for a tab from its recent output (paste-before-run).', '1.0.0', { terminalId: { type: 'string' } }),

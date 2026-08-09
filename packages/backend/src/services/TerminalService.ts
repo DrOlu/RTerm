@@ -1405,6 +1405,23 @@ export class TerminalService {
     }
   }
 
+  /** Set the display title of a terminal tab. Updates the tab, the persisted config,
+   * and notifies the renderer so the UI shows the new title immediately. */
+  setTitle(terminalId: string, title: string): void {
+    const terminal = this.terminals.get(terminalId)
+    if (!terminal) return
+    const trimmed = String(title || '').trim()
+    if (!trimmed) return
+    terminal.title = trimmed
+    // Update the persisted config so the title survives restarts.
+    const config = this.terminalConfigs.get(terminalId)
+    if (config) {
+      this.terminalConfigs.set(terminalId, { ...config, title: trimmed } as TerminalConfig)
+    }
+    this.publishTerminalTabsChanged()
+    this.schedulePersistTerminalState()
+  }
+
   kill(terminalId: string): void {
     this.pendingResizeByTerminal.delete(terminalId)
     // Clean up pending write buffers (prevents stale data on reconnected tabs)

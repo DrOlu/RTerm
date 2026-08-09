@@ -465,14 +465,22 @@ const createRuntime = (
       id: runtime.contextMenuId,
       canCopy: selectionText.trim().length > 0,
       canPaste: true,
-    });
+      canRename: true,
+    } as any);
   };
 
   const onContextMenuAction = (data: {
     id: string;
-    action: "copy" | "paste";
+    action: "copy" | "paste" | "rename";
   }) => {
     if (data.id !== runtime.contextMenuId) return;
+    if (data.action === "rename") {
+      const newTitle = window.prompt("Rename terminal:", config.title || "");
+      if (newTitle?.trim()) {
+        void window.gyshell.terminal.setTitle(config.id, newTitle.trim());
+      }
+      return;
+    }
     if (data.action === "copy") {
       const selectionText = term.getSelection();
       if (selectionText) {

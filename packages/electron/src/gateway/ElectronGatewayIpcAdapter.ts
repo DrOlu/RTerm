@@ -767,6 +767,10 @@ export class ElectronGatewayIpcAdapter {
       this.terminalService.kill(terminalId);
     });
 
+    ipcMain.handle("terminal:setTitle", async (_: any, terminalId: string, title: string) => {
+      this.terminalService.setTitle(terminalId, title);
+    });
+
     ipcMain.handle(
       "terminal:setSelection",
       async (_: any, terminalId: string, selectionText: string) => {
@@ -1118,7 +1122,7 @@ export class ElectronGatewayIpcAdapter {
       "ui:showContextMenu",
       async (
         event: any,
-        payload: { id: string; canCopy: boolean; canPaste: boolean },
+        payload: { id: string; canCopy: boolean; canPaste: boolean; canRename?: boolean },
       ) => {
         const window = BrowserWindow.fromWebContents(event.sender);
         if (!window) return;
@@ -1144,6 +1148,18 @@ export class ElectronGatewayIpcAdapter {
               });
             },
           },
+          ...(payload.canRename
+            ? [{
+                label: "Rename",
+                enabled: true,
+                click: () => {
+                  window.webContents.send("ui:contextMenuAction", {
+                    id: payload.id,
+                    action: "rename",
+                  });
+                },
+              }]
+            : []),
         ]);
 
         menu.popup({ window });

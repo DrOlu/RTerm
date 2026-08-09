@@ -41,6 +41,7 @@ type WebSocketRpcMethod =
   | "terminal:resize"
   | "terminal:kill"
   | "terminal:reconnect"
+  | "terminal:setTitle"
   | "terminal:setSelection"
   | "terminal:getBufferDelta"
   | "terminal:generateCommandDraft"
@@ -193,6 +194,7 @@ export interface WebSocketGatewayAdapterOptions {
       rows: number,
     ) => void | Promise<void>;
     kill?: (terminalId: string) => void | Promise<void>;
+    setTitle?: (terminalId: string, title: string) => void | Promise<void>;
     reconnect?: (terminalId: string) => Promise<{ id: string }> | { id: string };
     setSelection?: (
       terminalId: string,
@@ -1164,6 +1166,19 @@ export class WebSocketGatewayAdapter {
         }
         const terminalId = this.readStringParam(params, "terminalId");
         await bridge.kill(terminalId);
+        return { ok: true };
+      }
+      case "terminal:setTitle": {
+        const bridge = this.options.terminalBridge;
+        if (!bridge?.setTitle) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "Terminal rename is not available on this websocket gateway.",
+          );
+        }
+        const terminalId = this.readStringParam(params, "terminalId");
+        const title = this.readStringParam(params, "title");
+        bridge.setTitle(terminalId, title);
         return { ok: true };
       }
       case "terminal:reconnect": {

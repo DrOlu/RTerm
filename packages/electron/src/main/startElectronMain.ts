@@ -563,6 +563,9 @@ export async function startElectronMain(): Promise<void> {
                   }
                   terminalService.kill(terminalId);
                 },
+                setTitle: async (terminalId, title) => {
+                  terminalService.setTitle(terminalId, title);
+                },
                 reconnect: async (terminalId) => {
                   const tab = await terminalService.reconnectTerminal(terminalId);
                   return { id: tab.id };
