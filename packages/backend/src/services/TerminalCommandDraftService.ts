@@ -153,7 +153,7 @@ export class TerminalCommandDraftService {
     }
 
     return {
-      model: this.helpers.createChatModel(globalItem, 0.1),
+      model: this.helpers.createChatModel(globalItem, 0.1, profile),
       supportsStructuredOutput: globalItem.supportsStructuredOutput === true,
       supportsObjectToolChoice: globalItem.supportsObjectToolChoice === true,
       profileId,

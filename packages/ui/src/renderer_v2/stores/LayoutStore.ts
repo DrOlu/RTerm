@@ -1355,7 +1355,12 @@ export class LayoutStore {
     this.tree = nextTree;
     this.syncPanelBindings({ persist: false });
     this.saveLayoutDebounced();
-    this.syncGlobalActiveFromPanel(kind, tabId);
+    // v3.2.9: only steal the global active tab when the move landed in the
+    // focused panel. Attaching/creating a chat tab in ANOTHER panel must not
+    // change which session the user's current chat panel shows.
+    if (this.tree.focusedPanelId === targetPanelId) {
+      this.syncGlobalActiveFromPanel(kind, tabId);
+    }
   }
 
   private showTabsInLayout(kind: PanelKind, tabIds: string[]): void {

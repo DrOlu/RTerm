@@ -219,6 +219,9 @@ const refitRuntime = (
     ) {
       requestBackendResize(runtime, size.cols, size.rows);
     }
+    // v3.2.9: repaint after resize so cursor position and reflowed rows are
+    // redrawn in the same frame — keeps Windows terminals in sync when output
+    // and panel resizing overlap.
     runtime.term.refresh(0, Math.max(0, runtime.term.rows - 1));
   } catch {
     // ignore transient DOM/layout issues
@@ -524,10 +527,20 @@ const createRuntime = (
   let lastBufferOffset = 0;
   let isSyncingInitialBuffer = true;
   const pendingLiveEvents: Array<{ data: string; offset?: number }> = [];
+  // v3.2.9: serialize writes against resizes. xterm.js reflows the buffer
+  // synchronously inside resize(); a resize landing between two queued writes
+  // makes the second write land on reflowed rows with a stale cursor — visible
+  // as garbled output on Windows terminals under continuous output + panel
+  // resizing. Wrapping every write in a writeCallback keeps the resize
+  // (performed in the same write queue slot) ordered after the pending writes.
+  const serializedWrite = (data: string): void => {
+    if (!data) return;
+    term.write(data);
+  };
   const writeDataWithOffset = (data: string, offset?: number): void => {
     if (!data) return;
     if (!Number.isFinite(offset)) {
-      term.write(data);
+      serializedWrite(data);
       return;
     }
 
@@ -540,12 +553,12 @@ const createRuntime = (
       const overlap = lastBufferOffset - chunkStart;
       const nextChunk = data.slice(Math.max(0, overlap));
       if (nextChunk) {
-        term.write(nextChunk);
+        serializedWrite(nextChunk);
       }
       lastBufferOffset = normalizedOffset;
       return;
     }
-    term.write(data);
+    serializedWrite(data);
     lastBufferOffset = normalizedOffset;
   };
 

@@ -677,9 +677,36 @@ export const SeamlessToolGroupBanner = observer(({
   const lastMsg = messages[messages.length - 1]
   const lastStep = lastMsg ? getStepDescription(lastMsg) : null
 
+  // v3.2.9: accurate failure/warning states — a group is failed when any step
+  // errored (command exit != 0, tool error, error message), and warned when any
+  // step hit a warning (sub_tool warning level, alert). The header icon + text
+  // reflect the worst state instead of always showing a green check.
+  const stepSeverity = (msg: ChatMessage): 'error' | 'warning' | 'ok' => {
+    if (msg.type === 'error') return 'error'
+    if (msg.type === 'command' && msg.metadata?.exitCode !== undefined && msg.metadata.exitCode !== 0) return 'error'
+    if (msg.type === 'file_edit' && msg.metadata?.action === 'error') return 'error'
+    if (msg.type === 'sub_tool' && msg.metadata?.subToolLevel === 'error') return 'error'
+    if (msg.type === 'alert') {
+      // retry hints are transient; real alerts are warnings
+      return msg.metadata?.subToolLevel === 'info' ? 'warning' : 'warning'
+    }
+    if (msg.type === 'sub_tool' && msg.metadata?.subToolLevel === 'warning') return 'warning'
+    return 'ok'
+  }
+  const hasError = messages.some((m) => stepSeverity(m) === 'error')
+  const hasWarning = !hasError && messages.some((m) => stepSeverity(m) === 'warning')
+
   let headerText: string
   if (isStreaming) {
     headerText = lastStep ? truncate(lastStep.text, 48) : 'Working...'
+  } else if (hasError) {
+    headerText = stepCount === 1
+      ? (lastStep ? truncate(lastStep.text, 48) : 'Failed')
+      : `Failed · ${stepCount} steps`
+  } else if (hasWarning) {
+    headerText = stepCount === 1
+      ? (lastStep ? truncate(lastStep.text, 48) : 'Done (with warnings)')
+      : `Done with warnings · ${stepCount} steps`
   } else if (stepCount === 1) {
     headerText = lastStep ? lastStep.text : 'Done'
   } else {
@@ -690,15 +717,22 @@ export const SeamlessToolGroupBanner = observer(({
   const headerInfo =
     !isStreaming && stepCount === 1 ? lastStep?.info : undefined
 
+  const errorCount = messages.filter((m) => stepSeverity(m) === 'error').length
+  const warningCount = messages.filter((m) => stepSeverity(m) === 'warning').length
+
   return (
     <div
-      className={`seamless-tool-group${isStreaming ? ' is-streaming' : ' is-done'}${stepCount === 1 ? ' is-single' : ''}${expanded ? ' is-expanded' : ''}`}
+      className={`seamless-tool-group${isStreaming ? ' is-streaming' : ' is-done'}${stepCount === 1 ? ' is-single' : ''}${expanded ? ' is-expanded' : ''}${hasError ? ' is-error' : ''}${hasWarning ? ' is-warning' : ''}`}
     >
       <div className="stg-header" onClick={() => setExpanded(!expanded)}>
         <div className="stg-status-icon">
           {isStreaming
             ? <Loader2 size={12} className="spin" />
-            : <Check size={12} />}
+            : hasError
+              ? <XCircle size={12} />
+              : hasWarning
+                ? <AlertTriangle size={12} />
+                : <Check size={12} />}
         </div>
         <div className={`stg-title${shouldSweep ? ' stg-sweep' : ''}`}>
           <span data-sweep-text={shouldSweep ? headerText : undefined}>
@@ -708,6 +742,10 @@ export const SeamlessToolGroupBanner = observer(({
         <div className="stg-meta">
           {isStreaming && stepCount > 1 ? (
             <span className="stg-count">{stepCount} steps</span>
+          ) : hasError && errorCount > 0 ? (
+            <span className="stg-count is-error">{errorCount} failed</span>
+          ) : hasWarning && warningCount > 0 ? (
+            <span className="stg-count is-warning">{warningCount} warning{warningCount > 1 ? 's' : ''}</span>
           ) : headerInfo ? (
             <span className="stg-step-info">{headerInfo}</span>
           ) : null}
@@ -722,12 +760,15 @@ export const SeamlessToolGroupBanner = observer(({
             const { fullText, info } = getStepDescription(msg)
             const isDone = !msg.streaming
             const isLast = idx === messages.length - 1
+            const severity = stepSeverity(msg)
             return (
               <div
                 key={msg.id}
-                className={`stg-step${isDone ? ' is-done' : ' is-active'}${isLast && isStreaming ? ' is-current' : ''}`}
+                className={`stg-step${isDone ? ' is-done' : ' is-active'}${isLast && isStreaming ? ' is-current' : ''}${severity === 'error' ? ' is-error' : severity === 'warning' ? ' is-warning' : ''}`}
               >
-                <span className="stg-step-connector">{isLast ? '└' : '├'}</span>
+                <span className="stg-step-connector">
+                  {severity === 'error' ? '✕' : severity === 'warning' ? '!' : isLast ? '└' : '├'}
+                </span>
                 <span className="stg-step-text">{fullText}</span>
                 {info && <span className="stg-step-info">{info}</span>}
               </div>

@@ -1,19 +1,73 @@
 import { ChatOpenAI } from '@langchain/openai'
-import type { BackendSettings, ModelDefinition } from '../../../types'
+import type { BackendSettings, ModelDefinition, ModelProfile } from '../../../types'
 import { resolveBuiltInToolCapabilityName } from '../tool_capabilities'
 
-export function createChatModel(item: ModelDefinition, temperature: number): ChatOpenAI {
+/**
+ * Runtime-owned request-body fields that per-model `requestParams` overrides may
+ * never touch. Overriding these would break the agent loop itself (model routing,
+ * message history, tool binding, streaming), so they are silently dropped.
+ */
+const RUNTIME_OWNED_REQUEST_PARAMS = new Set<string>([
+  'model',
+  'messages',
+  'tools',
+  'tool_choice',
+  'stream',
+  'stream_options',
+  'apiKey',
+  'baseURL',
+  'n',
+])
+
+/** Validate + sanitize a per-model requestParams override map (v3.2.9). */
+export function sanitizeRequestParams(
+  params: Record<string, string | number | boolean | object> | undefined,
+): Record<string, string | number | boolean | object> {
+  if (!params || typeof params !== 'object') return {}
+  const out: Record<string, string | number | boolean | object> = {}
+  for (const [key, value] of Object.entries(params)) {
+    if (!key || RUNTIME_OWNED_REQUEST_PARAMS.has(key)) continue
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      (value !== null && typeof value === 'object')
+    ) {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+/** Resolve the requestParams override for a model: model-level wins over profile-level. */
+export function resolveRequestParams(
+  item: ModelDefinition,
+  profile?: ModelProfile | null,
+): Record<string, string | number | boolean | object> {
+  return {
+    ...sanitizeRequestParams(profile?.requestParams),
+    ...sanitizeRequestParams(item.requestParams),
+  }
+}
+
+export function createChatModel(
+  item: ModelDefinition,
+  temperature: number,
+  profile?: ModelProfile | null,
+): ChatOpenAI {
+  const requestParams = resolveRequestParams(item, profile)
   return new ChatOpenAI({
     model: item.model,
     apiKey: item.apiKey,
     configuration: {
-      baseURL: item.baseUrl
+      baseURL: item.baseUrl,
     },
     __includeRawResponse: true,
     temperature,
     maxRetries: 0,
-    modelKwargs: {
-    }
+    ...(Object.keys(requestParams).length > 0
+      ? { modelKwargs: requestParams }
+      : { modelKwargs: {} }),
   })
 }
 

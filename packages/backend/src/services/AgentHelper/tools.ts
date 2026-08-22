@@ -14,13 +14,15 @@ import {
   writeStdinSchema,
   reconnectTerminalTabSchema,
   openTerminalTabSchema,
+  closeTerminalTabSchema,
   runCommand, 
   runCommandNowait, 
   readTerminalTab, 
   readCommandOutput,
   writeStdin,
   reconnectTerminalTab,
-  openTerminalTab
+  openTerminalTab,
+  closeTerminalTab
 } from './tools/terminal_tools'
 import { 
   BUILTIN_TOOL_INFO, 
@@ -119,7 +121,8 @@ export {
   readCommandOutputSchema,
   writeStdinSchema,
   reconnectTerminalTabSchema,
-  openTerminalTabSchema
+  openTerminalTabSchema,
+  closeTerminalTabSchema
 } from './tools/terminal_tools'
 
 export { readFileSchema } from './tools/read_tools'
@@ -185,6 +188,11 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'open_terminal_tab',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'open_terminal_tab')?.description ?? '',
       schema: openTerminalTabSchema
+    },
+    {
+      name: 'close_terminal_tab',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'close_terminal_tab')?.description ?? '',
+      schema: closeTerminalTabSchema
     },
     {
       name: WRITE_FILE_TOOL_NAME,
@@ -425,6 +433,7 @@ export const toolImplementations = {
   writeStdin,
   reconnectTerminalTab,
   openTerminalTab,
+  closeTerminalTab,
   wait,
   waitTerminalIdle,
   copyBetweenTabs,

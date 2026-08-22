@@ -1119,3 +1119,84 @@ function formatCommandOutputSlice(params: { output: string; offset: number; limi
   }
   return result
 }
+
+export const closeTerminalTabSchema = z.object({
+  tabIdOrName: z
+    .string()
+    .min(1)
+    .describe(
+      'The ID or exact name of the terminal tab to close. Resolve it first (read_terminal_tab) if unsure.',
+    ),
+  reason: z
+    .string()
+    .optional()
+    .describe('Short human-readable reason recorded in the tool output (e.g. "cleanup after transfer").'),
+})
+
+/**
+ * close_terminal_tab (v3.2.9) — agent-managed terminal tabs, close side.
+ * Mirrors open_terminal_tab: the agent may close tabs it no longer needs.
+ * Guarded: refuses to close the last remaining tab (keeps at least one shell
+ * available) and reports exactly what was closed.
+ */
+export async function closeTerminalTab(
+  args: z.infer<typeof closeTerminalTabSchema>,
+  context: ToolExecutionContext,
+): Promise<string> {
+  const { terminalService, sessionId, messageId, sendEvent } = context
+
+  abortIfNeeded(context.signal)
+
+  const notFound = (reason: string): string => {
+    sendEvent(sessionId, {
+      messageId,
+      type: 'tool_call',
+      toolName: 'close_terminal_tab',
+      input: JSON.stringify(args),
+      output: reason,
+    })
+    return reason
+  }
+
+  const resolved = resolveTerminalForTool(context, args.tabIdOrName, 'terminal tab')
+  if (!resolved.ok) {
+    return notFound(resolved.message)
+  }
+
+  const terminal = resolved.terminal
+  const allTerminals = terminalService.getAllTerminals()
+  if (allTerminals.length <= 1) {
+    return notFound(
+      `Refusing to close terminal tab "${terminal.title || terminal.id}" (id=${terminal.id}): it is the only open tab. At least one terminal tab must remain open.`,
+    )
+  }
+
+  sendEvent(sessionId, {
+    messageId,
+    type: 'sub_tool_started',
+    toolName: 'close_terminal_tab',
+    title: `Close ${terminal.title || terminal.id}`,
+    hint: terminal.type,
+    input: JSON.stringify(args),
+  })
+
+  const finish = (output: string): string => {
+    sendEvent(sessionId, { messageId, type: 'sub_tool_delta', outputDelta: output })
+    sendEvent(sessionId, { messageId, type: 'sub_tool_finished' })
+    return output
+  }
+
+  try {
+    terminalService.kill(terminal.id)
+    const reasonSuffix = args.reason ? ` Reason: ${args.reason}` : ''
+    return finish(
+      `Closed terminal tab "${terminal.title || terminal.id}" (id=${terminal.id}, type=${terminal.type}).${reasonSuffix} ${allTerminals.length - 1} tab(s) remain open.`,
+    )
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    return finish(`Failed to close terminal tab "${terminal.title || terminal.id}": ${message}`)
+  }
+}

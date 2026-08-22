@@ -740,6 +740,7 @@ export interface GyShellAPI {
     writePaths: (terminalId: string, paths: string[]) => Promise<void>;
     resize: (terminalId: string, cols: number, rows: number) => Promise<void>;
     kill: (terminalId: string) => Promise<void>;
+    setTitle: (terminalId: string, title: string) => Promise<void>;
     setSelection: (terminalId: string, selectionText: string) => Promise<void>;
     getBufferDelta: (
       terminalId: string,
@@ -1174,6 +1175,7 @@ const api: GyShellAPI = {
     resize: (terminalId, cols, rows) =>
       ipcRenderer.invoke("terminal:resize", terminalId, cols, rows),
     kill: (terminalId) => ipcRenderer.invoke("terminal:kill", terminalId),
+    setTitle: (terminalId, title) => ipcRenderer.invoke("terminal:setTitle", terminalId, title),
     setSelection: (terminalId, selectionText) =>
       ipcRenderer.invoke("terminal:setSelection", terminalId, selectionText),
     getBufferDelta: (terminalId, fromOffset) =>

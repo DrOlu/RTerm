@@ -205,6 +205,11 @@ export const OPEN_TERMINAL_TAB_DESCRIPTION = [
   "The new tab starts in the initializing state. It is immediately addressable by its Name via the other terminal tools. If a tab for that connection is already open, the tool reports the existing tab instead of opening a duplicate.",
   "Prefer this over asking the user to click Connect: only use it when the user asks you to connect to a named server, or when a task requires a server that has no open tab yet. The tool does not create or edit saved connections; it only opens existing ones.",
 ].join("\n");
+export const CLOSE_TERMINAL_TAB_DESCRIPTION = [
+  "Close a terminal tab you no longer need (the close side of open_terminal_tab). Pass the tab's ID or exact name.",
+  "Use this to clean up tabs the task no longer needs — e.g. after a transfer finished, or after a one-off probe on a server. Close tabs you opened yourself when the work is done; do not close tabs the user was actively using unless asked.",
+  "Guarded: it refuses to close the last remaining terminal tab (at least one tab must stay open) and reports how many tabs remain after the close. If the tab is running a command, the command is terminated by the close.",
+].join("\n");
 export const COPY_BETWEEN_TABS_DESCRIPTION = [
   "Start an asynchronous file copy between two different terminal tabs on different machines. Use this only for cross-terminal-tab file transfer; do not use it for copying within one tab or between two tabs connected to the same machine.",
   "If either source or target terminal is disconnected or not ready, this tool returns an explicit terminal_status for that side and does not start a transfer.",
@@ -372,6 +377,11 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     name: "open_terminal_tab",
     description: OPEN_TERMINAL_TAB_DESCRIPTION,
     shortDescription: "Open a new terminal tab",
+  },
+  {
+    name: "close_terminal_tab",
+    description: CLOSE_TERMINAL_TAB_DESCRIPTION,
+    shortDescription: "Close a terminal tab",
   },
   {
     name: "create_or_edit",

@@ -1,6 +1,6 @@
 import { ChatOpenAI } from '@langchain/openai'
 import type { BaseMessage } from '@langchain/core/messages'
-import type { AgentEvent, ModelDefinition, BackendSettings } from '../../types'
+import type { AgentEvent, ModelDefinition, ModelProfile, BackendSettings } from '../../types'
 import { buildActionModelHistory } from './utils/action_model_history'
 import { extractText, parseStrictJsonObject, isEphemeral, markEphemeral } from './utils/common'
 import { createChatModel, getMaxTokensForModel, computeReadFileSupport, getEnabledBuiltInTools } from './utils/model_config'
@@ -73,8 +73,8 @@ export class AgentHelpers {
   /**
    * Factory for creating ChatOpenAI instances
    */
-  createChatModel(item: ModelDefinition, temperature: number): ChatOpenAI {
-    return createChatModel(item, temperature)
+  createChatModel(item: ModelDefinition, temperature: number, profile?: ModelProfile | null): ChatOpenAI {
+    return createChatModel(item, temperature, profile)
   }
 
   /**

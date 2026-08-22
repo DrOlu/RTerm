@@ -44,6 +44,7 @@ import {
   writeStdinSchema,
   reconnectTerminalTabSchema,
   openTerminalTabSchema,
+  closeTerminalTabSchema,
   editFileSchema,
   writeAndEditSchema,
   writeFileSchema,
@@ -278,6 +279,8 @@ const SINGLE_CALL_TOOL_BOUNDARY_NAMES = new Set([
   "open_terminal_tab",
   // Spawns a new terminal tab → the agent must re-read system info next round
   // to discover the freshly-opened tab.
+  "close_terminal_tab",
+  // Removes a terminal tab → same boundary: the visible tab list changed.
   "probe_connectivity",
   // Mutate-visible-list tools: the agent must re-read system info next round
   // to see the updated connection/list state.
@@ -822,15 +825,15 @@ export class AgentService_v2 {
       ? settings.models.items.find((m) => m.id === profile.compactionModelId)
       : undefined;
 
-    const model = this.helpers.createChatModel(globalItem, 0.7);
+    const model = this.helpers.createChatModel(globalItem, 0.7, profile);
     const actionModel = actionItem?.apiKey
-      ? this.helpers.createChatModel(actionItem, 0.1)
+      ? this.helpers.createChatModel(actionItem, 0.1, profile)
       : model;
     const thinkingModel = thinkingItem?.apiKey
-      ? this.helpers.createChatModel(thinkingItem, 0.2)
+      ? this.helpers.createChatModel(thinkingItem, 0.2, profile)
       : model;
     const compactionModel = compactionItem?.apiKey
-      ? this.helpers.createChatModel(compactionItem, 0.2)
+      ? this.helpers.createChatModel(compactionItem, 0.2, profile)
       : thinkingItem?.apiKey
         ? thinkingModel
         : model;
@@ -2002,6 +2005,20 @@ export class AgentService_v2 {
             );
           } catch (err) {
             result = `Parameter validation error for open_terminal_tab: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "close_terminal_tab": {
+          try {
+            const validatedArgs = closeTerminalTabSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.closeTerminalTab(
+              validatedArgs,
+              executionContext,
+            );
+          } catch (err) {
+            result = `Parameter validation error for close_terminal_tab: ${(err as Error).message}`;
           }
           break;
         }

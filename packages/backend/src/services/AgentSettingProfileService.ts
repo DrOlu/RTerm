@@ -52,6 +52,8 @@ interface AgentSettingProfileServiceOptions {
 
 export class AgentSettingProfileService {
   private mutationQueue: Promise<unknown> = Promise.resolve()
+  /** re-entrancy guard for autoSaveActiveProfile (the write-back triggers a settings change) */
+  private autoSaveInFlight = false
 
   constructor(private readonly options: AgentSettingProfileServiceOptions) {}
 
@@ -130,6 +132,31 @@ export class AgentSettingProfileService {
       )
       return await this.buildResult([])
     })
+  }
+
+  /**
+   * Auto-save (v3.2.9): when a profile is active, write the changed settings
+   * back into that profile so manual overwrite is no longer needed. Called from
+   * the SettingsService change listener; re-entrancy is guarded because the
+   * write-back itself triggers another settings change (which must not loop).
+   */
+  async autoSaveActiveProfile(): Promise<void> {
+    if (this.autoSaveInFlight) return
+    const settings = this.options.settingsService.getSettings()
+    const activeProfileId = settings.agentSettings?.activeProfileId || null
+    if (!activeProfileId) return
+    const state = this.getNormalizedAgentSettings(settings)
+    if (!state.profiles.some((profile) => profile.id === activeProfileId)) {
+      return
+    }
+    this.autoSaveInFlight = true
+    try {
+      await this.overwrite(activeProfileId)
+    } catch {
+      // best-effort: a failed auto-save must never break the settings write
+    } finally {
+      this.autoSaveInFlight = false
+    }
   }
 
   async delete(profileId: string): Promise<AgentSettingOperationResult> {

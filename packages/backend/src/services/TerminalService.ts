@@ -1947,7 +1947,7 @@ export class TerminalService {
     command: string,
     timeoutMs = 6000,
     options?: TerminalExecOptions
-  ): Promise<{ stdout: string; stderr: string } | null> {
+  ): Promise<{ stdout: string; stderr: string; stdoutStream?: AsyncIterable<Buffer> } | null> {
     const tab = this.terminals.get(terminalId)
     if (!tab) return null
 

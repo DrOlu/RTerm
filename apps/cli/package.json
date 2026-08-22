@@ -1,0 +1,17 @@
+{
+  "name": "@rterm/cli",
+  "version": "3.2.9",
+  "private": true,
+  "type": "module",
+  "description": "rterm \u2014 command CLI for the RTerm / neuralOS backend WebSocket gateway",
+  "bin": {
+    "rterm": "./rterm-cli.mjs"
+  },
+  "files": [
+    "rterm-cli.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

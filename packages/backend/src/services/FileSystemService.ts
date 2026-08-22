@@ -737,6 +737,33 @@ export class FileSystemService {
       }
     }
 
+    // v3.2.9: SSH → SSH direct transfer. When both ends are Unix SSH sessions,
+    // copy the file directly between the two machines (cat over a side-band exec
+    // channel on the source, streamed into the target's writeFileChunk). This
+    // avoids the local relay (download → upload) that halves throughput and
+    // bounces the bytes through the RTerm host. Automatic fallback to the
+    // existing chunked relay below when either side declines or errors.
+    if (sourceType === 'ssh' && targetType === 'ssh') {
+      const sourceOs = this.terminalService.getRemoteOs(sourceTerminalId)
+      const targetOs = this.terminalService.getRemoteOs(targetTerminalId)
+      if (sourceOs === 'unix' && targetOs === 'unix') {
+        const direct = await this.tryDirectSshToSshTransfer({
+          sourceTerminalId,
+          sourcePath,
+          targetTerminalId,
+          targetPath,
+          fileSize,
+          chunkSize,
+          ensureNotCancelled,
+          signal,
+          onChunkWritten,
+        })
+        if (direct) {
+          return
+        }
+      }
+    }
+
     let offset = 0
     let totalSizeHint: number | undefined = fileSize
     while (true) {
@@ -777,6 +804,123 @@ export class FileSystemService {
       if (chunk.bytesRead <= 0) {
         throw new Error(`Unexpected zero-length chunk while copying file: ${sourcePath}`)
       }
+    }
+  }
+
+  /**
+   * v3.2.9: SSH → SSH direct single-file transfer.
+   *
+   * Streams the file from the source host into the target host without routing
+   * the bytes through the RTerm host process: the source's side-band exec
+   * channel runs `cat <path>` and each chunk is written straight into the
+   * target's writeFileChunk. Returns true when the transfer completed; false
+   * means the caller should fall back to the chunked relay path.
+   *
+   * Conditions (checked by the caller): both terminals are SSH sessions on
+   * Unix hosts, and the payload is a single regular file. Any failure here is
+   * non-fatal — the relay path retries from scratch.
+   */
+  private async tryDirectSshToSshTransfer(params: {
+    sourceTerminalId: string
+    sourcePath: string
+    targetTerminalId: string
+    targetPath: string
+    fileSize: number
+    chunkSize: number
+    ensureNotCancelled: () => void
+    signal?: AbortSignal
+    onChunkWritten: (bytesWritten: number) => void
+  }): Promise<boolean> {
+    const {
+      sourceTerminalId,
+      sourcePath,
+      targetTerminalId,
+      targetPath,
+      fileSize,
+      ensureNotCancelled,
+      signal,
+      onChunkWritten,
+    } = params
+
+    ensureNotCancelled()
+
+    // Empty file: just create it on the target.
+    if (fileSize <= 0) {
+      try {
+        await this.awaitWithCancellation(
+          () => this.terminalService.writeFileChunk(
+            targetTerminalId,
+            targetPath,
+            0,
+            Buffer.alloc(0),
+            { truncate: true, close: true },
+          ),
+          signal,
+        )
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    // Stream `cat` from the source over its side-band exec channel.
+    // execOnTerminal returns null when the backend doesn't support side-band
+    // exec (e.g. a shell-less device) — that's a clean "not supported" signal.
+    const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`
+    const command = `cat ${shellQuote(sourcePath)}`
+    let sourceStream: AsyncIterable<Buffer> | null = null
+    try {
+      const exec = await this.terminalService.execOnTerminal(
+        sourceTerminalId,
+        command,
+        0,
+        { streamStdout: true },
+      )
+      if (!exec || !exec.stdoutStream) {
+        return false
+      }
+      sourceStream = exec.stdoutStream
+    } catch {
+      return false
+    }
+    if (!sourceStream) return false
+
+    try {
+      let offset = 0
+      let wroteAny = false
+      for await (const chunk of sourceStream) {
+        ensureNotCancelled()
+        if (!chunk || chunk.length === 0) continue
+        await this.awaitWithCancellation(
+          () => this.terminalService.writeFileChunk(
+            targetTerminalId,
+            targetPath,
+            offset,
+            chunk,
+            { truncate: !wroteAny, close: false },
+          ),
+          signal,
+        )
+        wroteAny = true
+        offset += chunk.length
+        onChunkWritten(chunk.length)
+      }
+      // Close the target file handle.
+      await this.awaitWithCancellation(
+        () => this.terminalService.writeFileChunk(
+          targetTerminalId,
+          targetPath,
+          offset,
+          Buffer.alloc(0),
+          { truncate: false, close: true },
+        ),
+        signal,
+      )
+      return true
+    } catch {
+      // Partial write happened — the relay fallback restarts from offset 0,
+      // and writeFileChunk(truncate: true) from the fallback resets the file.
+      return false
     }
   }
 

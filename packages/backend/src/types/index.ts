@@ -28,6 +28,11 @@ export interface ModelDefinition {
     ok?: boolean
     error?: string
   }
+  /** Per-model OpenAI-compatible request-body overrides (v3.2.9). Typed values
+   * merged over runtime defaults; runtime-owned fields (model, messages, tools,
+   * stream) are protected and cannot be overridden. Model-level wins over
+   * profile-level when both define the same field. */
+  requestParams?: Record<string, string | number | boolean | object>
 }
 
 export interface ModelProfile {
@@ -1444,7 +1449,7 @@ export interface TerminalSessionBackend {
     command: string,
     timeoutMs?: number,
     options?: TerminalExecOptions,
-  ): Promise<{ stdout: string; stderr: string } | null>
+  ): Promise<{ stdout: string; stderr: string; stdoutStream?: AsyncIterable<Buffer> } | null>
 
   /**
    * Direct (non-streaming) command execution for backends that don't expose a
@@ -1488,6 +1493,14 @@ export interface TerminalExecOptions {
    * Optional standard input payload to write to the spawned side-band command.
    */
   stdin?: string
+  /**
+   * v3.2.9: when true, the returned result carries a `stdoutStream` (an async
+   * iterable of Buffers) instead of a buffered `stdout` string. Used by the
+   * SSH→SSH direct transfer path to stream file bytes without buffering the
+   * whole payload in memory. Backends that don't support streaming ignore it
+   * and return the buffered shape (callers must handle both).
+   */
+  streamStdout?: boolean
 }
 
 export interface TerminalFileSystemBackend {

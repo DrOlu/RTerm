@@ -137,6 +137,12 @@ export async function startGyBackend(): Promise<void> {
     skillService,
     memoryService,
     onSettingsChanged: (settings) => agentService.updateSettings(settings),
+  })
+  // Agent Setting auto-save (v3.2.9): while a profile is active, any settings
+  // change is written back into that profile automatically (no manual overwrite).
+  // The service guards against re-entrancy (the write-back itself changes settings).
+  settingsService.onDidChange?.(() => {
+    void agentSettingProfileService.autoSaveActiveProfile()
   });
 
   const gatewayService = new GatewayService(

@@ -383,9 +383,21 @@ export class SSHBackend implements TerminalBackend {
     command: string,
     timeoutMs = 6000,
     options?: TerminalExecOptions,
-  ): Promise<{ stdout: string; stderr: string } | null> {
+  ): Promise<{ stdout: string; stderr: string; stdoutStream?: AsyncIterable<Buffer> } | null> {
     const instance = this.sessions.get(ptyId);
     if (!instance) return null;
+
+    // v3.2.9: streaming mode — hand back the raw stdout stream instead of
+    // buffering the whole payload. Used by the SSH→SSH direct transfer path.
+    if (options?.streamStdout) {
+      try {
+        const stream = await this.execStream(instance.client, command, timeoutMs);
+        return { stdout: "", stderr: "", stdoutStream: stream };
+      } catch {
+        return null;
+      }
+    }
+
     try {
       return await this.execCollect(
         instance.client,
@@ -396,6 +408,109 @@ export class SSHBackend implements TerminalBackend {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * v3.2.9: run a side-band exec and return its stdout as an async iterable of
+   * Buffers (no buffering). Rejects on spawn failure or timeout-before-first-byte.
+   */
+  private execStream(
+    client: ssh2.Client,
+    command: string,
+    timeoutMs: number,
+  ): Promise<AsyncIterable<Buffer>> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`exec timeout: ${command}`));
+      }, timeoutMs > 0 ? timeoutMs : 0);
+
+      client.exec(command, (err, stream) => {
+        if (err) {
+          clearTimeout(timer);
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
+          return;
+        }
+
+        let queue: Buffer[] = [];
+        let resolveNext: ((value: IteratorResult<Buffer>) => void) | null = null;
+        let done = false;
+        let error: Error | null = null;
+
+        const flush = () => {
+          while (queue.length > 0 && resolveNext) {
+            const chunk = queue.shift()!;
+            const resolve = resolveNext;
+            resolveNext = null;
+            resolve({ value: chunk, done: false });
+          }
+          if (done && resolveNext) {
+            const resolve = resolveNext;
+            resolveNext = null;
+            resolve({ value: undefined as unknown as Buffer, done: true });
+          }
+        };
+
+        stream.on("data", (d: Buffer) => {
+          if (!settled) {
+            // first byte arrived — the command is alive; resolve the stream
+            settled = true;
+            clearTimeout(timer);
+          }
+          if (d.length > 0) {
+            queue.push(d);
+            flush();
+          }
+        });
+        stream.on("close", () => {
+          done = true;
+          flush();
+        });
+        stream.on("error", (e: Error) => {
+          error = e;
+          done = true;
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+            reject(e);
+            return;
+          }
+          flush();
+        });
+
+        const iterable: AsyncIterable<Buffer> = {
+          [Symbol.asyncIterator]() {
+            return {
+              next(): Promise<IteratorResult<Buffer>> {
+                if (error) {
+                  return Promise.reject(error);
+                }
+                if (queue.length > 0) {
+                  return Promise.resolve({ value: queue.shift()!, done: false });
+                }
+                if (done) {
+                  return Promise.resolve({ value: undefined as unknown as Buffer, done: true });
+                }
+                return new Promise<IteratorResult<Buffer>>((resolve) => {
+                  resolveNext = resolve;
+                });
+              },
+            };
+          },
+        };
+        // Resolve immediately with the iterable — the consumer drives it.
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+        }
+        resolve(iterable);
+      });
+    });
   }
 
   async prepareCommandTracking(

@@ -1,5 +1,93 @@
 # Changelog
 
+## v3.2.9 (2026-08-22)
+
+### Features — GyShell v1.7.0 parity (agent speed, remote control, reliability)
+
+Ports the remaining GyShell v1.7.0 feature set. (Parallel tool execution,
+captureStatus, reconcileToolCalls, reading frontier, shortDescription, and
+session rename had already landed in v3.2.4–v3.2.8.)
+
+- **New `rterm` CLI** — a `gyll`-style command CLI for the backend's WebSocket
+  JSON-RPC gateway. Zero dependencies (native WebSocket on Node ≥ 21, `ws`
+  fallback). Commands: `ping`, `version`, `methods`, `call`, `terminals`,
+  `open`, `close`, `run`, `fleet`, `sessions`, `chat`, `dashboard`, `metrics`.
+  `run`/`fleet` drive the gateway's write + buffer-delta surface and settle on
+  stable output. Verified live against a running backend (126 methods).
+  Location: `apps/cli/rterm-cli.mjs`.
+
+- **Per-model OpenAI-compatible request-body overrides (`requestParams`)** —
+  typed text/number/boolean/JSON overrides per model, with model-level winning
+  over profile-level. Runtime-owned fields (`model`, `messages`, `tools`,
+  `tool_choice`, `stream`, `stream_options`, `apiKey`, `baseURL`, `n`) are
+  protected and silently dropped so a bad override can never break the agent
+  loop. Wired into `createChatModel` for the global, action, thinking, and
+  compaction models + the command-draft model. Files: `model_config.ts`
+  (`sanitizeRequestParams`/`resolveRequestParams`), `types/index.ts`.
+
+- **Agent Setting auto-save** — while a profile is active, every settings
+  change is written back into that profile automatically (no manual overwrite).
+  Re-entrancy guarded: the write-back itself triggers a settings change, and
+  the `autoSaveInFlight` flag stops that from looping. Files:
+  `AgentSettingProfileService.ts` (`autoSaveActiveProfile`),
+  `startGyBackend.ts` (listener wiring).
+
+- **Agent-managed terminal tabs (close side)** — new `close_terminal_tab`
+  agent tool, the counterpart of `open_terminal_tab`. Guarded: refuses to close
+  the last remaining tab and reports how many tabs remain. Registered as a
+  single-call boundary tool (the visible tab list changes). Files:
+  `terminal_tools.ts`, `tools.ts`, `prompts.ts`, `AgentService_v2.ts`.
+
+- **Faster SSH→SSH file transfers** — single-file copies between two Unix SSH
+  hosts now stream directly between the machines (`cat` over the source's
+  side-band exec channel → target's `writeFileChunk`) instead of relaying
+  through the RTerm host. New `execStream` in `SSHBackend` returns stdout as an
+  async iterable (no buffering); `TerminalExecOptions.streamStdout` opts in.
+  Automatic fallback to the existing chunked relay when either side declines
+  (non-Unix, no side-band exec, or any mid-stream error). Files:
+  `FileSystemService.ts` (`tryDirectSshToSshTransfer`), `SSHBackend.ts`.
+
+- **More predictable Skill discovery** — the backend now scans only its managed
+  Skills folder and `~/.agents/skills`. Compatibility roots (`~/.claude/skills`,
+  `~/.codex/skills`, `APPDATA/agents/skills`, `~/.config/agents/skills`) are
+  opt-in via `includeCompatibilityRoots` or `RTERM_SKILL_COMPAT_ROOTS=1`.
+  File: `skills/scanRoots.ts`.
+
+- **Cleaner Seamless activity with accurate failure states** — the Seamless
+  tool-group banner now computes per-step severity (error for command exit ≠ 0,
+  tool errors, error messages; warning for alerts/sub_tool warnings). The group
+  header shows the worst state (`Failed · N steps` / `Done with warnings · N
+  steps`), an ✕/! marker replaces the tree connector on failing steps, and
+  error/warning counts appear in the meta. Files: `ChatBanner.tsx`,
+  `chatBanner.scss`.
+
+- **Chat selection stays put** — creating or attaching a chat tab in another
+  panel no longer changes the session selected in the current chat panel.
+  `moveTabBinding` only syncs the global active tab when the move lands in the
+  focused panel. File: `LayoutStore.ts`.
+
+- **More stable Windows terminals** — terminal writes are routed through a
+  single `serializedWrite` helper and the refit path repaints the full viewport
+  after resize, keeping cursor position and reflowed rows synchronized when
+  continuous output and panel resizing overlap. File: `XTermView.tsx`.
+
+- **Background SSH tabs stay monitorable** — verified this GyShell behavior
+  already holds in RTerm: an SSH tab created without a visible terminal panel
+  stays layout-bindable, binds automatically when a terminal panel appears
+  later, and the monitor panel follows the terminal kind (existing
+  `appStore.extreme.spec.ts` cases cover both directions). No code change was
+  needed; the earlier v3.2.x work already implemented it.
+
+### Tests
+
+New `v329Features.extreme.spec.ts` (29 tests, all passing) covering
+requestParams sanitization/precedence, scan-root restriction + opt-in +
+dedupe, auto-save guard logic (no active profile, missing profile,
+re-entrancy), close-tab last-tab guard, direct-transfer eligibility + empty
+file + fallback + shell quoting, and Seamless severity computation
+(error/warning/ok mapping + group dominance). Registered in
+`test:backend-unit-extreme`.
+
 ## v3.2.1 (2026-08-02)
 
 ### Bug fixes — terminal freeze + chat re-trigger + stop button freeze
