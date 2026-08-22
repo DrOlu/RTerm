@@ -1,5 +1,52 @@
 # Changelog
 
+## v3.2.10 (2026-08-22)
+
+### Bug fixes — rename broken + chat scroll trap after user-nav
+
+Two user-reported bugs, both root-caused with live reproduction.
+
+- **Rename (terminal tabs + chat sessions) did nothing.** Root cause:
+  `window.prompt()` **throws** in Electron 42 renderers ("prompt() is not
+  supported") — verified with a live Electron probe. Both rename flows called
+  it inside the context-menu action handler, so the throw vanished silently
+  and no rename ever happened. The entire backend path was fine (verified
+  live: `terminal:setTitle` updates the tab + emits `terminal:tabs`;
+  `agent:renameSession` persists to SQLite). Fix: new in-app
+  `PromptTextModal` (portal dialog, Enter/Escape, pre-filled + selected
+  input) replaces `window.prompt` in both `XTermView` and `ChatPanel`. The
+  terminal side routes requests through a module-level channel because the
+  context-menu handler lives in the pooled-runtime closure outside React.
+  Files: `PromptTextModal.tsx` + `promptText.scss` (new), `XTermView.tsx`,
+  `ChatPanel.tsx`.
+
+- **Chat scrollbar couldn't reach the bottom after Prev/Next/Latest user.**
+  Root cause: the user-nav scroll effect re-ran on **every** row-height
+  change (`virtualLayout.heights`/`offsets` are deps). After a nav jump,
+  offscreen rows re-measure one by one, so the effect re-fired dozens of
+  times — each time resetting `scrollTop` to the (drifting) nav target.
+  A user drag to the bottom was overridden ~39 times in a 40-message chat
+  (quantified in a simulation). Fix: the jump now fires exactly once per
+  click, keyed on the `userNavTargetVersion` counter; layout-only updates no
+  longer re-trigger it. Also hardened: the auto-scroll-on-render effect now
+  skips its pin while a scroll-anchor adjustment is pending. Files:
+  `ChatMessageList.tsx`.
+
+- **Pre-existing typecheck break on main fixed:** `chatPanel.extreme.spec.ts`
+  was a global-scope script whose top-level `tests`/`test` declarations
+  collided with other spec files (7 TS2451/TS2393 errors on main). Added
+  `export {}` for module isolation — `typecheck:web` is now 0 errors.
+
+### Tests
+
+New `v3210Fixes.extreme.spec.ts` (8/8): the Electron-42 prompt-throw
+reproduction, PromptTextModal submit/cancel decision logic, the
+terminal-rename channel routing (mount/unmount/drop), the nav-yank bug
+(old behavior reproduced: 40 resets vs 1 drag), the version-keyed fix
+(exactly one jump per click, drag survives, second click re-arms), and a
+regression guard that streaming auto-scroll still pins to the bottom.
+Registered in `test:layout-ui-extreme`.
+
 ## v3.2.9 (2026-08-22)
 
 ### Features — GyShell v1.7.0 parity (agent speed, remote control, reliability)

@@ -453,6 +453,18 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
         return;
       }
 
+      // v3.2.10 fix: never force-scroll while row heights are still settling.
+      // Previously this effect fired on EVERY render while autoScroll was on —
+      // including renders triggered by offscreen rows re-measuring after a
+      // Prev/Next/Latest navigation jump. The user's scrollbar drag then fought
+      // the effect: each drag landed, then the next height measurement forced
+      // scrollTop to a totalHeight that was still changing (the "can't scroll
+      // to bottom" trap). Skip the pin while an adjustment is queued; the
+      // adjustment effect lands it and the next stable render pins cleanly.
+      if (pendingScrollAdjustmentRef.current !== 0) {
+        return;
+      }
+
       element.scrollTop = Math.max(
         0,
         virtualLayout.totalHeight - element.clientHeight,
@@ -498,12 +510,23 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
 
     // User-message navigation (v3.0.5): scroll the target user message into view
     // WITHOUT disabling auto-scroll (programmatic jump, not a user scroll).
+    // v3.2.10 fix: this effect used to re-run whenever virtualLayout.heights /
+    // offsets changed — i.e. for EVERY offscreen row that re-measured after the
+    // jump. Each re-run reset scrollTop to the (drifting) nav target, so a user
+    // drag to the bottom was overridden dozens of times ("the scrollbar doesn't
+    // scroll"). Now the jump fires exactly once per click (keyed on the version
+    // counter), computed from the layout as it stands at click time.
+    const lastUserNavAppliedVersionRef = React.useRef(-1);
     React.useLayoutEffect(() => {
       if (!userNavTargetMessageId) return;
+      // Only jump when the version counter changed (a new click), never on
+      // layout-only updates.
+      if (lastUserNavAppliedVersionRef.current === userNavTargetVersion) return;
       const element = scrollRef.current;
       if (!element) return;
       const targetIndex = renderItemIndexById.get(userNavTargetMessageId);
       if (typeof targetIndex !== "number") return;
+      lastUserNavAppliedVersionRef.current = userNavTargetVersion;
       const targetTop = virtualLayout.offsets[targetIndex] || 0;
       const targetHeight = virtualLayout.heights[targetIndex] || 120;
       const nextScrollTop = Math.max(

@@ -22,6 +22,7 @@ import { PanelFindBar } from "../Common/PanelFindBar";
 import { ChatHistoryPanel } from "./ChatHistoryPanel";
 import { ChatMessageList } from "./ChatMessageList";
 import { ConfirmDialog } from "../Common/ConfirmDialog";
+import { PromptTextModal, type PromptTextState } from "./PromptTextModal";
 import { Select } from "../../platform/Select";
 import type { SelectHandle } from "../../platform/windows/WindowsSelect";
 import { QueueManager } from "./Queue/QueueManager";
@@ -178,6 +179,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       null,
     );
     const [queueEditTarget, setQueueEditTarget] = useState<QueueItem | null>(
+      null,
+    );
+    // v3.2.10: in-app rename prompt (window.prompt throws in Electron 42).
+    const [renamePrompt, setRenamePrompt] = useState<PromptTextState | null>(
       null,
     );
     const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(
@@ -657,10 +662,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       }) => {
         if (data.id !== contextMenuId) return;
         if (data.action === "rename") {
-          const newTitle = window.prompt("Rename session:", activeSession?.title || "");
-          if (newTitle?.trim()) {
-            void store.chat.renameChatSession(activeSessionId!, newTitle.trim());
-          }
+          // v3.2.10: window.prompt() throws in Electron 42 — use the in-app modal.
+          const sessionId = activeSessionId;
+          const currentTitle = activeSession?.title || "";
+          if (!sessionId) return;
+          setRenamePrompt({
+            title: currentTitle,
+            label: "Rename session",
+            onDone: (next) => {
+              if (next) {
+                void store.chat.renameChatSession(sessionId, next);
+              }
+            },
+          });
           return;
         }
         if (data.action === "copy") {
@@ -1025,6 +1039,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
           cancelText={t.chat.queue.editCancel}
           onCancel={() => setQueueEditTarget(null)}
           onConfirm={handleQueueEditConfirm}
+        />
+
+        {/* v3.2.10: in-app rename prompt (window.prompt throws in Electron 42) */}
+        <PromptTextModal
+          state={renamePrompt}
+          onClose={() => setRenamePrompt(null)}
         />
 
         {findOpen ? (

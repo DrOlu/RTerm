@@ -17,6 +17,7 @@ import {
   TerminalCommandDraft,
   type TerminalCommandDraftLabels,
 } from "./TerminalCommandDraft";
+import { PromptTextModal } from "../Chat/PromptTextModal";
 import {
   getOrCreateTerminalSearchHandle,
   type TerminalSearchResultsChangeHandler,
@@ -146,6 +147,23 @@ interface TerminalRuntime {
 
 const runtimePool = new Map<string, TerminalRuntime>();
 let terminalRecoveryEpoch = 0;
+
+// v3.2.10: terminal-rename request channel. The context-menu handler runs
+// inside createRuntime's closure (outside React), and window.prompt() throws
+// in Electron 42 — so rename requests flow through this module-level listener
+// and the mounted XTermView renders the in-app PromptTextModal.
+type TerminalRenameListener = (request: {
+  terminalId: string;
+  currentTitle: string;
+}) => void;
+let terminalRenameListener: TerminalRenameListener | null = null;
+
+const requestTerminalRename = (request: {
+  terminalId: string;
+  currentTitle: string;
+}): void => {
+  terminalRenameListener?.(request);
+};
 
 const toPlainConfig = (config: TerminalConfig): TerminalConfig =>
   JSON.parse(JSON.stringify(config)) as TerminalConfig;
@@ -478,10 +496,13 @@ const createRuntime = (
   }) => {
     if (data.id !== runtime.contextMenuId) return;
     if (data.action === "rename") {
-      const newTitle = window.prompt("Rename terminal:", config.title || "");
-      if (newTitle?.trim()) {
-        void window.gyshell.terminal.setTitle(config.id, newTitle.trim());
-      }
+      // v3.2.10: window.prompt() throws in Electron 42 — route the rename
+      // request through the module-level channel; the mounted XTermView
+      // renders the in-app PromptTextModal and applies the result.
+      requestTerminalRename({
+        terminalId: config.id,
+        currentTitle: config.title || "",
+      });
       return;
     }
     if (data.action === "copy") {
@@ -726,6 +747,13 @@ export const XTermView = React.forwardRef<XTermSearchHandle, XTermViewProps>(
       width?: number;
     } | null>(null);
     const [commandDraftSpinnerFrame, setCommandDraftSpinnerFrame] = useState(0);
+    // v3.2.10: in-app rename prompt (window.prompt throws in Electron 42).
+    // The context-menu handler lives in createRuntime's closure, so it reports
+    // rename requests through this ref instead of calling window.prompt.
+    const [renamePrompt, setRenamePrompt] = useState<{
+      title: string;
+      onDone: (value: string | null) => void;
+    } | null>(null);
     const resolvedCommandDraftShortcut =
       props.commandDraftShortcut ?? getDefaultCommandDraftShortcut();
 
@@ -755,6 +783,24 @@ export const XTermView = React.forwardRef<XTermSearchHandle, XTermViewProps>(
     useEffect(() => {
       onSearchResultsChangeRef.current = props.onSearchResultsChange;
     }, [props.onSearchResultsChange]);
+
+    // v3.2.10: subscribe to terminal-rename requests (from the pooled
+    // runtime's context-menu handler) and show the in-app rename modal.
+    useEffect(() => {
+      terminalRenameListener = (request) => {
+        setRenamePrompt({
+          title: request.currentTitle,
+          onDone: (next) => {
+            if (next) {
+              void window.gyshell.terminal.setTitle(request.terminalId, next);
+            }
+          },
+        });
+      };
+      return () => {
+        terminalRenameListener = null;
+      };
+    }, []);
 
     const resolveDraftPosition = useCallback(
       (
@@ -1254,6 +1300,11 @@ export const XTermView = React.forwardRef<XTermSearchHandle, XTermViewProps>(
             if (commandDraftPending) return;
             setCommandDraftOpen(false);
           }}
+        />
+        {/* v3.2.10: in-app rename modal (window.prompt throws in Electron 42) */}
+        <PromptTextModal
+          state={renamePrompt}
+          onClose={() => setRenamePrompt(null)}
         />
       </>
     );

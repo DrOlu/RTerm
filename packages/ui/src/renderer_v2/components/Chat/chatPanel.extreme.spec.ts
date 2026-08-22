@@ -10,6 +10,11 @@
  * They test the guard conditions and state transitions directly.
  */
 
+// Module isolation: without this, this file is a global-scope script and its
+// top-level `tests`/`test` declarations collide with other spec files in the
+// same tsconfig project (TS2451/TS2393).
+export {}
+
 const tests: Array<{ name: string; run: () => Promise<void> | void }> = []
 function test(name: string, run: () => Promise<void> | void) { tests.push({ name, run }) }
 function assertTrue(cond: boolean, message: string): void { if (!cond) throw new Error(message) }

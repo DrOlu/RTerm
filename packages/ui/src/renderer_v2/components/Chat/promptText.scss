@@ -1,0 +1,66 @@
+// Styles for the in-app promptText modal (v3.2.10 rename fix).
+// Reuses the gyshell-modal overlay/card from chatBanner.scss and adds the
+// input + footer buttons.
+
+.prompt-text-modal {
+  min-width: 360px;
+  max-width: 480px;
+}
+
+.prompt-text-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--panel-bg) 80%, transparent);
+  border: 1px solid var(--border, rgba(148, 178, 255, 0.2));
+  border-radius: 6px;
+  outline: none;
+
+  &:focus {
+    border-color: var(--accent);
+  }
+
+  &::placeholder {
+    color: color-mix(in srgb, var(--fg) 35%, transparent);
+  }
+}
+
+.prompt-text-modal .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px 14px;
+}
+
+.prompt-text-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--panel-bg) 70%, transparent);
+  border: 1px solid var(--border, rgba(148, 178, 255, 0.2));
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+}
+
+.prompt-text-btn-primary {
+  color: var(--fg-inverted, #fff);
+  background: var(--accent);
+  border-color: var(--accent);
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 85%, #fff);
+  }
+}
