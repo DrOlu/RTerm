@@ -1,5 +1,63 @@
 # Changelog
 
+## v3.2.12 (2026-08-22)
+
+### Bug fixes — chat console: response cleared and re-answered after completion
+
+The reported bug: after the agent delivered a full response, the chat would
+clear that response and start responding again to the already-completed task
+unless the user clicked Stop. Root cause found in the task-completion guard,
+plus two related defects fixed alongside.
+
+- **Guard continue loop unbounded (the core bug).** After the model produced
+  its final answer, the `task_completion_guard` node asked a thinking-model
+  "auditor" whether the task was truly done. The auditor prompt instructed it
+  to reject stopping "if there are reasonable alternative attempts/tools
+  left" — for open-ended tasks it can always invent one more verification
+  step, so it kept answering `false`. Each `false` removed the assistant's
+  answer from the UI and forced the model to re-answer from scratch,
+  indefinitely. Live logs confirmed it ("Triggered continue. reason=…never
+  verified… optionally round-trip a test request…"). The guard is now bounded
+  to at most `TASK_COMPLETION_GUARD_MAX_CONTINUES` (1) forced continues per
+  run; after that the run ends with the answer it produced. New graph state
+  `guardContinueCount` (reducer-backed) tracks it.
+
+- **Guard deleted the completed answer.** On a forced continue the guard
+  called `emitRemoveMessageIfPresent` on the assistant's last message — the
+  "clears that response" half of the bug. It no longer removes anything: the
+  answer stays in the transcript and the continue instruction arrives as a
+  new turn.
+
+- **Auditor prompt biased toward "not done".** Rewrote
+  `createTaskCompletionDecisionUserPrompt`: true when the user's request was
+  answered/work performed; explicitly forbids inventing optional follow-up
+  work (extra checks, alternative approaches, further reading) as a reason to
+  continue; false only when a stated requirement is unmet or the answer is
+  factually wrong.
+
+- **Duplicate DONE per run.** Both the agent's `final_output` node and
+  `GatewayService.dispatchTask`'s finally block emitted `done`, so every run
+  finished twice in the UI. The agent now records its runId in
+  `doneEmittedForRunIds`; the gateway checks `emittedDoneForRun(runId)` and
+  skips its duplicate (still emitting when the agent threw before
+  final_output, so failed runs still produce exactly one DONE).
+
+- **FP: queued-insertion echo re-armed the spinner.** A late
+  `ADD_MESSAGE(user)` with a non-normal `inputKind` (inserted/queued echo
+  arriving after DONE) set `isThinking=true` with no run behind it, leaving
+  the chat stuck "thinking". The ChatStore handler now ignores non-normal
+  input kinds; the backend's run events drive the real state.
+
+### Tests
+
+New `v3212ChatFixes.extreme.spec.ts` (12/12): guard bound (first continue
+allowed, second blocked, missing count = 0, over-strict auditor terminates),
+answer preservation on continue, DONE dedupe (exactly one per successful AND
+failed run), and the UI re-arm guard (normal arms, inserted/queued echoes
+don't, busy state unchanged, no-metadata treated as normal). Registered in
+`test:backend-unit-extreme`. Full backend-unit / layout-ui / automation
+suites green.
+
 ## v3.2.10 (2026-08-22)
 
 ### Bug fixes — rename broken + chat scroll trap after user-nav

@@ -969,17 +969,18 @@ export function createTaskCompletionDecisionUserPrompt(): HumanMessage {
   return new HumanMessage(
     [
       "# Task Completion Audit",
-      "You are a strict completion auditor for an autonomous agent.",
+      "You are a completion auditor for an autonomous agent.",
       "",
-      "Check the full conversation and decide whether the agent has truly finished ALL user tasks.",
-      "Do not approve stopping if there are reasonable alternative attempts/tools left.",
+      "Check the conversation and decide whether the agent has finished the user's task.",
       "",
       "Output MUST be JSON only:",
       '{"is_fully_completed": true|false, "reason":"..."}',
       "",
       "Decision rules:",
-      "- true only when the user request is fully completed and verified, or further progress is impossible and must be handed to user.",
-      "- false if requirements are unmet, verification is missing, or alternative attempts still exist.",
+      "- true when the user's request has been answered or the requested work was performed and its result reported.",
+      "- true when the agent already provided a complete, usable answer — do NOT demand extra verification the user never asked for.",
+      "- false only when a clearly stated user requirement is still unmet or the agent's answer is factually wrong.",
+      "- Do not invent optional follow-up work (extra checks, alternative approaches, further reading) as a reason to continue. If the user asked for X and X was delivered, the task is done.",
       "- reason must be concrete and reference what is done/missing.",
     ].join("\n"),
   );

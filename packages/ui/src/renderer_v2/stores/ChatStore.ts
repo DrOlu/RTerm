@@ -808,6 +808,16 @@ export class ChatStore {
         // Only set isThinking if the session isn't already done — a late
         // ADD_MESSAGE event arriving after DONE would otherwise re-set
         // isThinking=true, causing a stale "thinking" state (the re-trigger bug).
+        // v3.2.12: a message tagged as a queued insertion must NOT re-arm
+        // thinking on its own — the backend drives that via its own run
+        // events. Re-arming here left the spinner stuck after DONE when a
+        // late insertion echo arrived.
+        const isQueuedInsertionEcho =
+          (update.message?.metadata as any)?.inputKind === "queued_insertion" ||
+          !!(update.message?.metadata as any)?.inputKind;
+        if (isQueuedInsertionEcho) {
+          return;
+        }
         if (!session.isSessionBusy || session.isThinking) {
           session.isThinking = true;
           session.isSessionBusy = true;

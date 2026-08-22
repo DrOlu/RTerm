@@ -276,12 +276,22 @@ export class GatewayService extends EventEmitter implements IGatewayRuntime {
         if (context.metadata.agentRunRestartInProgress === agentRunId) {
           delete context.metadata.agentRunRestartInProgress;
         }
-        // 1. Send DONE action (for UI state like isThinking)
-        this.broadcast({
-          type: "agent:event",
-          sessionId,
-          payload: { type: "done" },
-        });
+        // v3.2.12 fix: the agent's final_output node already emitted `done`
+        // (which UIHistoryService translated into the DONE UI action), so
+        // emitting it again here produced a duplicate DONE per run — the UI
+        // saw the run finish twice. Only emit when the agent didn't (e.g. it
+        // threw before reaching final_output).
+        const agentEmittedDone =
+          typeof (this.agentService as any).emittedDoneForRun === "function"
+            ? (this.agentService as any).emittedDoneForRun(runId)
+            : false;
+        if (!agentEmittedDone) {
+          this.broadcast({
+            type: "agent:event",
+            sessionId,
+            payload: { type: "done" },
+          });
+        }
         // 2. Send SESSION_READY action (for admission control and queue scheduling)
         // This MUST be sent after clearRunState to ensure backend is truly idle
         this.transportHub.sendUIUpdate({ type: "SESSION_READY", sessionId });

@@ -239,6 +239,18 @@ const StateAnnotation = Ann.Root({
     reducer: (x: "end" | "continue", y?: "end" | "continue") => y ?? x,
     default: () => "end",
   }),
+  // v3.2.12: how many times the completion guard has forced a continue in the
+  // current run. Bounded so an over-strict auditor can't loop forever.
+  guardContinueCount: Ann({
+    reducer: (x: number, y?: number) => (typeof y === "number" ? y : x),
+    default: () => 0,
+  }),
+  // v3.2.12: the gateway runId for the current graph invocation (used to
+  // dedupe the DONE broadcast).
+  runId: Ann({
+    reducer: (x: string, y?: string) => (typeof y === "string" ? y : x),
+    default: () => "",
+  }),
   modelRequestPassCount: Ann({
     reducer: (x: number, y?: number) => (typeof y === "number" ? y : x),
     default: () => 0,
@@ -267,6 +279,11 @@ const StateAnnotation = Ann.Root({
 
 const MODEL_RETRY_MAX = 4;
 const MODEL_RETRY_DELAYS_MS = [1000, 2000, 4000, 6000];
+// v3.2.12: max times the task-completion guard may force a continue within one
+// run. The auditor prompt biases toward "not done" (it must reject stopping
+// while any alternative attempt exists), so unbounded continues re-answered
+// completed tasks indefinitely.
+const TASK_COMPLETION_GUARD_MAX_CONTINUES = 1;
 const COMPACTION_PROTECTED_NORMAL_USER_ROUNDS = 2;
 const FALLBACK_COMPACTION_SUMMARY_MAX_CHARS = 60_000;
 const FALLBACK_COMPACTION_DIGEST_MIN_CHARS = 8_000;
@@ -494,6 +511,9 @@ export class AgentService_v2 {
   private checkpointer: MemorySaver;
   private builtInToolEnabled: Record<string, boolean> = {};
   private lastAbortedMessage: BaseMessage | null = null;
+  /** v3.2.12: runIds whose final_output node already emitted `done` — lets
+   * GatewayService skip its duplicate DONE broadcast for the same run. */
+  private doneEmittedForRunIds = new Set<string>();
   private sessionModelBindings: Map<string, SessionModelBinding> = new Map();
   private selfCorrectionRuntimeManager = new SelfCorrectionRuntimeManager();
   private waitForFeedback:
@@ -678,6 +698,21 @@ export class AgentService_v2 {
 
   isAbortError(error: unknown): boolean {
     return this.helpers.isAbortError(error);
+  }
+
+  /**
+   * v3.2.12: true when the given run's final_output node already emitted the
+   * `done` event. GatewayService uses this to avoid broadcasting a duplicate
+   * DONE for the same run (the UI saw every run finish twice).
+   */
+  emittedDoneForRun(runId: string): boolean {
+    if (!runId) return false;
+    const emitted = this.doneEmittedForRunIds.has(runId);
+    if (emitted) {
+      // consume: each runId is unique, so keeping it is a slow leak
+      this.doneEmittedForRunIds.delete(runId);
+    }
+    return emitted;
   }
 
   private throwIfAborted(signal: AbortSignal | undefined): void {
@@ -2926,6 +2961,28 @@ export class AgentService_v2 {
       const sessionId = state.sessionId;
       if (!sessionId) throw new Error("No session ID in state");
 
+      // v3.2.12 fix: bound the guard's continue loop. The completion auditor's
+      // prompt asks it to keep going while "reasonable alternative attempts
+      // remain" — for open-ended tasks it can always invent one more
+      // verification step, so every completed answer got removed and re-answered
+      // (the reported "response clears and starts responding again" bug).
+      // After MAX guard continues in a single run, force the run to END with the
+      // answer it already produced.
+      const guardContinueCount =
+        typeof state.guardContinueCount === "number" ? state.guardContinueCount : 0;
+      if (guardContinueCount >= TASK_COMPLETION_GUARD_MAX_CONTINUES) {
+        console.log(
+          `[AgentService_v2][task_guard] Continue limit reached (${guardContinueCount}). Forcing completion (sessionId=${sessionId}).`,
+        );
+        return {
+          messages: state.messages,
+          sessionId,
+          pendingToolCalls: [],
+          completionGuardDecision: "end" as const,
+          guardContinueCount,
+        };
+      }
+
       const messages: BaseMessage[] = [...state.messages];
       const lastMessage: BaseMessage | undefined = messages.length > 0 ? messages[messages.length - 1] : undefined;
       const lastMessageIsAi = AIMessage.isInstance(lastMessage);
@@ -2946,6 +3003,7 @@ export class AgentService_v2 {
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "end" as const,
+          guardContinueCount,
         };
       }
 
@@ -2959,6 +3017,7 @@ export class AgentService_v2 {
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "continue" as const,
+          guardContinueCount,
         };
       }
 
@@ -2978,6 +3037,7 @@ export class AgentService_v2 {
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "continue" as const,
+          guardContinueCount,
         };
       }
 
@@ -2997,6 +3057,7 @@ export class AgentService_v2 {
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "continue" as const,
+          guardContinueCount,
         };
       }
 
@@ -3012,6 +3073,7 @@ export class AgentService_v2 {
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "continue" as const,
+          guardContinueCount,
         };
       }
 
@@ -3053,6 +3115,7 @@ export class AgentService_v2 {
             sessionId,
             pendingToolCalls: [],
             completionGuardDecision: "continue" as const,
+            guardContinueCount,
           };
         }
         console.log(
@@ -3063,6 +3126,7 @@ export class AgentService_v2 {
           sessionId,
           pendingToolCalls: [],
           completionGuardDecision: "end" as const,
+          guardContinueCount,
         };
       }
       console.log(
@@ -3103,8 +3167,11 @@ export class AgentService_v2 {
         };
       }
 
-      this.emitRemoveMessageIfPresent(sessionId, lastMessage);
-
+      // v3.2.12 fix: do NOT remove the assistant's answer from the UI when the
+      // guard forces a continue. Removing it made the completed response
+      // vanish from the chat (the "clears that response" half of the bug);
+      // the continue instruction now arrives as a new turn instead, and the
+      // model's follow-up is appended after the earlier answer.
       const continueMessage = new HumanMessage(
         `${CONTINUE_INSTRUCTION_TAG}${this.appendTaskGuardSummaryReminder(continueInstruction.continue_instruction)}`,
       );
@@ -3118,6 +3185,7 @@ export class AgentService_v2 {
         sessionId,
         pendingToolCalls: [],
         completionGuardDecision: "continue" as const,
+        guardContinueCount: guardContinueCount + 1,
       };
     });
   }
@@ -3165,6 +3233,11 @@ export class AgentService_v2 {
         history: JSON.parse(JSON.stringify(finalBoundaryMessages)),
       });
       this.helpers.sendEvent(sessionId, { type: "done" });
+      // v3.2.12: mark this run as having emitted done so GatewayService's
+      // finally-block doesn't broadcast a second DONE for the same run.
+      const doneRunId =
+        typeof (state as any)?.runId === "string" ? (state as any).runId : "";
+      if (doneRunId) this.doneEmittedForRunIds.add(doneRunId);
       return {
         ...state,
         messages: finalBoundaryMessages,
@@ -4361,6 +4434,9 @@ export class AgentService_v2 {
       sessionId: sessionId,
       startup_input: input,
       startup_mode: startMode,
+      // v3.2.12: carried so final_output can mark this run as done-emitting
+      // (dedupes the GatewayService finally-block DONE broadcast).
+      runId: runId || "",
       runtimeThinkingCorrectionEnabled:
         runExperimentalFlags.runtimeThinkingCorrectionEnabled,
       taskFinishGuardEnabled: runExperimentalFlags.taskFinishGuardEnabled,
@@ -4426,6 +4502,10 @@ export class AgentService_v2 {
         message: errorMessage,
         details: errorDetails,
       });
+      // v3.2.12: the error event already makes UIHistoryService emit a DONE
+      // action; record the run so the gateway's finally-block fallback doesn't
+      // broadcast a second `done` for the same run.
+      if (runId) this.doneEmittedForRunIds.add(runId);
 
       throw err; // Throw to Gateway for UI notification
     } finally {
