@@ -11,5 +11,26 @@
     "start": "node dist/index.js",
     "start:standalone": "node dist-standalone/gybackend.js",
     "typecheck": "tsc --noEmit -p tsconfig.json"
-  }
+  },
+  "description": "AI-native terminal & ops platform built for Forward Deployed Engineers (FDE): SSH/WinRM/serial reach into any estate, fleet execution, AI agent under policy, MOP-gated change control, SRE observability, tamper-evident audit.",
+  "keywords": [
+    "forward-deployed-engineer",
+    "fde",
+    "ai-terminal",
+    "ai-agent",
+    "ssh",
+    "winrm",
+    "serial-console",
+    "cisco",
+    "network-automation",
+    "devops",
+    "sre",
+    "observability",
+    "incident-response",
+    "change-management",
+    "infrastructure-automation",
+    "fleet-management",
+    "runbooks",
+    "neuralos"
+  ]
 }

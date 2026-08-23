@@ -1,6 +1,7 @@
 # <img src="./demo_imgs/icon.png" width="40" height="40" align="center" style="margin-right: 10px;"> RTerm
 
 > **The AI-Native Terminal that thinks, executes, and collaborates with you.**
+> **Built for Forward Deployed Engineers (FDEs), SREs, and platform teams** who live inside customer estates: reach any host (SSH / WinRM / serial), execute across fleets, change production safely, and leave behind automation — from one window, under your control.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#platforms)
@@ -12,6 +13,7 @@ Latest release notes: [`changelogs/v1.6.0.md`](./changelogs/v1.6.0.md)
 If you have any suggestions or questions, please feel free to submit them in [GitHub Discussions](https://github.com/MrOrangeJJ/RTerm/discussions).
 
 Usage guides:
+[`docs/fde.md` — RTerm for Forward Deployed Engineers](./docs/fde.md) ·
 [`docs/mobile-web-usage.md`](./docs/mobile-web-usage.md) ·
 [`docs/tui-usage.md`](./docs/tui-usage.md) ·
 [`docs/gybackend-usage.md`](./docs/gybackend-usage.md)
@@ -64,6 +66,7 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 
 ### At a Glance
 
+- **For Forward Deployed Engineers (FDEs)**: reach any customer estate (SSH / WinRM / serial / Cisco), execute across fleets, land production changes under MOP approval with automatic rollback, and leave behind playbooks, triggers, and audit evidence — see [`docs/fde.md`](./docs/fde.md).
 - **For shipping work**: not just planning, but iterative execution and correction.
 - **For long-running tasks**: preserves session continuity and state across steps.
 - **For real infrastructure**: shell, SSH, forwarding, file management, and multi-tab interactive terminal control.

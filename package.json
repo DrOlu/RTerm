@@ -1,7 +1,7 @@
 {
   "name": "rterm",
   "version": "3.2.12",
-  "description": "RTerm - AI-Native Terminal App",
+  "description": "AI-native terminal & ops platform built for Forward Deployed Engineers (FDE): SSH/WinRM/serial reach into any estate, fleet execution, AI agent under policy, MOP-gated change control, SRE observability, tamper-evident audit.",
   "main": "./out/main/index.js",
   "author": "Hyperspace Technologies <rterm@hyperspace.ng>",
   "private": true,
@@ -131,5 +131,25 @@
     "typescript": "^5.3.3",
     "vite": "^5.0.10"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "keywords": [
+    "forward-deployed-engineer",
+    "fde",
+    "ai-terminal",
+    "ai-agent",
+    "ssh",
+    "winrm",
+    "serial-console",
+    "cisco",
+    "network-automation",
+    "devops",
+    "sre",
+    "observability",
+    "incident-response",
+    "change-management",
+    "infrastructure-automation",
+    "fleet-management",
+    "runbooks",
+    "neuralos"
+  ]
 }
