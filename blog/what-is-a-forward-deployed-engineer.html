@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>What Is a Forward Deployed Engineer — and Why the Role Needs Its Own Tooling | RTerm Blog</title>
+<meta name="description" content="What FDEs actually do all day, why generic dev tools fail them, and what purpose-built FDE tooling looks like." />
+<link rel="canonical" href="https://rterm.app/blog/what-is-a-forward-deployed-engineer.html" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://rterm.app/blog/what-is-a-forward-deployed-engineer.html" />
+<meta property="og:title" content="What Is a Forward Deployed Engineer — and Why the Role Needs Its Own Tooling" />
+<meta property="og:description" content="What FDEs actually do all day, why generic dev tools fail them, and what purpose-built FDE tooling looks like." />
+<meta property="og:image" content="https://rterm.app/og-image.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="What Is a Forward Deployed Engineer — and Why the Role Needs Its Own Tooling" />
+<meta name="twitter:description" content="What FDEs actually do all day, why generic dev tools fail them, and what purpose-built FDE tooling looks like." />
+<meta name="twitter:image" content="https://rterm.app/og-image.png" />
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Article", "headline": "What Is a Forward Deployed Engineer \u2014 and Why the Role Needs Its Own Tooling", "description": "What FDEs actually do all day, why generic dev tools fail them, and what purpose-built FDE tooling looks like.", "url": "https://rterm.app/blog/what-is-a-forward-deployed-engineer.html", "image": "https://rterm.app/og-image.png", "author": {"@type": "Organization", "name": "Hyperspace Technologies"}, "publisher": {"@type": "Organization", "name": "Hyperspace Technologies"}}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/blog/style.css" />
+<link rel="icon" type="image/png" href="/icons2/icon_256.png" />
+</head>
+<body>
+<nav class="blog-nav">
+  <div class="nav-container">
+    <div class="logo-container">
+      <a href="/"><img src="/icons2/icon.png" alt="RTerm" class="logo"></a>
+      <span class="logo-text">R<span>T</span>erm</span>
+    </div>
+    <div class="nav-right">
+      <a href="/">Home</a>
+      <a href="/blog/">Blog</a>
+      <a href="https://fde.rterm.app/">FDE Playbook</a>
+      <a href="https://github.com/DrOlu/RTerm">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="wrap">
+
+<div class="kicker">FDE</div>
+<h1 class="post-title">What Is a Forward Deployed Engineer — and Why the Role Needs Its Own Tooling</h1>
+<p class="post-sub">The FDE role went mainstream when Sam Altman put it on OpenAI's hiring page. Here's what FDEs actually do all day, and why generic dev tools keep failing them.</p>
+<div class="post-meta"><span>Hyperspace Technologies</span><span class="dot"></span><span>2026-08-23</span><span class="dot"></span><span class="tag">#fde</span> <span class="tag">#forward-deployed-engineer</span> <span class="tag">#career</span></div>
+<article>
+<h2>The job, minus the mythology</h2>
+<p>A Forward Deployed Engineer is an engineer who works <strong>inside someone else's production environment</strong>. Not a lab. Not staging. The customer's messy, undocumented, half-migrated estate — under a clock, with their VP watching.</p>
+<p>Strip away the vendor slides and the job is five moves:</p>
+<ol><li><strong>Set the stage</strong> — name the environment, the blast radius, the clock</li><li><strong>Gather facts</strong> — pull ground truth from every box, in parallel; never guess</li><li><strong>Track the issue</strong> — form a hypothesis and drive it with tools</li><li><strong>Resolve under guardrails</strong> — change production <em>safely</em>, prove it worked</li><li><strong>Lock it in</strong> — automate the recurrence so it never pages anyone again</li></ol>
+<p>That fifth move is what separates an FDE from a firefighter.</p>
+<h2>Why generic tooling breaks on this job</h2>
+<p>The default FDE kit — iTerm/SecureCRT, a pile of Ansible repos, a notes app, screenshots for evidence — fails in predictable ways:</p>
+<div class="table-scroll"><table><thead><tr>
+<th>Failure</th>
+<th>Cost</th>
+</tr></thead><tbody>
+<tr><td>N windows for N hosts (Linux SSH + Windows RDP/WinRM + serial + Cisco)</td><td>context-switching; missed signals</td></tr>
+<tr><td>Facts live in tribal memory</td><td>every engagement re-discovers the estate</td></tr>
+<tr><td>Changes applied by hand-rolled scripts</td><td>no validation, no rollback, no approval trail</td></tr>
+<tr><td>Evidence = screenshots</td><td>audits become archaeology</td></tr>
+<tr><td>Fixes are one-offs</td><td>the same incident returns next quarter</td></tr>
+</tbody></table></div>
+<h2>What purpose-built looks like</h2>
+<p><a href="https://github.com/DrOlu/RTerm">RTerm</a> was designed around that five-move loop. The short version of <a href="https://fde.rterm.app/">the field guide</a>:</p>
+<ul><li><strong>Reach</strong>: one window into everything — SSH, WinRM, serial console, Cisco</li></ul>
+<p>IOS-XE/XR with proper terminal handling, local shell. PuTTY session import for day one of an engagement.</p>
+<ul><li><strong>Command</strong>: run the same check across the fleet in parallel; inventory hosts</li></ul>
+<p>automatically into structured facts you can act on.</p>
+<ul><li><strong>Agent</strong>: hand the tedious observe→reason→act loop to an AI agent — bounded</li></ul>
+<p>by a policy engine (allow read/status, deny destructive, escalate prod changes) and an optional second "checker" model reviewing every consequential action.</p>
+<ul><li><strong>Operations</strong>: production changes go through plan → human approval → run →</li></ul>
+<p>validate → automatic rollback. Every action lands in a hash-chained audit ledger that can be sealed into independently verifiable evidence bundles.</p>
+<ul><li><strong>Lock it in</strong>: turn any fix into a playbook, trigger, SLO, or scheduled task —</li></ul>
+<p>the leave-behind becomes part of the customer's operations, not your laptop.</p>
+<p>And because the same engine runs headless (<code>npm i -g rterm-backend</code>), the whole workstation can be handed to the customer's team at engagement end — or driven by CI and other agents over its WebSocket API.</p>
+<h2>The market moved</h2>
+<p>OpenAI, Palantir, Anthropic, and every AI-forward consultancy now hire for this role explicitly. The tools are catching up slower than the title. <a href="https://github.com/DrOlu/RTerm">RTerm</a> is an attempt to close that gap — built by people who do the job.</p>
+<div class="cta">
+  <h2>See it in action</h2>
+  <p>RTerm was designed around the five-move FDE loop — reach, command, agent, operations, lock-it-in. See the field guide or go straight to GitHub.</p>
+  <a class="btn" href="https://github.com/DrOlu/RTerm">RTerm on GitHub</a>
+  <a class="btn ghost" href="https://fde.rterm.app/">Read the FDE Playbook</a>
+</div>
+</article>
+
+</main>
+<footer class="site-footer">RTerm — AI-native terminal &amp; agentic-AI operations platform · <a href="https://rterm.app">rterm.app</a> · <a href="https://github.com/DrOlu/RTerm">GitHub</a></footer>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI SRE Tools: Where Agents Actually Execute (2026 Landscape) | RTerm Blog</title>
+<meta name="description" content="An honest map of the AI SRE category — observability copilots, RCA engines, and the agents that actually execute remediation on real hosts." />
+<link rel="canonical" href="https://rterm.app/blog/ai-sre-tools-landscape.html" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://rterm.app/blog/ai-sre-tools-landscape.html" />
+<meta property="og:title" content="AI SRE Tools: Where Agents Actually Execute (2026 Landscape)" />
+<meta property="og:description" content="An honest map of the AI SRE category — observability copilots, RCA engines, and the agents that actually execute remediation on real hosts." />
+<meta property="og:image" content="https://rterm.app/og-image.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="AI SRE Tools: Where Agents Actually Execute (2026 Landscape)" />
+<meta name="twitter:description" content="An honest map of the AI SRE category — observability copilots, RCA engines, and the agents that actually execute remediation on real hosts." />
+<meta name="twitter:image" content="https://rterm.app/og-image.png" />
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Article", "headline": "AI SRE Tools: Where Agents Actually Execute (2026 Landscape)", "description": "An honest map of the AI SRE category \u2014 observability copilots, RCA engines, and the agents that actually execute remediation on real hosts.", "url": "https://rterm.app/blog/ai-sre-tools-landscape.html", "image": "https://rterm.app/og-image.png", "author": {"@type": "Organization", "name": "Hyperspace Technologies"}, "publisher": {"@type": "Organization", "name": "Hyperspace Technologies"}}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/blog/style.css" />
+<link rel="icon" type="image/png" href="/icons2/icon_256.png" />
+</head>
+<body>
+<nav class="blog-nav">
+  <div class="nav-container">
+    <div class="logo-container">
+      <a href="/"><img src="/icons2/icon.png" alt="RTerm" class="logo"></a>
+      <span class="logo-text">R<span>T</span>erm</span>
+    </div>
+    <div class="nav-right">
+      <a href="/">Home</a>
+      <a href="/blog/">Blog</a>
+      <a href="https://fde.rterm.app/">FDE Playbook</a>
+      <a href="https://github.com/DrOlu/RTerm">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="wrap">
+
+<div class="kicker">AI SRE</div>
+<h1 class="post-title">AI SRE Tools: Where Agents Actually Execute (2026 Landscape)</h1>
+<p class="post-sub">"AI SRE" is becoming a product category. Here's an honest map of who does what — and where the execution gap still is.</p>
+<div class="post-meta"><span>Hyperspace Technologies</span><span class="dot"></span><span>2026-08-23</span><span class="dot"></span><span class="tag">#ai-sre</span> <span class="tag">#sre</span> <span class="tag">#incident-response</span></div>
+<article>
+<h2>The category, honestly drawn</h2>
+<p>"AI SRE" now covers at least four distinct things, often conflated:</p>
+<ol><li><strong>AI-assisted observability</strong> — anomaly detection, alert correlation,</li></ol>
+<p>noise reduction (classic AIOps: Datadog Watchdog, Dynatrace Davis, BigPanda)</p>
+<ol><li><strong>AI incident copilots</strong> — summarize the incident, draft the timeline,</li></ol>
+<p>suggest queries (Rootly AI, FireHydrant, Resolve.ai)</p>
+<ol><li><strong>RCA engines</strong> — topology-aware probable-cause analysis</li><li><strong>Agents that execute remediation</strong> — actually <em>do</em> the fix on infrastructure</li></ol>
+<p>Categories 1–3 are maturing fast. Category 4 is where most tools stop at "we triggered your webhook." The hard problem isn't deciding what to do — it's doing it safely on real, heterogeneous infrastructure and proving what happened.</p>
+<h2>The execution gap, concretely</h2>
+<p>Ask any vendor in 1–3 what happens after the alert fires:</p>
+<blockquote>"We call your runbook automation."</blockquote>
+<p>Ask what happens if the runbook doesn't cover this failure mode:</p>
+<blockquote>"…your engineer investigates."</blockquote>
+<p>That handoff — from correlated alert to someone SSHing into a box at 2am with production access and no guardrails — is the unsolved part of the AI SRE story. It's also exactly the part <a href="https://github.com/DrOlu/RTerm">RTerm</a> automates.</p>
+<h2>How RTerm fits the landscape</h2>
+<p>RTerm is not another dashboard. It's the <strong>agent-with-hands</strong> layer:</p>
+<div class="table-scroll"><table><thead><tr>
+<th>Layer</th>
+<th>Typical tool</th>
+<th>RTerm's answer</th>
+</tr></thead><tbody>
+<tr><td>Detect</td><td>your AIOps platform</td><td>consumes its webhooks; lightweight built-in metrics/anomaly/forecasting</td></tr>
+<tr><td>Decide</td><td>correlation engine</td><td>AI agent reasoning over live host state, under allow/deny/escalate policy</td></tr>
+<tr><td><strong>Act</strong></td><td>webhook → your scripts</td><td><strong>native agent-driven execution over SSH/WinRM/serial — with MOP approval gates and automatic rollback</strong></td></tr>
+<tr><td>Prove</td><td>alert log</td><td>hash-chained audit ledger, Merkle-sealed evidence, recorded sessions</td></tr>
+</tbody></table></div>
+<p>The distinctive bits for SRE teams evaluating AI agents:</p>
+<ul><li><strong>Agentless reach</strong>: talks to hosts over the protocols they already speak —</li></ul>
+<p>critical for brownfield and customer estates where you can't install agents.</p>
+<ul><li><strong>Guardrails as a first-class feature</strong>: policy engine + maker/checker review</li></ul>
+<p>model evaluate every consequential action before it runs. Prod changes require human approval through built-in change management.</p>
+<ul><li><strong>Evidence by default</strong>: every action lands in a tamper-evident ledger —</li></ul>
+<p>the postmortem writes itself, and compliance gets verifiable proof.</p>
+<ul><li><strong>Runs anywhere</strong>: desktop app for interactive work, headless daemon</li></ul>
+<p>(<code>npm i -g rterm-backend</code>) for bastion/CI, WebSocket API for other agents.</p>
+<h2>Practical pairings</h2>
+<ul><li><strong>Datadog/PagerDuty + RTerm</strong>: platform detects and pages → trigger fires an</li></ul>
+<p>RTerm playbook → agent diagnoses on-host under policy → fix applied via approved change or held for human approval → evidence sealed.</p>
+<ul><li><strong>Grafana + RTerm</strong>: alerts route to RTerm triggers; remediation and</li></ul>
+<p>investigation happen where the infrastructure is.</p>
+<ul><li><strong>Standalone RTerm</strong>: small teams run its built-in golden signals, SLOs,</li></ul>
+<p>incident ledger, and on-call paging as the entire stack.</p>
+<h2>Bottom line</h2>
+<p>The AI SRE category is real, but most of it stops one step short of production. When comparing tools, ask exactly one question: <em>"Show me the agent changing something on a real host — and then show me who approved it and how you'd prove it afterward."</em> <a href="https://github.com/DrOlu/RTerm">RTerm</a> was built to be the tool that survives that question.</p>
+<div class="cta">
+  <h2>See it in action</h2>
+  <p>When comparing AI SRE tools, ask one question: "Show me the agent changing something on a real host — then show me who approved it." RTerm survives it.</p>
+  <a class="btn" href="https://github.com/DrOlu/RTerm">RTerm on GitHub</a>
+  <a class="btn ghost" href="https://fde.rterm.app/">Read the FDE Playbook</a>
+</div>
+</article>
+
+</main>
+<footer class="site-footer">RTerm — AI-native terminal &amp; agentic-AI operations platform · <a href="https://rterm.app">rterm.app</a> · <a href="https://github.com/DrOlu/RTerm">GitHub</a></footer>
+</body>
+</html>

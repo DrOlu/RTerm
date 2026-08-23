@@ -6,6 +6,26 @@
     <priority>1.0</priority>
   </url>
   <url>
+    <loc>https://rterm.app/blog/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://rterm.app/blog/rterm-vs-aiops-platforms.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://rterm.app/blog/what-is-a-forward-deployed-engineer.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://rterm.app/blog/ai-sre-tools-landscape.html</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://fde.rterm.app/</loc>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
@@ -13,11 +33,11 @@
   <url>
     <loc>https://github.com/DrOlu/RTerm</loc>
     <changefreq>weekly</changefreq>
-    <priority>0.8</priority>
+    <priority>0.7</priority>
   </url>
   <url>
     <loc>https://raw.githubusercontent.com/DrOlu/RTerm/main/docs/fde.md</loc>
     <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
+    <priority>0.6</priority>
   </url>
 </urlset>

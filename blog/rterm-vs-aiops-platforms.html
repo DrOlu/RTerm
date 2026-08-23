@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RTerm vs AIOps Platforms: Watching Is Not Closing the Loop | RTerm Blog</title>
+<meta name="description" content="Classic AIOps platforms detect and decide. RTerm is the execution layer that acts on real infrastructure under policy and seals tamper-evident evidence." />
+<link rel="canonical" href="https://rterm.app/blog/rterm-vs-aiops-platforms.html" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://rterm.app/blog/rterm-vs-aiops-platforms.html" />
+<meta property="og:title" content="RTerm vs AIOps Platforms: Watching Is Not Closing the Loop" />
+<meta property="og:description" content="Classic AIOps platforms detect and decide. RTerm is the execution layer that acts on real infrastructure under policy and seals tamper-evident evidence." />
+<meta property="og:image" content="https://rterm.app/og-image.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="RTerm vs AIOps Platforms: Watching Is Not Closing the Loop" />
+<meta name="twitter:description" content="Classic AIOps platforms detect and decide. RTerm is the execution layer that acts on real infrastructure under policy and seals tamper-evident evidence." />
+<meta name="twitter:image" content="https://rterm.app/og-image.png" />
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Article", "headline": "RTerm vs AIOps Platforms: Watching Is Not Closing the Loop", "description": "Classic AIOps platforms detect and decide. RTerm is the execution layer that acts on real infrastructure under policy and seals tamper-evident evidence.", "url": "https://rterm.app/blog/rterm-vs-aiops-platforms.html", "image": "https://rterm.app/og-image.png", "author": {"@type": "Organization", "name": "Hyperspace Technologies"}, "publisher": {"@type": "Organization", "name": "Hyperspace Technologies"}}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/blog/style.css" />
+<link rel="icon" type="image/png" href="/icons2/icon_256.png" />
+</head>
+<body>
+<nav class="blog-nav">
+  <div class="nav-container">
+    <div class="logo-container">
+      <a href="/"><img src="/icons2/icon.png" alt="RTerm" class="logo"></a>
+      <span class="logo-text">R<span>T</span>erm</span>
+    </div>
+    <div class="nav-right">
+      <a href="/">Home</a>
+      <a href="/blog/">Blog</a>
+      <a href="https://fde.rterm.app/">FDE Playbook</a>
+      <a href="https://github.com/DrOlu/RTerm">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main class="wrap">
+
+<div class="kicker">AIOps</div>
+<h1 class="post-title">RTerm vs AIOps Platforms: Watching Is Not Closing the Loop</h1>
+<p class="post-sub">A practical comparison for SRE and platform teams evaluating AIOps tooling in 2026.</p>
+<div class="post-meta"><span>Hyperspace Technologies</span><span class="dot"></span><span>2026-08-23</span><span class="dot"></span><span class="tag">#aiops</span> <span class="tag">#ai-sre</span> <span class="tag">#agentic-ai</span></div>
+<article>
+<p>The AIOps market has converged on a pattern: ingest telemetry from everywhere, apply ML to detect anomalies and correlate alerts, then notify a human. Datadog, Dynatrace, BigPanda, Moogsoft, PagerDuty Process Automation — excellent tools, and most teams need one. But notice what's missing from that sentence: <strong>someone still has to log into a box and fix it.</strong></p>
+<h2>The gap in the classic AIOps loop</h2>
+<p>The textbook closed loop is <strong>Detect → Decide → Act → Prove</strong>. Traditional AIOps platforms are strong on the first two and stop there:</p>
+<div class="table-scroll"><table><thead><tr>
+<th>Stage</th>
+<th>Classic AIOps platform</th>
+<th>What's left for your team</th>
+</tr></thead><tbody>
+<tr><td>Detect</td><td>✅ metrics, traces, logs, anomaly detection</td><td>—</td></tr>
+<tr><td>Decide</td><td>⚠️ correlation + runbook <em>suggestions</em></td><td>a human reads it, decides</td></tr>
+<tr><td>Act</td><td>❌ or webhook-hands-off to scripts you maintain</td><td>someone SSHes in, prays</td></tr>
+<tr><td>Prove</td><td>⚠️ audit log of <em>alerts</em>, not <em>actions</em></td><td>screenshots in the postmortem</td></tr>
+</tbody></table></div>
+<p>The "last mile" — actually executing a change on real infrastructure, safely, with evidence — is exactly where <a href="https://github.com/DrOlu/RTerm">RTerm</a> lives.</p>
+<h2>What RTerm adds to an AIOps stack</h2>
+<p>RTerm is not a replacement for your observability platform. It's the <strong>execution layer</strong> underneath it:</p>
+<ol><li><strong>It executes over the protocols your estate already speaks</strong> — SSH, WinRM,</li></ol>
+<p>serial console, Cisco IOS-XE/XR. No agents to install on customer or prod hosts.</p>
+<ol><li><strong>An AI agent drives the tedious loop</strong> (observe output → reason → act) under</li></ol>
+<p>an allow/deny/escalate policy engine, with an optional maker/checker second model reviewing every consequential action.</p>
+<ol><li><strong>Production changes go through MOP change control</strong>: plan → human approval →</li></ol>
+<p>run → validation steps → automatic rollback on failure. Durable change ledger.</p>
+<ol><li><strong>Every action leaves tamper-evident evidence</strong>: a hash-chained audit ledger</li></ol>
+<p>with Merkle-tree sealing. When compliance asks "who ran what, where, and who approved it" — you hand them verifiable proof, not screenshots.</p>
+<ol><li><strong>It plays both directions</strong>: consume webhooks from your alerting stack and</li></ol>
+<p>fire remediation playbooks; export Prometheus metrics; expose its whole API over a WebSocket JSON-RPC gateway for CI and other agents.</p>
+<h2>Side-by-side</h2>
+<div class="table-scroll"><table><thead><tr>
+<th>Capability</th>
+<th>Classic AIOps</th>
+<th>RTerm</th>
+</tr></thead><tbody>
+<tr><td>Metrics/APM/RUM ingestion</td><td>✅ deep</td><td>⚠️ lightweight ledgers + OTLP/Prometheus interop</td></tr>
+<tr><td>Anomaly detection &amp; forecasting</td><td>✅ mature</td><td>✅ z-score/robust + trend forecasts</td></tr>
+<tr><td>Alert routing / on-call paging</td><td>✅ mature</td><td>✅ Slack/Teams/SMTP/Telegram/webhook</td></tr>
+<tr><td><strong>Execute remediation on hosts</strong></td><td>❌ hands off</td><td>✅ native (SSH/WinRM/serial), agent-driven</td></tr>
+<tr><td><strong>Change approval workflow</strong></td><td>❌ ticketing integration only</td><td>✅ built-in MOP plan→approve→run→rollback</td></tr>
+<tr><td><strong>Agentless reach into brownfield/customer estates</strong></td><td>❌ needs agents/integrations</td><td>✅ core design</td></tr>
+<tr><td>Tamper-evident action audit</td><td>❌ alert-centric</td><td>✅ hash-chained ledger + Merkle sealing</td></tr>
+<tr><td>Runs where the work is (laptop, bastion, CI)</td><td>☁️ SaaS</td><td>✅ desktop app or headless daemon</td></tr>
+</tbody></table></div>
+<h2>The honest takeaway</h2>
+<p>If your problem is <em>"we can't see everything"</em> — buy a classic AIOps platform. If your problem is <em>"we see everything and humans are still the API between the alert and the fix"</em> — add an execution layer. Most mature teams end up wanting both, integrated.</p>
+<p>That integration — alerts in, verified actions out, evidence sealed — is the whole point of <a href="https://github.com/DrOlu/RTerm">RTerm</a>. See the <a href="https://fde.rterm.app/">FDE field guide</a> for what this looks like inside customer environments.</p>
+<div class="cta">
+  <h2>See it in action</h2>
+  <p>If your problem is "we see everything and humans are still the API between the alert and the fix" — add an execution layer. RTerm closes the loop: alerts in, verified actions out, evidence sealed.</p>
+  <a class="btn" href="https://github.com/DrOlu/RTerm">RTerm on GitHub</a>
+  <a class="btn ghost" href="https://fde.rterm.app/">Read the FDE Playbook</a>
+</div>
+</article>
+
+</main>
+<footer class="site-footer">RTerm — AI-native terminal &amp; agentic-AI operations platform · <a href="https://rterm.app">rterm.app</a> · <a href="https://github.com/DrOlu/RTerm">GitHub</a></footer>
+</body>
+</html>
