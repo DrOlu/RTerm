@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.2.13 (2026-08-23)
+
+### SEO & positioning: Forward Deployed Engineers + AIOps / AI SRE / agentic-AI operations
+
+Discoverability release — no runtime behavior changes. Aligns every public
+metadata surface with how the product is actually used in the field.
+
+- **npm metadata (`neuralos` + `rterm-backend`):** description now leads with
+  "AI-native terminal & agentic-AI operations platform for Forward Deployed
+  Engineers & SREs"; keywords expanded to 26 incl. `aiops`, `ai-sre`,
+  `agentic-ai`, `chatops`, `self-healing`, `runbook-automation`,
+  `closed-loop-remediation`, `mcp`. This release activates those keywords in
+  npm search.
+- **GitHub repo:** FDE-led description + homepage + 20 topics
+  (`forward-deployed-engineer`, `fde`, `aiops`, `ai-sre`, `agentic-ai`,
+  `chatops`, ...).
+- **README.md:** new "Where RTerm Fits — AIOps, AI SRE & Agentic Ops" section
+  + FDE tagline; README.zh-CN.md carries the same positioning in Chinese.
+- **docs/fde.md:** full FDE field guide (estate reach, MOP-gated change,
+  incident loop, leave-behind automation).
+- **seo/:** rterm.app fix-pack — head/body snippets, robots.txt (incl. AI
+  crawlers), sitemap.xml, deploy checklist.
+
+### Packaging
+
+- No code changes vs v3.2.12; backend bundle rebuilt at same engine state.
+
 ## v3.2.12 (2026-08-22)
 
 ### Bug fixes — chat console: response cleared and re-answered after completion

@@ -1,6 +1,6 @@
 {
   "name": "rterm",
-  "version": "3.2.12",
+  "version": "3.2.13",
   "description": "AI-native terminal & agentic-AI operations platform for Forward Deployed Engineers & SREs - AIOps closed-loop remediation, AI SRE, self-healing infrastructure, runbook automation, ChatOps over SSH/WinRM/serial under policy with tamper-evident audit.",
   "main": "./out/main/index.js",
   "author": "Hyperspace Technologies <rterm@hyperspace.ng>",
