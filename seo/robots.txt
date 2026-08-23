@@ -1,0 +1,33 @@
+# rterm.app — robots.txt
+# All major crawlers welcome. Sitemap declared for discovery.
+
+User-agent: *
+Allow: /
+
+# AI/LLM crawlers — explicitly welcome (GPTBot, ClaudeBot, PerplexityBot, etc.)
+# so RTerm appears in AI-generated answers, not just blue links.
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://rterm.app/sitemap.xml
