@@ -1,6 +1,10 @@
 # <img src="./demo_imgs/icon.png" width="40" height="40" align="center" style="margin-right: 10px;"> RTerm
 
 > **会思考、会执行、可协作的 AI 原生终端。**
+>
+> **面向 Forward Deployed Engineer（FDE，前线部署工程师）、SRE 与平台团队**：一个窗口触达任意主机（SSH / WinRM / 串口），跨机器并行执行，在审批与回滚保护下安全变更生产环境，并把自动化沉淀留给客户。
+>
+> **AIOps · AI SRE · 智能体运维（Agentic Ops）**：闭环修复、自愈基础设施、Runbook 自动化与 ChatOps —— AI 智能体在策略约束下真正执行操作，并留下可验证的审计证据。
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#支持平台)

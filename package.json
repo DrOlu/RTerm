@@ -1,7 +1,7 @@
 {
   "name": "rterm",
   "version": "3.2.12",
-  "description": "AI-native terminal & ops platform built for Forward Deployed Engineers (FDE): SSH/WinRM/serial reach into any estate, fleet execution, AI agent under policy, MOP-gated change control, SRE observability, tamper-evident audit.",
+  "description": "AI-native terminal & agentic-AI operations platform for Forward Deployed Engineers & SREs - AIOps closed-loop remediation, AI SRE, self-healing infrastructure, runbook automation, ChatOps over SSH/WinRM/serial under policy with tamper-evident audit.",
   "main": "./out/main/index.js",
   "author": "Hyperspace Technologies <rterm@hyperspace.ng>",
   "private": true,
@@ -150,6 +150,14 @@
     "infrastructure-automation",
     "fleet-management",
     "runbooks",
-    "neuralos"
+    "neuralos",
+    "aiops",
+    "ai-sre",
+    "agentic-ai",
+    "chatops",
+    "self-healing",
+    "runbook-automation",
+    "closed-loop-remediation",
+    "mcp"
   ]
 }

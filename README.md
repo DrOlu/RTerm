@@ -2,6 +2,7 @@
 
 > **The AI-Native Terminal that thinks, executes, and collaborates with you.**
 > **Built for Forward Deployed Engineers (FDEs), SREs, and platform teams** who live inside customer estates: reach any host (SSH / WinRM / serial), execute across fleets, change production safely, and leave behind automation — from one window, under your control.
+> **AIOps · AI SRE · Agentic AI for operations**: closed-loop remediation, self-healing infrastructure, runbook automation, and ChatOps — with an AI agent that executes under policy and leaves tamper-evident evidence.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)](#platforms)
@@ -72,6 +73,22 @@ RTerm is built for **persistent execution in your real terminal runtime**:
 - **For real infrastructure**: shell, SSH, forwarding, file management, and multi-tab interactive terminal control.
 - **For multi-device flow**: desktop + TUI + mobile-web with shared gateway semantics.
 - **For multimodal workflows**: text and image inputs can be combined in one execution turn.
+
+## Where RTerm Fits — AIOps, AI SRE & Agentic Ops
+
+Depending on your lens, RTerm is an **AIOps platform**, an **AI SRE teammate**, an **agentic-AI operations runtime**, a **runbook automation engine**, or **ChatOps for production** — all running on your own machine, against your real estate, under your policy.
+
+| If you're looking for… | RTerm delivers |
+|---|---|
+| **AIOps / closed-loop remediation** | Detect (metrics, anomaly detection, early-warning forecasts, triggers) → Decide (AI agent under AGT policy) → Act (playbooks, MOP-gated changes) → Prove (hash-chained audit ledger + Merkle evidence sealing) |
+| **AI SRE / SRE agents** | Golden signals, SLOs with error budgets + burn-rate alerting, uptime watchdogs, incident ledger with AI RCA + postmortems, capacity forecasting, on-call paging — executed by an agent with guardrails, not another dashboard you stare at |
+| **Agentic AI for infrastructure** | The missing execution layer: a persistent observe→reason→act loop over SSH/WinRM/serial fleets, 100+ built-in tools, MCP support, skills, plugins, and a maker/checker review model that double-checks every consequential action |
+| **Runbook automation** | Orchestrated DAG playbooks (incl. dagu YAML), validation steps with automatic rollback, Jinja templates, cron scheduling, GitOps drift detection |
+| **Self-healing infrastructure** | Event-driven triggers (terminal pattern / metric threshold / webhook / schedule) fire playbooks or propose approved changes — auto-remediation with cooldowns and concurrency caps |
+| **ChatOps for prod** | Steer operations conversationally from the desktop app or your phone's browser (mobile-web companion); approve blocked commands from anywhere; alerts fan out to Slack/Teams/Telegram/SMTP |
+| **Copilot for ops/on-call** | Ask "why is db-02 slow?" — the agent pulls facts across hosts, correlates metrics + traces + logs, proposes a fix under approval, writes the postmortem |
+
+The common thread: **RTerm doesn't just watch or suggest — it executes, safely, and leaves evidence.**
 
 ## Latest Highlights
 
