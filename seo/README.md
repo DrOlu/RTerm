@@ -1,5 +1,12 @@
 # rterm.app — SEO Fix-Pack
 
+> **✅ DEPLOYED LIVE 2026-08-23** — index.html upgraded on the Apache host
+> (`~/public_html/`, user `rtermapp@131.153.147.50`). Original page backed up as
+> `index.html.bak-20260823` on the server (restore = `cp index.html.bak-20260823 index.html`).
+> Verified live: title/desc/keywords/canonical/OG+Twitter cards/JSON-LD/og-image(200)/robots.txt/sitemap.xml/http→https 301/www→apex 301, new H1 + AIOps/AI-SRE section (FDE ×5, AI SRE ×7 in page text).
+>
+> **Note:** password auth works; pubkey auth is disabled server-side (sshd rejects even localhost self-test → cPanel/WHM `PubkeyAuthentication` off). Enable via WHM → Security Center → SSH Password Authorization Tweak, or ask host support. Rotate the shared password after enabling keys.
+
 Everything needed to make rterm.app rank for **"forward deployed engineer tool"**,
 **"AI SRE"**, **"agentic AI operations"**, and related searches.
 
