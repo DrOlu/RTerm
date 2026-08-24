@@ -1,31 +1,38 @@
 # Changelog
 
-## v3.2.13 (2026-08-23)
+## v3.2.14 (2026-08-22)
 
-### SEO & positioning: Forward Deployed Engineers + AIOps / AI SRE / agentic-AI operations
+### Features & fixes — OTel pusher fix + OpenLLMetry-style LLM tracing
 
-Discoverability release — no runtime behavior changes. Aligns every public
-metadata surface with how the product is actually used in the field.
+- **Fixed: OTel metrics push was always empty.** The push driver rebuilt the
+  host-metrics registry into a fresh object for the Prometheus text renderer
+  but kept pushing the original boot-time singleton to the OTLP endpoint —
+  so collectors received zero metrics even while
+  `observability:metricsPrometheus` showed live host data. Both consumers now
+  share `buildHostMetricsRegistry()`; the pusher sends the freshly-built
+  registry every interval.
 
-- **npm metadata (`neuralos` + `rterm-backend`):** description now leads with
-  "AI-native terminal & agentic-AI operations platform for Forward Deployed
-  Engineers & SREs"; keywords expanded to 26 incl. `aiops`, `ai-sre`,
-  `agentic-ai`, `chatops`, `self-healing`, `runbook-automation`,
-  `closed-loop-remediation`, `mcp`. This release activates those keywords in
-  npm search.
-- **GitHub repo:** FDE-led description + homepage + 20 topics
-  (`forward-deployed-engineer`, `fde`, `aiops`, `ai-sre`, `agentic-ai`,
-  `chatops`, ...).
-- **README.md:** new "Where RTerm Fits — AIOps, AI SRE & Agentic Ops" section
-  + FDE tagline; README.zh-CN.md carries the same positioning in Chinese.
-- **docs/fde.md:** full FDE field guide (estate reach, MOP-gated change,
-  incident loop, leave-behind automation).
-- **seo/:** rterm.app fix-pack — head/body snippets, robots.txt (incl. AI
-  crawlers), sitemap.xml, deploy checklist.
+- **New: OpenLLMetry-style LLM tracing.** Every model invocation in the agent
+  (chat pass, thinking-model audits such as task_completion_guard /
+  self_correction, and their failures) is recorded as a span in RTerm's APM
+  trace store, grouped per agent run (traceId derived from the gateway
+  runId). Each span carries model name, operation (`chat` / `thinking` /
+  `audit.*`), duration, token usage, finish reason, and error status — so
+  `observability:apmSummary` and the dashboard APM section now show per-run
+  LLM waterfalls and per-model latency/error stats with zero configuration.
+  When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, spans are additionally forwarded
+  as OTLP/HTTP JSON with standard `gen_ai.*` attributes (provider inferred
+  from the model id) so Jaeger/Tempo/Datadog can chart LLM calls alongside
+  application traces. Tracing is fire-and-forget: it can never break or slow
+  a run.
 
-### Packaging
+### Tests
 
-- No code changes vs v3.2.12; backend bundle rebuilt at same engine state.
+New `v3213OtelFixes.extreme.spec.ts` (10/10): populated-registry OTLP payload
+shape, non-empty pushed payload via the fixed wiring, LLM span ingestion
+(ok/error), stable per-run traceIds (32-hex), gen_ai attributes on the OTLP
+forward, disabled-recorder no-op, and no-throw without a ledger. Registered
+in `test:backend-unit-extreme`.
 
 ## v3.2.12 (2026-08-22)
 

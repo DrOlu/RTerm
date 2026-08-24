@@ -549,6 +549,8 @@ export class AgentService_v2 {
   /** sessionId → ledger run id for the in-flight run (set for every run,
    * unlike activeAgentRunIdsBySession which requires caller metadata). */
   private ledgerRunIdsBySession: Map<string, string> = new Map();
+  /** v3.2.13: gateway runId per session — used to correlate LLM trace spans. */
+  private currentRunIdBySession: Map<string, string> = new Map();
 
   constructor(
     terminalService: TerminalService,
@@ -1436,6 +1438,8 @@ export class AgentService_v2 {
       let partialText = "";
       let reasoningContent = "";
       let debugRawChunks: any[] = [];
+      // v3.2.13: OpenLLMetry-style LLM span for this model pass.
+      const llmTraceStart = Date.now();
       const fullResponse = await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
         messages: modelInputMessages,
@@ -1652,6 +1656,41 @@ export class AgentService_v2 {
         debugRawChunks,
       );
       let currentTokens = state.token_state.current_tokens;
+
+      // v3.2.13: record the OpenLLMetry-style span for this model pass.
+      try {
+        const traceModelName =
+          getStreamedResponseModelName(fullResponse, debugRawChunks) ||
+          (baseModel as any)?.modelName ||
+          (baseModel as any)?.model ||
+          "unknown";
+        const breakdown = usageInfo
+          ? extractUsageTokenBreakdown(usageInfo.usage)
+          : undefined;
+        this.observability?.llmTrace?.record(
+          {
+            runId: state.runId,
+            sessionId,
+            operation: shouldUseThinkingModelOnThisPass ? "thinking" : "chat",
+            model: traceModelName,
+          },
+          {
+            durationMs: Date.now() - llmTraceStart,
+            ...(breakdown?.promptTokens !== undefined
+              ? { inputTokens: breakdown.promptTokens }
+              : {}),
+            ...(breakdown?.completionTokens !== undefined
+              ? { outputTokens: breakdown.completionTokens }
+              : {}),
+            ...(usageInfo ? { totalTokens: usageInfo.totalTokens } : {}),
+            finishReason:
+              describeStreamedResponseFinish(fullResponse, debugRawChunks) ||
+              undefined,
+          },
+        );
+      } catch {
+        /* tracing must never break the agent */
+      }
 
       if (usageInfo) {
         currentTokens = usageInfo.totalTokens;
@@ -4122,63 +4161,107 @@ export class AgentService_v2 {
     const processedMessages = buildDynamicRequestHistory(messages, {
       modelSupportsImage: sessionBinding.readFileSupport.image,
     });
+    // v3.2.13: OpenLLMetry-style span for this audit call.
+    const llmTraceStart = Date.now();
+    const traceResult = (error?: string): void => {
+      try {
+        this.observability?.llmTrace?.record(
+          {
+            runId: this.currentRunIdBySession.get(sessionId),
+            sessionId,
+            operation: `audit.${decisionName}`,
+            model:
+              (model as any)?.modelName ||
+              (model as any)?.model ||
+              "unknown",
+          },
+          {
+            durationMs: Date.now() - llmTraceStart,
+            ...(error ? { error } : {}),
+          },
+        );
+      } catch {
+        /* tracing must never break the agent */
+      }
+    };
 
     if (sessionBinding.thinkingModelSupportsStructuredOutput) {
       const structuredModel = model.withStructuredOutput(schema, {
         method: "jsonSchema",
       });
-      return await invokeWithRetryAndSanitizedInput({
-        helpers: this.helpers,
-        messages: processedMessages,
-        modelSupportsImage: sessionBinding.readFileSupport.image,
-        signal,
-        operation: async (sanitizedMessages) => {
-          return (await structuredModel.invoke(sanitizedMessages, {
-            signal,
-          })) as any;
-        },
-        onRetry: (attempt) => {
-          console.log(
-            `[AgentService_v2] Retrying thinking model decision for ${decisionName} (attempt ${attempt + 1})...`,
-          );
-        },
-        maxRetries: MODEL_RETRY_MAX,
-        delaysMs: MODEL_RETRY_DELAYS_MS,
-      });
+      try {
+        const result = await invokeWithRetryAndSanitizedInput({
+          helpers: this.helpers,
+          messages: processedMessages,
+          modelSupportsImage: sessionBinding.readFileSupport.image,
+          signal,
+          operation: async (sanitizedMessages) => {
+            return (await structuredModel.invoke(sanitizedMessages, {
+              signal,
+            })) as any;
+          },
+          onRetry: (attempt) => {
+            console.log(
+              `[AgentService_v2] Retrying thinking model decision for ${decisionName} (attempt ${attempt + 1})...`,
+            );
+          },
+          maxRetries: MODEL_RETRY_MAX,
+          delaysMs: MODEL_RETRY_DELAYS_MS,
+        });
+        traceResult();
+        return result;
+      } catch (err) {
+        traceResult(err instanceof Error ? err.message : String(err));
+        throw err;
+      }
     }
 
     if (sessionBinding.thinkingModelSupportsObjectToolChoice) {
       const functionCallingModel = model.withStructuredOutput(schema, {
         method: "functionCalling",
       });
-      return await invokeWithRetryAndSanitizedInput({
-        helpers: this.helpers,
-        messages: processedMessages,
-        modelSupportsImage: sessionBinding.readFileSupport.image,
-        signal,
-        operation: async (sanitizedMessages) => {
-          return (await functionCallingModel.invoke(sanitizedMessages, {
-            signal,
-          })) as any;
-        },
-        onRetry: (attempt) => {
-          console.log(
-            `[AgentService_v2] Retrying tool-call thinking decision for ${decisionName} (attempt ${attempt + 1})...`,
-          );
-        },
-        maxRetries: MODEL_RETRY_MAX,
-        delaysMs: MODEL_RETRY_DELAYS_MS,
-      });
+      try {
+        const result = await invokeWithRetryAndSanitizedInput({
+          helpers: this.helpers,
+          messages: processedMessages,
+          modelSupportsImage: sessionBinding.readFileSupport.image,
+          signal,
+          operation: async (sanitizedMessages) => {
+            return (await functionCallingModel.invoke(sanitizedMessages, {
+              signal,
+            })) as any;
+          },
+          onRetry: (attempt) => {
+            console.log(
+              `[AgentService_v2] Retrying tool-call thinking decision for ${decisionName} (attempt ${attempt + 1})...`,
+            );
+          },
+          maxRetries: MODEL_RETRY_MAX,
+          delaysMs: MODEL_RETRY_DELAYS_MS,
+        });
+        traceResult();
+        return result;
+      } catch (err) {
+        traceResult(err instanceof Error ? err.message : String(err));
+        throw err;
+      }
     }
 
-    return await this.invokeModelDecisionByPlainToolCall(
-      sessionId,
-      processedMessages,
-      schema,
-      signal,
-      decisionName,
-      "thinking",
-    );
+    try {
+      const result = await this.invokeModelDecisionByPlainToolCall(
+        sessionId,
+        processedMessages,
+        schema,
+        signal,
+        decisionName,
+        "thinking",
+      );
+      traceResult(result);
+      return result;
+    } catch (err) {
+      traceResult(err instanceof Error ? err.message : String(err));
+      throw err;
+    }
   }
 
   private async getCompactionModelDecision<T extends z.ZodTypeAny>(
@@ -4387,6 +4470,8 @@ export class AgentService_v2 {
       agentRunId ??
       `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     this.ledgerRunIdsBySession.set(sessionId, ledgerRunId);
+    // v3.2.13: correlate LLM trace spans with this gateway run.
+    if (runId) this.currentRunIdBySession.set(sessionId, runId);
     const ledgerInputPreview =
       typeof input === "string"
         ? input
@@ -4519,6 +4604,7 @@ export class AgentService_v2 {
       if (this.ledgerRunIdsBySession.get(sessionId) === ledgerRunId) {
         this.ledgerRunIdsBySession.delete(sessionId);
       }
+      this.currentRunIdBySession.delete(sessionId);
       this.agentRunLedger?.finishRun(ledgerRunId, ledgerExitStatus, ledgerExitError);
       await this.clearCheckpoint(sessionId);
     }

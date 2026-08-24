@@ -14,6 +14,7 @@ import { IncidentLedger } from './sre/incidentLedger'
 import { SyntheticChecks } from './sre/syntheticChecks'
 import { DriftDetector } from './sre/driftDetector'
 import { SpanLedger } from './apm/spanLedger'
+import { LlmTraceRecorder } from './observability/llmTrace'
 import { RumLedger } from './dem/rumLedger'
 import { InfraMonitor } from './infra/infraMonitor'
 import { EtwService } from './etw/etwService'
@@ -109,6 +110,8 @@ export interface Observability {
   driftDetector: DriftDetector
   spanLedger: SpanLedger
   rumLedger: RumLedger
+  /** v3.2.13: OpenLLMetry-style LLM call tracing into the APM ledger. */
+  llmTrace: LlmTraceRecorder
   infraMonitor: InfraMonitor
   etwService: EtwService
   dashboard: DashboardService
@@ -389,6 +392,10 @@ export function createObservability(deps: ObservabilityDeps): Observability {
 
   // --- APM / DEM / Infra / ETW ---
   const spanLedger = new SpanLedger({})
+  // v3.2.13: OpenLLMetry-style LLM tracing — every model call becomes a span
+  // in the APM ledger (grouped per agent run), optionally forwarded OTLP.
+  const llmTrace = new LlmTraceRecorder()
+  llmTrace.setSpanLedger(spanLedger)
   const rumLedger = new RumLedger({})
   const infraMonitor = new InfraMonitor({})
   const etwService = new EtwService({})
@@ -565,7 +572,12 @@ const reviewService = new ReviewService({
     : null
 
   // Rebuild the Prometheus registry from the metrics ledger's latest points.
-  const renderPrometheus = (): string => {
+  // v3.2.13 fix: returns the freshly-built registry so BOTH consumers (the
+  // Prometheus scrape renderer and the OTel pusher) read the same data.
+  // Previously this only returned rendered text while the OTel pusher kept
+  // pushing the original empty singleton — pushed payloads were always empty
+  // even when `observability:metricsPrometheus` showed host metrics.
+  const buildHostMetricsRegistry = (): PrometheusRegistry => {
     const series: Array<{ host: string; metric: string; value: number }> = []
     for (const host of metricsLedger.hosts()) {
       const latest = metricsLedger.latest(host)
@@ -575,9 +587,9 @@ const reviewService = new ReviewService({
         if (typeof v === 'number' && Number.isFinite(v)) series.push({ host, metric: `host_${k}`, value: v })
       }
     }
-    const reg = registryFromHostMetrics(series, { prefix: 'rterm', helpPrefix: 'RTerm host metric' })
-    return reg.render()
+    return registryFromHostMetrics(series, { prefix: 'rterm', helpPrefix: 'RTerm host metric' })
   }
+  const renderPrometheus = (): string => buildHostMetricsRegistry().render()
 
   // --- Secrets vault (v2.9.0): encrypted at rest, never in LLM context ---
   const secretsVault = new SecretsVault({
@@ -940,14 +952,39 @@ refreshCloudAccounts()
     const intervalMs = Number(process.env.OTEL_EXPORTER_OTLP_INTERVAL_MS ?? 30_000) || 30_000
     const pushOnce = async () => {
       try {
-        // refresh the registry from the ledger before pushing
-        renderPrometheus()
-        await otelExporter.push(prometheusRegistry)
+        // v3.2.13 fix: push the freshly-built registry (host metrics ledger),
+        // not the empty boot-time singleton.
+        await otelExporter.push(buildHostMetricsRegistry())
       } catch { /* best-effort — a collector outage never blocks RTerm */ }
     }
     otelPushTimer = setInterval(() => { void pushOnce() }, intervalMs)
     if (typeof otelPushTimer.unref === 'function') otelPushTimer.unref()
     void pushOnce()
+  }
+
+  // --- LLM trace forwarding (v3.2.13): when an OTLP endpoint is configured,
+  // forward LLM spans (OpenLLMetry-style gen_ai attributes) to it as well.
+  // Fire-and-forget POST per batch; failures never affect the agent.
+  if (otelEndpoint) {
+    llmTrace.setOtlpTraceExporter((spans) => {
+      void fetch(otelEndpoint.replace(/\/v1\/metrics$/, '/v1/traces'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          resourceSpans: [
+            {
+              resource: {
+                attributes: [
+                  { key: 'service.name', value: { stringValue: 'rterm-agent' } },
+                  { key: 'service.version', value: { stringValue: process.env.GYBACKEND_VERSION ?? 'dev' } },
+                ],
+              },
+              scopeSpans: [{ spans }],
+            },
+          ],
+        }),
+      }).catch(() => { /* tracing must never break the agent */ })
+    })
   }
 
   // --- On-call escalation driver (v2.9.x): advance the escalation clock on an
@@ -964,6 +1001,7 @@ refreshCloudAccounts()
     incidentLedger, syntheticChecks, driftDetector, spanLedger, rumLedger,
     infraMonitor, etwService, dashboard, evalHarness, anomalyDetector,
     earlyWarning, behaviorLedger,
+    llmTrace,
     dagu: { parseDaguYaml, parseDaguWorkflow, daguExecutionPlan },
     notify: { slackChannel, teamsChannel, smtpChannel, telegramChannel },
     aperf: { service: aperfService, toMetricPoint: aperfSummaryToMetricPoint },
