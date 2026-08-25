@@ -229,6 +229,28 @@ export async function executeScheduledTask(
   task: ScheduledTaskEntry,
 ): Promise<ScheduledTaskRunOutcome[]> {
   const log = deps.onLog ?? (() => {})
+
+  // v3.2.16: task → playbook binding. When a playbookId is set, run the
+  // playbook (with its validation + rollback) instead of a raw command.
+  if (task.playbookId) {
+    const playbook = deps.automationManager.getPlaybook(task.playbookId)
+    if (!playbook) {
+      return [{
+        target: 'playbook',
+        ok: false,
+        error: `scheduled task "${task.name}" references missing playbook "${task.playbookId}"`,
+      }]
+    }
+    if (playbook.requireApproval) {
+      return [{
+        target: 'playbook',
+        ok: false,
+        error: `playbook "${playbook.name}" is MOP-gated (requireApproval); schedule it via a change record instead`,
+      }]
+    }
+    return executePlaybookForTask(deps, task, playbook)
+  }
+
   const command = resolveScheduledTaskCommand(task, deps.automationManager)
   const settings = deps.getSettings()
   const targets = resolveScheduledTaskTargets(task, settings)
@@ -307,7 +329,7 @@ export async function executeScheduledTask(
         rows: 32,
       } as TerminalConfig),
     )
-    return outcomes
+    return applyRetries(deps, task, outcomes, runOne, outcomes)
   }
 
   for (const target of targets) {
@@ -321,4 +343,99 @@ export async function executeScheduledTask(
     outcomes.push(await runOne(target.name, config))
   }
   return outcomes
+}
+
+/** v3.2.16: retry failed targets per the task's retryAttempts/retryDelaySeconds. */
+async function applyRetries(
+  deps: ScheduledTaskRunnerDeps,
+  task: ScheduledTaskEntry,
+  outcomes: ScheduledTaskRunOutcome[],
+  _runOne: unknown,
+  _initial: ScheduledTaskRunOutcome[],
+): Promise<ScheduledTaskRunOutcome[]> {
+  const attempts = task.retryAttempts ?? 0
+  const delaySec = task.retryDelaySeconds ?? 60
+  if (attempts <= 0) return outcomes
+  const log = deps.onLog ?? (() => {})
+  const final = [...outcomes]
+  for (let i = 0; i < final.length; i++) {
+    let outcome = final[i]
+    let attempt = 0
+    while (!outcome.ok && attempt < attempts) {
+      attempt += 1
+      log(
+        `[scheduler] task "${task.name}" target ${outcome.target} failed (${outcome.error}); retry ${attempt}/${attempts} in ${delaySec}s`,
+      )
+      await sleep(delaySec * 1000)
+      // Re-run the whole task for the failing target only.
+      try {
+        const retryOutcomes = await executeScheduledTaskNoRetry(deps, task)
+        const match = retryOutcomes.find((o) => o.target === outcome.target)
+        if (match) outcome = match
+      } catch {
+        // keep the previous outcome
+      }
+    }
+    final[i] = outcome
+  }
+  return final
+}
+
+/** Execute without the retry wrapper (used by applyRetries to avoid recursion). */
+async function executeScheduledTaskNoRetry(
+  deps: ScheduledTaskRunnerDeps,
+  task: ScheduledTaskEntry,
+): Promise<ScheduledTaskRunOutcome[]> {
+  const { retryAttempts, ...taskWithoutRetry } = task
+  void retryAttempts
+  return executeScheduledTask(deps, { ...taskWithoutRetry, retryAttempts: 0 })
+}
+
+/** v3.2.16: run a playbook for a task (validation + rollback inherited). */
+async function executePlaybookForTask(
+  deps: ScheduledTaskRunnerDeps,
+  task: ScheduledTaskEntry,
+  playbook: { id: string; name: string; steps: unknown[]; params?: unknown; maxParallelSteps?: number; requireApproval?: boolean },
+): Promise<ScheduledTaskRunOutcome[]> {
+  const log = deps.onLog ?? (() => {})
+  log(`[scheduler] task "${task.name}" → playbook "${playbook.name}" (${playbook.steps.length} steps)`)
+  try {
+    const { executePlaybook } = await import('./playbookRunner')
+    const { executeOrchestratedPlaybook } = await import('./orchestratedPlaybookRunner')
+    const { playbookNeedsOrchestration } = await import('../AgentHelper/tools/playbook_tools')
+    const settings = deps.getSettings()
+    const record = playbookNeedsOrchestration(playbook as never)
+      ? await executeOrchestratedPlaybook(
+          {
+            terminalService: deps.terminalService as never,
+            automationManager: deps.automationManager,
+            getSettings: () => settings,
+            onLog: () => {},
+            paramValues: {},
+          },
+          playbook as never,
+        )
+      : await executePlaybook(
+          {
+            terminalService: deps.terminalService as never,
+            automationManager: deps.automationManager,
+            getSettings: () => settings,
+            onLog: () => {},
+          },
+          playbook as never,
+        )
+    const ok = (record as { status?: string })?.status !== 'failed'
+    return [{
+      target: `playbook:${playbook.name}`,
+      ok,
+      output: tail(JSON.stringify(record).slice(0, 2048)),
+      ...(ok ? {} : { error: `playbook status: ${(record as { status?: string })?.status ?? 'unknown'}` }),
+    }]
+  } catch (error) {
+    return [{
+      target: `playbook:${playbook.name}`,
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    }]
+  }
 }

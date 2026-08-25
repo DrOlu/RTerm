@@ -87,9 +87,9 @@ test('manage_scheduled_task create/list', async () => {
   if (!l.includes('backup') || !l.includes('0 2 * * *')) throw new Error(l)
 })
 
-test('manage_scheduled_task requires scriptId or command', async () => {
+test('manage_scheduled_task requires scriptId, command, or playbookId', async () => {
   const res = await manageScheduledTask({ action: 'create', name: 'x', cron: '* * * * *' }, ctx(newManager()))
-  if (!res.includes('requires scriptId or command')) throw new Error(res)
+  if (!res.includes('requires scriptId, command, or playbookId')) throw new Error(res)
 })
 
 test('manage_template create + render with default filters', async () => {

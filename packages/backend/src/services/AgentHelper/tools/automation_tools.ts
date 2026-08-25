@@ -199,7 +199,7 @@ export async function manageGroup(
 // ---------------- Scheduled tasks ----------------
 
 export const manageScheduledTaskSchema = z.object({
-  action: z.enum(['create', 'update', 'delete', 'list']),
+  action: z.enum(['create', 'update', 'delete', 'list', 'runNow', 'history', 'drift', 'validate']),
   id: z.string().optional(),
   name: z.string().optional(),
   cron: z.string().optional(),
@@ -211,6 +211,15 @@ export const manageScheduledTaskSchema = z.object({
   enabled: z.boolean().optional(),
   retryAttempts: z.number().optional(),
   retryDelaySeconds: z.number().optional(),
+  /** v3.2.16 */
+  timezone: z.string().optional(),
+  catchUp: z.boolean().optional(),
+  maxConcurrent: z.number().optional(),
+  pausedUntil: z.string().optional(),
+  playbookId: z.string().optional(),
+  onSuccess: z.string().optional(),
+  onFailure: z.string().optional(),
+  alertAfterFailures: z.number().optional(),
 })
 
 export async function manageScheduledTask(
@@ -229,13 +238,21 @@ export async function manageScheduledTask(
   }
   if (action === 'create') {
     if (!args.name || !args.cron) { const msg = 'create requires name + cron.'; emit(context, 'manage_scheduled_task', args, msg); return msg }
-    if (!args.scriptId && !args.command) { const msg = 'create requires scriptId or command.'; emit(context, 'manage_scheduled_task', args, msg); return msg }
+    if (!args.scriptId && !args.command && !args.playbookId) { const msg = 'create requires scriptId, command, or playbookId.'; emit(context, 'manage_scheduled_task', args, msg); return msg }
+    // v3.2.16: reject invalid cron expressions at create time.
+    const { validateCron } = await import('../../automation/schedulerService')
+    const v = validateCron(args.cron)
+    if (!v.ok) { const msg = `Invalid cron "${args.cron}": ${v.reason}`; emit(context, 'manage_scheduled_task', args, msg); return msg }
     const t = m.createScheduledTask({
       name: args.name, cron: args.cron, scriptId: args.scriptId, command: args.command,
       groupId: args.groupId, tags: args.tags, targets: args.targets,
       enabled: args.enabled ?? true, retryAttempts: args.retryAttempts, retryDelaySeconds: args.retryDelaySeconds,
-    })
-    const msg = `Created scheduled task "${t.name}" (id=${t.id}, cron="${t.cron}"). It will be evaluated by the local scheduler.`
+      timezone: args.timezone, catchUp: args.catchUp, maxConcurrent: args.maxConcurrent,
+      pausedUntil: args.pausedUntil, playbookId: args.playbookId,
+      onSuccess: args.onSuccess, onFailure: args.onFailure,
+      alertAfterFailures: args.alertAfterFailures,
+    } as never)
+    const msg = `Created scheduled task "${t.name}" (id=${t.id}, cron="${t.cron}"${args.timezone ? ` @ ${args.timezone}` : ''}). It will be evaluated by the local scheduler.`
     emit(context, 'manage_scheduled_task', args, msg)
     return msg
   }
@@ -252,6 +269,58 @@ export async function manageScheduledTask(
     if (!args.id) { const msg = 'delete requires id.'; emit(context, 'manage_scheduled_task', args, msg); return msg }
     const removed = m.deleteScheduledTask(args.id)
     const msg = removed ? `Deleted task ${args.id}.` : `No task ${args.id}.`
+    emit(context, 'manage_scheduled_task', args, msg)
+    return msg
+  }
+  // v3.2.16: validate a cron expression without creating anything.
+  if (action === 'validate') {
+    if (!args.cron) { const msg = 'validate requires cron.'; emit(context, 'manage_scheduled_task', args, msg); return msg }
+    const { validateCron } = await import('../../automation/schedulerService')
+    const v = validateCron(args.cron)
+    const msg = v.ok
+      ? `Cron "${args.cron}" is valid.`
+      : `Invalid cron "${args.cron}": ${v.reason}`
+    emit(context, 'manage_scheduled_task', args, msg)
+    return msg
+  }
+  // v3.2.16: drift report — tasks that have not fired in >3× their expected interval.
+  if (action === 'drift') {
+    const { detectDrift } = await import('../../automation/schedulerService')
+    const drift = detectDrift(m.listScheduledTasks(), new Date())
+    const flagged = drift.filter((d) => d.drifted)
+    const msg = flagged.length === 0
+      ? `No drift detected across ${drift.length} enabled task(s).`
+      : `Drifted task(s) (${flagged.length}):\n${flagged.map((d) => `- ${d.taskName} (id=${d.taskId}): ${Number.isFinite(d.minutesSinceLastRun) ? `${Math.round(d.minutesSinceLastRun)} min since last run` : 'never ran'} vs expected ≤${d.expectedIntervalMinutes} min`).join('\n')}`
+    emit(context, 'manage_scheduled_task', args, msg)
+    return msg
+  }
+  // v3.2.16: run history + success rate for one task (or all).
+  if (action === 'history') {
+    const sched = (context as { scheduledTaskHistory?: { history(id: string): unknown[]; successRate(id: string): number; avgDurationMs(id: string): number; consecutiveFailures(id: string): number } }).scheduledTaskHistory
+    if (!sched) { const msg = 'Run history is not available in this runtime (headless daemon exposes it via the gateway).'; emit(context, 'manage_scheduled_task', args, msg); return msg }
+    const tasks = args.id ? m.listScheduledTasks().filter((t) => t.id === args.id) : m.listScheduledTasks()
+    if (tasks.length === 0) { const msg = args.id ? `No task ${args.id}.` : 'No scheduled tasks.'; emit(context, 'manage_scheduled_task', args, msg); return msg }
+    const lines = tasks.map((t) => {
+      const h = sched.history(t.id) as Array<{ at: string; ok: boolean; durationMs: number; error?: string }>
+      const rate = Math.round(sched.successRate(t.id) * 100)
+      const avg = sched.avgDurationMs(t.id)
+      const streak = sched.consecutiveFailures(t.id)
+      const last = h[h.length - 1]
+      return `- ${t.name} (id=${t.id}): ${h.length} run(s) recorded, ${rate}% success, avg ${avg}ms${streak > 0 ? `, ${streak} consecutive failure(s)` : ''}${last ? `, last ${last.ok ? 'ok' : 'FAILED'} at ${last.at}` : ', never ran'}`
+    })
+    const msg = `Scheduled task history:\n${lines.join('\n')}`
+    emit(context, 'manage_scheduled_task', args, msg)
+    return msg
+  }
+  // v3.2.16: run a task immediately (testing), respecting the overlap guard.
+  if (action === 'runNow') {
+    if (!args.id) { const msg = 'runNow requires id.'; emit(context, 'manage_scheduled_task', args, msg); return msg }
+    const task = m.listScheduledTasks().find((t) => t.id === args.id)
+    if (!task) { const msg = `No task ${args.id}.`; emit(context, 'manage_scheduled_task', args, msg); return msg }
+    const sched = (context as { scheduledTaskRunner?: (t: unknown) => Promise<{ ran: boolean; reason?: string }> }).scheduledTaskRunner
+    if (!sched) { const msg = 'Run-now is not available in this runtime.'; emit(context, 'manage_scheduled_task', args, msg); return msg }
+    const r = await sched(task)
+    const msg = r.ran ? `Task "${task.name}" executed now.` : `Task "${task.name}" not run: ${r.reason}.`
     emit(context, 'manage_scheduled_task', args, msg)
     return msg
   }

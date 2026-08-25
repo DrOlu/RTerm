@@ -1,5 +1,81 @@
 # Changelog
 
+## v3.2.16 (2026-08-25)
+
+### Features — scheduled-task (cron) overhaul + Model-settings Base URL prefill
+
+**12 scheduler improvements**, each addressing a real gap in the cron system:
+
+1. **Timezone-aware evaluation** — `timezone` (IANA, e.g. `Africa/Lagos`) per
+   task; the expression is evaluated in that zone via the Intl API (no new
+   dependency). A task set for "2am Lagos" fires at 2am Lagos regardless of
+   where the daemon runs; DST transitions are handled by the tz database
+   (verified: LA 2am fires exactly once on the November fallback day).
+
+2. **Overlap guard** — the scheduler tracks in-flight executions per task. A
+   new firing while the previous one still runs is **SKIPPED and logged**
+   (default `maxConcurrent: 1`), never queued — two concurrent `rm -rf`
+   cleanups can no longer race. `maxConcurrent > 1` opts into parallelism.
+
+3. **Pause windows** — `pausedUntil` (ISO) suppresses firings until that time
+   (maintenance blackouts); invalid values are ignored, not a crash.
+
+4. **Catch-up policy** — missed minutes stay missed by default (classic cron).
+   `catchUp: true` opts into replaying them, still bounded by the 24h window
+   and the at-most-once-per-tick rule (burst-firing non-idempotent commands is
+   dangerous).
+
+5. **Cron validation** — `validateCron()` rejects wrong field counts, garbage,
+   out-of-range values, and never-matching expressions (e.g. Feb 31) with a
+   human-readable reason. `manage_scheduled_task create` now refuses an
+   invalid expression instead of silently never firing.
+
+6. **Run-now** — `manage_scheduled_task action="runNow"` fires a task
+   immediately for testing, respecting the overlap guard.
+
+7. **Run history** — `RunHistoryStore` records the last 20 runs per task
+   (ring): outcome, duration, targets, error. `action="history"` reports run
+   count, success rate, avg duration, consecutive failures, last result.
+
+8. **Failure-streak alerting** — `alertAfterFailures: N` logs a warning when
+   N consecutive runs fail.
+
+9. **Task → playbook binding** — `playbookId` runs a playbook instead of a raw
+   command, inheriting validation + rollback. MOP-gated playbooks
+   (requireApproval) are refused with a clear message.
+
+10. **Chaining** — `onSuccess` / `onFailure` point at the next task id; the
+    scheduler runs it after the outcome is known.
+
+11. **Drift detection** — `action="drift"` flags enabled tasks that have not
+    fired in >3× their expected interval (bad edit, silently broken
+    expression). `expectedIntervalMinutes()` now handles cron's dom/dow OR
+    semantics correctly (a bug found by the tests: `0 0 * * *` computed
+    1440/7 instead of 1440).
+
+12. **Retry wiring** — the runner now applies `retryAttempts` /
+    `retryDelaySeconds` to failed targets (the fields existed on the type but
+    were never executed).
+
+**Model settings UI:** the "ADD MODEL" Base URL field is now prefilled with
+`https://api.superagent.ng` (still fully editable) so a new model is usable
+immediately for the common case.
+
+### Tests
+
+New `v3216Scheduler.extreme.spec.ts` (41/41): validation (valid/invalid/
+never-matching/dow-7), timezone (UTC exact, Lagos +1, LA -7, wall-clock
+firing per zone, DST fallback fires once, invalid tz no-crash), overlap guard
+(skip while running, maxConcurrent opt-in, scheduler-level skip), pause
+(before/after/absent/invalid), catch-up (default skips, opt-in replays
+at-most-once-per-tick), history (ring cap 20, success rate, avg duration,
+streak reset, empty-task FP guards, clear), drift (interval estimates, stale
+flagged, never-ran flagged, disabled/paused excluded), runNow (executes +
+records, refuses while running), and 6 regression tests proving the original
+scheduler semantics are unchanged. Existing scheduler (15/15) and
+scheduledTaskRunner (12/12) suites still green; one automation spec updated
+for the new "scriptId, command, or playbookId" error text.
+
 ## v3.2.15 (2026-08-25)
 
 ### Features — offensive security plugins (promptfoo, mitmproxy, NetExec)

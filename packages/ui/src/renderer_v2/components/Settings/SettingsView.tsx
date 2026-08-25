@@ -1148,7 +1148,9 @@ const ModelEditor = observer(
             id: `model-${Date.now()}`,
         name: "",
         model: "",
-        baseUrl: "",
+        // Prefill with the default provider endpoint (still editable) so a new
+        // model is usable immediately for the common case.
+        baseUrl: "https://api.superagent.ng",
         apiKey: "",
             maxTokens: 200000,
         structuredOutputMode: "auto",

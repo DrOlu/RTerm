@@ -374,10 +374,24 @@ export async function startGyBackend(): Promise<void> {
   // open a short-lived headless session per target (SSH/WinRM/serial, or the
   // local shell when no scope is set), run to completion, tear down. Session
   // output is captured by the regular session-logging wiring when enabled.
+  //
+  // v3.2.16: timezone-aware evaluation, overlap guard (skip while running),
+  // pause windows, catch-up opt-in, run history, failure streaks → alerts,
+  // task→playbook binding, and onSuccess/onFailure chaining.
   const scheduler = new SchedulerService({
     getTasks: () => automationManager.listScheduledTasks(),
+    onSkip: (task, reason) => {
+      if (reason === "overlap-skip") {
+        console.warn(
+          `[scheduler] task "${task.name}" still running — skipping this firing (overlap guard)`,
+        );
+      } else if (reason === "paused") {
+        console.log(`[scheduler] task "${task.name}" paused until ${task.pausedUntil}`);
+      }
+    },
     run: async (task) => {
-      console.log(`[scheduler] due task: ${task.name} (${task.cron})`);
+      console.log(`[scheduler] due task: ${task.name} (${task.cron}${task.timezone ? ` @ ${task.timezone}` : ""})`);
+      let allOk = true;
       try {
         const outcomes = await executeScheduledTask(
           {
@@ -389,6 +403,7 @@ export async function startGyBackend(): Promise<void> {
           task,
         );
         const failed = outcomes.filter((o) => !o.ok);
+        allOk = failed.length === 0;
         for (const f of failed) {
           console.warn(
             `[scheduler] task "${task.name}" target ${f.target} failed: ${f.error ?? "unknown"}`,
@@ -398,12 +413,38 @@ export async function startGyBackend(): Promise<void> {
           `[scheduler] task "${task.name}" finished: ${outcomes.length - failed.length}/${outcomes.length} target(s) ok`,
         );
       } catch (error) {
+        allOk = false;
         console.warn(
           `[scheduler] task "${task.name}" could not run:`,
           error instanceof Error ? error.message : error,
         );
       } finally {
         automationManager.markScheduledTaskRun(task.id);
+      }
+
+      // v3.2.16: failure-streak alerting.
+      const streak = scheduler.history.consecutiveFailures(task.id);
+      const threshold = task.alertAfterFailures ?? 0;
+      if (!allOk && threshold > 0 && streak >= threshold) {
+        console.warn(
+          `[scheduler] task "${task.name}" has failed ${streak} consecutive run(s) — alert threshold ${threshold} reached`,
+        );
+      }
+
+      // v3.2.16: onSuccess / onFailure chaining.
+      const next = allOk ? task.onSuccess : task.onFailure;
+      if (next) {
+        const nextTask = automationManager.listScheduledTasks().find((t) => t.id === next);
+        if (nextTask) {
+          console.log(`[scheduler] chaining "${task.name}" → "${nextTask.name}" (${allOk ? "onSuccess" : "onFailure"})`);
+          try {
+            await scheduler.runNow(nextTask);
+          } catch (e) {
+            console.warn(`[scheduler] chained task "${nextTask.name}" failed:`, e);
+          }
+        } else {
+          console.warn(`[scheduler] chain target "${next}" not found`);
+        }
       }
     },
   });

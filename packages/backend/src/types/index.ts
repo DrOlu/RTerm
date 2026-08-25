@@ -258,6 +258,31 @@ export interface ScheduledTaskEntry {
   enabled: boolean
   /** ISO timestamp of last run, for the UI. */
   lastRunAt?: string
+
+  // ── v3.2.16 scheduler improvements ─────────────────────────────────────
+  /** IANA timezone the cron expression is evaluated in (e.g. "Africa/Lagos").
+   * Default: the daemon's local timezone. */
+  timezone?: string
+  /** Run missed executions on daemon start (bounded by the catch-up window).
+   * Default: false — a missed run stays missed, matching classic cron. */
+  catchUp?: boolean
+  /** Max concurrent executions of this task. Default 1 — a still-running
+   * execution means the new firing is SKIPPED (logged), never queued. */
+  maxConcurrent?: number
+  /** Skip firing while another execution is running instead of queueing.
+   * Default true. When false, firings queue (bounded by maxConcurrent). */
+  skipIfRunning?: boolean
+  /** ISO timestamp — pause until this time (maintenance blackout). */
+  pausedUntil?: string
+  /** Task → playbook binding: run this playbook instead of a raw command,
+   * inheriting validation + rollback + MOP gating. */
+  playbookId?: string
+  /** Chain: task id (or playbook: prefixed id) to run on success. */
+  onSuccess?: string
+  /** Chain: task id (or playbook: prefixed id) to run on failure. */
+  onFailure?: string
+  /** Alert after N consecutive failed runs (0 = never). Default 0. */
+  alertAfterFailures?: number
 }
 
 /** A versioned, parameterized configuration template (Jinja-subset render). */
