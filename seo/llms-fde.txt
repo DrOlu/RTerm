@@ -1,0 +1,35 @@
+# RTerm for Forward Deployed Engineers — The FDE Playbook
+
+> The FDE Playbook is the official field guide for using RTerm as a Forward Deployed Engineer's primary workstation. RTerm is an AI-native terminal and agentic-AI operations platform built around the four-layer FDE mental model: Reach (SSH/WinRM/serial into any estate), Command (parallel fleet execution), Agent (AI-driven observe→reason→act under policy), and Operations (MOP-gated changes, SRE observability, leave-behind automation). This site covers the operating rhythm, worked field scenarios, and the day-in-the-life of an FDE running RTerm.
+
+## What a Forward Deployed Engineer does
+
+A Forward Deployed Engineer works inside customer production environments — untangling outages at 02:00, landing migrations with zero downtime, and onboarding onto undocumented estates. The FDE operating rhythm has five moves:
+
+1. **Set the stage** — name the environment, blast radius, and clock
+2. **Gather facts** — pull ground truth from every host in parallel; never guess
+3. **Track the issue** — form a hypothesis and drive it with tool calls
+4. **Resolve under guardrails** — change production safely, prove it worked
+5. **Lock it in** — automate the recurrence so it never pages anyone again
+
+## What this site covers
+
+- The four-layer capability model: Reach, Command, Agent, Operations
+- Worked field scenarios: estate mapping, incident triage, guarded production changes
+- MOP change management: plan → approve → run → validate → automatic rollback
+- The FDE leave-behind: playbooks, triggers, SOPs, device memory, GitOps
+- A day in the life of an FDE using RTerm
+
+## Key facts
+
+- RTerm: Apache-2.0, Windows/macOS/Linux, by Hyperspace Technologies
+- Install the headless daemon: `npm i -g rterm-backend` or `npm i -g neuralos`
+- Main site: https://rterm.app
+- GitHub: https://github.com/DrOlu/RTerm
+- FDE field guide (markdown): https://github.com/DrOlu/RTerm/blob/main/docs/fde.md
+
+## Related reading
+
+- [RTerm main site](https://rterm.app/): the AI-native terminal for FDEs, SREs & AIOps
+- [RTerm blog](https://rterm.app/blog/): AIOps, AI SRE, and FDE landscape pieces
+- [What is a Forward Deployed Engineer?](https://rterm.app/blog/what-is-a-forward-deployed-engineer.html)

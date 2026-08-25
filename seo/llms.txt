@@ -1,0 +1,39 @@
+# RTerm
+
+> RTerm is an AI-native terminal and agentic-AI operations platform for Forward Deployed Engineers (FDEs), SREs, and platform teams. It reaches any host over SSH, WinRM, and serial console (including Cisco IOS-XE/XR), executes across fleets in parallel, drives an AI agent under an allow/deny/escalate policy engine with maker/checker review, gates production changes behind MOP approval (plan → approve → run → validate → automatic rollback), and seals every action in a hash-chained, tamper-evident audit ledger. Runs as a desktop app (Windows/macOS/Linux) or headless daemon (`npm i -g rterm-backend` or `neuralos`) with a WebSocket JSON-RPC gateway and live browser dashboard.
+
+## What RTerm is used for
+
+- **Forward Deployed Engineer workflows**: map undocumented customer estates, land production changes safely, leave behind automation the customer keeps
+- **AIOps closed-loop remediation**: detect (metrics, anomaly detection, forecasts, triggers) → decide (AI agent under policy) → act (playbooks, MOP-gated changes) → prove (sealed audit evidence)
+- **AI SRE**: golden signals, SLOs with error budgets and burn-rate alerting, incident ledger with AI root-cause analysis and postmortems, on-call paging
+- **Runbook automation**: DAG playbooks (incl. dagu YAML), validation steps with automatic rollback, Jinja config templates, cron scheduling, GitOps drift detection
+- **Self-healing infrastructure**: event-driven triggers (terminal pattern / metric threshold / webhook / schedule) fire playbooks or propose approved changes
+- **ChatOps for production**: conversational control from desktop or phone browser; approve blocked commands from anywhere
+- **Network engineering**: Cisco-safe SSH (IOS-XE/IOS-XR), serial console with break support, config templates with validation
+
+## Key facts
+
+- **License**: Apache-2.0
+- **Platforms**: Windows, macOS, Linux (desktop app + headless daemon)
+- **Install**: `npm i -g rterm-backend` or `npm i -g neuralos`, then run `gybackend`
+- **Gateway**: WebSocket JSON-RPC on port 17888; self-describing API via `gateway:describe` (123+ methods)
+- **Live dashboard**: `http://<host>:17888/dashboard`
+- **Publisher**: Hyperspace Technologies
+- **Current version**: v3.2.13 (npm: `neuralos`, `rterm-backend`)
+
+## Documentation
+
+- [GitHub repository](https://github.com/DrOlu/RTerm): source, README with full capability list
+- [FDE Playbook](https://fde.rterm.app/): field guide for Forward Deployed Engineers — the four-layer model (Reach → Command → Agent → Operations), worked scenarios, day-in-the-life
+- [FDE field guide (markdown)](https://github.com/DrOlu/RTerm/blob/main/docs/fde.md)
+- [Blog](https://rterm.app/blog/): comparisons and landscape pieces on AIOps, AI SRE, and the FDE role
+- [RTerm vs AIOps Platforms](https://rterm.app/blog/rterm-vs-aiops-platforms.html): why watching is not closing the loop
+- [What is a Forward Deployed Engineer?](https://rterm.app/blog/what-is-a-forward-deployed-engineer.html)
+- [AI SRE tools landscape](https://rterm.app/blog/ai-sre-tools-landscape.html)
+- [Backend usage guide](https://github.com/DrOlu/RTerm/blob/main/docs/gybackend-usage.md): headless daemon + gateway
+- [Mobile-web usage](https://github.com/DrOlu/RTerm/blob/main/docs/mobile-web-usage.md): approve from your phone
+
+## Honest limits
+
+RTerm is the execution + evidence plane. It does not replace customer ITSM (ServiceNow/Jira), enterprise IdP/PAM, EDR (CrowdStrike/Defender), or greenfield IaC (Terraform/Helm). It excels at day-2 operations and brownfield estates.
