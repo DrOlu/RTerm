@@ -1,5 +1,65 @@
 # Changelog
 
+## v3.2.15 (2026-08-25)
+
+### Features — offensive security plugins (promptfoo, mitmproxy, NetExec)
+
+Three new plugins wire external security tooling into RTerm's agent, each
+behind explicit governance. 11 → 14 plugins.
+
+- **promptfoo-redteam** — LLM red-team evals against configured model
+  profiles. Runs promptfoo (`npx -y promptfoo@latest eval`) with a generated
+  config; ships a 6-test builtin suite covering jailbreaks, prompt injection,
+  credential exfiltration, PII leakage, destructive commands, and disguised
+  (roleplay) requests. Failed tests (a model complying with a harmful prompt)
+  become **critical findings**; errored tests are warnings, not failures.
+  Tool: `promptfoo_redteam`. Panel: LLM Red-Team.
+
+- **mitmproxy-bridge** — traffic capture for agent self-inspection (what the
+  LLM actually sends over the wire) and authorized interception. Tools:
+  `mitm_start` (regular proxy / reverse modes), `mitm_stop`, `mitm_flows`
+  (per-host/method/status summaries + **secret-pattern detection** on request
+  bodies — OpenAI keys, GitHub tokens, AWS keys, Slack tokens, JWTs,
+  credential assignments — with redacted previews so secrets never land in
+  output). Reverse mode REQUIRES a host allowlist; unbounded interception is
+  refused. Panel: Traffic Capture.
+
+- **netexec-bridge** — external attack simulation complementing rmagent's
+  inside view: credential validation, SMB/LDAP enumeration, spray planning.
+  Tools: `netexec_check` (runs netexec; **target allowlist required on every
+  call** — exact IPs and CIDRs, each comma-separated target validated, no
+  batch bypass), `netexec_spray_plan` (builds a rate-limited, jittered, SLOW
+  spray schedule without executing it). Trigger: `netexec_auth_success`.
+  Passwords pass as `env:<vaultRef>` — never the secret itself. Panel: NetExec.
+
+**Governance model:** promptfoo targets your own model endpoints (low risk);
+mitmproxy reverse mode requires an allowlist (medium); netexec requires an
+allowlist on every call and denies everything by default, including empty or
+null allowlists (high). All three follow the rmagent rule: authorized estate
+only.
+
+**Bug found and fixed during testing:** the mitmproxy JWT secret-detector
+regex required 20+ chars after the `eyJ` prefix, but real JWT headers are
+commonly exactly 20 chars total (17 after the prefix) — short-header JWTs
+were silently missed (an FN). Threshold corrected to `{17,}`.
+
+### Tests
+
+New `offensivePlugins.extreme.spec.ts` (47/47): config/command builders
+(incl. missing-field rejections), builtin red-team suite coverage (every test
+has asserts — no auto-passing), result parsing (pass/fail/error aggregation,
+low-score-with-success counted as failed, per-provider stats, unparseable and
+null input), flow parsing (per-host/method/status, no-response flows,
+malformed input), secret detection (all 6 pattern kinds, redaction verified,
+zero false positives on benign traffic), host allowlist (exact, wildcard,
+suffix-trick rejection), target validation (exact IPs, /24 and /32 CIDRs,
+mixed-target denial, empty/null allowlist denial, whitespace bypass attempt),
+netexec output parsing (success/failure/info lines, error capture), spray
+plan bounds, plugin registration shapes, and the three governance gates
+refusing to run without authorization. Registered in
+`test:backend-unit-extreme`. typecheck:all green; layout-ui + automation
+suites green.
+
 ## v3.2.14 (2026-08-22)
 
 ### Features & fixes — OTel pusher fix + OpenLLMetry-style LLM tracing

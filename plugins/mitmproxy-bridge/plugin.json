@@ -1,0 +1,17 @@
+{
+  "name": "mitmproxy-bridge",
+  "version": "1.0.0",
+  "description": "mitmproxy traffic capture for RTerm — agent self-inspection (what the LLM sends over the wire) and authorized interception on administered hosts. Flow summaries + secret-pattern detection on captured bodies.",
+  "entry": "index.mjs",
+  "tools": [
+    "mitm_start",
+    "mitm_stop",
+    "mitm_flows"
+  ],
+  "panels": [
+    "mitmproxy-flows"
+  ],
+  "permissions": [
+    "spawnProcess"
+  ]
+}

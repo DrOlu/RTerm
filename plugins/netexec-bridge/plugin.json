@@ -1,0 +1,20 @@
+{
+  "name": "netexec-bridge",
+  "version": "1.0.0",
+  "description": "NetExec external attack-simulation for RTerm — credential validation, SMB/LDAP enumeration, and rate-limited spray simulation against authorized targets. Complements rmagent (inside view) with the outside view; closes the purple-team loop.",
+  "entry": "index.mjs",
+  "tools": [
+    "netexec_check",
+    "netexec_spray_plan"
+  ],
+  "triggers": [
+    "netexec_auth_success"
+  ],
+  "panels": [
+    "netexec-results"
+  ],
+  "permissions": [
+    "spawnProcess",
+    "readLedger:incidents"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "promptfoo-redteam",
+  "version": "1.0.0",
+  "description": "promptfoo LLM red-team integration for RTerm — runs jailbreak, prompt-injection, credential-exfiltration, PII-leakage, and destructive-command evals against configured model profiles. A model swap that makes the agent more jailbreakable becomes a visible finding.",
+  "entry": "index.mjs",
+  "tools": [
+    "promptfoo_redteam"
+  ],
+  "panels": [
+    "promptfoo-redteam"
+  ],
+  "permissions": [
+    "spawnProcess",
+    "readLedger:metrics"
+  ]
+}
