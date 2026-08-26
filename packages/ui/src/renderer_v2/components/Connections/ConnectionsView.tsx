@@ -1,6 +1,6 @@
 import React from 'react'
 import { observer } from 'mobx-react-lite'
-import { ArrowLeft, KeyRound, LockKeyhole, MonitorCog, Cable, FolderTree, Pencil, Plus, Save, Server, Shield, Trash2, Waypoints, Upload } from 'lucide-react'
+import { ArrowLeft, KeyRound, LockKeyhole, MonitorCog, Cable, FolderTree, Pencil, Play, Plus, Save, Server, Shield, Trash2, Waypoints, Upload } from 'lucide-react'
 import type { AppStore } from '../../stores/AppStore'
 import { PortForwardType, type TunnelEntry } from '../../lib/ipcTypes'
 import './connections.scss'
@@ -668,7 +668,13 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                 <div className="connections-row header"><div className="connections-row-main header-main"><div>{t.common.name}</div><div>Cron</div><div>On</div></div><div className="row-icon header-icon" /></div>
                 {scheduledTasks.map((c) => (
                   <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
-                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}><div>{c.name}</div><div>{c.cron}</div><div>{c.enabled ? '✓' : '✗'}</div></button>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}><div>{c.name}</div><div>{c.cron}{(c as any).timezone ? ` @ ${(c as any).timezone}` : ''}</div><div>{c.enabled ? '✓' : '✗'}</div></button>
+                    <button className="row-icon" title="Run now (v3.2.16)" onClick={async () => {
+                      try {
+                        const r = await (window as any).gyshell?.agent?.startTask?.('', `Use the manage_scheduled_task tool with action="runNow" and id="${c.id}". Report exactly what it returns.`)
+                        console.log('[scheduledTasks] runNow', r)
+                      } catch (e) { console.warn('[scheduledTasks] runNow failed', e) }
+                    }}><Play size={14} strokeWidth={2} /></button>
                     <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
                   </div>
                 ))}
@@ -682,6 +688,40 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                     <div className="editor-row" style={{ height: 'auto', alignItems: 'flex-start', padding: '8px 0' }}><span className="editor-icon" style={{ marginTop: 6 }}><Waypoints size={16} strokeWidth={2} /></span><textarea className="editor-input" style={{ minHeight: 60, resize: 'vertical' }} placeholder="Command (or a saved script id via the agent)" value={draft.command ?? ''} onChange={(e) => setDraft({ ...draft, command: e.target.value })} /></div>
                     <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
                       <Select className="editor-select" value={draft.enabled ? 'on' : 'off'} onChange={(val) => setDraft({ ...draft, enabled: val === 'on' })} options={[{value:'on',label:'Enabled'},{value:'off',label:'Disabled'}]} />
+                    </div>
+
+                    {/* v3.3.0: the full v3.2.16 scheduler fields, previously agent-only */}
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" placeholder="Timezone (IANA, e.g. Africa/Lagos)" value={(draft as any).timezone ?? ''} onChange={(e) => setDraft({ ...draft, timezone: e.target.value || undefined } as any)} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={(draft as any).catchUp ? 'on' : 'off'} onChange={(val) => setDraft({ ...draft, catchUp: val === 'on' } as any)} options={[{value:'off',label:'Catch-up: off (missed runs stay missed)'},{value:'on',label:'Catch-up: on (replay missed, once/tick)'}]} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={(draft as any).playbookId ? 'playbook' : 'command'} onChange={(val) => setDraft({ ...draft, playbookId: val === 'playbook' ? (playbooks[0]?.id ?? '') : undefined, command: val === 'playbook' ? undefined : (draft.command ?? '') } as any)} options={[{value:'command',label:'Runs: command'},{value:'playbook',label:'Runs: playbook'}]} />
+                    </div>
+                    {(draft as any).playbookId ? (
+                      <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                        <Select className="editor-select" value={(draft as any).playbookId ?? ''} onChange={(val) => setDraft({ ...draft, playbookId: val || undefined } as any)} options={[{value:'',label:'(select a playbook)'}, ...playbooks.map((p) => ({ value: p.id, label: p.name }))]} />
+                      </div>
+                    ) : null}
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" type="number" min={0} placeholder="Retry attempts (0 = none)" value={(draft as any).retryAttempts ?? ''} onChange={(e) => setDraft({ ...draft, retryAttempts: e.target.value === '' ? undefined : Number(e.target.value) } as any)} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" type="number" min={0} placeholder="Retry delay (seconds)" value={(draft as any).retryDelaySeconds ?? ''} onChange={(e) => setDraft({ ...draft, retryDelaySeconds: e.target.value === '' ? undefined : Number(e.target.value) } as any)} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" type="number" min={0} placeholder="Alert after N consecutive failures (0 = never)" value={(draft as any).alertAfterFailures ?? ''} onChange={(e) => setDraft({ ...draft, alertAfterFailures: e.target.value === '' ? undefined : Number(e.target.value) } as any)} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" placeholder="Pause until (ISO date, blank = active)" value={(draft as any).pausedUntil ?? ''} onChange={(e) => setDraft({ ...draft, pausedUntil: e.target.value || undefined } as any)} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={(draft as any).onSuccess ?? ''} onChange={(val) => setDraft({ ...draft, onSuccess: val || undefined } as any)} options={[{value:'',label:'On success: (nothing)'}, ...scheduledTasks.filter((x) => x.id !== draft.id).map((x) => ({ value: x.id, label: `On success → ${x.name}` }))]} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={(draft as any).onFailure ?? ''} onChange={(val) => setDraft({ ...draft, onFailure: val || undefined } as any)} options={[{value:'',label:'On failure: (nothing)'}, ...scheduledTasks.filter((x) => x.id !== draft.id).map((x) => ({ value: x.id, label: `On failure → ${x.name}` }))]} />
                     </div>
                     <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
                   </div>

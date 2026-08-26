@@ -1,5 +1,36 @@
 # Changelog
 
+## v3.3.1 (2026-08-26)
+
+### Features — Settings-coverage audit: 3 UI gaps closed
+
+A settings audit found blocks that existed in `BackendSettings` with working
+backend behavior but **no way to configure them from the UI**. Three closed:
+
+- **Scheduled-task editor upgraded** (Connections → Scheduled Tasks) — the
+  editor previously exposed only name/cron/command/enabled. It now covers the
+  full v3.2.16 scheduler surface that was agent-only:
+  `timezone` (IANA), `catchUp` (replay-missed policy), run-mode switch
+  (command **or** playbook via `playbookId` with a playbook picker),
+  `retryAttempts` / `retryDelaySeconds`, `alertAfterFailures`,
+  `pausedUntil` (maintenance blackout), and `onSuccess` / `onFailure`
+  chaining pickers (self excluded). The task list shows the timezone next to
+  the cron and gains a **Run now** button (fires the agent's
+  `manage_scheduled_task action="runNow"`).
+
+- **Session Logging toggle** (Settings → Memory section) —
+  `sessionLogging.enabled` was JSON-only; now a switch. Records terminal
+  output per session for replay/evidence.
+
+- **New Settings → Plugins section** — a generic panel rendering one form per
+  previously-UI-less plugin block: **Web Intelligence** (wigolo: restUrl,
+  token, autoStart, warmupOnInit), **NATS Event Mesh** (url, prefix, queue),
+  **Synapse Bridge** (url, prefix, agentId), and **Numbat Bridge**
+  (binaryPath, recordsPath, ingestToken). Booleans render as switches, strings
+  as inputs with placeholder defaults; blank fields are omitted on save so
+  server defaults apply; per-block Save with a confirmation flash. Nav entry
+  added to the Settings sidebar.
+
 ## v3.3.0 (2026-08-26)
 
 ### Features — Model Failover is now actually configurable (UI + settings + engine)

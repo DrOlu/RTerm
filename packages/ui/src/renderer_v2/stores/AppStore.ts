@@ -261,6 +261,7 @@ export type SettingsSection =
   | "oncall"
   | "cloud"
   | "agentspan"
+  | "plugins"
   | "version";
 
 export type McpToolSummary = Awaited<

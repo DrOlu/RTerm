@@ -28,6 +28,7 @@ import {
   PhoneCall,
   Cloud,
   Workflow,
+  Puzzle,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { AppStore } from "../../stores/AppStore";
@@ -1019,6 +1020,185 @@ function AgentspanPanel({ store }: { store: AppStore }) {
   );
 }
 
+/**
+ * v3.3.0: generic plugin-settings panel — one form per settings block that
+ * previously had no UI (webIntel / nats / synapse / numbat). Each field is a
+ * plain string input; booleans render as a switch. Saved via settings.set in
+ * one call; blank fields are omitted so defaults apply.
+ */
+interface PluginFieldDef {
+  key: string
+  label: string
+  placeholder?: string
+  type?: "text" | "boolean"
+  hint?: string
+}
+
+const PLUGIN_PANELS: Array<{
+  block: "webIntel" | "nats" | "synapse" | "numbat"
+  title: string
+  description: string
+  fields: PluginFieldDef[]
+}> = [
+  {
+    block: "webIntel",
+    title: "Web Intelligence (wigolo)",
+    description:
+      "Local-first web tools: multi-engine search, clean fetch, crawl, research, page-watch. Lean by default — the browser engine downloads only when a tool needs it.",
+    fields: [
+      { key: "enabled", label: "Enabled", type: "boolean" },
+      { key: "restUrl", label: "Daemon URL", placeholder: "http://127.0.0.1:3333" },
+      { key: "token", label: "Bearer token", placeholder: "(only if WIGOLO_API_TOKEN is set)" },
+      { key: "autoStart", label: "Auto-start daemon", type: "boolean" },
+      { key: "warmupOnInit", label: "Download full engine at boot", type: "boolean", hint: "Off = lean (~no download); on = fetch the browser engine + models in the background." },
+    ],
+  },
+  {
+    block: "nats",
+    title: "NATS Event Mesh",
+    description:
+      "Fleet-wide triggers: terminal output and monitor snapshots federate across RTerm instances sharing a NATS server.",
+    fields: [
+      { key: "enabled", label: "Enabled", type: "boolean" },
+      { key: "url", label: "Server URL", placeholder: "nats://localhost:4222" },
+      { key: "prefix", label: "Subject prefix", placeholder: "rterm" },
+      { key: "queue", label: "Queue group", placeholder: "(optional, load-balances subscriptions)" },
+    ],
+  },
+  {
+    block: "synapse",
+    title: "Synapse Mesh Bridge",
+    description:
+      "Discover and dispatch tasks to other Synapse agents over NATS, and register this RTerm as a mesh agent other agents can call.",
+    fields: [
+      { key: "enabled", label: "Enabled", type: "boolean" },
+      { key: "url", label: "NATS URL", placeholder: "nats://localhost:4222" },
+      { key: "prefix", label: "Mesh prefix", placeholder: "mesh" },
+      { key: "agentId", label: "This agent's id", placeholder: "rterm-001" },
+    ],
+  },
+  {
+    block: "numbat",
+    title: "Numbat Bridge",
+    description:
+      "Endpoint AI-agent detection (EDR). Deploy numbat to hosts, ingest its NDJSON findings, and fire governed triggers on medium+ severity.",
+    fields: [
+      { key: "enabled", label: "Enabled", type: "boolean" },
+      { key: "binaryPath", label: "Binary path", placeholder: "numbat (on PATH)" },
+      { key: "recordsPath", label: "Records file", placeholder: "~/.numbat/records.ndjson" },
+      { key: "ingestToken", label: "Ingest token", placeholder: "(vault secretRef ok)" },
+    ],
+  },
+];
+
+function PluginSettingsPanel({ store }: { store: AppStore }) {
+  const [saving, setSaving] = useState(false);
+  const [savedBlock, setSavedBlock] = useState<string | null>(null);
+
+  const saveBlock = async (block: string, values: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      // Omit blank strings so server defaults apply; keep booleans as-is.
+      const clean: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(values)) {
+        if (typeof v === "string" && v.trim() === "") continue;
+        clean[k] = v;
+      }
+      await window.gyshell.settings.set({ [block]: clean } as never);
+      setSavedBlock(block);
+      setTimeout(() => setSavedBlock(null), 2000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      {PLUGIN_PANELS.map((panel) => (
+        <PluginBlockPanel
+          key={panel.block}
+          panel={panel}
+          store={store}
+          saving={saving}
+          saved={savedBlock === panel.block}
+          onSave={saveBlock}
+        />
+      ))}
+    </>
+  );
+}
+
+function PluginBlockPanel({
+  panel,
+  store,
+  saving,
+  saved,
+  onSave,
+}: {
+  panel: (typeof PLUGIN_PANELS)[number];
+  store: AppStore;
+  saving: boolean;
+  saved: boolean;
+  onSave: (block: string, values: Record<string, unknown>) => Promise<void>;
+}) {
+  const current = ((store.settings as unknown) as Record<string, Record<string, unknown> | undefined> | null)?.[panel.block];
+  const [values, setValues] = useState<Record<string, string | boolean>>({});
+
+  useEffect(() => {
+    const next: Record<string, string | boolean> = {};
+    for (const f of panel.fields) {
+      const v = current?.[f.key];
+      if (f.type === "boolean") next[f.key] = v === undefined ? true : v === true;
+      else next[f.key] = typeof v === "string" ? v : "";
+    }
+    setValues(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel.block, store.settings]);
+
+  return (
+    <>
+      <div className="settings-section-header">
+        <div className="settings-section-title">{panel.title}</div>
+      </div>
+      <div className="settings-section-desc">{panel.description}</div>
+      <div className="settings-rows">
+        {panel.fields.map((f) => (
+          <div className="settings-row" key={f.key}>
+            <div className="settings-row-label-with-info">
+              <label>{f.label}</label>
+              {f.hint ? <InfoTooltip content={f.hint} /> : null}
+            </div>
+            {f.type === "boolean" ? (
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={values[f.key] === true}
+                  onChange={(e) => setValues({ ...values, [f.key]: e.target.checked })}
+                />
+                <span className="switch-slider" />
+              </label>
+            ) : (
+              <input
+                className="settings-inline-input"
+                style={{ width: 320 }}
+                placeholder={f.placeholder ?? ""}
+                value={String(values[f.key] ?? "")}
+                onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0 24px" }}>
+        <button className="btn-secondary" disabled={saving} onClick={() => void onSave(panel.block, values)}>
+          Save {panel.title}
+        </button>
+        {saved ? <span style={{ fontSize: 12, opacity: 0.7 }}>Saved ✓</span> : null}
+      </div>
+    </>
+  );
+}
+
 function ThemeTile(props: {
   active?: boolean;
   theme: AppTheme;
@@ -1693,6 +1873,11 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
             "agentspan",
             <Workflow size={16} strokeWidth={2} />,
             (t.settings as any).agentspan ?? "AgentSpan",
+          )}
+          {renderNavItem(
+            "plugins",
+            <Puzzle size={16} strokeWidth={2} />,
+            (t.settings as any).plugins ?? "Plugins",
           )}
           {renderNavItem(
             "version",
@@ -2995,6 +3180,24 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                     <span className="switch-slider" />
                   </label>
                 </div>
+                <div className="settings-row">
+                  <div className="settings-row-label-with-info">
+                    <label>Session Logging</label>
+                    <InfoTooltip content="Record terminal output to disk per session (plain files under the data dir). Recorded sessions are searchable via the session-log tools and replayable as evidence." />
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={store.settings?.sessionLogging?.enabled === true}
+                        onChange={async (e) => {
+                          await window.gyshell.settings.set({
+                            sessionLogging: { enabled: e.target.checked },
+                          } as never)
+                        }}
+                    />
+                    <span className="switch-slider" />
+                  </label>
+                </div>
               </div>
 
               <div className="settings-memory-panel">
@@ -3585,6 +3788,10 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
 
             {store.settingsSection === "agentspan" ? (
               <AgentspanPanel store={store} />
+            ) : null}
+
+            {store.settingsSection === "plugins" ? (
+              <PluginSettingsPanel store={store} />
             ) : null}
 
             {store.settingsSection === "version" ? (
