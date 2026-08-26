@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.2.19 (2026-08-26)
+
+### Bug fixes — history search actually finds content (live-verified)
+
+A "check it's wired, not placeholder" pass against the running daemon found
+the v3.2.18 history search returning sessions by title but **zero message
+matches**. Three stacked bugs, all fixed and live-verified:
+
+1. **The history bridge fed the search metadata, not messages.**
+   `agentService.getAllChatHistory()` returns session summaries
+   (`messagesCount`, `lastMessagePreview`) with no `messages` array — and its
+   session ids can diverge from the durable store. The bridge now searches
+   `historyStore.listChatSessions()` directly (full records with messages),
+   falling back to the metadata path only if the store is unavailable.
+
+2. **Stored messages are double-wrapped.** The store persists
+   `{id, type, data: {type, data: {content}}}`; `extractMessageText` read
+   `content` one level too early and always got `undefined`. It now unwraps
+   nested `data` layers (bounded, only when the inner object actually has
+   `content` or another `data`), handling both the double-wrapped and plain
+   shapes. `normalizeMessages()` was also added so sessions whose messages
+   are a `Map` (the in-memory `ChatSession` shape) or a plain object are
+   searched, not just arrays.
+
+3. **The history store resolved its data dir from `process.cwd()`.** Under
+   launchd the daemon runs with cwd=`/`, so the store opened
+   `/.gybackend-data` — an empty DB that silently diverged from the user's
+   real `~/.gybackend-data`. Resolution order is now `GYSHELL_STORE_DIR` →
+   `GYBACKEND_DATA_DIR` → `~/.gybackend-data` (was cwd-based).
+
+**Live verification:** `GET /api/v1/history/search?q=netexec` → 1 session, 3
+message matches with real snippets ("…Call the netexec_check tool with
+protocol \"smb\"…"); `?q=synapse` → 2 sessions, 581 matches. All 77
+v3218Comprehensive tests still green; typecheck clean.
+
 ## v3.2.18 (2026-08-26)
 
 ### Features — comprehensive improvements (7 new subsystems)
