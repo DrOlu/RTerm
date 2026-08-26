@@ -214,7 +214,11 @@ test('per-target scope: failed target rolls back, other targets still complete',
     if (command.includes('maybe-boom') && isFirstTarget) return { stdoutDelta: 'err', exitCode: 1 }
     return { stdoutDelta: 'ok', exitCode: 0 }
   }
-  const record = await executePlaybook(deps(service), pb(steps, { groupId: 'g1' }))
+  // This test asserts that a failed target rolls back while the OTHER target
+  // still completes — that is the onTargetError='continue' policy. v3.2.17
+  // changed the default to 'stop' (a failed target halts remaining targets),
+  // so opt into 'continue' here to match the test's stated intent.
+  const record = await executePlaybook(deps(service), pb(steps, { groupId: 'g1', onTargetError: 'continue' }))
   assert(record.targets.length === 2, 'two targets resolved')
   const [t1, t2] = record.targets
   assert(!t1.ok && t1.rolledBack === true, 'target 1 rolled back')
