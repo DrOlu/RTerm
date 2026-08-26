@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export const HISTORY_SQLITE_FILE_NAME = "gyshell-history.sqlite";
@@ -17,7 +18,15 @@ export function resolveHistoryStorageDir(): string {
   if (overrideDir) {
     return path.resolve(overrideDir);
   }
-  return path.join(process.cwd(), ".gybackend-data");
+  // v3.2.18 fix: the daemon may run with cwd=/ (launchd), which previously
+  // resolved to /.gybackend-data — an empty store that silently diverged from
+  // the user's real data at ~/.gybackend-data. Prefer the home directory so
+  // history is found regardless of the process working directory.
+  const gybackendDataDir = (process.env.GYBACKEND_DATA_DIR || "").trim();
+  if (gybackendDataDir) {
+    return path.resolve(gybackendDataDir);
+  }
+  return path.join(os.homedir(), ".gybackend-data");
 }
 
 export function ensureHistoryStorageDir(

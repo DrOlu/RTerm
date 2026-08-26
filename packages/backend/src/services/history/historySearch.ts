@@ -64,11 +64,25 @@ const SNIPPET_CONTEXT = 60
 const DEFAULT_SESSION_LIMIT = 20
 const DEFAULT_SNIPPET_LIMIT = 3
 
-/** Extract searchable text from a stored message's data payload. */
+/** Extract searchable text from a stored message's data payload.
+ *  Handles the double-wrapped shape the store persists ({type, data: {type,
+ *  data: {content}}}) as well as the plain ({content}) shape. */
 export function extractMessageText(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
-  const obj = data as Record<string, unknown>
-  // LangChain messages: content is a string or an array of parts
+  let obj = data as Record<string, unknown>
+
+  // Unwrap nested {data: {...}} wrappers (up to 3 levels, defensive).
+  for (let i = 0; i < 3 && obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data); i++) {
+    const inner = obj.data as Record<string, unknown>
+    // Only unwrap when the inner object has content (or another data layer);
+    // otherwise we'd unwrap past the content itself.
+    if (inner.content !== undefined || inner.data !== undefined) {
+      obj = inner
+    } else {
+      break
+    }
+  }
+
   const content = obj.content
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
@@ -118,6 +132,17 @@ export function findMatches(text: string, query: string, wholeWord: boolean): Ar
   return out
 }
 
+/** Normalize a session's messages to an array, whether stored as an array or
+ *  a Map<string, message> (ChatSession uses a Map). */
+export function normalizeMessages(messages: unknown): Array<{ id?: string; type?: string; data?: unknown }> {
+  if (!messages) return []
+  if (Array.isArray(messages)) return messages as never[]
+  if (messages instanceof Map) return [...messages.values()] as never[]
+  // Plain object keyed by id
+  if (typeof messages === 'object') return Object.values(messages as Record<string, never>)
+  return []
+}
+
 /** Search across all sessions. Pure: no I/O. */
 export function searchChatHistory(
   sessions: readonly StoredChatSession[],
@@ -146,8 +171,8 @@ export function searchChatHistory(
       ? findMatches(session.title, trimmed, wholeWord)
       : []
 
-    for (const message of session.messages ?? []) {
-      const text = extractMessageText(message.data)
+    for (const message of normalizeMessages((session as { messages?: unknown }).messages)) {
+      const text = extractMessageText(message?.data)
       if (!text) continue
       const hits = findMatches(text, trimmed, wholeWord)
       for (const hit of hits) {
@@ -155,8 +180,8 @@ export function searchChatHistory(
         totalMatches++
         if (matches.length < snippetLimit) {
           matches.push({
-            messageId: message.id,
-            type: message.type,
+            messageId: String(message?.id ?? ''),
+            type: String(message?.type ?? ''),
             snippet: buildSnippet(text, hit.offset, hit.length),
             offset: hit.offset,
           })

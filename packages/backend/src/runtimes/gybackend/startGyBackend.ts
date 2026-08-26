@@ -1063,8 +1063,23 @@ const makeRestHandler = (
         // v3.2.18: cross-session history search.
         historyBridge: {
           getAllSessions: async () => {
-            const history = agentService.getAllChatHistory() ?? [];
-            return history;
+            // v3.2.18 fix: agentService.getAllChatHistory() returns session
+            // METADATA from a different source than the durable SQLite store
+            // (ids can diverge, and it carries no messages). Search the store
+            // directly — loadAllChatSessions() returns full records with
+            // messages, which is exactly what searchChatHistory needs.
+            try {
+              const all = historyStore.listChatSessions();
+              if (Array.isArray(all) && all.length > 0) {
+                return all;
+              }
+            } catch (e) {
+              console.warn(
+                "[history:search] store load failed, falling back to metadata:",
+                e instanceof Error ? e.message : e,
+              );
+            }
+            return agentService.getAllChatHistory() ?? [];
           },
         },
         commandPolicyBridge: {
