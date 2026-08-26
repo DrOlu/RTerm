@@ -30,6 +30,11 @@ type WebSocketRpcMethod =
   | "gateway:describe"
   | "session:list"
   | "session:get"
+  | "history:search"
+  | "settings:listBackups"
+  | "settings:restoreBackup"
+  | "settings:export"
+  | "settings:import"
   | "agent:exportHistory"
   | "agent:getAllChatHistory"
   | "agent:loadChatSession"
@@ -166,6 +171,8 @@ export interface WebSocketGatewayAdapterOptions {
   host: string;
   port: number;
   accessTokenAuth?: WebSocketAccessTokenAuth;
+  /** v3.2.18: optional per-client rate limiter (token bucket + auth lockout). */
+  rateLimiter?: { check(k: string): { allowed: boolean; retryAfterMs?: number; reason?: string }; recordAuthFailure(k: string): { allowed: boolean }; recordAuthSuccess(k: string): void; isLockedOut(k: string): boolean };
   ipFilter?: WebSocketIpFilter;
   /** optional HTTP routes served on the same port as the WS gateway (e.g.
    * /dashboard). Served by the default server factory. NOTE: when a custom
@@ -180,6 +187,10 @@ export interface WebSocketGatewayAdapterOptions {
     getAllChatHistory?: () => unknown | Promise<unknown>;
     loadChatSession?: (sessionId: string) => unknown | Promise<unknown>;
     getUiMessages?: (sessionId: string) => unknown | Promise<unknown>;
+  };
+  /** v3.2.18: cross-session history search bridge. */
+  historyBridge?: {
+    getAllSessions?: () => unknown | Promise<unknown>;
   };
   terminalBridge?: {
     listTerminals: () => Array<{ id: string; title: string; type: string }>;
@@ -401,6 +412,11 @@ export interface WebSocketGatewayAdapterOptions {
   settingsBridge?: {
     getSettings?: () => unknown | Promise<unknown>;
     setSettings?: (settings: Record<string, any>) => unknown | Promise<unknown>;
+    /** v3.2.18: backup/restore/export/import. */
+    listBackups?: () => unknown | Promise<unknown>;
+    restoreBackup?: (name: string) => unknown | Promise<unknown>;
+    export?: () => unknown | Promise<unknown>;
+    import?: (content: string) => unknown | Promise<unknown>;
   };
   commandPolicyBridge?: {
     getLists?: () => unknown | Promise<unknown>;
@@ -685,14 +701,20 @@ export class WebSocketGatewayAdapter {
 
     const token = this.extractAccessToken(request);
     if (!token) {
+      // v3.2.18: count missing-token attempts toward the auth lockout.
+      this.options.rateLimiter?.recordAuthFailure(this.clientKeyForRequest(request));
       return "missing access token";
     }
 
     try {
       const valid = await auth.verifyToken(token);
       if (!valid) {
+        // v3.2.18: failed verification counts toward the lockout.
+        this.options.rateLimiter?.recordAuthFailure(this.clientKeyForRequest(request));
         return "invalid access token";
       }
+      // v3.2.18: successful auth clears the failure counter.
+      this.options.rateLimiter?.recordAuthSuccess(this.clientKeyForRequest(request));
       return null;
     } catch (error) {
       this.logger.warn(
@@ -701,6 +723,17 @@ export class WebSocketGatewayAdapter {
       );
       return "token verification failed";
     }
+  }
+
+  /** v3.2.18: a stable per-client key for rate limiting (IP or token id). */
+  private clientKeyForRequest(request?: any): string {
+    return String(request?.socket?.remoteAddress || "unknown");
+  }
+
+  /** v3.2.18: per-client key from a live socket connection. */
+  private clientKeyForSocket(socket: IWebSocketConnectionLike): string {
+    const remote = (socket as unknown as { remoteAddress?: string }).remoteAddress;
+    return String(remote || "unknown");
   }
 
   private extractAccessToken(request?: any): string | null {
@@ -895,6 +928,24 @@ export class WebSocketGatewayAdapter {
     try {
       const parsed = this.parseRequest(raw);
       requestId = parsed.id !== undefined ? String(parsed.id) : undefined;
+
+      // v3.2.18: per-client rate limiting — reject with 429 semantics when the
+      // client exceeds its bucket. Lockout (auth failures) is checked at
+      // connection time, not per message.
+      const limiter = this.options.rateLimiter;
+      if (limiter) {
+        const clientKey = this.clientKeyForSocket(socket);
+        const decision = limiter.check(clientKey);
+        if (!decision.allowed) {
+          throw new WebSocketRpcError(
+            "RATE_LIMITED",
+            decision.reason === "locked-out"
+              ? `locked out; retry in ${Math.ceil((decision.retryAfterMs ?? 0) / 1000)}s`
+              : `rate limited; retry in ${Math.ceil((decision.retryAfterMs ?? 1000) / 1000)}s`,
+          );
+        }
+      }
+
       const result = await this.executeRequest(parsed, socket);
       if (requestId) {
         this.sendRpcSuccess(socket, requestId, result);
@@ -953,6 +1004,27 @@ export class WebSocketGatewayAdapter {
     throw new WebSocketRpcError(
       "BAD_REQUEST",
       "Unsupported websocket payload type.",
+    );
+  }
+
+  /**
+   * v3.2.18: public dispatch for non-WebSocket callers (the REST API layer).
+   * Executes a gateway method with a synthetic loopback socket — same
+   * validation and error mapping as a WS request, no socket required.
+   */
+  async handleRequest(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    const syntheticSocket = {
+      send: () => {},
+      close: () => {},
+      on: () => {},
+      readyState: 1,
+    } as unknown as IWebSocketConnectionLike;
+    return await this.executeRequest(
+      { id: `rest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, method, params } as WebSocketRpcRequest,
+      syntheticSocket,
     );
   }
 
@@ -1039,6 +1111,62 @@ export class WebSocketGatewayAdapter {
           );
         }
         return { session };
+      }
+      case "history:search": {
+        // v3.2.18: cross-session full-text search.
+        const bridge = this.options.historyBridge;
+        if (!bridge?.getAllSessions) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "history:search is not available on this gateway (no history bridge).",
+          );
+        }
+        const { searchChatHistory } = await import("../history/historySearch");
+        const sessions = (await bridge.getAllSessions()) as never[];
+        const query = this.readStringParam(params, "query");
+        const wholeWord = params?.wholeWord === true;
+        const includeTitles = params?.includeTitles !== false;
+        const sessionLimit = typeof params?.sessionLimit === "number" ? params.sessionLimit : undefined;
+        const snippetLimit = typeof params?.snippetLimit === "number" ? params.snippetLimit : undefined;
+        return searchChatHistory(sessions, query, { wholeWord, includeTitles, sessionLimit, snippetLimit });
+      }
+      case "settings:listBackups": {
+        const bridge = this.options.settingsBridge;
+        if (!bridge?.listBackups) {
+          throw new WebSocketRpcError("METHOD_NOT_FOUND", "settings backups are not available on this gateway.");
+        }
+        return { backups: await bridge.listBackups() };
+      }
+      case "settings:restoreBackup": {
+        const bridge = this.options.settingsBridge;
+        if (!bridge?.restoreBackup) {
+          throw new WebSocketRpcError("METHOD_NOT_FOUND", "settings backups are not available on this gateway.");
+        }
+        const name = this.readStringParam(params, "name");
+        const result = await bridge.restoreBackup(name);
+        if (result && typeof result === "object" && "ok" in result && !(result as { ok: boolean }).ok) {
+          throw new WebSocketRpcError("BAD_REQUEST", String((result as { error?: string }).error ?? "restore failed"));
+        }
+        return { restored: name };
+      }
+      case "settings:export": {
+        const bridge = this.options.settingsBridge;
+        if (!bridge?.export) {
+          throw new WebSocketRpcError("METHOD_NOT_FOUND", "settings export is not available on this gateway.");
+        }
+        return { content: await bridge.export() };
+      }
+      case "settings:import": {
+        const bridge = this.options.settingsBridge;
+        if (!bridge?.import) {
+          throw new WebSocketRpcError("METHOD_NOT_FOUND", "settings import is not available on this gateway.");
+        }
+        const content = this.readStringParam(params, "content");
+        const result = await bridge.import(content);
+        if (result && typeof result === "object" && "ok" in result && !(result as { ok: boolean }).ok) {
+          throw new WebSocketRpcError("BAD_REQUEST", String((result as { error?: string }).error ?? "import failed"));
+        }
+        return { imported: true };
       }
       case "agent:exportHistory": {
         const bridge = this.options.agentBridge;

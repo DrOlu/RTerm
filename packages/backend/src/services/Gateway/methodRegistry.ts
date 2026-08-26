@@ -32,6 +32,11 @@ export const CORE_METHODS: GatewayMethod[] = [
   m('gateway:isSameMachine', 'gateway', 'Whether the caller is on the same machine as the backend.', '1.0.0'),
   m('gateway:createSession', 'session', 'Create an agent session (returns sessionId).', '1.0.0'),
   m('session:list', 'session', 'List chat sessions.', '1.0.0'),
+  m('history:search', 'session', 'Full-text search across ALL stored chat sessions (v3.2.18). Params: {query, wholeWord?, includeTitles?, sessionLimit?, snippetLimit?}. Returns matching sessions ranked by match count with snippets.', '3.2.18'),
+  m('settings:listBackups', 'settings', 'List timestamped settings backups (v3.2.18). Returns [{name, at, size}] newest-first.', '3.2.18'),
+  m('settings:restoreBackup', 'settings', 'Restore settings from a named backup (v3.2.18). Takes a SAFETY backup of the current state first. Params: {name}.', '3.2.18'),
+  m('settings:export', 'settings', 'Export the current settings.json content as a portable JSON string (v3.2.18).', '3.2.18'),
+  m('settings:import', 'settings', 'Import settings JSON (v3.2.18). Validates it is a JSON object; takes a SAFETY backup before replacing. Params: {content}.', '3.2.18'),
   m('session:get', 'session', 'Get one chat session by id.', '1.0.0', { sessionId: { type: 'string' } }),
 
   m('agent:startTask', 'agent', 'Start an AI agent task (blocking) and return the final answer.', '1.0.0', { sessionId: { type: 'string' }, userInput: { type: 'string' } }),

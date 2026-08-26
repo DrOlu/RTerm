@@ -210,6 +210,11 @@ export const CLOSE_TERMINAL_TAB_DESCRIPTION = [
   "Use this to clean up tabs the task no longer needs — e.g. after a transfer finished, or after a one-off probe on a server. Close tabs you opened yourself when the work is done; do not close tabs the user was actively using unless asked.",
   "Guarded: it refuses to close the last remaining terminal tab (at least one tab must stay open) and reports how many tabs remain after the close. If the tab is running a command, the command is terminated by the close.",
 ].join("\n");
+export const SPAWN_SUBAGENTS_DESCRIPTION = [
+  "Fan work out to concurrent child agent sessions. Each task gets its own session running its prompt to completion; results are collected into one summary.",
+  "Use this when you have MULTIPLE INDEPENDENT tasks that would otherwise run one at a time — e.g. 'check disk usage on these 6 servers', 'analyze these 3 files', or 'research these 4 questions'. Do NOT use it for sequential work where each step depends on the previous one's output.",
+  "Each task needs a self-contained prompt (the child has no context from this conversation) and a short label. Guards: max 20 tasks per fan-out, per-child timeout 5 minutes (configurable), concurrency cap 3 (configurable). One child failing or timing out does not affect the others — you get a per-task result with ✓/✗ status.",
+].join("\n");
 export const COPY_BETWEEN_TABS_DESCRIPTION = [
   "Start an asynchronous file copy between two different terminal tabs on different machines. Use this only for cross-terminal-tab file transfer; do not use it for copying within one tab or between two tabs connected to the same machine.",
   "If either source or target terminal is disconnected or not ready, this tool returns an explicit terminal_status for that side and does not start a transfer.",
@@ -382,6 +387,11 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     name: "close_terminal_tab",
     description: CLOSE_TERMINAL_TAB_DESCRIPTION,
     shortDescription: "Close a terminal tab",
+  },
+  {
+    name: "spawn_subagents",
+    description: SPAWN_SUBAGENTS_DESCRIPTION,
+    shortDescription: "Fan out to concurrent child agents",
   },
   {
     name: "create_or_edit",

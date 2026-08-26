@@ -19,7 +19,7 @@ import {
   MemorySaver,
 } from "@langchain/langgraph";
 import { RunnableLambda } from "@langchain/core/runnables";
-import type { ChatSession, BackendSettings, TerminalTab, UserInputPayload } from "../types";
+import type { ChatSession, BackendSettings, TerminalTab, UserInputPayload, ModelDefinition } from "../types";
 import { TerminalService } from "./TerminalService";
 import type { FileTransferService } from "./FileTransferService";
 import type {
@@ -45,6 +45,7 @@ import {
   reconnectTerminalTabSchema,
   openTerminalTabSchema,
   closeTerminalTabSchema,
+  spawnSubAgentsSchema,
   editFileSchema,
   writeAndEditSchema,
   writeFileSchema,
@@ -700,6 +701,21 @@ export class AgentService_v2 {
 
   isAbortError(error: unknown): boolean {
     return this.helpers.isAbortError(error);
+  }
+
+  /**
+   * v3.2.18: resolve a fallback model id to its ModelDefinition from the
+   * session's settings. Returns null when the model isn't configured.
+   */
+  private resolveFallbackModelItem(modelId: string): ModelDefinition | null {
+    try {
+      const settings = (this as any).options?.getSettings?.() ?? null;
+      const items: ModelDefinition[] = settings?.models?.items ?? [];
+      const hit = items.find((m) => m.model === modelId || m.id === modelId || m.name === modelId);
+      return hit ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1440,7 +1456,74 @@ export class AgentService_v2 {
       let debugRawChunks: any[] = [];
       // v3.2.13: OpenLLMetry-style LLM span for this model pass.
       const llmTraceStart = Date.now();
-      const fullResponse = await invokeWithRetryAndSanitizedInput({
+
+      // v3.2.18: model failover — when the primary model's provider errors
+      // (429/5xx/network/auth), transparently retry against the configured
+      // fallback chain. Context-length/400/abort errors are NOT failed over
+      // (the request itself is bad); those rethrow immediately.
+      // NOTE: the fallback models must be resolvable ModelDefinitions; the
+      // chain is built from the session binding's fallbackModels list.
+      const fallbacks = (sessionBinding as { fallbackModels?: Array<{ model: string; label?: string }> }).fallbackModels;
+      let fullResponse: any;
+      if (Array.isArray(fallbacks) && fallbacks.length > 0) {
+        const { withModelFailover } = await import("./AgentHelper/utils/modelFailover");
+        const primaryModel = (baseModel as any)?.model ?? (baseModel as any)?.modelName ?? "unknown";
+        const chain = [{ model: primaryModel }, ...fallbacks.map((f) => ({ model: f.model, label: f.label }))];
+        const failover = await withModelFailover(chain, async (candidate) => {
+          // The primary candidate uses the already-built modelWithTools; for
+          // fallbacks we rebuild the chat model from the profile's item map.
+    let modelToUse = modelWithTools;
+    if (candidate.model !== primaryModel) {
+      const fallbackItem = this.resolveFallbackModelItem(candidate.model);
+      if (!fallbackItem) {
+        throw new Error(`fallback model "${candidate.model}" is not configured`);
+      }
+      const fallbackBinding = this.getSessionModelBinding(sessionId);
+      const fallbackChat = this.helpers.createChatModel(fallbackItem, 0.7, (fallbackBinding as any)?.profile ?? null);
+      modelToUse = fallbackChat as typeof modelWithTools;
+    }
+          return await invokeWithRetryAndSanitizedInput({
+            helpers: this.helpers,
+            messages: modelInputMessages,
+            modelSupportsImage: sessionBinding.readFileSupport.image,
+            signal: config?.signal,
+            operation: async (streamInputMessages: any) => {
+              const stream = await modelToUse.stream(streamInputMessages, { signal: config?.signal });
+              // Consume using the shared streaming consumer (defined below in
+              // the non-fallback path is not reachable here; use a minimal
+              // consumption that mirrors it).
+              let response: any = null;
+              for await (const chunk of stream) {
+                response = response ? response.concat(chunk) : chunk;
+              }
+              if (!response) throw new Error("Model stream ended without a usable response.");
+              return response;
+            },
+            onRetry: (attempt: number) => {
+              this.helpers.sendEvent(sessionId, {
+                type: "alert",
+                message: `Retrying (${attempt}/${MODEL_RETRY_MAX})...`,
+                level: "info",
+                messageId: `retry-${messageId}-${attempt}`,
+              });
+            },
+            maxRetries: MODEL_RETRY_MAX,
+            delaysMs: MODEL_RETRY_DELAYS_MS,
+          });
+        }, {
+          onAttempt: (a) => {
+            if (!a.ok) {
+              console.warn(`[AgentService_v2] model failover: ${a.model} failed (${a.reason}) after ${a.durationMs}ms`);
+            }
+          },
+        });
+        if (failover.value !== undefined) {
+          fullResponse = failover.value;
+        } else {
+          throw failover.error ?? new Error("model failover exhausted all candidates");
+        }
+      } else {
+      fullResponse = await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
         messages: modelInputMessages,
         modelSupportsImage: sessionBinding.readFileSupport.image,
@@ -1622,6 +1705,7 @@ export class AgentService_v2 {
         maxRetries: MODEL_RETRY_MAX,
         delaysMs: MODEL_RETRY_DELAYS_MS,
       });
+      }
 
       fullResponse.additional_kwargs = {
         ...(fullResponse.additional_kwargs || {}),
@@ -2093,6 +2177,22 @@ export class AgentService_v2 {
             );
           } catch (err) {
             result = `Parameter validation error for close_terminal_tab: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "spawn_subagents": {
+          try {
+            const validatedArgs = spawnSubAgentsSchema.parse(
+              toolCall.args || {},
+            );
+            result = await toolImplementations.spawnSubAgents(
+              validatedArgs,
+              // The sub-agent tool needs the agent service to create child
+              // sessions — inject it into the execution context.
+              { ...executionContext, agentService: this } as never,
+            );
+          } catch (err) {
+            result = `Parameter validation error for spawn_subagents: ${(err as Error).message}`;
           }
           break;
         }

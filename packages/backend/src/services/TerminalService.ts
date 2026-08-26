@@ -230,6 +230,9 @@ export class TerminalService {
   private readonly terminalIdsBeingKilled = new Set<string>()
   private readonly autoReconnect = new AutoReconnect({ maxAttempts: 10 })
   private readonly terminalClosedListeners = new Set<TerminalClosedListener>()
+  /** v3.2.18: idle-timeout tracking hooks. */
+  private readonly terminalCreatedListeners = new Set<(terminalId: string) => void>()
+  private readonly terminalDataListeners = new Set<(terminalId: string) => void>()
   /** Optional session logger (records terminal output to disk per session). */
   private sessionLogger: import('./automation/sessionLogService').SessionLogService | null = null
   private readonly sessionLogStarted = new Set<string>()
@@ -286,6 +289,36 @@ export class TerminalService {
     this.terminalClosedListeners.add(listener)
     return () => {
       this.terminalClosedListeners.delete(listener)
+    }
+  }
+
+  /** v3.2.18: fires when a terminal tab is created (idle-timeout tracking). */
+  onTerminalCreated(listener: (terminalId: string) => void): () => void {
+    this.terminalCreatedListeners.add(listener)
+    return () => {
+      this.terminalCreatedListeners.delete(listener)
+    }
+  }
+
+  /** v3.2.18: fires on any terminal data event (idle-timeout activity). */
+  onTerminalData(listener: (terminalId: string) => void): () => void {
+    this.terminalDataListeners.add(listener)
+    return () => {
+      this.terminalDataListeners.delete(listener)
+    }
+  }
+
+  /** v3.2.18: notify created-listeners (called from createTerminal paths). */
+  private notifyTerminalCreated(terminalId: string): void {
+    for (const listener of this.terminalCreatedListeners) {
+      try { listener(terminalId) } catch { /* listener errors never break the service */ }
+    }
+  }
+
+  /** v3.2.18: notify data-listeners (called from the data pump). */
+  private notifyTerminalData(terminalId: string): void {
+    for (const listener of this.terminalDataListeners) {
+      try { listener(terminalId) } catch { /* listener errors never break the service */ }
     }
   }
 
@@ -686,6 +719,7 @@ export class TerminalService {
 
     this.publishTerminalTabsChanged()
     this.schedulePersistTerminalState()
+    this.notifyTerminalCreated(tab.id)
 
     return tab
   }
@@ -908,6 +942,8 @@ export class TerminalService {
             }
             this.sessionLogger.write(terminalId, captureData)
           }
+          // v3.2.18: program output counts as activity for the idle timeout.
+          this.notifyTerminalData(terminalId)
         })
       }
     }
@@ -1308,6 +1344,8 @@ export class TerminalService {
       backend.write(terminal.ptyId, data)
       // Reset retry counter on successful write
       this.pendingWriteRetries.delete(terminalId)
+      // v3.2.18: user input counts as activity for the idle timeout.
+      this.notifyTerminalData(terminalId)
     } else if (terminal) {
       // Edge case 5: if the terminal is exited (connection dead), drop the buffer
       // instead of retrying forever — the user will need to reconnect.

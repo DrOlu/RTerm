@@ -7,23 +7,24 @@ import {
   writeFileSchema
 } from './tools/edit_tools'
 import { readFileSchema, runReadFile } from './tools/read_tools'
-import { 
-  execCommandSchema, 
-  readTerminalTabSchema, 
+import {
+  execCommandSchema,
+  readTerminalTabSchema,
   readCommandOutputSchema,
   writeStdinSchema,
   reconnectTerminalTabSchema,
   openTerminalTabSchema,
   closeTerminalTabSchema,
-  runCommand, 
-  runCommandNowait, 
-  readTerminalTab, 
+  runCommand,
+  runCommandNowait,
+  readTerminalTab,
   readCommandOutput,
   writeStdin,
   reconnectTerminalTab,
   openTerminalTab,
   closeTerminalTab
 } from './tools/terminal_tools'
+import { spawnSubAgentsSchema, spawnSubAgents } from './tools/subAgent_tools'
 import { 
   BUILTIN_TOOL_INFO, 
   EDIT_FILE_TOOL_DESCRIPTION,
@@ -115,15 +116,17 @@ export {
   writeFileSchema
 } from './tools/edit_tools'
 
-export { 
-  execCommandSchema, 
-  readTerminalTabSchema, 
+export {
+  execCommandSchema,
+  readTerminalTabSchema,
   readCommandOutputSchema,
   writeStdinSchema,
   reconnectTerminalTabSchema,
   openTerminalTabSchema,
   closeTerminalTabSchema
 } from './tools/terminal_tools'
+
+export { spawnSubAgentsSchema } from './tools/subAgent_tools'
 
 export { readFileSchema } from './tools/read_tools'
 export { waitSchema, waitTerminalIdleSchema } from './tools/wait_tools'
@@ -193,6 +196,11 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'close_terminal_tab',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'close_terminal_tab')?.description ?? '',
       schema: closeTerminalTabSchema
+    },
+    {
+      name: 'spawn_subagents',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'spawn_subagents')?.description ?? '',
+      schema: spawnSubAgentsSchema
     },
     {
       name: WRITE_FILE_TOOL_NAME,
@@ -434,6 +442,7 @@ export const toolImplementations = {
   reconnectTerminalTab,
   openTerminalTab,
   closeTerminalTab,
+  spawnSubAgents,
   wait,
   waitTerminalIdle,
   copyBetweenTabs,

@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import process from "node:process";
 import { TerminalService } from "../../services/TerminalService";
 import { FileSystemService } from "../../services/FileSystemService";
@@ -34,6 +35,10 @@ import { AgentRunLedger } from "../../services/agentRunLedger";
 import { ChangeLedger } from "../../services/changeLedger";
 import { SessionLogService } from "../../services/automation/sessionLogService";
 import { SchedulerService } from "../../services/automation/schedulerService";
+import { SettingsBackupService } from "../../services/settings/settingsBackup";
+import { IdleTimeoutService } from "../../services/terminal/idleTimeout";
+import { defaultRestRoutes, handleRestRequest } from "../../services/Gateway/restApi";
+import { GatewayRateLimiter } from "../../services/Gateway/gatewayRateLimit";
 import { executeScheduledTask } from "../../services/automation/scheduledTaskRunner";
 import { HistoryStorageMigration } from "../../services/history/HistoryStorageMigration";
 import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
@@ -494,21 +499,168 @@ export async function startGyBackend(): Promise<void> {
     gatewayService.broadcastRaw("memory:updated", result.memory);
   };
 
+  // ── v3.2.18 wiring: settings backup, idle timeout, rate limiting, REST routes ──
+
+// Gateway rate limiter: per-client token bucket + auth-failure lockout.
+const gatewayRateLimiter = new GatewayRateLimiter({
+  capacity: Number(process.env.RTERM_RATE_LIMIT_BURST ?? 60) || 60,
+  refillPerSecond: Number(process.env.RTERM_RATE_LIMIT_REFILL ?? 1) || 1,
+  authFailureLimit: 5,
+  authLockoutMs: 60_000,
+});
+
+  // Settings backup: timestamped backups on every save, rotation, restore.
+  const settingsDir = path.dirname(settingsService.getSettingsPath?.() ?? "");
+  const backupsDir = settingsDir ? path.join(settingsDir, "backups") : "";
+  const settingsBackupService = new SettingsBackupService(
+    backupsDir
+      ? {
+          read: () => fs.readFileSync(settingsService.getSettingsPath!(), "utf8"),
+          write: (c) => fs.writeFileSync(settingsService.getSettingsPath!(), c),
+          listBackups: () => (fs.existsSync(backupsDir) ? fs.readdirSync(backupsDir) : []),
+          readBackup: (n) => fs.readFileSync(path.join(backupsDir, n), "utf8"),
+          writeBackup: (n, c) => {
+            fs.mkdirSync(backupsDir, { recursive: true });
+            fs.writeFileSync(path.join(backupsDir, n), c);
+          },
+          deleteBackup: (n) => {
+            const p = path.join(backupsDir, n);
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+          },
+        }
+      : { read: () => "", write: () => {}, listBackups: () => [], readBackup: () => "", writeBackup: () => {}, deleteBackup: () => {} },
+    { keep: 20 },
+  );
+  // Take a backup on every settings save (best-effort — never blocks a save).
+  const originalSetSettings = settingsService.setSettings.bind(settingsService);
+  settingsService.setSettings = ((next: unknown) => {
+    try { settingsBackupService.backup() } catch { /* best-effort */ }
+    return originalSetSettings(next as never);
+  }) as typeof settingsService.setSettings;
+
+// Idle terminal timeout: close terminals idle past the threshold.
+const idleTimeoutService = new IdleTimeoutService({
+  idleMinutes: Number(process.env.RTERM_IDLE_TIMEOUT_MINUTES ?? 30) || 30,
+  protectedIds: [process.env.GYBACKEND_TERMINAL_ID || "local-main"],
+});
+  for (const t of terminalService.getAllTerminals()) idleTimeoutService.register(t.id);
+  terminalService.onTerminalCreated?.((id: string) => idleTimeoutService.register(id));
+  terminalService.onTerminalData?.((id: string) => idleTimeoutService.touch(id));
+  terminalService.onTerminalClosed?.((id: string) => idleTimeoutService.forget(id));
+  const idleSweeper = setInterval(() => {
+    try {
+      const idle = idleTimeoutService.idleTerminals(terminalService.getAllTerminals().map((t) => t.id));
+      for (const { terminalId, idleMinutes } of idle) {
+        console.log(`[gybackend] closing idle terminal ${terminalId} (${idleMinutes}min idle)`);
+        try { terminalService.kill(terminalId) } catch { /* already gone */ }
+        idleTimeoutService.forget(terminalId);
+      }
+    } catch { /* best-effort */ }
+  }, 60_000);
+  if (typeof idleSweeper.unref === "function") idleSweeper.unref();
+
+// REST dispatch: route REST calls through the WS adapter's method dispatch.
+// Declared as a mutable binding — the adapter is created below, and REST
+// routes only dispatch when a request arrives (by then it exists).
+type RestDispatchTarget = { handleRequest?: (m: string, p: Record<string, unknown>) => Promise<unknown> } | null;
+let restDispatchTarget: RestDispatchTarget = null;
+const restDispatch = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
+  const target: RestDispatchTarget = restDispatchTarget;
+  if (!target?.handleRequest) {
+    throw new Error("REST API is not ready yet (gateway still starting)");
+  }
+  return await target.handleRequest(method, params);
+};
+
+  /**
+   * Build the /api/v1/* HTTP routes from the REST route table (sync — the
+   * route table is static). Each route authorizes via the same token check as
+   * the dashboard, parses the JSON body for POSTs, and dispatches through the
+   * gateway.
+   */
+  const buildRestHttpRoutesSync = (opts: {
+    isAuthorized: (req: unknown) => Promise<boolean>;
+    dispatch: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+  }): Array<{ path: string; handler: (req: unknown, res: unknown) => Promise<void> }> => {
+    const routes = defaultRestRoutes();
+    // The HTTP route table matches paths EXACTLY, so register each concrete
+    // REST path. Parameterized paths (:id) register per-segment wildcards via
+    // a single /api/v1 catch-all is NOT possible — instead we register the
+    // static paths exactly and one dynamic handler per parameterized prefix.
+    const staticRoutes = routes
+      .filter((r) => !r.path.includes(":"))
+      .map((route) => ({
+        path: route.path,
+        handler: makeRestHandler(routes, opts),
+      }));
+    // Parameterized paths: the adapter matches exactly, so we cannot register
+    // /api/v1/terminals/:id/write directly. Instead expose them through the
+    // /api/v1/rpc escape hatch (POST {method:"terminal:write", params:{...}}),
+    // which covers every gateway method including these.
+    return staticRoutes;
+  };
+
+const makeRestHandler = (
+  routes: ReturnType<typeof defaultRestRoutes>,
+  opts: { isAuthorized: (req: unknown) => Promise<boolean>; dispatch: (method: string, params: Record<string, unknown>) => Promise<unknown> },
+) => {
+    return async (req: unknown, res: unknown): Promise<void> => {
+      const r = req as { method?: string; url?: string };
+      const s = res as { writeHead?: (n: number, h: Record<string, string>) => void; end?: (b: string) => void };
+      try {
+        if (!(await opts.isAuthorized(r))) {
+          s.writeHead?.(401, { "content-type": "application/json" });
+          s.end?.(JSON.stringify({ error: "unauthorized" }));
+          return;
+        }
+        const url = new URL(r.url ?? "/", "http://localhost");
+        const body = r.method === "POST" ? await readJsonBody(r as never) : Object.fromEntries(url.searchParams.entries());
+        const result = await handleRestRequest(routes, opts.dispatch, {
+          method: r.method ?? "GET",
+          path: url.pathname,
+          body,
+        });
+        s.writeHead?.(result.status, { "content-type": "application/json" });
+        s.end?.(JSON.stringify(result.body));
+      } catch (e) {
+        s.writeHead?.(500, { "content-type": "application/json" });
+        s.end?.(JSON.stringify({ error: "internal", message: e instanceof Error ? e.message : String(e) }));
+      }
+    };
+  };
+
+  const readJsonBody = (req: { on?: (e: string, cb: (d?: Buffer) => void) => void }): Promise<unknown> =>
+    new Promise((resolve) => {
+      let data = "";
+      req.on?.("data", (d) => { data += String(d ?? "") });
+      req.on?.("end", () => {
+        try { resolve(data ? JSON.parse(data) : {}) } catch { resolve({}) }
+      });
+    });
+
   const wsGatewayControlService = new WebSocketGatewayControlService({
-    createAdapter: (host, port, ipFilter) =>
-      new WebSocketGatewayAdapter(gatewayService, {
+    createAdapter: (host, port, ipFilter) => {
+      const adapter = new WebSocketGatewayAdapter(gatewayService, {
         host,
         port,
         accessTokenAuth: {
           verifyToken: (token: string) => accessTokenService.verifyToken(token),
           allowLocalhostWithoutToken: true,
         },
+        // v3.2.18: per-client rate limiting (token bucket + auth lockout).
+        rateLimiter: gatewayRateLimiter,
         ipFilter,
         // Browser dashboard on the SAME port as the WS gateway: /dashboard serves
         // a live page (WS push via observability:liveDashboardSubscribe, with a
         // /dashboard/json polling fallback). Auth mirrors the WS gateway —
         // loopback open, remote needs a valid access token.
+        // v3.2.18: REST API routes (/api/v1/*) are prepended so curl/CI can
+        // drive the gateway without a WS client.
         httpRoutes: [
+          ...buildRestHttpRoutesSync({
+            isAuthorized: (req) => dashboardHttpAuthorized(req as never, (t) => accessTokenService.verifyToken(t)),
+            dispatch: restDispatch,
+          }),
           {
             path: "/dashboard",
             handler: async (req, res) => {
@@ -902,6 +1054,18 @@ export async function startGyBackend(): Promise<void> {
             agentService.updateSettings(next);
             return next;
           },
+          // v3.2.18: settings backup/restore/export/import.
+          listBackups: () => settingsBackupService.list(),
+          restoreBackup: async (name: string) => settingsBackupService.restore(name),
+          export: () => settingsBackupService.export(),
+          import: async (content: string) => settingsBackupService.import(content),
+        },
+        // v3.2.18: cross-session history search.
+        historyBridge: {
+          getAllSessions: async () => {
+            const history = agentService.getAllChatHistory() ?? [];
+            return history;
+          },
         },
         commandPolicyBridge: {
           getLists: async () => {
@@ -950,7 +1114,11 @@ export async function startGyBackend(): Promise<void> {
           observability: () => observability,
           terminalService: () => terminalService,
         }),
-      }),
+      });
+      // v3.2.18: the REST routes dispatch through this adapter.
+      restDispatchTarget = adapter as unknown as RestDispatchTarget;
+      return adapter;
+    },
   });
   await wsGatewayControlService.applyPolicy(startupPolicy);
 
