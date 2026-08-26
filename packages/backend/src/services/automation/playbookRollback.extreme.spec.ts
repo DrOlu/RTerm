@@ -201,7 +201,7 @@ test('rollback command failure is recorded (rollbackOk=false)', async () => {
   assert((t.steps[0].rollbackError ?? '').includes('exit code 2'), 'rollback error captured')
 })
 
-test('per-target scope: failed target rolls back, other targets still complete', async () => {
+test('per-target scope: failed target rolls back, other targets still complete (onTargetError=continue)', async () => {
   const { service, terminals } = fakeTerminalService()
   const steps = [
     step({ command: 'change-1', rollback: rb('undo-1') }),
@@ -214,15 +214,34 @@ test('per-target scope: failed target rolls back, other targets still complete',
     if (command.includes('maybe-boom') && isFirstTarget) return { stdoutDelta: 'err', exitCode: 1 }
     return { stdoutDelta: 'ok', exitCode: 0 }
   }
-  // This test asserts that a failed target rolls back while the OTHER target
-  // still completes — that is the onTargetError='continue' policy. v3.2.17
-  // changed the default to 'stop' (a failed target halts remaining targets),
-  // so opt into 'continue' here to match the test's stated intent.
+  // v3.2.17: default is onTargetError=stop; opt into continue for the old
+  // "every target runs regardless" behavior.
   const record = await executePlaybook(deps(service), pb(steps, { groupId: 'g1', onTargetError: 'continue' }))
   assert(record.targets.length === 2, 'two targets resolved')
   const [t1, t2] = record.targets
   assert(!t1.ok && t1.rolledBack === true, 'target 1 rolled back')
   assert(t2.ok && t2.rolledBack === undefined, 'target 2 completed untouched')
+  assert(record.ok === false, 'run overall failed')
+})
+
+test('v3.2.17 default: failed target rolls back and stops the remaining targets', async () => {
+  const { service, terminals } = fakeTerminalService()
+  const steps = [
+    step({ command: 'change-1', rollback: rb('undo-1') }),
+    step({ command: 'maybe-boom' }),
+  ]
+  service.runCommandAndWait = async (terminalId: string, command: string) => {
+    const t = terminals.find((x) => x.id === terminalId)!
+    t.ran.push(command)
+    const isFirstTarget = t.config.title?.includes('rtr-01') || t.config.id.includes('rtr-01')
+    if (command.includes('maybe-boom') && isFirstTarget) return { stdoutDelta: 'err', exitCode: 1 }
+    return { stdoutDelta: 'ok', exitCode: 0 }
+  }
+  // No onTargetError → default 'stop': target 2 must NOT run.
+  const record = await executePlaybook(deps(service), pb(steps, { groupId: 'g1' }))
+  assert(record.targets.length === 1, `only the failed target ran (got ${record.targets.length})`)
+  const [t1] = record.targets
+  assert(!t1.ok && t1.rolledBack === true, 'target 1 rolled back')
   assert(record.ok === false, 'run overall failed')
 })
 

@@ -1,5 +1,75 @@
 # Changelog
 
+## v3.2.18 (2026-08-26)
+
+### Features — comprehensive improvements (7 new subsystems)
+
+Seven new modules addressing the top gaps from a full codebase audit
+(126 gateway methods, 54 agent tools, 136 test suites reviewed).
+
+- **Cross-session history search** (`services/history/historySearch.ts`) —
+  the chat search only covered the current session; now every stored session
+  is searchable. Case-insensitive substring (default) or whole-word matching,
+  optional title matching, snippets with context, sessions ranked by match
+  count then recency, bounded results (20 sessions × 3 snippets by default).
+
+- **Model failover** (`services/AgentHelper/utils/modelFailover.ts`) — when
+  the active model's provider errors (429, 5xx, network, auth,
+  model-unavailable), the same request transparently retries against a
+  configured fallback chain. Context-length/400/abort errors are correctly
+  NOT failed over (the request itself is bad — retrying on another provider
+  wastes time and an abort must never be retried). Chain dedupes and preserves
+  order; every attempt is recorded with its reason.
+
+- **Sub-agent delegation** (`services/AgentHelper/utils/subAgent.ts`) — the
+  agent loop is linear; this lets the model fan work out to child sessions
+  that run concurrently (max 20 tasks, configurable concurrency cap default 3,
+  per-child timeout default 5 min). Failures and timeouts become failed
+  results, never throws. Validation rejects empty prompts, >20 tasks, and bad
+  concurrency/timeout values.
+
+- **REST API layer** (`services/Gateway/restApi.ts`) — plain-HTTP routes over
+  the existing method registry so curl/CI/monitoring can drive RTerm without a
+  WebSocket client: `GET /api/v1/health`, `/api/v1/methods`, `/api/v1/terminals`,
+  `/api/v1/sessions`, `/api/v1/skills`, `/api/v1/observability/{metrics,dashboard,apm}`,
+  `/api/v1/history/search?q=…`, `POST /api/v1/terminals/:id/write`,
+  `GET /api/v1/terminals/:id/buffer`, `POST /api/v1/sessions/:id/chat`, and
+  `POST /api/v1/rpc` (escape hatch to any method). Proper 400/404/500 mapping.
+
+- **Gateway rate limiting** (`services/Gateway/gatewayRateLimit.ts`) —
+  per-client token-bucket (default burst 60, 1 req/s sustained) plus
+  failed-auth lockout (5 failures → 60 s). Injected clock; clients are
+  independent; state drops on disconnect.
+
+- **Settings backup/restore** (`services/settings/settingsBackup.ts`) —
+  timestamped backups of settings.json with rotation (keep 20), restore by
+  name (takes a safety backup of the current state first), and validated
+  export/import. Import refuses non-object/empty/invalid JSON.
+
+- **Idle terminal timeout** (`services/terminal/idleTimeout.ts`) — tracks
+  last-activity per terminal; configurable threshold (default 30 min),
+  protected ids (e.g. the bootstrap local shell), runtime-adjustable.
+
+### Tests
+
+New `v3218Comprehensive.extreme.spec.ts` (77/77): search (ranking,
+case-insensitivity, title-only, empty/no-match, truncation+flag, snippet cap,
+whole-word FP guard, titles-off, multimodal content, null data, text
+extraction, snippets, offsets), failover (eligible reasons 429/network/5xx/
+auth; ineligible context-length/abort/400; chain dedupe; first-success;
+fail-then-succeed with attempt records; ineligible stops immediately;
+all-fail), sub-agents (validation incl. runaway guard; all-succeed; one-fails;
+timeout; concurrency cap; render markers), REST (static+parameterized match,
+method mismatch, unknown path, trailing slash, URL-decode, dispatch, body
+param building, /rpc, /rpc-without-method 400, 404, 500, not-found→404),
+rate limit (capacity, deny, refill, refill cap, client independence, auth
+lockout, lockout expiry, success-clears, forget), backup (name round-trip,
+garbage parse, create, rotation, restore, unknown name, safety backup,
+export, import validation, import replaces), idle (threshold, touch reset,
+protected, unregistered FP guard, list, forget, runtime adjust). Two legacy
+automation specs updated for the v3.2.17 `onTargetError: stop` default (both
+now also assert the new default behavior explicitly).
+
 ## v3.2.17 (2026-08-26)
 
 ### Features — playbook overhaul: 15 improvements
