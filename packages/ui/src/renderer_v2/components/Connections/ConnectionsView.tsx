@@ -771,6 +771,11 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                       <div>{c.steps?.length ?? 0}</div>
                       <div>{c.lastRunAt ? `${c.lastRunOk ? '✓' : '✗'} ${new Date(c.lastRunAt).toLocaleString()}` : '—'}</div>
                     </button>
+                    <button className="row-icon" title="Dry-run (resolve targets + commands, execute nothing)" onClick={async () => {
+                      try {
+                        await (window as any).gyshell?.agent?.startTask?.('', `Use the run_playbook tool with name "${c.name}" and dryRun=true. Report the plan it returns.`)
+                      } catch (e) { console.warn('[playbooks] dry-run failed', e) }
+                    }}><Play size={14} strokeWidth={2} /></button>
                     <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
                   </div>
                 ))}
@@ -786,6 +791,16 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                     </div>
                     <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
                       <Select className="editor-select" value={draft.onError ?? 'stop'} onChange={(val) => setDraft({ ...draft, onError: val })} options={[{value:'stop',label:'On failure: stop'},{value:'continue',label:'On failure: continue'}]} />
+                    </div>
+                    {/* v3.3.2: v3.2.17 playbook-level fields */}
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={(draft as any).onTargetError ?? 'stop'} onChange={(val) => setDraft({ ...draft, onTargetError: val } as any)} options={[{value:'stop',label:'Target fails: stop remaining targets'},{value:'continue',label:'Target fails: continue all targets'}]} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" type="number" min={1} placeholder="Max parallel targets (1 = one at a time)" value={(draft as any).maxParallelTargets ?? ''} onChange={(e) => setDraft({ ...draft, maxParallelTargets: e.target.value === '' ? undefined : Math.max(1, Number(e.target.value)) } as any)} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" type="number" min={0} placeholder="Abort after N minutes (blank = no cap)" value={(draft as any).maxRuntimeMinutes ?? ''} onChange={(e) => setDraft({ ...draft, maxRuntimeMinutes: e.target.value === '' ? undefined : Number(e.target.value) } as any)} />
                     </div>
                     <div style={{ padding: '4px 0 2px', fontSize: 12, opacity: 0.7 }}>Steps (run in order)</div>
                     {(draft.steps ?? []).map((s: any, i: number) => (
@@ -847,10 +862,120 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                             setDraft({ ...draft, steps })
                           }} options={[{value:'',label:`On failure: playbook default (${draft.onError ?? 'stop'})`},{value:'stop',label:'On failure: stop'},{value:'continue',label:'On failure: continue'}]} />
                         </div>
+                        {/* v3.3.2: v3.2.17 step fields */}
+                        {s.kind === 'command' || s.kind === 'script' ? (
+                          <>
+                            <div className="editor-row" style={{ padding: '2px 0 0 18px' }}>
+                              <input className="editor-input" type="number" min={0} placeholder="Timeout (seconds, blank = none)" value={s.timeoutSeconds ?? ''} onChange={(e) => {
+                                const steps = (draft.steps ?? []).slice()
+                                steps[i] = { ...steps[i], timeoutSeconds: e.target.value === '' ? undefined : Number(e.target.value) }
+                                setDraft({ ...draft, steps })
+                              }} />
+                              <input className="editor-input" type="number" min={0} placeholder="Retries (blank = none)" value={s.retryAttempts ?? ''} onChange={(e) => {
+                                const steps = (draft.steps ?? []).slice()
+                                steps[i] = { ...steps[i], retryAttempts: e.target.value === '' ? undefined : Number(e.target.value) }
+                                setDraft({ ...draft, steps })
+                              }} />
+                            </div>
+                            <div className="editor-row" style={{ padding: '2px 0 0 18px' }}>
+                              <input className="editor-input" placeholder="Only run when ({{env}} == 'prod' or a check command)" value={s.when ?? ''} onChange={(e) => {
+                                const steps = (draft.steps ?? []).slice()
+                                steps[i] = { ...steps[i], when: e.target.value || undefined }
+                                setDraft({ ...draft, steps })
+                              }} />
+                            </div>
+                          </>
+                        ) : null}
+                        {s.kind === 'command' ? (
+                          <div className="editor-row" style={{ padding: '2px 0 0 18px' }}>
+                            <input className="editor-input" placeholder="Env vars (KEY=value, comma-separated; {{param}} ok)" value={s.env ? Object.entries(s.env).map(([k, v]) => `${k}=${v}`).join(', ') : ''} onChange={(e) => {
+                              const steps = (draft.steps ?? []).slice()
+                              const raw = e.target.value.trim()
+                              if (!raw) { steps[i] = { ...steps[i], env: undefined } }
+                              else {
+                                const env: Record<string, string> = {}
+                                for (const pair of raw.split(',')) {
+                                  const [k, ...rest] = pair.split('=')
+                                  if (k?.trim()) env[k.trim()] = rest.join('=').trim()
+                                }
+                                steps[i] = { ...steps[i], env }
+                              }
+                              setDraft({ ...draft, steps })
+                            }} />
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                     <div className="editor-row" style={{ justifyContent: 'flex-start' }}>
                       <button className="icon-btn-sm" title="Add step" onClick={() => setDraft({ ...draft, steps: [...(draft.steps ?? []), { id: `st-${Math.random().toString(36).slice(2, 10)}`, kind: 'command', command: '' }] })}><Plus size={14} /> Add step</button>
+                    </div>
+                    <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : null}
+
+        {section === 'triggers' ? (
+          <>
+            <div className="connections-header"><div className="connections-title">Triggers</div><div className="connections-actions"><button className="icon-btn-sm" title={t.common.add} onClick={startNewEntry}><Plus size={16} strokeWidth={2} /></button></div></div>
+            <div className="connections-split">
+              <div className="connections-table">
+                <div className="connections-row header"><div className="connections-row-main header-main"><div>{t.common.name}</div><div>Kind</div><div>Fires</div><div>On</div></div><div className="row-icon header-icon" /></div>
+                {((store.settings?.automation as any)?.triggers ?? []).map((c: any) => (
+                  <div key={c.id} className={editingId === c.id ? 'connections-row is-active' : 'connections-row'}>
+                    <button className="connections-row-main" onClick={() => startEdit(c)} title={t.common.edit}>
+                      <div>{c.name}</div>
+                      <div>{c.kind}</div>
+                      <div>{c.fireCount ?? 0}{c.lastFiredAt ? ` · ${new Date(c.lastFiredAt).toLocaleString()}` : ''}</div>
+                      <div>{c.enabled ? '✓' : '✗'}</div>
+                    </button>
+                    <button className="row-icon" title={t.common.edit} onClick={() => startEdit(c)}><Pencil size={14} strokeWidth={2} /></button>
+                  </div>
+                ))}
+                {((store.settings?.automation as any)?.triggers ?? []).length === 0 ? <div className="connections-empty">No triggers yet. A trigger watches terminal output (pattern), metrics (threshold), webhooks, or a schedule and fires a playbook or proposes a MOP change.</div> : null}
+              </div>
+              <div className="connections-editor">
+                {!draft ? <div className="editor-empty">{t.common.selectOrCreate}</div> : (
+                  <div className="editor-card">
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span><input className="editor-input" placeholder={t.common.name} value={draft.name ?? ''} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.kind ?? 'pattern'} onChange={(val) => setDraft({ ...draft, kind: val })} options={[
+                        {value:'pattern',label:'Kind: pattern (terminal output)'},
+                        {value:'threshold',label:'Kind: threshold (metric)'},
+                        {value:'webhook',label:'Kind: webhook (inbound)'},
+                        {value:'schedule',label:'Kind: schedule'},
+                      ]} />
+                    </div>
+                    {draft.kind === 'pattern' ? (
+                      <>
+                        <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Match text or regex" value={draft.match ?? ''} onChange={(e) => setDraft({ ...draft, match: e.target.value })} /></div>
+                        <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                          <Select className="editor-select" value={draft.matchMode ?? 'substring'} onChange={(val) => setDraft({ ...draft, matchMode: val })} options={[{value:'substring',label:'Match: substring'},{value:'regex',label:'Match: regex'}]} />
+                        </div>
+                      </>
+                    ) : null}
+                    {draft.kind === 'threshold' ? (
+                      <>
+                        <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Metric (e.g. cpuUsagePercent)" value={draft.metric ?? ''} onChange={(e) => setDraft({ ...draft, metric: e.target.value })} /></div>
+                        <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                          <Select className="editor-select" value={draft.op ?? 'gt'} onChange={(val) => setDraft({ ...draft, op: val })} options={[{value:'gt',label:'>'},{value:'gte',label:'≥'},{value:'lt',label:'<'},{value:'lte',label:'≤'},{value:'eq',label:'='}]} />
+                          <input className="editor-input" type="number" placeholder="Value" value={draft.value ?? ''} onChange={(e) => setDraft({ ...draft, value: e.target.value === '' ? undefined : Number(e.target.value) })} />
+                        </div>
+                      </>
+                    ) : null}
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.action ?? 'run-playbook'} onChange={(val) => setDraft({ ...draft, action: val })} options={[{value:'run-playbook',label:'Action: run playbook'},{value:'propose-change',label:'Action: propose MOP change'}]} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.playbookId ?? ''} onChange={(val) => setDraft({ ...draft, playbookId: val })} options={[{value:'',label:'(select a playbook)'}, ...playbooks.map((p) => ({ value: p.id, label: p.name }))]} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <input className="editor-input" type="number" min={0} placeholder="Cooldown seconds (default 300)" value={draft.cooldownSeconds ?? ''} onChange={(e) => setDraft({ ...draft, cooldownSeconds: e.target.value === '' ? undefined : Number(e.target.value) })} />
+                    </div>
+                    <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select className="editor-select" value={draft.enabled ? 'on' : 'off'} onChange={(val) => setDraft({ ...draft, enabled: val === 'on' })} options={[{value:'on',label:'Enabled'},{value:'off',label:'Disabled'}]} />
                     </div>
                     <div className="editor-actions"><button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button><button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} /></button></div>
                   </div>

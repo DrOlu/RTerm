@@ -1,5 +1,27 @@
 # Changelog
 
+## v3.3.2 (2026-08-26)
+
+### Features — the last automation UI gaps: playbook v3.2.17 fields + trigger manager
+
+- **Playbook editor upgraded** (Connections → Playbooks) — the step editor
+  existed but covered only kind/command/script/wait + name + order. It now
+  exposes the v3.2.17 surface that was agent-only:
+  - **Step**: `timeoutSeconds`, `retryAttempts`, `when` (conditional —
+    `{{env}} == 'prod'` or a check command), and `env` (KEY=value,
+    comma-separated with `{{param}}` substitution; parsed to a map on save).
+  - **Playbook**: `onTargetError` (stop/continue remaining targets),
+    `maxParallelTargets`, `maxRuntimeMinutes` (circuit breaker).
+  - **Dry-run button** on each playbook row (resolves targets + commands and
+    prints the plan without executing anything).
+
+- **New Triggers section** (Connections → Triggers) — triggers were
+  agent-only since v1.9.1. Full manager: list with kind / fire count /
+  last-fired / enabled, and an editor covering all four kinds — **pattern**
+  (match + substring/regex), **threshold** (metric + op + value),
+  **webhook**, **schedule** — plus action (run-playbook or propose MOP
+  change), playbook picker, cooldown seconds, and enable/disable.
+
 ## v3.3.1 (2026-08-26)
 
 ### Features — Settings-coverage audit: 3 UI gaps closed

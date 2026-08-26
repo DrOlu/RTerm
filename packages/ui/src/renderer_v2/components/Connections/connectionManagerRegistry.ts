@@ -2,11 +2,11 @@ import { Server, Shield, Waypoints, MonitorCog, Cable, FolderTree, type LucideIc
 import type { AppStore } from '../../stores/AppStore'
 import { PortForwardType } from '../../lib/ipcTypes'
 
-export type ConnectionsSection = 'ssh' | 'winrm' | 'serial' | 'proxies' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates' | 'playbooks'
+export type ConnectionsSection = 'ssh' | 'winrm' | 'serial' | 'proxies' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates' | 'playbooks' | 'triggers'
 
 export interface ConnectionManagerSectionDefinition {
   id: ConnectionsSection
-  labelKey: 'ssh' | 'winrm' | 'serial' | 'proxy' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates' | 'playbooks'
+  labelKey: 'ssh' | 'winrm' | 'serial' | 'proxy' | 'tunnels' | 'groups' | 'scripts' | 'scheduledTasks' | 'templates' | 'playbooks' | 'triggers'
   icon: LucideIcon
   getEntries: (store: AppStore) => any[]
   createDraft: () => any
@@ -197,6 +197,44 @@ export const CONNECTION_MANAGER_SECTIONS: readonly ConnectionManagerSectionDefin
       },
       deleteEntry: async (store, id) => {
         await store.deletePlaybook(id)
+      },
+    }),
+    // v3.3.2: trigger manager — previously agent-only.
+    createSectionDefinition({
+      id: 'triggers',
+      labelKey: 'triggers',
+      icon: Shield,
+      getEntries: (store) => (store.settings?.automation as { triggers?: unknown[] } | undefined)?.triggers ?? [],
+      createDraft: () => ({
+        id: `trg-${crypto.randomUUID?.() ?? Math.random().toString(16).slice(2)}`,
+        name: '',
+        enabled: true,
+        kind: 'pattern',
+        match: '',
+        matchMode: 'substring',
+        action: 'run-playbook',
+        playbookId: '',
+        cooldownSeconds: 300,
+        createdAt: Date.now(),
+      }),
+      saveDraft: async (store, draft) => {
+        await window.gyshell.settings.set({
+          automation: {
+            ...((store.settings?.automation as Record<string, unknown>) ?? {}),
+            triggers: [
+              ...((store.settings?.automation as { triggers?: Array<{ id: string }> } | undefined)?.triggers?.filter((x) => x.id !== draft.id) ?? []),
+              draft,
+            ],
+          },
+        } as never)
+      },
+      deleteEntry: async (store, id) => {
+        await window.gyshell.settings.set({
+          automation: {
+            ...((store.settings?.automation as Record<string, unknown>) ?? {}),
+            triggers: ((store.settings?.automation as { triggers?: Array<{ id: string }> } | undefined)?.triggers ?? []).filter((x) => x.id !== id),
+          },
+        } as never)
       },
     }),
     createSectionDefinition({
