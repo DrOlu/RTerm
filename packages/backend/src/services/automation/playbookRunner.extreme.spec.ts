@@ -224,7 +224,7 @@ test('step-level onError overrides the playbook default', async () => {
   if (rec.targets[0].steps.length !== 2) throw new Error('step-level continue not honored')
 })
 
-test('a target that fails does not stop other targets', async () => {
+test('a target that fails does not stop other targets (onTargetError=continue)', async () => {
   const { service: svc, terminals: terms } = fakeTerminalService()
   const baseCreate = svc.createTerminal.bind(svc)
   svc.createTerminal = async (config: TerminalConfig) => {
@@ -234,11 +234,30 @@ test('a target that fails does not stop other targets', async () => {
     if (terms.length === 1) t.defaultResponse = { output: 'err\n', exitCode: 9 }
     return out
   }
-  const pb = playbook({ groupId: 'grp-core', steps: [step({ command: 'show version' })] })
+  // v3.2.17: the default is onTargetError=stop (safer); opt into continue to
+  // preserve the old "every target runs regardless" behavior.
+  const pb = playbook({ groupId: 'grp-core', onTargetError: 'continue', steps: [step({ command: 'show version' })] })
   const rec = await executePlaybook(deps({ terminalService: svc }), pb)
   if (rec.targets.length !== 2) throw new Error('both targets should run')
   if (rec.targets[0].ok) throw new Error('first target should fail')
   if (!rec.targets[1].ok) throw new Error('second target should succeed')
+  if (rec.ok) throw new Error('run should be failed overall')
+})
+
+test('v3.2.17 default: a failing target stops the remaining targets', async () => {
+  const { service: svc, terminals: terms } = fakeTerminalService()
+  const baseCreate = svc.createTerminal.bind(svc)
+  svc.createTerminal = async (config: TerminalConfig) => {
+    const out = await baseCreate(config)
+    const t = terms.find((x) => x.id === out.id)!
+    if (terms.length === 1) t.defaultResponse = { output: 'err\n', exitCode: 9 }
+    return out
+  }
+  // No onTargetError → default 'stop': target b must NOT run after a fails.
+  const pb = playbook({ groupId: 'grp-core', steps: [step({ command: 'show version' })] })
+  const rec = await executePlaybook(deps({ terminalService: svc }), pb)
+  if (rec.targets.length !== 1) throw new Error(`only the first target should run (got ${rec.targets.length})`)
+  if (rec.targets[0].ok) throw new Error('first target should fail')
   if (rec.ok) throw new Error('run should be failed overall')
 })
 

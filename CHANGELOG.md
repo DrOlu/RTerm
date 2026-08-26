@@ -1,5 +1,71 @@
 # Changelog
 
+## v3.2.17 (2026-08-26)
+
+### Features — playbook overhaul: 15 improvements
+
+**Correctness & safety:**
+
+1. **Per-step timeout** (`timeoutSeconds`) — a hung command (network mount,
+   stuck service) no longer blocks the playbook forever. The step is killed
+   after N seconds, treated as failed, and rollback fires.
+2. **Parallel targets** (`maxParallelTargets`, default 1) — targets ran one
+   at a time before; a 50-host fleet × 2-minute steps took 100+ minutes.
+   Batches of N cut that proportionally. Default preserves the current
+   safety posture.
+3. **Per-step retry** (`retryAttempts` / `retryDelaySeconds`) — a flaky
+   network check no longer fails the whole playbook and unwinds a good
+   deployment; it retries up to N times first.
+4. **Dry-run mode** (`run_playbook dryRun: true`) — resolves targets +
+   commands and prints the plan WITHOUT executing anything. Flags missing
+   templateIds/healthUrls/playbookIds in notes. Essential before a MOP change.
+5. **Conditional steps** (`when`) — `"{{env}} == 'prod'"` expressions or a
+   check command (exit 0 = run). One playbook handles staging vs. prod.
+
+**New step kinds:**
+
+6. **`template`** — renders a saved config template and writes it to the
+   target (base64-encoded transfer). Closes the template→playbook loop natively.
+7. **`healthCheck`** — polls a URL until the expected status (default 200)
+   with configurable interval/timeout. First-class instead of hand-rolled
+   curl loops.
+8. **`playbook`** — runs a sub-playbook as a step (with its own rollback).
+   Compose "patch fleet" from backup/patch/verify playbooks.
+
+**Operability:**
+
+9. **`maxRuntimeMinutes`** — playbook-level circuit breaker; a DAG with a
+   dependency mistake can't run for days.
+10. **`onTargetError: stop | continue`** — target-level failure policy.
+    **Default is now `stop`** (safer: one dead host halts the rollout instead
+    of continuing to apply a possibly-bad change to the rest). Opt into the
+    old behavior with `continue`.
+11. **`env`** per step — `export VAR='value' && command` injection with
+    `{{param}}` substitution and single-quote escaping.
+12. **`outputCapture: 'full'`** — keep the entire step output instead of the
+    4k tail (for debugging failed changes).
+13. **Playbook-level defaults** — `defaultStepTimeoutSeconds` /
+    `defaultStepRetryAttempts` so you don't repeat them per step.
+14. **`notifyOn: [failure, success]`** field on the type (AlertService wiring
+    to follow).
+15. **Mid-playbook approval gates** (`approvalGate`) on the type for
+    migrations that need a human between prep and cutover.
+
+### Tests
+
+New `v3217Playbook.extreme.spec.ts` (39/39): timeout (no-timeout, fast, slow
+→ synthetic exit -1), retry (first-attempt success, fail-then-succeed,
+exhaustion → rollback), when (== / != / missing param / double quotes /
+command mode / skipped-is-not-a-failure), parallel targets (sequential
+regression + concurrent), onTargetError (stop default + continue),
+maxRuntime circuit breaker, dry-run plan (resolution, missing-field notes,
+parallel/breaker notes), env injection (empty, single, multiple, param
+substitution, missing param, quote escaping), outputCapture (4096 tail vs
+full), new step kinds (null resolution, template write with decoded-content
+verification, healthCheck poll-until-healthy + timeout), and 6 regression
+tests proving existing semantics. One existing automation spec updated for
+the new `onTargetError` default (stop) with a new test covering the default.
+
 ## v3.2.16 (2026-08-25)
 
 ### Features — scheduled-task (cron) overhaul + Model-settings Base URL prefill

@@ -387,8 +387,11 @@ export interface PlaybookStep {
    * - command: run an inline command
    * - script: run a saved script by id
    * - wait: pause for waitSeconds before the next step
+   * - template: render a saved config template and write it to the target
+   * - playbook: run another playbook as a sub-playbook (with its own rollback)
+   * - healthCheck: poll a URL until it returns the expected status
    */
-  kind: 'command' | 'script' | 'wait'
+  kind: 'command' | 'script' | 'wait' | 'template' | 'playbook' | 'healthCheck'
   /** Inline command (kind=command). */
   command?: string
   /** Saved script id (kind=script). */
@@ -401,6 +404,43 @@ export interface PlaybookStep {
   validate?: PlaybookStepValidation
   /** Optional undo action for the automatic rollback sequence. */
   rollback?: PlaybookStepRollback
+
+  // --- v3.2.17 playbook improvements ---
+  /** Kill the step's command after N seconds and treat it as failed (default: no timeout). */
+  timeoutSeconds?: number
+  /** Retry a failed step up to N times before treating it as failed (default 0 = no retry). */
+  retryAttempts?: number
+  /** Seconds between retries (default 30). */
+  retryDelaySeconds?: number
+  /** Conditional execution: skip this step unless the condition holds.
+   *  Either a check command (must exit 0 to run) or a simple expression
+   *  evaluated against the param map, e.g. "{{env}} == 'prod'". */
+  when?: string
+  /** Extra environment variables injected into the step's shell (kind=command).
+   *  Values support {{param.name}} substitution. */
+  env?: Record<string, string>
+  /** Capture the FULL step output to the run record instead of the 4k tail. */
+  outputCapture?: 'tail' | 'full'
+  /** template step: the saved template id to render. */
+  templateId?: string
+  /** template step: variable values for the render ({{param.name}} supported). */
+  templateValues?: Record<string, string>
+  /** template step: absolute path on the target to write the rendered config. */
+  templateTargetPath?: string
+  /** playbook step: the sub-playbook id to run. */
+  playbookId?: string
+  /** playbook step: param values passed to the sub-playbook. */
+  playbookParams?: Record<string, string>
+  /** healthCheck step: URL to poll. */
+  healthUrl?: string
+  /** healthCheck step: expected HTTP status (default 200). */
+  healthExpectStatus?: number
+  /** healthCheck step: total seconds to keep polling before failing (default 60). */
+  healthTimeoutSeconds?: number
+  /** healthCheck step: seconds between polls (default 5). */
+  healthIntervalSeconds?: number
+  /** Mid-playbook human gate: pause and require manage_change approval to continue. */
+  approvalGate?: { message: string }
 
   // --- Advanced orchestration (v1.9.1) ---
   /**
@@ -470,6 +510,21 @@ export interface PlaybookEntry {
   /** Runbook parameters: values are injected at run time and substituted into
    * step commands as {{param.name}}. `secret` params are masked in records. */
   params?: PlaybookParam[]
+  // --- v3.2.17 playbook improvements ---
+  /** Max targets that may run concurrently (default 1 = one at a time, preserving
+   *  the current safety posture; raise for large fleets). */
+  maxParallelTargets?: number
+  /** Playbook-level circuit breaker: abort (and roll back) after N minutes. */
+  maxRuntimeMinutes?: number
+  /** Target-level failure policy: 'stop' halts remaining targets after the first
+   *  failed target; 'continue' runs every target regardless (default stop). */
+  onTargetError?: 'stop' | 'continue'
+  /** Fire an alert through the AlertService on these outcomes (default none). */
+  notifyOn?: Array<'failure' | 'success'>
+  /** Default step timeout (seconds) for steps that don't set their own. */
+  defaultStepTimeoutSeconds?: number
+  /** Default step retry attempts for steps that don't set their own. */
+  defaultStepRetryAttempts?: number
   createdAt?: string
   updatedAt?: string
   /** ISO timestamp of last run, for the UI. */

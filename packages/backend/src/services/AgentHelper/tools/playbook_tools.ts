@@ -76,6 +76,7 @@ export const runPlaybookSchema = z.object({
   id: z.string().optional().describe('Playbook id to run.'),
   name: z.string().optional().describe('Playbook name to run (when id is not given).'),
   paramValues: z.record(z.string(), z.string()).optional().describe('Run-time values for the playbook\'s declared params (Advanced Automation).'),
+  dryRun: z.boolean().optional().describe('v3.2.17: resolve targets + commands and return the plan WITHOUT executing anything. Use before a MOP change to preview what will happen.'),
 })
 
 export async function managePlaybook(
@@ -190,6 +191,29 @@ export async function runPlaybook(
   }
   if (playbook.requireApproval) {
     const msg = `Playbook "${playbook.name}" is in MOP mode (requireApproval). Run it through a change record: manage_change action=plan name="${playbook.name}" → approve → run.`
+    emit(context, 'run_playbook', args, msg)
+    return msg
+  }
+
+  // v3.2.17: dry-run — resolve targets + commands, execute nothing.
+  if (args.dryRun) {
+    const { buildPlaybookDryRunPlan } = await import('../../automation/playbookRunner')
+    const plan = buildPlaybookDryRunPlan(
+      { automationManager: m, getSettings: () => settings },
+      playbook,
+    )
+    const targetList = plan.targets.map((t) => `${t.kind}://${t.name}`).join(', ')
+    const stepList = plan.steps.map((s) => {
+      const bits = [
+        s.command ?? '(no command)',
+        s.timeoutSeconds ? `timeout=${s.timeoutSeconds}s` : '',
+        s.retryAttempts ? `retry=${s.retryAttempts}` : '',
+        s.when ? `when=${s.when}` : '',
+      ].filter(Boolean).join(' ')
+      return `  ${s.index + 1}. [${s.kind}]${s.name ? ` ${s.name}:` : ''} ${bits}`
+    }).join('\n')
+    const notes = plan.notes.length ? `\nNotes:\n${plan.notes.map((n) => `  ⚠ ${n}`).join('\n')}` : ''
+    const msg = `Dry-run plan for "${playbook.name}" (NOTHING EXECUTED):\n\nTargets (${plan.targets.length}): ${targetList}\n\nSteps (${plan.steps.length}):\n${stepList}${notes}`
     emit(context, 'run_playbook', args, msg)
     return msg
   }
