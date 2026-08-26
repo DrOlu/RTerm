@@ -1,5 +1,52 @@
 # Changelog
 
+## v3.3.0 (2026-08-26)
+
+### Features — Model Failover is now actually configurable (UI + settings + engine)
+
+v3.2.18 shipped the failover **engine** with 77 passing tests, but a wiring
+check revealed nothing could ever populate the chain — the profile field, the
+binding construction, and the UI didn't exist, so the feature was dormant.
+v3.3.0 completes the write→read path end to end.
+
+- **`fallbackModels: string[]` on `ModelProfile`** — ordered list of model ids.
+  Persists through `settings:set` like every other profile field.
+
+- **Binding construction** (`buildModelBindingFromProfileId`) now resolves the
+  chain: valid ids become `{model, label}`; the primary's own id, duplicates,
+  unknown ids, ids without an API key, and non-string/blank entries are all
+  skipped with a warning (one bad entry can't break the chain). User order is
+  preserved. `SessionModelBinding` carries `fallbackModels`.
+
+- **Settings UI** — a "Fallback Models (failover chain)" editor in Settings →
+  Models, per profile: numbered rows, model picker (primary excluded), the
+  resolved model id shown beside each, remove (×), reorder (↑/↓), and
+  "+ Add fallback model". Tooltip explains the eligibility rules. Styled in
+  `settings.scss`.
+
+- **Fallback models now get tools bound** — the v3.2.18 fallback path rebuilt
+  the chat model but never called `.bindTools(...)`, so a failover response
+  would have had no tools available. Fixed: fallbacks re-bind the same
+  built-in + MCP tool set, with the correct temperature for the pass type.
+
+- **Engine edge case fixed** — `withModelFailover([])` (empty chain) used to
+  return a silent "success" with no value; it now returns an explicit error
+  ("model failover chain is empty"). Found by the new edge-case tests.
+
+### Tests
+
+New `v330FailoverWiring.extreme.spec.ts` (22/22): resolution happy path,
+custom names as labels, primary-id exclusion, dedupe, unknown-id skip,
+keyless skip, non-string/blank skip, undefined/empty/all-invalid → empty
+chain, user-order preservation, JSON round-trip (and key-absence when unset),
+engine edge cases (empty message, null/string errors, label propagation,
+ineligible-stops-chain, empty chain, durations), and two full write→read
+simulations proving a profile with fallbacks produces a populated binding
+chain while a profile without produces an empty one (failover off).
+
+All prior suites still green: v3218Comprehensive 77/77, layout-ui 8/8,
+automation all passing. typecheck:all clean (backend + web + electron).
+
 ## v3.2.19 (2026-08-26)
 
 ### Bug fixes — history search actually finds content (live-verified)

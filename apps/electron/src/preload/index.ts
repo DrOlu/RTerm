@@ -114,6 +114,8 @@ interface BackendSettings {
       compactionModelId?: string;
       reviewModelId?: string;
       reviewMode?: "strict" | "advisory" | "auto-approve";
+      /** v3.3.0: ordered fallback chain of model ids for provider failover. */
+      fallbackModels?: string[];
     }>;
     activeProfileId: string;
   };

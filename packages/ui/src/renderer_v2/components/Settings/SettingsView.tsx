@@ -2321,6 +2321,85 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                             ]}
                           />
                         </div>
+                        <div className="profile-field" style={{ gridColumn: "1 / -1" }}>
+                          <div className="profile-field-label-with-info">
+                            <label>Fallback Models (failover chain)</label>
+                            <InfoTooltip content="Ordered list. When the primary model's provider fails (rate limit, 5xx, network, auth), the same request is retried against each fallback in order. Context-length and bad-request errors never fail over. Leave empty to disable." />
+                          </div>
+                          <div className="fallback-models-editor">
+                            {(p.fallbackModels || []).map((fid, idx) => {
+                              const item = store.settings?.models.items.find((m) => m.id === fid);
+                              return (
+                                <div className="fallback-model-row" key={`${fid}-${idx}`}>
+                                  <span className="fallback-order">{idx + 1}.</span>
+                                  <Select
+                                      value={fid}
+                                      onChange={(id) => {
+                                        const next = [...(p.fallbackModels || [])];
+                                        next[idx] = id;
+                                        store.saveProfile({ ...p, fallbackModels: next.filter(Boolean) });
+                                      }}
+                                    options={[
+                                        { value: "", label: "(select a model)" },
+                                        ...(store.settings?.models.items
+                                          .filter((m) => m.id !== p.globalModelId)
+                                          .map((m) => ({ value: m.id, label: m.name })) || []),
+                                    ]}
+                                  />
+                                  <span className="fallback-model-name">{item?.model || "unknown model"}</span>
+                                  <button
+                                    className="fallback-remove-btn"
+                                    title="Remove from chain"
+                                    onClick={() => {
+                                      const next = (p.fallbackModels || []).filter((_, i) => i !== idx);
+                                      store.saveProfile({ ...p, fallbackModels: next.length ? next : undefined });
+                                    }}
+                                  >
+                                    ×
+                                  </button>
+                                  {idx < (p.fallbackModels || []).length - 1 && (
+                                    <>
+                                      <button
+                                        className="fallback-move-btn"
+                                        title="Move up"
+                                        disabled={idx === 0}
+                                        onClick={() => {
+                                          if (idx === 0) return;
+                                          const next = [...(p.fallbackModels || [])];
+                                          [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                                          store.saveProfile({ ...p, fallbackModels: next });
+                                        }}
+                                      >
+                                        ↑
+                                      </button>
+                                      <button
+                                        className="fallback-move-btn"
+                                        title="Move down"
+                                        disabled={idx === (p.fallbackModels || []).length - 1}
+                                        onClick={() => {
+                                          const next = [...(p.fallbackModels || [])];
+                                          [next[idx + 1], next[idx]] = [next[idx], next[idx + 1]];
+                                          store.saveProfile({ ...p, fallbackModels: next });
+                                        }}
+                                      >
+                                        ↓
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <button
+                              className="add-fallback-btn"
+                              onClick={() => {
+                                const next = [...(p.fallbackModels || []), ""];
+                                store.saveProfile({ ...p, fallbackModels: next });
+                              }}
+                            >
+                              + Add fallback model
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                     );

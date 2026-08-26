@@ -59,6 +59,12 @@ export interface ModelProfile {
    * merged over runtime defaults; runtime-owned fields (model, messages, tools,
    * stream) are protected and cannot be overridden. */
   requestParams?: Record<string, string | number | boolean | object>
+  /** v3.3.0: ordered fallback chain of model ids. When the primary model's
+   * provider errors with an eligible failure (429/5xx/network/auth/
+   * model-unavailable), the same request is retried against each fallback in
+   * order. Context-length/400/abort errors never fail over. Duplicates and
+   * the primary's own id are ignored when the chain is built. */
+  fallbackModels?: string[]
 }
 
 export interface ExperimentalFlags {

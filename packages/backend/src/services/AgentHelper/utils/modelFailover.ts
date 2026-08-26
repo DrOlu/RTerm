@@ -103,6 +103,15 @@ export async function withModelFailover<T>(
   const attempts: FailoverAttempt[] = []
   let lastError: unknown
 
+  // v3.3.0: an empty chain is a caller bug — return an explicit error rather
+  // than a silent "success" with no value (which looked like a real result).
+  if (chain.length === 0) {
+    return {
+      error: new Error('model failover chain is empty — no candidates to try'),
+      attempts,
+    }
+  }
+
   for (const candidate of chain) {
     const started = Date.now()
     try {

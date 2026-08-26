@@ -470,6 +470,8 @@ interface SessionModelBinding {
   actionModel: ChatOpenAI;
   thinkingModel: ChatOpenAI;
   compactionModel: ChatOpenAI;
+  /** v3.3.0: resolved fallback chain (model ids + labels) from the profile. */
+  fallbackModels: Array<{ model: string; label?: string }>;
   actionModelSupportsStructuredOutput: boolean;
   actionModelSupportsObjectToolChoice: boolean;
   thinkingModelSupportsStructuredOutput: boolean;
@@ -890,6 +892,28 @@ export class AgentService_v2 {
       : thinkingItem?.apiKey
         ? thinkingModel
         : model;
+
+    // v3.3.0: resolve the profile's fallback chain into usable fallback
+    // models. Unknown ids and ids without an API key are skipped (with a
+    // warning) so one bad entry can't break the chain; the primary's own id
+    // and duplicates are dropped when the chain is consumed.
+    const fallbackModels: Array<{ model: string; label?: string }> = [];
+    const seenFallbackIds = new Set<string>([profile.globalModelId]);
+    for (const fallbackId of Array.isArray(profile.fallbackModels) ? profile.fallbackModels : []) {
+      if (typeof fallbackId !== "string" || !fallbackId.trim()) continue;
+      if (seenFallbackIds.has(fallbackId)) continue;
+      const item = settings.models.items.find((m) => m.id === fallbackId);
+      if (!item || !item.apiKey) {
+        console.warn(
+          "[AgentService_v2] Fallback model is invalid or has no API key — skipping:",
+          { profileId, fallbackId },
+        );
+        continue;
+      }
+      seenFallbackIds.add(fallbackId);
+      fallbackModels.push({ model: item.model, label: item.name ?? item.model });
+    }
+
     const actionModelSupportsStructuredOutput = actionItem?.apiKey
       ? actionItem.supportsStructuredOutput === true
       : globalItem.supportsStructuredOutput === true;
@@ -928,6 +952,7 @@ export class AgentService_v2 {
       actionModel,
       thinkingModel,
       compactionModel,
+      fallbackModels,
       actionModelSupportsStructuredOutput,
       actionModelSupportsObjectToolChoice,
       thinkingModelSupportsStructuredOutput,
@@ -1471,17 +1496,21 @@ export class AgentService_v2 {
         const chain = [{ model: primaryModel }, ...fallbacks.map((f) => ({ model: f.model, label: f.label }))];
         const failover = await withModelFailover(chain, async (candidate) => {
           // The primary candidate uses the already-built modelWithTools; for
-          // fallbacks we rebuild the chat model from the profile's item map.
-    let modelToUse = modelWithTools;
-    if (candidate.model !== primaryModel) {
-      const fallbackItem = this.resolveFallbackModelItem(candidate.model);
-      if (!fallbackItem) {
-        throw new Error(`fallback model "${candidate.model}" is not configured`);
-      }
-      const fallbackBinding = this.getSessionModelBinding(sessionId);
-      const fallbackChat = this.helpers.createChatModel(fallbackItem, 0.7, (fallbackBinding as any)?.profile ?? null);
-      modelToUse = fallbackChat as typeof modelWithTools;
-    }
+          // fallbacks we rebuild the chat model AND re-bind the same tool set
+          // (a fallback without tools bound would break the agent loop).
+          let modelToUse = modelWithTools;
+          if (candidate.model !== primaryModel) {
+            const fallbackItem = this.resolveFallbackModelItem(candidate.model);
+            if (!fallbackItem) {
+              throw new Error(`fallback model "${candidate.model}" is not configured`);
+            }
+            const fallbackChat = this.helpers.createChatModel(
+              fallbackItem,
+              shouldUseThinkingModelOnThisPass ? 0.2 : 0.7,
+              null,
+            );
+            modelToUse = fallbackChat.bindTools([...builtInTools, ...mcpTools]) as typeof modelWithTools;
+          }
           return await invokeWithRetryAndSanitizedInput({
             helpers: this.helpers,
             messages: modelInputMessages,

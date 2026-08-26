@@ -39,4 +39,6 @@ export interface ModelProfile {
   reviewModelId?: string
   /** how strict the review is: 'strict' (block on any issue), 'advisory' (flag but allow), 'auto-approve' (skip review for low-risk actions). */
   reviewMode?: 'strict' | 'advisory' | 'auto-approve'
+  /** v3.3.0: ordered fallback chain of model ids for provider failover. */
+  fallbackModels?: string[]
 }
