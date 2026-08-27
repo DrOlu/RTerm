@@ -1,6 +1,6 @@
 import React from 'react'
 import { observer } from 'mobx-react-lite'
-import { Settings, SlidersHorizontal, Minus, Square, X } from 'lucide-react'
+import { Settings, SlidersHorizontal, Minus, Square, X, LayoutDashboard } from 'lucide-react'
 import type { AppStore } from '../../stores/AppStore'
 import { isLinux } from '../../platform/platform'
 import './topbar.scss'
@@ -25,6 +25,10 @@ export const TopBar: React.FC<{ store: AppStore }> = observer(({ store }) => {
           {/* Connection manager entry: adding new remote connections should be in Connections SSH panel */}
           <button className="icon-btn" title={store.i18n.t.connections.title} onClick={() => store.openConnections()}>
             <SlidersHorizontal size={16} strokeWidth={2} />
+          </button>
+
+          <button className="icon-btn" title="Dashboard" onClick={() => store.openDashboard()}>
+            <LayoutDashboard size={16} strokeWidth={2} />
           </button>
 
           <button className="icon-btn" onClick={() => store.toggleSettings()} title={store.i18n.t.settings.title}>

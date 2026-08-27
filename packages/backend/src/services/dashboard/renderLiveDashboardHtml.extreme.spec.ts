@@ -80,11 +80,15 @@ const state: DashboardState = {
     },
   ],
   capacity: [{ host: "web-1", diskPercent: 70.1, daysToFull: 120 }],
+  situation: [],
+  headline: "",
+  work: { playbooks: [], triggers: [], scheduledTasks: [], agentRuns: [] },
+  empty: [],
 };
 
 await runCase("live page renders all section containers with stable ids", () => {
   const html = renderLiveDashboardHtml(state);
-  for (const id of ["fleet", "slo", "uptime", "incidents", "apm-svc", "apm-trace", "dem", "clusters", "capacity"]) {
+  for (const id of ["fleet", "slo", "uptime", "incidents", "apm-svc", "apm-trace", "dem", "clusters", "capacity", "situation", "work", "host-filter"]) {
     assert(html.includes(`id="${id}"`), `missing section container #${id}`);
   }
 });

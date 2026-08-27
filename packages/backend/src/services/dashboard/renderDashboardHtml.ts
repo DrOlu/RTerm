@@ -130,12 +130,49 @@ export function renderDashboardHtml(state: DashboardState, opts: RenderOptions =
       <td>${c.daysToFull !== undefined ? num(c.daysToFull, 1) + ' days' : '—'}</td>
     </tr>`).join('\n')
 
-  const section = (id: string, label: string, rows: string, emptyMsg: string) =>
+  const emptyMsg = (sectionId: string, fallback: string): string =>
+    state.empty?.find((e) => e.section === sectionId)?.message ?? fallback
+
+  const sitItems = state.situation ?? []
+  const sitHtml = sitItems
+    .map((s) => {
+      const cls = s.severity === 'critical' ? 'bad' : s.severity === 'warning' ? 'warn' : 'ok'
+      const act = s.action
+        ? `<button class="act" data-action="${esc(s.action.type)}" data-target="${esc(s.action.target ?? '')}">${esc(s.action.label)}</button>`
+        : ''
+      return `<div class="sit ${cls}"><span class="badge ${cls}">${esc(s.severity)}</span><div><strong>${esc(s.title)}</strong><div class="dim">${esc(s.detail)}</div></div>${act}</div>`
+    })
+    .join('')
+
+  const workBlock = (title: string, items: Array<{ name: string; ok: boolean | null; detail: string; action?: { type: string; target?: string; label: string } }>) => {
+    if (!items.length) return ''
+    const rows = items
+      .map((w) => {
+        const badge = w.ok === false ? 'bad' : w.ok === true ? 'ok' : 'mute'
+        const act = w.action
+          ? `<button class="act" data-action="${esc(w.action.type)}" data-target="${esc(w.action.target ?? '')}">${esc(w.action.label)}</button>`
+          : ''
+        return `<tr><td class="host">${esc(w.name)}</td><td><span class="badge ${badge}">${esc(w.detail)}</span></td><td>${act}</td></tr>`
+      })
+      .join('')
+    return `<h3>${esc(title)}</h3><table>${rows}</table>`
+  }
+  const work = state.work
+  const workHtml = work
+    ? [
+        workBlock('Playbooks', work.playbooks),
+        workBlock('Triggers', work.triggers),
+        workBlock('Scheduled tasks', work.scheduledTasks),
+        workBlock('Agent runs', work.agentRuns),
+      ].join('')
+    : ''
+
+  const section = (id: string, label: string, rows: string, emptyMsgText: string) =>
     live
-      ? `<section><h2>${label}</h2><div id="${id}">${rows ? `<table>${rows}</table>` : `<p class="empty">${esc(emptyMsg)}</p>`}</div></section>`
+      ? `<section><h2>${label}</h2><div id="${id}">${rows ? `<table>${rows}</table>` : `<p class="empty">${esc(emptyMsgText)}</p>`}</div></section>`
       : rows
         ? `<section id="${id}"><h2>${label}</h2><table>${rows}</table></section>`
-        : `<section id="${id}"><h2>${label}</h2><p class="empty">${esc(emptyMsg)}</p></section>`
+        : `<section id="${id}"><h2>${label}</h2><p class="empty">${esc(emptyMsgText)}</p></section>`
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -176,6 +213,16 @@ ${refresh > 0 && !live ? `<meta http-equiv="refresh" content="${refresh}">` : ''
   .row-bad td { background: rgba(255,93,126,0.05); }
   .empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
   .span2 { grid-column: span 2; }
+  .sit-strip { display: flex; flex-direction: column; gap: 8px; }
+  .sit { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); }
+  .sit.bad { border-color: rgba(255,93,126,0.35); background: rgba(255,93,126,0.06); }
+  .sit.warn { border-color: rgba(255,196,77,0.3); background: rgba(255,196,77,0.05); }
+  .sit.ok { border-color: rgba(61,220,151,0.25); }
+  .sit strong { display: block; font-size: 13px; }
+  .act { margin-left: auto; background: transparent; color: var(--accent); border: 1px solid rgba(79,216,232,0.35); border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .act:hover { background: rgba(79,216,232,0.12); }
+  section h3 { font-size: 11px; color: var(--muted); margin: 10px 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .filter { margin: 0 0 10px; padding: 6px 10px; width: 100%; max-width: 320px; background: var(--panel2); color: var(--fg); border: 1px solid var(--border); border-radius: 8px; }
   footer { color: var(--muted); font-size: 11px; padding: 14px 26px 30px; }
   @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .span2 { grid-column: span 1; } }
 </style>
@@ -187,25 +234,36 @@ ${refresh > 0 && !live ? `<meta http-equiv="refresh" content="${refresh}">` : ''
   <span class="live" id="live-indicator">LIVE · updated ${esc(new Date(state.at).toISOString().slice(11, 19))} UTC</span>
 </header>
 <main>
+  <section class="span2" id="situation-wrap">
+    <h2>Situation</h2>
+    <div class="sub dim" id="headline">${esc(state.headline || '')}</div>
+    <div class="sit-strip" id="situation">${sitHtml || '<p class="empty">All clear.</p>'}</div>
+  </section>
   <div class="grid">
     <section class="span2">
       <h2>Fleet health</h2>
+      <input class="filter" id="host-filter" type="search" placeholder="Filter hosts…" />
       <div id="fleet">
       <table>
         <tr><th>host</th><th>state</th><th>cpu</th><th>mem</th><th>disk</th><th>cpu trend</th><th>disk full in</th></tr>
-        ${hostRows || '<tr><td class="empty">No hosts reporting yet.</td></tr>'}
+        ${hostRows || `<tr><td class="empty">${esc(emptyMsg('hosts', 'No hosts reporting yet. Open a terminal so Monitor can collect CPU/mem/disk, or add a watchdog target.'))}</td></tr>`}
       </table>
       </div>
     </section>
 
-    ${section('slo', 'SLO board', sloRows ? `<tr><th>slo</th><th>sli</th><th>burn rate</th><th>budget</th><th>status</th></tr>${sloRows}` : '', 'No SLOs defined yet.')}
-    ${section('uptime', 'Uptime', upRows ? `<tr><th>host</th><th>state</th><th>failures</th><th>latency</th><th>error</th></tr>${upRows}` : '', 'No watchdog targets yet.')}
-    ${section('incidents', 'Open incidents', incRows ? `<tr><th>incident</th><th>sev</th><th>status</th><th>affected</th><th>rca</th></tr>${incRows}` : '', 'No open incidents.')}
-    ${section('apm-svc', 'APM · bottleneck services', apmSvcRows ? `<tr><th>service</th><th>spans</th><th>errors</th><th>error rate</th><th>p95</th></tr>${apmSvcRows}` : '', 'No APM spans ingested yet.')}
-    ${section('apm-trace', 'APM · slowest traces', apmTraceRows ? `<tr><th>trace</th><th>root</th><th>spans</th><th>duration</th><th>status</th></tr>${apmTraceRows}` : '', 'No traces yet.')}
-    ${section('dem', 'DEM · slowest pages (Core Web Vitals)', demRows ? `<tr><th>page</th><th>sessions</th><th>p75 lcp</th><th>p75 inp</th><th>error rate</th></tr>${demRows}` : '', 'No RUM sessions yet.')}
-    ${section('clusters', 'Kubernetes / cloud clusters', clusterRows ? `<tr><th>context</th><th>pods</th><th>not ready</th><th>crashloop</th><th>restarts</th><th>nodes</th></tr>${clusterRows}` : '', 'No clusters reporting yet.')}
-    ${section('capacity', 'Capacity forecast', capRows ? `<tr><th>host</th><th>disk</th><th>full in</th></tr>${capRows}` : '', 'No capacity data yet.')}
+    <section class="span2" id="work-wrap">
+      <h2>RTerm work</h2>
+      <div id="work">${workHtml || '<p class="empty">No playbook runs, trigger fires, scheduled tasks, or agent runs yet.</p>'}</div>
+    </section>
+
+    ${section('slo', 'SLO board', sloRows ? `<tr><th>slo</th><th>sli</th><th>burn rate</th><th>budget</th><th>status</th></tr>${sloRows}` : '', emptyMsg('slos', 'No SLOs defined yet. Define an SLO to track error budget and burn rate.'))}
+    ${section('uptime', 'Uptime', upRows ? `<tr><th>host</th><th>state</th><th>failures</th><th>latency</th><th>error</th></tr>${upRows}` : '', emptyMsg('uptime', 'No watchdog targets yet. Uptime probes appear here once a host is watched.'))}
+    ${section('incidents', 'Open incidents', incRows ? `<tr><th>incident</th><th>sev</th><th>status</th><th>affected</th><th>rca</th></tr>${incRows}` : '', emptyMsg('incidents', 'No open incidents.'))}
+    ${section('apm-svc', 'APM · bottleneck services', apmSvcRows ? `<tr><th>service</th><th>spans</th><th>errors</th><th>error rate</th><th>p95</th></tr>${apmSvcRows}` : '', emptyMsg('apm', 'No APM spans ingested yet. Model calls and OTLP spans appear here when tracing is on.'))}
+    ${section('apm-trace', 'APM · slowest traces', apmTraceRows ? `<tr><th>trace</th><th>root</th><th>spans</th><th>duration</th><th>status</th></tr>${apmTraceRows}` : '', emptyMsg('apm', 'No traces yet.'))}
+    ${section('dem', 'DEM · slowest pages (Core Web Vitals)', demRows ? `<tr><th>page</th><th>sessions</th><th>p75 lcp</th><th>p75 inp</th><th>error rate</th></tr>${demRows}` : '', emptyMsg('dem', 'No RUM sessions yet. Core Web Vitals appear after DEM beacons are ingested.'))}
+    ${section('clusters', 'Kubernetes / cloud clusters', clusterRows ? `<tr><th>context</th><th>pods</th><th>not ready</th><th>crashloop</th><th>restarts</th><th>nodes</th></tr>${clusterRows}` : '', emptyMsg('clusters', 'No Kubernetes clusters reporting yet. Run collect_infra / kubectl ingest to populate.'))}
+    ${section('capacity', 'Capacity forecast', capRows ? `<tr><th>host</th><th>disk</th><th>full in</th></tr>${capRows}` : '', emptyMsg('capacity', 'No capacity forecast yet. Disk-days-to-full needs Monitor disk samples.'))}
   </div>
 </main>
 <footer>

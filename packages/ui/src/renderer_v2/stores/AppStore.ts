@@ -244,7 +244,7 @@ const resolveSuppressionKinds = (kind: PanelKind): WindowScopedTabKind[] =>
           ? ["monitor"]
           : [];
 
-export type AppView = "main" | "settings" | "connections";
+export type AppView = "main" | "settings" | "connections" | "dashboard";
 export type SettingsSection =
   | "general"
   | "theme"
@@ -508,6 +508,7 @@ export class AppStore {
       closeSettings: action,
       toggleSettings: action,
       openConnections: action,
+      openDashboard: action,
       closeOverlay: action,
       bootstrap: action,
       createLocalTab: action,
@@ -1433,6 +1434,10 @@ export class AppStore {
     return this.view === "connections";
   }
 
+  get isDashboard(): boolean {
+    return this.view === "dashboard";
+  }
+
   get activeTerminal(): TerminalTabModel | null {
     if (!this.activeTerminalId) return null;
     return (
@@ -1841,6 +1846,10 @@ export class AppStore {
 
   openConnections(): void {
     this.view = "connections";
+  }
+
+  openDashboard(): void {
+    this.view = "dashboard";
   }
 
   closeOverlay(): void {

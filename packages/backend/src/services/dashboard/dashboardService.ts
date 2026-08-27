@@ -6,6 +6,13 @@ import type { IncidentLedger, Incident } from '../sre/incidentLedger'
 import type { SpanLedger, ServiceStats, TraceSummary } from '../apm/spanLedger'
 import type { RumLedger, RumPageStats } from '../dem/rumLedger'
 import type { InfraMonitor, K8sClusterHealth } from '../infra/infraMonitor'
+import {
+  presentDashboard,
+  type DashboardExtras,
+  type EmptyHint,
+  type SituationItem,
+  type DashboardWork,
+} from './dashboardPresentation'
 
 /**
  * DashboardService — a unified aggregation layer over every monitoring ledger.
@@ -41,6 +48,13 @@ export interface DashboardState {
   clusters: K8sClusterHealth[]
   /** capacity forecast: days-to-disk-full per host. */
   capacity: Array<{ host: string; diskPercent?: number; daysToFull?: number }>
+  /** v3.3.5: ranked "what should I do" strip. */
+  situation: SituationItem[]
+  headline: string
+  /** v3.3.5: playbooks / triggers / scheduled tasks / agent runs. */
+  work: DashboardWork
+  /** v3.3.5: honest empty-state copy per section. */
+  empty: EmptyHint[]
 }
 
 export interface DashboardDeps {
@@ -55,6 +69,8 @@ export interface DashboardDeps {
   now?: () => number
   /** max items per section (default 10). */
   sectionLimit?: number
+  /** v3.3.5: RTerm work sources (playbooks / triggers / runs). */
+  getExtras?: () => DashboardExtras
 }
 
 const DEFAULT_LIMIT = 10
@@ -112,7 +128,7 @@ export class DashboardService {
     // Capacity forecast.
     const capacity = d.goldenSignals.capacityForecast()
 
-    return {
+    const fleet = {
       at: this.now(),
       hosts,
       slos,
@@ -122,6 +138,20 @@ export class DashboardService {
       dem,
       clusters,
       capacity,
+    }
+    let extras: DashboardExtras = {}
+    try {
+      extras = this.deps.getExtras?.() ?? {}
+    } catch {
+      extras = {}
+    }
+    const presented = presentDashboard(fleet as never, extras)
+    return {
+      ...fleet,
+      situation: presented.situation,
+      headline: presented.headline,
+      work: presented.work,
+      empty: presented.empty,
     }
   }
 

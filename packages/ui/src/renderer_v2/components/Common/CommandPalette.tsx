@@ -1,6 +1,6 @@
 import React from 'react'
 import { observer } from 'mobx-react-lite'
-import { Server, MonitorCog, Cable, Settings, FolderTree, Clock, FileCode, Activity, Upload, Radio } from 'lucide-react'
+import { Server, MonitorCog, Cable, Settings, FolderTree, Clock, FileCode, Activity, Upload, Radio, LayoutDashboard } from 'lucide-react'
 import { broadcastStore } from '../../stores/BroadcastStore'
 import type { AppStore } from '../../stores/AppStore'
 
@@ -62,6 +62,7 @@ export const CommandPalette: React.FC<{ store: AppStore }> = observer(({ store }
   for (const e of serial) items.push({ id: `serial-${e.id}`, label: `Open Serial: ${e.name}`, hint: e.path, icon: <Cable size={16} />, run: () => { store.createSerialTab(e.id); setOpen(false) } })
   // Panels / views
   items.push({ id: 'connections', label: 'Open Connections', icon: <FolderTree size={16} />, run: () => { store.openConnections(); setOpen(false) } })
+  items.push({ id: 'dashboard', label: 'Open Dashboard', icon: <LayoutDashboard size={16} />, run: () => { store.openDashboard(); setOpen(false) } })
   items.push({ id: 'settings', label: 'Open Settings', icon: <Settings size={16} />, run: () => { store.openSettings(); setOpen(false) } })
   // Toggles
   const loggingOn = store.settings?.sessionLogging?.enabled === true

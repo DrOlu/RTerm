@@ -404,6 +404,39 @@ export function createObservability(deps: ObservabilityDeps): Observability {
   const dashboard = new DashboardService({
     metricsLedger, goldenSignals, sloService, uptimeWatchdog, incidentLedger,
     spanLedger, rumLedger, infraMonitor,
+    getExtras: () => {
+      const am = deps.automationManager
+      const playbooks = am.listPlaybooks().map((p) => ({
+        id: p.id,
+        name: p.name,
+        lastRunAt: p.lastRunAt,
+        lastRunOk: p.lastRunOk,
+      }))
+      const scheduledTasks = am.listScheduledTasks().map((t) => ({
+        id: t.id,
+        name: t.name,
+        enabled: t.enabled,
+        lastRunAt: t.lastRunAt,
+      }))
+      const triggers = am.listTriggers().map((t) => ({
+        id: t.id,
+        name: t.name,
+        enabled: t.enabled,
+        kind: t.kind,
+        lastFiredAt: t.lastFiredAt,
+        fireCount: t.fireCount,
+      }))
+      const agentRuns = deps.agentRunLedger.listRuns({ limit: 12 }).map((r) => ({
+        runId: r.runId,
+        sessionId: r.sessionId,
+        status: r.status,
+        error: r.error,
+        startedAt: r.startedAt,
+        endedAt: r.endedAt,
+        inputPreview: r.inputPreview,
+      }))
+      return { playbooks, scheduledTasks, triggers, agentRuns }
+    },
   })
 
   // --- Predictive + behavior + evals ---

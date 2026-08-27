@@ -4,6 +4,7 @@ import { AppStore } from "./stores/AppStore";
 import { TopBar } from "./components/TopBar/TopBar";
 import { SettingsView } from "./components/Settings/SettingsView";
 import { ConnectionsView } from "./components/Connections/ConnectionsView";
+import { DashboardView } from "./components/Dashboard/DashboardView";
 import { ConfirmDialog } from "./components/Common/ConfirmDialog";
 import { ToastStack } from "./components/Common/ToastStack";
 import { CommandPalette } from "./components/Common/CommandPalette";
@@ -188,6 +189,12 @@ export const App: React.FC = observer(() => {
           className={`gyshell-overlay connections-overlay${store.view === "connections" ? " is-open" : ""}`}
         >
           <ConnectionsView store={store} />
+        </div>
+
+        <div
+          className={`gyshell-overlay dashboard-overlay${store.view === "dashboard" ? " is-open" : ""}`}
+        >
+          <DashboardView store={store} />
         </div>
 
         {showHistoryMigrationOverlay ? (

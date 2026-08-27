@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.3.5 (2026-08-27)
+
+### Features — situation-first dashboard (ops console, not a report)
+
+- **Situation strip** ranks what to do: host down/degraded, Sev1–2 incidents,
+  fast-burning SLOs, disk-full <7d, crashloop clusters, failed playbooks,
+  failed agent runs. All-clear when nothing is on fire.
+- **RTerm work** on the same page: last playbook runs, trigger fires,
+  scheduled tasks, agent-run ledger — unique to RTerm, not another CPU grid.
+- **Honest empty states** (e.g. "No hosts — open a terminal so Monitor can
+  collect" / "No APM spans ingested") instead of blank tables.
+- **In-app overlay** (TopBar + Command Palette "Open Dashboard") with
+  click-through: host row → SSH/WinRM tab; playbooks/triggers → Connections.
+- Browser `/dashboard` gains the same situation + work sections, host filter,
+  and action buttons. Live WS path unchanged.
+
 ## v3.3.4 (2026-08-27)
 
 ### Fixes — Prev / Next user jumps to the user query (and stays enabled)
