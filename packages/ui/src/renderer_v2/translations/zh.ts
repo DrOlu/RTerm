@@ -296,6 +296,7 @@ export const zh = {
     scheduledTasks: "定时任务",
     templates: "模板",
     playbooks: "剧本",
+    triggers: "触发器",
     proxy: "代理",
     tunnels: "隧道",
     newConnection: "新建连接",

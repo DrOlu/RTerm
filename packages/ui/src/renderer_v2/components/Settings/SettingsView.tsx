@@ -2522,13 +2522,17 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                                       onChange={(id) => {
                                         const next = [...(p.fallbackModels || [])];
                                         next[idx] = id;
-                                        store.saveProfile({ ...p, fallbackModels: next.filter(Boolean) });
+                                        const cleaned = next.filter(Boolean).filter((v, i, a) => a.indexOf(v) === i && v !== p.globalModelId);
+                                        store.saveProfile({ ...p, fallbackModels: cleaned });
                                       }}
                                     options={[
                                         { value: "", label: "(select a model)" },
                                         ...(store.settings?.models.items
-                                          .filter((m) => m.id !== p.globalModelId)
-                                          .map((m) => ({ value: m.id, label: m.name })) || []),
+                                          .filter((m) => m.id !== p.globalModelId && m.apiKey)
+                                          .map((m) => ({
+                                            value: m.id,
+                                            label: `${m.name}${m.apiKey ? "" : " (no key)"}`,
+                                          })) || []),
                                     ]}
                                   />
                                   <span className="fallback-model-name">{item?.model || "unknown model"}</span>
@@ -2537,7 +2541,9 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                                     title="Remove from chain"
                                     onClick={() => {
                                       const next = (p.fallbackModels || []).filter((_, i) => i !== idx);
-                                      store.saveProfile({ ...p, fallbackModels: next.length ? next : undefined });
+                                      // Persist [] (not undefined): settings deepMerge skips undefined, so
+                                      // clearing the chain would otherwise leave the previous values.
+                                      store.saveProfile({ ...p, fallbackModels: next });
                                     }}
                                   >
                                     ×
@@ -3190,9 +3196,7 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                       type="checkbox"
                       checked={store.settings?.sessionLogging?.enabled === true}
                         onChange={async (e) => {
-                          await window.gyshell.settings.set({
-                            sessionLogging: { enabled: e.target.checked },
-                          } as never)
+                          await store.setSessionLoggingEnabled(e.target.checked)
                         }}
                     />
                     <span className="switch-slider" />

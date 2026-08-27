@@ -322,8 +322,9 @@ function normalizePlaybookSteps(steps: PlaybookStep[] | undefined): PlaybookStep
   if (!steps || steps.length === 0) throw new Error('A playbook needs at least one step')
   return steps.map((s, idx) => {
     const kind = s.kind
-    if (kind !== 'command' && kind !== 'script' && kind !== 'wait') {
-      throw new Error(`Step ${idx + 1}: kind must be command|script|wait`)
+    const allowed = ['command', 'script', 'wait', 'template', 'playbook', 'healthCheck']
+    if (!allowed.includes(kind)) {
+      throw new Error(`Step ${idx + 1}: kind must be ${allowed.join('|')}`)
     }
     if (kind === 'command' && !(s.command ?? '').trim()) {
       throw new Error(`Step ${idx + 1}: command steps need a non-empty command`)
@@ -333,6 +334,15 @@ function normalizePlaybookSteps(steps: PlaybookStep[] | undefined): PlaybookStep
     }
     if (kind === 'wait' && !(typeof s.waitSeconds === 'number' && s.waitSeconds > 0)) {
       throw new Error(`Step ${idx + 1}: wait steps need waitSeconds > 0`)
+    }
+    if (kind === 'template' && !(s.templateId ?? '').trim()) {
+      throw new Error(`Step ${idx + 1}: template steps need a templateId`)
+    }
+    if (kind === 'playbook' && !(s.playbookId ?? '').trim()) {
+      throw new Error(`Step ${idx + 1}: playbook steps need a playbookId`)
+    }
+    if (kind === 'healthCheck' && !(s.healthUrl ?? '').trim()) {
+      throw new Error(`Step ${idx + 1}: healthCheck steps need a healthUrl`)
     }
     if (s.onError && s.onError !== 'stop' && s.onError !== 'continue') {
       throw new Error(`Step ${idx + 1}: onError must be stop|continue`)

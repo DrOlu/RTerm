@@ -218,23 +218,10 @@ export const CONNECTION_MANAGER_SECTIONS: readonly ConnectionManagerSectionDefin
         createdAt: Date.now(),
       }),
       saveDraft: async (store, draft) => {
-        await window.gyshell.settings.set({
-          automation: {
-            ...((store.settings?.automation as Record<string, unknown>) ?? {}),
-            triggers: [
-              ...((store.settings?.automation as { triggers?: Array<{ id: string }> } | undefined)?.triggers?.filter((x) => x.id !== draft.id) ?? []),
-              draft,
-            ],
-          },
-        } as never)
+        await store.saveTrigger(draft)
       },
       deleteEntry: async (store, id) => {
-        await window.gyshell.settings.set({
-          automation: {
-            ...((store.settings?.automation as Record<string, unknown>) ?? {}),
-            triggers: ((store.settings?.automation as { triggers?: Array<{ id: string }> } | undefined)?.triggers ?? []).filter((x) => x.id !== id),
-          },
-        } as never)
+        await store.deleteTrigger(id)
       },
     }),
     createSectionDefinition({

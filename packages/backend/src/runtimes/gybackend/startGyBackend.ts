@@ -385,6 +385,9 @@ export async function startGyBackend(): Promise<void> {
   // task→playbook binding, and onSuccess/onFailure chaining.
   const scheduler = new SchedulerService({
     getTasks: () => automationManager.listScheduledTasks(),
+    onMinute: (at) => {
+      try { triggerEngine.fire_schedule(at) } catch { /* never crash the tick */ }
+    },
     onSkip: (task, reason) => {
       if (reason === "overlap-skip") {
         console.warn(

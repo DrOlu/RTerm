@@ -3,6 +3,7 @@ import {
   buildFailoverChain,
   withModelFailover,
 } from './AgentHelper/utils/modelFailover'
+import { deepMerge } from './settings/objectMerge'
 import type { ModelProfile, ModelDefinition, BackendSettings } from '../types'
 
 /**
@@ -289,6 +290,32 @@ test('e2e: profile with fallbacks → binding carries a usable chain', () => {
   )
   assertEqual(engineChain.length, 3, 'primary + 2 fallbacks')
   assertEqual(engineChain[0].model, 'moonshotai/kimi-k3', 'primary first')
+})
+
+test('settings: empty fallbackModels array survives (clearing the chain is not skipped by deepMerge)', () => {
+  const base = { models: { profiles: [{ id: 'p1', fallbackModels: ['m2', 'm3'] }] } }
+  const patch = { models: { profiles: [{ id: 'p1', fallbackModels: [] as string[] }] } }
+  // Array replacement: deepMerge assigns arrays wholesale (not element-merge).
+  const merged = deepMerge(base, patch) as typeof base
+  assertEqual(merged.models.profiles[0].fallbackModels.length, 0, 'cleared')
+})
+
+test('settings: undefined fallbackModels is skipped by deepMerge (must persist [])', () => {
+  const base = { id: 'p1', fallbackModels: ['m2'] }
+  const patch = { fallbackModels: undefined as unknown as string[] }
+  const merged = deepMerge(base, patch)
+  assertEqual(merged.fallbackModels[0], 'm2', 'undefined must NOT clear — UI must write []')
+})
+
+test('lookup: prefer keyed item when several share a model string', () => {
+  const items: ModelDefinition[] = [
+    makeItem('ghost', 'z-ai/glm-5.1', { name: 'GLM no key', apiKey: '' }),
+    makeItem('live', 'z-ai/glm-5.1', { name: 'GLM keyed' }),
+  ]
+  const keyed = items.filter((m) => !!m.apiKey)
+  const pool = keyed.length ? keyed : items
+  const hit = pool.find((m) => m.model === 'z-ai/glm-5.1')
+  assertEqual(hit?.id, 'live', 'keyed wins')
 })
 
 test('e2e: profile WITHOUT fallbacks → binding chain is empty (failover off)', () => {

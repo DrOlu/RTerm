@@ -13,6 +13,7 @@ import {
   getConnectionManagerSectionDefinition,
   type ConnectionsSection,
 } from './connectionManagerRegistry'
+import { connectionNavLabel } from './connectionNavLabel'
 
 export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store }) => {
   const t = store.i18n.t
@@ -121,26 +122,7 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
         <div className="connections-nav">
           {CONNECTION_MANAGER_SECTIONS.map((item) => {
             const Icon = item.icon
-            const label =
-              item.labelKey === 'ssh'
-                ? t.connections.ssh
-                : item.labelKey === 'winrm'
-                  ? (t.connections as any).winrm ?? 'WinRM'
-                  : item.labelKey === 'serial'
-                    ? (t.connections as any).serial ?? 'Serial'
-                    : item.labelKey === 'proxy'
-                      ? t.connections.proxy
-                      : item.labelKey === 'tunnels'
-                        ? t.connections.tunnels
-                        : item.labelKey === 'groups'
-                          ? (t.connections as any).groups ?? 'Groups'
-                          : item.labelKey === 'scripts'
-                            ? (t.connections as any).scripts ?? 'Scripts'
-                            : item.labelKey === 'scheduledTasks'
-                              ? (t.connections as any).scheduledTasks ?? 'Scheduled Tasks'
-                              : item.labelKey === 'playbooks'
-                                ? (t.connections as any).playbooks ?? 'Playbooks'
-                                : (t.connections as any).templates ?? 'Templates'
+            const label = connectionNavLabel(item, t as { connections: Record<string, unknown> })
             return (
               <div
                 key={item.id}
@@ -811,7 +793,7 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                             const steps = (draft.steps ?? []).slice()
                             steps[i] = { ...steps[i], kind: val }
                             setDraft({ ...draft, steps })
-                          }} options={[{value:'command',label:'command'},{value:'script',label:'script'},{value:'wait',label:'wait'}]} />
+                          }} options={[{value:'command',label:'command'},{value:'script',label:'script'},{value:'wait',label:'wait'},{value:'template',label:'template'},{value:'playbook',label:'playbook'},{value:'healthCheck',label:'healthCheck'}]} />
                           <input className="editor-input" placeholder="Step name (optional)" value={s.name ?? ''} onChange={(e) => {
                             const steps = (draft.steps ?? []).slice()
                             steps[i] = { ...steps[i], name: e.target.value }
@@ -846,7 +828,7 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                               setDraft({ ...draft, steps })
                             }} options={[{value:'',label:'Pick a saved script…'}, ...scripts.map((sc:any)=>({value:sc.id,label:sc.name}))]} />
                           </div>
-                        ) : (
+                        ) : s.kind === 'wait' ? (
                           <div className="editor-row" style={{ padding: '4px 0 0 18px' }}>
                             <input className="editor-input" type="number" min={1} placeholder="Wait seconds" value={s.waitSeconds ?? ''} onChange={(e) => {
                               const steps = (draft.steps ?? []).slice()
@@ -854,7 +836,41 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                               setDraft({ ...draft, steps })
                             }} />
                           </div>
-                        )}
+                        ) : s.kind === 'template' ? (
+                          <div className="editor-row" style={{ padding: '4px 0 0 18px' }}>
+                            <Select className="editor-select" value={s.templateId ?? ''} onChange={(val) => {
+                              const steps = (draft.steps ?? []).slice()
+                              steps[i] = { ...steps[i], templateId: val || undefined }
+                              setDraft({ ...draft, steps })
+                            }} options={[{value:'',label:'Pick a template…'}, ...templates.map((tpl:any)=>({value:tpl.id,label:tpl.name}))]} />
+                            <input className="editor-input" placeholder="Target path on host" value={s.templateTargetPath ?? ''} onChange={(e) => {
+                              const steps = (draft.steps ?? []).slice()
+                              steps[i] = { ...steps[i], templateTargetPath: e.target.value || undefined }
+                              setDraft({ ...draft, steps })
+                            }} />
+                          </div>
+                        ) : s.kind === 'playbook' ? (
+                          <div className="editor-row" style={{ padding: '4px 0 0 18px' }}>
+                            <Select className="editor-select" value={s.playbookId ?? ''} onChange={(val) => {
+                              const steps = (draft.steps ?? []).slice()
+                              steps[i] = { ...steps[i], playbookId: val || undefined }
+                              setDraft({ ...draft, steps })
+                            }} options={[{value:'',label:'Pick a sub-playbook…'}, ...playbooks.filter((p:any)=>p.id!==draft.id).map((p:any)=>({value:p.id,label:p.name}))]} />
+                          </div>
+                        ) : s.kind === 'healthCheck' ? (
+                          <div className="editor-row" style={{ padding: '4px 0 0 18px' }}>
+                            <input className="editor-input" placeholder="Health URL" value={s.healthUrl ?? ''} onChange={(e) => {
+                              const steps = (draft.steps ?? []).slice()
+                              steps[i] = { ...steps[i], healthUrl: e.target.value || undefined }
+                              setDraft({ ...draft, steps })
+                            }} />
+                            <input className="editor-input" type="number" min={1} placeholder="Expect status (200)" value={s.healthExpectStatus ?? ''} onChange={(e) => {
+                              const steps = (draft.steps ?? []).slice()
+                              steps[i] = { ...steps[i], healthExpectStatus: e.target.value === '' ? undefined : Number(e.target.value) }
+                              setDraft({ ...draft, steps })
+                            }} />
+                          </div>
+                        ) : null}
                         <div className="editor-row" style={{ padding: '4px 0 0 18px' }}>
                           <Select className="editor-select" value={s.onError ?? ''} onChange={(val) => {
                             const steps = (draft.steps ?? []).slice()
@@ -964,6 +980,15 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                           <input className="editor-input" type="number" placeholder="Value" value={draft.value ?? ''} onChange={(e) => setDraft({ ...draft, value: e.target.value === '' ? undefined : Number(e.target.value) })} />
                         </div>
                       </>
+                    ) : null}
+                    {draft.kind === 'schedule' ? (
+                      <>
+                        <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Cron (e.g. 0 2 * * *)" value={draft.cron ?? ''} onChange={(e) => setDraft({ ...draft, cron: e.target.value })} /></div>
+                        <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span><input className="editor-input" placeholder="Timezone (IANA, blank = daemon local)" value={draft.timezone ?? ''} onChange={(e) => setDraft({ ...draft, timezone: e.target.value || undefined })} /></div>
+                      </>
+                    ) : null}
+                    {draft.kind === 'webhook' ? (
+                      <div className="editor-row" style={{ fontSize: 12, opacity: 0.75, padding: '4px 0' }}>Inbound webhook: fire via manage_trigger action="fire" or the trigger:fire RPC. Cooldown still applies.</div>
                     ) : null}
                     <div className="editor-row"><span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
                       <Select className="editor-select" value={draft.action ?? 'run-playbook'} onChange={(val) => setDraft({ ...draft, action: val })} options={[{value:'run-playbook',label:'Action: run playbook'},{value:'propose-change',label:'Action: propose MOP change'}]} />

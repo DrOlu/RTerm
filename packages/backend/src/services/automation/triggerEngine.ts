@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { TriggerEntry } from '../../types'
+import { matchesCron, matchesCronInTz } from './schedulerService'
 
 export type { TriggerEntry } from '../../types'
 export type TriggerKind = TriggerEntry['kind']
@@ -117,6 +118,20 @@ export class TriggerEngine {
     return this.triggers.delete(t.id)
   }
 
+  /** Replace in-memory triggers from persisted settings (UI save path). */
+  reloadFrom(list: readonly TriggerEntry[]): void {
+    const previous = new Map(this.triggers)
+    this.triggers.clear()
+    for (const t of list) {
+      const existing = previous.get(t.id)
+      this.triggers.set(t.id, {
+        ...t,
+        fireCount: t.fireCount ?? existing?.fireCount ?? 0,
+        lastFiredAt: t.lastFiredAt ?? existing?.lastFiredAt,
+      })
+    }
+  }
+
   setEnabled(idOrName: string, enabled: boolean): boolean {
     const t = this.get(idOrName)
     if (!t) return false
@@ -153,6 +168,29 @@ export class TriggerEngine {
         void this.fire(t, `${t.metric} ${t.op} ${t.value} (actual ${actual}) on ${host}`)
       }
     }
+  }
+
+  /**
+   * Fire every enabled schedule-kind trigger whose cron matches `at`.
+   * Called from SchedulerService on each minute tick.
+   */
+  fire_schedule(at: Date): string[] {
+    const fired: string[] = []
+    for (const t of this.triggers.values()) {
+      if (!t.enabled || t.kind !== 'schedule') continue
+      if (!t.cron) continue
+      try {
+        const due = t.timezone
+          ? matchesCronInTz(t.cron, at, t.timezone)
+          : matchesCron(t.cron, at)
+        if (!due) continue
+        void this.fire(t, `schedule "${t.cron}" at ${at.toISOString()}`)
+        fired.push(t.id)
+      } catch {
+        // a bad cron must not crash the scheduler tick
+      }
+    }
+    return fired
   }
 
   /** Manually fire any webhook-kind triggers (or test a specific one). */

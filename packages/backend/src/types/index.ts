@@ -346,6 +346,10 @@ export interface TriggerEntry {
   value?: number
   /** only react to these hosts (empty = all). */
   scopeHosts?: string[]
+  /** schedule kind: 5-field cron expression (evaluated by SchedulerService). */
+  cron?: string
+  /** schedule kind: IANA timezone (default: daemon local). */
+  timezone?: string
   action: 'run-playbook' | 'propose-change'
   /** playbook id or name to run/propose on match. */
   playbookId: string

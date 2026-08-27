@@ -529,6 +529,8 @@ export class AppStore {
       deleteTemplate: action,
       savePlaybook: action,
       deletePlaybook: action,
+      saveTrigger: action,
+      deleteTrigger: action,
       setSessionLoggingEnabled: action,
       importPuttySessions: action,
       reconnectTerminal: action,
@@ -3501,6 +3503,21 @@ export class AppStore {
     const current = this.settings ?? (await this.fetchCombinedSettings());
     const list = (current.automation?.playbooks ?? []).filter((p) => p.id !== id);
     await this.saveAutomationSlice({ playbooks: list });
+  }
+
+  async saveTrigger(trigger: Record<string, unknown>): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = ((current.automation as { triggers?: Array<{ id: string }> } | undefined)?.triggers ?? []).slice();
+    const id = String(trigger.id ?? '');
+    const idx = list.findIndex((t) => t.id === id);
+    const next = idx === -1 ? [...list, trigger] : list.map((t) => (t.id === id ? { ...t, ...trigger } : t));
+    await this.saveAutomationSlice({ triggers: next } as any);
+  }
+
+  async deleteTrigger(id: string): Promise<void> {
+    const current = this.settings ?? (await this.fetchCombinedSettings());
+    const list = ((current.automation as { triggers?: Array<{ id: string }> } | undefined)?.triggers ?? []).filter((t) => t.id !== id);
+    await this.saveAutomationSlice({ triggers: list } as any);
   }
 
   async setSessionLoggingEnabled(enabled: boolean): Promise<void> {

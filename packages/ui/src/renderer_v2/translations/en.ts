@@ -302,6 +302,7 @@ export const en = {
     scheduledTasks: "Scheduled Tasks",
     templates: "Templates",
     playbooks: "Playbooks",
+    triggers: "Triggers",
     proxy: "Proxy",
     tunnels: "Tunnels",
     newConnection: "New Connection",

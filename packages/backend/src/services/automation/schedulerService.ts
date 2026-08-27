@@ -361,6 +361,8 @@ export interface SchedulerServiceOptions {
   onSkip?: (task: ScheduledTaskEntry, reason: NonNullable<SchedulerFireDecision['reason']>, at: Date) => void
   /** Shared run-history store (optional; the scheduler creates one when omitted). */
   history?: RunHistoryStore
+  /** Called once per evaluated minute (after due tasks). Used to fire schedule-kind triggers. */
+  onMinute?: (at: Date) => void
 }
 
 export class SchedulerService {
@@ -476,6 +478,7 @@ export class SchedulerService {
           // A bad task should not crash the scheduler.
         }
       }
+      try { this.opts.onMinute?.(new Date(cur)) } catch { /* schedule triggers must not crash the tick */ }
       cur = new Date(cur.getTime() + 60_000)
     }
     this.lastTickMs = nowMs

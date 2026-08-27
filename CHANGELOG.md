@@ -1,5 +1,51 @@
 # Changelog
 
+## v3.3.3 (2026-08-27)
+
+### Fixes — duplicate Templates label, checkpoint OOM, failover that actually runs
+
+- **Connections nav: two "Templates"** — a nested ternary after Playbooks
+  fell through to the Templates label, so the Triggers section opened as a
+  second Templates. Labels now resolve via `connectionNavLabel` (en + zh
+  `triggers` keys). Verified: exactly one Templates, Triggers is Triggers.
+
+- **`RangeError: Failed to allocate memory` after a task finishes** —
+  LangGraph `MemorySaver.put` JSON-serialized the entire graph (every tool
+  result) via `TextEncoder.encode`. Long runs overflowed V8 after the answer
+  was already shown. New `SafeMemorySaver` prunes tool payloads (8 KB/string,
+  40-message cap) before serialize, retries with a tighter drop, and skips
+  persist rather than crashing the process.
+
+- **Model failover was configured but did not run** —
+  `resolveFallbackModelItem` read `this.options.getSettings` which never
+  existed, so fallbacks always missed. It now reads `this.settings` and
+  prefers keyed items. Failover uses the same streaming UI path as the
+  primary (not a silent concat). Empty chain persists as `[]` (deepMerge
+  skips `undefined`, so clearing the chain used to leave the old values).
+  UI drops the primary and duplicates from the picker and only lists keyed
+  models.
+
+### Fixes — playbook / scheduler / session / trigger / plugin settings actually work
+
+- **Triggers saved from the UI now fire** — saves go through
+  `saveTrigger`/`saveAutomationSlice` (no sibling wipe). `updateSettings`
+  reloads the live TriggerEngine. Schedule-kind triggers have cron + timezone
+  fields and are evaluated on every scheduler minute (`onMinute` →
+  `fire_schedule`). Pattern / threshold / webhook still work; cooldown,
+  disable, and bad cron cannot crash the tick.
+
+- **Playbook step kinds `template` / `playbook` / `healthCheck`** — the
+  editor could pick them but `normalizePlaybookSteps` rejected anything but
+  command|script|wait. Both sides now accept the v3.2.17 kinds with the
+  required fields.
+
+- **Session logging toggle** uses `store.setSessionLoggingEnabled` so the
+  switch stays in sync with settings.
+
+- **Failover / scheduler / playbook / trigger / plugin settings** live-checked
+  against the running daemon (REST + settings:get). Exhaustive specs added
+  for SafeMemorySaver, nav labels, schedule triggers, and failover merge.
+
 ## v3.3.2 (2026-08-26)
 
 ### Features — the last automation UI gaps: playbook v3.2.17 fields + trigger manager

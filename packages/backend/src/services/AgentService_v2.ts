@@ -16,7 +16,6 @@ import {
   START,
   END,
   Annotation,
-  MemorySaver,
 } from "@langchain/langgraph";
 import { RunnableLambda } from "@langchain/core/runnables";
 import type { ChatSession, BackendSettings, TerminalTab, UserInputPayload, ModelDefinition } from "../types";
@@ -34,6 +33,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { z } from "zod";
 import type { StartTaskInput, StartTaskMode } from "./Gateway/types";
 import { extractUsageTokenBreakdown } from "./agentRunLedger";
+import { SafeMemorySaver } from "./AgentHelper/utils/safeMemorySaver";
 import type { StoredChatSession } from "./ChatHistoryService";
 import {
   buildToolsForModel,
@@ -511,7 +511,7 @@ export class AgentService_v2 {
 
   private graph: any = null;
   private helpers: AgentHelpers;
-  private checkpointer: MemorySaver;
+  private checkpointer: SafeMemorySaver;
   private builtInToolEnabled: Record<string, boolean> = {};
   private lastAbortedMessage: BaseMessage | null = null;
   /** v3.2.12: runIds whose final_output node already emitted `done` — lets
@@ -576,7 +576,7 @@ export class AgentService_v2 {
     this.imageAttachmentService = imageAttachmentService || null;
     this.fileTransferService = fileTransferService || null;
     this.helpers = new AgentHelpers();
-    this.checkpointer = new MemorySaver();
+    this.checkpointer = new SafeMemorySaver();
     this.initializeGraph();
   }
 
@@ -584,6 +584,11 @@ export class AgentService_v2 {
     this.settings = settings;
     this.builtInToolEnabled = settings.tools?.builtIn ?? {};
     this.initializeGraph();
+    try {
+      this.triggerEngine?.reloadFrom(settings.automation?.triggers ?? []);
+    } catch {
+      // a bad trigger list must not break settings apply
+    }
   }
 
   setEventPublisher(publisher: (sessionId: string, event: any) => void): void {
@@ -706,15 +711,23 @@ export class AgentService_v2 {
   }
 
   /**
-   * v3.2.18: resolve a fallback model id to its ModelDefinition from the
-   * session's settings. Returns null when the model isn't configured.
+   * v3.2.18 / v3.3.3: resolve a fallback model (id, name, or provider model
+   * string) to its ModelDefinition. Must use `this.settings` — the previous
+   * `this.options.getSettings` path never existed, so failover always missed.
+   * Prefers an item that has an API key when several share the same model id.
    */
   private resolveFallbackModelItem(modelId: string): ModelDefinition | null {
     try {
-      const settings = (this as any).options?.getSettings?.() ?? null;
-      const items: ModelDefinition[] = settings?.models?.items ?? [];
-      const hit = items.find((m) => m.model === modelId || m.id === modelId || m.name === modelId);
-      return hit ?? null;
+      const items: ModelDefinition[] = this.settings?.models?.items ?? [];
+      if (!modelId) return null;
+      const keyed = items.filter((m) => !!m.apiKey);
+      const pool = keyed.length ? keyed : items;
+      return (
+        pool.find((m) => m.id === modelId) ??
+        pool.find((m) => m.model === modelId) ??
+        pool.find((m) => m.name === modelId) ??
+        null
+      );
     } catch {
       return null;
     }
@@ -1488,77 +1501,48 @@ export class AgentService_v2 {
       // (the request itself is bad); those rethrow immediately.
       // NOTE: the fallback models must be resolvable ModelDefinitions; the
       // chain is built from the session binding's fallbackModels list.
-      const fallbacks = (sessionBinding as { fallbackModels?: Array<{ model: string; label?: string }> }).fallbackModels;
+      const fallbacks = sessionBinding.fallbackModels ?? [];
       let fullResponse: any;
-      if (Array.isArray(fallbacks) && fallbacks.length > 0) {
-        const { withModelFailover } = await import("./AgentHelper/utils/modelFailover");
-        const primaryModel = (baseModel as any)?.model ?? (baseModel as any)?.modelName ?? "unknown";
-        const chain = [{ model: primaryModel }, ...fallbacks.map((f) => ({ model: f.model, label: f.label }))];
-        const failover = await withModelFailover(chain, async (candidate) => {
-          // The primary candidate uses the already-built modelWithTools; for
-          // fallbacks we rebuild the chat model AND re-bind the same tool set
-          // (a fallback without tools bound would break the agent loop).
-          let modelToUse = modelWithTools;
-          if (candidate.model !== primaryModel) {
-            const fallbackItem = this.resolveFallbackModelItem(candidate.model);
-            if (!fallbackItem) {
-              throw new Error(`fallback model "${candidate.model}" is not configured`);
-            }
-            const fallbackChat = this.helpers.createChatModel(
-              fallbackItem,
-              shouldUseThinkingModelOnThisPass ? 0.2 : 0.7,
-              null,
-            );
-            modelToUse = fallbackChat.bindTools([...builtInTools, ...mcpTools]) as typeof modelWithTools;
+      const { withModelFailover, buildFailoverChain } = await import("./AgentHelper/utils/modelFailover");
+      const primaryModel = (baseModel as any)?.model ?? (baseModel as any)?.modelName ?? "unknown";
+      const chain = buildFailoverChain(
+        { model: primaryModel },
+        fallbacks.map((f) => ({ model: f.model, label: f.label })),
+      );
+      // Always go through the failover helper (chain of 1 = no failover) so
+      // the streaming UI path is identical for primary and fallbacks.
+      const failover = await withModelFailover(chain, async (candidate) => {
+        let modelToUse = modelWithTools;
+        if (candidate.model !== primaryModel) {
+          // A failed primary may have already streamed tokens into partialText.
+          // Reset so the fallback answer is not concatenated onto a corpse.
+          partialText = "";
+          reasoningContent = "";
+          debugRawChunks = [];
+          const fallbackItem = this.resolveFallbackModelItem(candidate.model);
+          if (!fallbackItem || !fallbackItem.apiKey) {
+            throw new Error(`fallback model "${candidate.model}" is not configured or has no API key`);
           }
-          return await invokeWithRetryAndSanitizedInput({
-            helpers: this.helpers,
-            messages: modelInputMessages,
-            modelSupportsImage: sessionBinding.readFileSupport.image,
-            signal: config?.signal,
-            operation: async (streamInputMessages: any) => {
-              const stream = await modelToUse.stream(streamInputMessages, { signal: config?.signal });
-              // Consume using the shared streaming consumer (defined below in
-              // the non-fallback path is not reachable here; use a minimal
-              // consumption that mirrors it).
-              let response: any = null;
-              for await (const chunk of stream) {
-                response = response ? response.concat(chunk) : chunk;
-              }
-              if (!response) throw new Error("Model stream ended without a usable response.");
-              return response;
-            },
-            onRetry: (attempt: number) => {
-              this.helpers.sendEvent(sessionId, {
-                type: "alert",
-                message: `Retrying (${attempt}/${MODEL_RETRY_MAX})...`,
-                level: "info",
-                messageId: `retry-${messageId}-${attempt}`,
-              });
-            },
-            maxRetries: MODEL_RETRY_MAX,
-            delaysMs: MODEL_RETRY_DELAYS_MS,
+          this.helpers.sendEvent(sessionId, {
+            type: "alert",
+            message: `Primary model failed — failing over to ${candidate.label || candidate.model}`,
+            level: "warning",
+            messageId: `failover-${messageId}-${candidate.model}`,
           });
-        }, {
-          onAttempt: (a) => {
-            if (!a.ok) {
-              console.warn(`[AgentService_v2] model failover: ${a.model} failed (${a.reason}) after ${a.durationMs}ms`);
-            }
-          },
-        });
-        if (failover.value !== undefined) {
-          fullResponse = failover.value;
-        } else {
-          throw failover.error ?? new Error("model failover exhausted all candidates");
+          const fallbackChat = this.helpers.createChatModel(
+            fallbackItem,
+            shouldUseThinkingModelOnThisPass ? 0.2 : 0.7,
+            null,
+          );
+          modelToUse = fallbackChat.bindTools([...builtInTools, ...mcpTools]) as typeof modelWithTools;
         }
-      } else {
-      fullResponse = await invokeWithRetryAndSanitizedInput({
+        return await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
         messages: modelInputMessages,
         modelSupportsImage: sessionBinding.readFileSupport.image,
         signal: config?.signal,
         operation: async (streamInputMessages) => {
-          const stream = await modelWithTools.stream(streamInputMessages, {
+          const stream = await modelToUse.stream(streamInputMessages, {
             signal: config?.signal,
           });
 
@@ -1734,6 +1718,19 @@ export class AgentService_v2 {
         maxRetries: MODEL_RETRY_MAX,
         delaysMs: MODEL_RETRY_DELAYS_MS,
       });
+      }, {
+        onAttempt: (a) => {
+          if (!a.ok) {
+            console.warn(`[AgentService_v2] model failover: ${a.model} failed (${a.reason}) after ${a.durationMs}ms`);
+          } else if (a.model !== primaryModel) {
+            console.log(`[AgentService_v2] model failover: succeeded on ${a.model} after ${a.durationMs}ms`);
+          }
+        },
+      });
+      if (failover.value !== undefined) {
+        fullResponse = failover.value;
+      } else {
+        throw failover.error ?? new Error("model failover exhausted all candidates");
       }
 
       fullResponse.additional_kwargs = {
