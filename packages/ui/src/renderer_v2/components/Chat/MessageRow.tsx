@@ -40,6 +40,8 @@ interface MessageRowProps {
   onBannerUiStateChange?: (patch: Partial<ChatBannerUiState>) => void;
   isSearchMatch?: boolean;
   isActiveSearchMatch?: boolean;
+  /** Highlight this row as the Prev/Next user-query jump target. */
+  isUserNavTarget?: boolean;
 }
 
 const COPY_FEEDBACK_MS = 1200;
@@ -79,6 +81,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
     onBannerUiStateChange,
     isSearchMatch = false,
     isActiveSearchMatch = false,
+    isUserNavTarget = false,
   }) => {
     const session = store.chat.getSessionById(sessionId);
     const msg = session?.messagesById.get(messageId);
@@ -280,7 +283,7 @@ export const MessageRow: React.FC<MessageRowProps> = observer(
       const inputImages = msg.metadata?.inputImages || [];
       return (
         <div
-          className={`message-row-container role-user${isSearchMatch ? " is-search-match" : ""}${isActiveSearchMatch ? " is-search-active" : ""}`}
+          className={`message-row-container role-user${isSearchMatch ? " is-search-match" : ""}${isActiveSearchMatch ? " is-search-active" : ""}${isUserNavTarget ? " is-user-nav-target" : ""}`}
         >
           <div className="message-role-label user">USER</div>
           <div className="message-user-row">

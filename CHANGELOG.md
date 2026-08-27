@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.3.4 (2026-08-27)
+
+### Fixes — Prev / Next user jumps to the user query (and stays enabled)
+
+- **Prev user / Next user / Latest** now always land on a **user query**, never
+  the assistant reply. Scroll pins the USER row to the **top of the pane**
+  (8px padding) instead of vertically centering it — centering a short query
+  next to a long assistant reply made the jump look like it hit the assistant.
+- Buttons are **never disabled** in any chat session (same always-on feel as
+  Top / Bottom). Prev/Next wrap at the ends: first → latest, latest → first.
+  An empty session no-ops; a single query always targets that query.
+- The jumped-to user query is highlighted (left accent + outline). Switching
+  chat tabs resets the cursor (Prev → latest, Next → first).
+- 15 unit tests cover wrap, “never land on assistant”, always-on single-query,
+  stale ids, empty session, and the top-pin scroll math.
+
 ## v3.3.3 (2026-08-27)
 
 ### Fixes — duplicate Templates label, checkpoint OOM, failover that actually runs

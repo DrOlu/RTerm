@@ -306,6 +306,13 @@ body.chat-drag-selection-suppressed * {
     background: color-mix(in srgb, var(--accent) 14%, transparent);
   }
 
+  &.role-user.is-user-nav-target {
+    outline: 2px solid color-mix(in srgb, var(--accent, #4fd8e8) 70%, transparent);
+    outline-offset: -2px;
+    background: color-mix(in srgb, var(--accent, #4fd8e8) 16%, transparent);
+    box-shadow: inset 3px 0 0 var(--accent, #4fd8e8);
+  }
+
   &.role-assistant.is-group-continuation {
     border-top: none;
     padding-top: 0;
@@ -1153,19 +1160,22 @@ body.chat-drag-selection-suppressed * {
 }
 .user-msg-nav-btn {
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 6px;
   border: 1px solid var(--border, rgba(148, 178, 255, 0.18));
   background: transparent;
   color: var(--fg, rgba(244, 247, 255, 0.9));
   cursor: pointer;
   white-space: nowrap;
+  opacity: 1;
 }
-.user-msg-nav-btn:hover:not(:disabled) {
+.user-msg-nav-btn:hover,
+.user-msg-nav-btn:focus-visible {
   background: rgba(79, 216, 232, 0.12);
   border-color: rgba(79, 216, 232, 0.4);
 }
 .user-msg-nav-btn:disabled {
+  /* Kept for any leftover disabled attrs; Prev/Next/Latest are never disabled. */
   opacity: 0.35;
   cursor: default;
 }

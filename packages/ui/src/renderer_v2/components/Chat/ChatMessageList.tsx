@@ -4,6 +4,7 @@ import type { AppStore } from "../../stores/AppStore";
 import type { ChatMessage } from "../../stores/ChatStore";
 import { MessageRow } from "./MessageRow";
 import { buildChatRenderItems, type ChatRenderItem } from "./chatRenderModel";
+import { userNavScrollTop } from "./userMessageNav";
 import {
   type ChatBannerUiState,
   type ChatBannerUiStateMap,
@@ -527,13 +528,11 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
       const targetIndex = renderItemIndexById.get(userNavTargetMessageId);
       if (typeof targetIndex !== "number") return;
       lastUserNavAppliedVersionRef.current = userNavTargetVersion;
+      // Pin the USER QUERY to the top of the pane. The old formula vertically
+      // centered the row, so a short user bubble next to a long assistant
+      // reply made the jump look like it landed on the assistant.
       const targetTop = virtualLayout.offsets[targetIndex] || 0;
-      const targetHeight = virtualLayout.heights[targetIndex] || 120;
-      const nextScrollTop = Math.max(
-        0,
-        targetTop - Math.max(0, (element.clientHeight - targetHeight) / 2),
-      );
-      scrollToProgrammatic(nextScrollTop);
+      scrollToProgrammatic(userNavScrollTop(targetTop));
     }, [
       renderItemIndexById,
       scrollToProgrammatic,
@@ -717,6 +716,7 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
                       searchMatchedMessageIds?.has(item.id) === true
                     }
                     isActiveSearchMatch={searchTargetMessageId === item.id}
+                    isUserNavTarget={userNavTargetMessageId === item.id}
                   />
                 </ObservedChatRow>
               );

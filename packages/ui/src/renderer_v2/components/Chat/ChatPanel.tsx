@@ -256,6 +256,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
       () => anchorFor(userAnchors, userNavTargetId),
       [userAnchors, userNavTargetId],
     );
+    // Reset the user-query cursor when the session tab changes so Prev/Next
+    // start from "nothing selected" (Prev → latest, Next → first) in every chat.
+    React.useEffect(() => {
+      setUserNavTargetId(null);
+    }, [activeSessionId]);
     const handleUserNav = useCallback(
       (direction: "previous" | "next" | "latest") => {
         const target = resolveUserMessageNavTarget(
@@ -1075,34 +1080,34 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
             <button
               type="button"
               className="user-msg-nav-btn"
-              title="Previous user message"
+              title="Previous user query (wraps to latest)"
+              aria-label="Previous user query"
               onClick={() => handleUserNav("previous")}
-              disabled={userAnchors.length === 0 || (userNavAnchor !== null && userNavAnchor.index <= 1)}
             >
               ↑ Prev user
             </button>
-            <span className="user-msg-nav-pos">
+            <span className="user-msg-nav-pos" aria-live="polite">
               {userNavAnchor
                 ? `User ${userNavAnchor.index}/${userNavAnchor.total}`
                 : userAnchors.length > 0
                   ? `${userAnchors.length} user`
-                  : ""}
+                  : "—"}
             </span>
             <button
               type="button"
               className="user-msg-nav-btn"
-              title="Next user message"
+              title="Next user query (wraps to first)"
+              aria-label="Next user query"
               onClick={() => handleUserNav("next")}
-              disabled={userAnchors.length === 0 || userNavAnchor === null || userNavAnchor.index >= userNavAnchor.total}
             >
               ↓ Next user
             </button>
             <button
               type="button"
               className="user-msg-nav-btn user-msg-nav-latest"
-              title="Jump to latest user message"
+              title="Jump to latest user query"
+              aria-label="Latest user query"
               onClick={() => handleUserNav("latest")}
-              disabled={userAnchors.length === 0 || (userNavAnchor !== null && userNavAnchor.index >= userNavAnchor.total)}
             >
               ⇣ Latest
             </button>
