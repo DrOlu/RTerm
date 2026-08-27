@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.3.7 (2026-08-27)
+
+### Fix — Monitor panel loads but shows no local/remote metrics
+
+Observability and the trigger engine each called `setPublisher` and **replaced**
+the UI window-registry listener, so snapshots were collected but never reached
+the Monitor panel (toggle on, empty graphs). `ResourceMonitorService` now fans
+out to every publisher.
+
+Assigned Monitor tabs are **default-enabled** (user opt-out is remembered).
+Empty states are loud: "Monitoring off — click to collect" / "No metrics yet"
+instead of a faint spinner.
+
 ## v3.3.6 (2026-08-27)
 
 ### Fix — in-app Dashboard "not reachable on localhost:17888"

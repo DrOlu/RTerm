@@ -408,6 +408,8 @@ export class AppStore {
   activeTerminalId: string | null = null;
   monitorStateByTerminalId: Record<string, MonitorTerminalState> = {};
   monitorEnabledSources: string[] = [];
+  /** Sources the user explicitly turned off. Default-enable skips these. */
+  private monitorOptedOutSources: string[] = [];
   terminalSelections: Record<string, string> = {};
   fileSystemClipboard: FileSystemClipboardState | null = null;
   fileTransferTasks: Record<string, FileTransferTaskSnapshot> = {};
@@ -694,10 +696,14 @@ export class AppStore {
 
     if (enabled && !this.monitorEnabledSources.includes(key)) {
       this.monitorEnabledSources = [...this.monitorEnabledSources, key];
+      this.monitorOptedOutSources = this.monitorOptedOutSources.filter((k) => k !== key);
     } else if (!enabled) {
       this.monitorEnabledSources = this.monitorEnabledSources.filter(
         (k) => k !== key,
       );
+      if (!this.monitorOptedOutSources.includes(key)) {
+        this.monitorOptedOutSources = [...this.monitorOptedOutSources, key];
+      }
     }
     this.monitorEnabledSources = this.normalizeMonitorEnabledSources(
       this.monitorEnabledSources,
@@ -789,6 +795,24 @@ export class AppStore {
     }
 
     this.syncMonitorSnapshotSubscriptions();
+
+    // Default-enable assigned monitor tabs unless the user opted out.
+    const assignedIds = this.getAssignedMonitorTabIds();
+    const autoEnable: string[] = [];
+    assignedIds.forEach((terminalId) => {
+      const tab = this.terminalTabs.find((entry) => entry.id === terminalId);
+      if (!tab) return;
+      const key = this.resolveMonitorSourceKey(tab);
+      if (this.monitorOptedOutSources.includes(key)) return;
+      if (!this.monitorEnabledSources.includes(key)) autoEnable.push(key);
+    });
+    if (autoEnable.length > 0) {
+      this.monitorEnabledSources = this.normalizeMonitorEnabledSources([
+        ...this.monitorEnabledSources,
+        ...autoEnable,
+      ]);
+      this.persistMonitorEnabledSources();
+    }
 
     const enabledSourceSet = new Set(this.monitorEnabledSources);
     const assignedTabsBySource = new Map<string, TerminalTabModel[]>();

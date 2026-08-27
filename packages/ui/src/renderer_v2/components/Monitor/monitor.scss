@@ -1620,3 +1620,32 @@
   padding: 16px;
   opacity: 0.5;
 }
+
+.monitor-paused-loud {
+  flex-direction: column;
+  max-width: 420px;
+  margin: 0 auto;
+  text-align: center;
+  opacity: 1;
+  color: var(--fg, rgba(244, 247, 255, 0.92));
+  gap: 10px;
+  strong {
+    font-size: 14px;
+    letter-spacing: 0;
+  }
+  span {
+    opacity: 0.8;
+    line-height: 1.4;
+  }
+}
+
+.monitor-enable-cta {
+  margin-top: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(79, 216, 232, 0.4);
+  background: rgba(79, 216, 232, 0.12);
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}

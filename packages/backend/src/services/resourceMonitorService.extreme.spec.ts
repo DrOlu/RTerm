@@ -1185,6 +1185,25 @@ const run = async (): Promise<void> => {
     service.stop('local-linux', 'win-detached')
     assertEqual(service.isMonitoring('local-linux'), false, 'session should stop after the last owner releases it')
   })
+
+  await runCase('setPublisher fans out: later callers do not steal snapshots from the first', () => {
+    const service = new ResourceMonitorService({} as never)
+    const hits: string[] = []
+    service.setPublisher((channel) => {
+      hits.push(`ui:${channel}`)
+    })
+    service.setPublisher((channel) => {
+      hits.push(`obs:${channel}`)
+    })
+    service.setPublisher((channel) => {
+      hits.push(`trig:${channel}`)
+    })
+    ;(service as unknown as { emitSnapshot: (c: string, d: unknown) => void }).emitSnapshot(
+      'monitor:snapshot',
+      { terminalId: 't1' },
+    )
+    assertEqual(hits.join(','), 'ui:monitor:snapshot,obs:monitor:snapshot,trig:monitor:snapshot', 'all three listeners must fire')
+  })
 }
 
 void run().catch((error) => {

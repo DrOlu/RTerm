@@ -1005,9 +1005,12 @@ const MonitorTabView: React.FC<{
 
   if (!snapshot) {
     return (
-      <div className="monitor-loading">
-        <Activity size={16} className="monitor-loading-spinner" />
-        <span>Collecting {terminalTitle} metrics...</span>
+      <div className="monitor-paused-state monitor-paused-loud">
+        <Activity size={18} className="monitor-loading-spinner" />
+        <strong>No metrics yet for {terminalTitle}</strong>
+        <span>
+          Collection is on, but no snapshot has arrived. Wait a few seconds, confirm the tab is ready, or toggle monitoring off and on. If this stays empty, the collector is not publishing to this window.
+        </span>
       </div>
     )
   }
@@ -2450,9 +2453,13 @@ export const MonitorPanel: React.FC<MonitorPanelProps> = observer(({
               availableHeight={panelBodySize.height}
             />
           ) : (
-            <div className="monitor-paused-state">
-              <Pause size={16} />
-              <span>Monitoring paused</span>
+            <div className="monitor-paused-state monitor-paused-loud">
+              <Pause size={18} />
+              <strong>Monitoring off — click to collect</strong>
+              <span>The panel is empty because collection is paused for this host. Use the toggle in the tab bar to start CPU, memory, and disk stats.</span>
+              <button type="button" className="monitor-enable-cta" onClick={handleToggleMonitor}>
+                Start collecting
+              </button>
             </div>
           )
         )}

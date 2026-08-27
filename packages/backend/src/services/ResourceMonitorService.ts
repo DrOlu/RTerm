@@ -123,11 +123,34 @@ export class ResourceMonitorService {
   private sessions = new Map<string, MonitorSession>()
   private sourceKeyByTerminalId = new Map<string, string>()
   private publisher: SnapshotPublisher | null = null
+  /** Extra listeners (UI window registry, triggers, observability). Fan-out so
+   * later setPublisher callers cannot steal snapshots from earlier ones. */
+  private extraPublishers: SnapshotPublisher[] = []
 
   constructor(private terminalService: TerminalService) {}
 
   setPublisher(publisher: SnapshotPublisher): void {
-    this.publisher = publisher
+    if (!this.publisher) {
+      this.publisher = publisher
+      return
+    }
+    if (this.publisher === publisher) return
+    if (!this.extraPublishers.includes(publisher)) {
+      this.extraPublishers.push(publisher)
+    }
+  }
+
+  private emitSnapshot(channel: string, data: unknown): void {
+    const pubs = [this.publisher, ...this.extraPublishers].filter(
+      (p): p is SnapshotPublisher => typeof p === 'function',
+    )
+    for (const pub of pubs) {
+      try {
+        pub(channel, data)
+      } catch {
+        /* one listener failing must not drop the others */
+      }
+    }
   }
 
   start(terminalId: string, ownerId = 'default', intervalMs?: number): void {
@@ -393,14 +416,12 @@ export class ResourceMonitorService {
       const sourceTerminalId = session.sourceTerminalId || terminalIds[0]
       const snapshot = await this.collectSnapshot(sourceTerminalId)
       session.lastCollectAt = Date.now()
-      if (this.publisher) {
-        terminalIds.forEach((terminalId) => {
-          this.publisher?.(
-            'monitor:snapshot',
-            terminalId === snapshot.terminalId ? snapshot : { ...snapshot, terminalId }
-          )
-        })
-      }
+      terminalIds.forEach((terminalId) => {
+        this.emitSnapshot(
+          'monitor:snapshot',
+          terminalId === snapshot.terminalId ? snapshot : { ...snapshot, terminalId },
+        )
+      })
     } finally {
       session.inFlight = false
     }
