@@ -1230,6 +1230,12 @@ export async function startElectronMain(): Promise<void> {
         // Wire the session recorder so terminal output feeds live recordings (asciinema).
         terminalService.setSessionRecorder(observability.recording);
 
+        ipcMain.handle("dashboard:state", async () => {
+          if (!observabilityRef.current) {
+            throw new Error("Dashboard is not ready yet.");
+          }
+          return observabilityRef.current.dashboard.state();
+        });
         ipcMain.handle("agentRunLedger:list", (_e, filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
           agentRunLedger.listRuns(filter),
         );

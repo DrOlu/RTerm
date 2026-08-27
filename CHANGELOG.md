@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.3.6 (2026-08-27)
+
+### Fix — in-app Dashboard "not reachable on localhost:17888"
+
+The overlay fetched `http://127.0.0.1:17888/dashboard/json`. The desktop app
+does not need that HTTP port (and Chromium fetch is not loopback-exempt the
+same way Node is). It now loads via IPC `dashboard:state` (same process as
+Monitor). HTTP remains a fallback for headless gybackend, using the configured
+gateway port first.
+
 ## v3.3.5 (2026-08-27)
 
 ### Features — situation-first dashboard (ops console, not a report)

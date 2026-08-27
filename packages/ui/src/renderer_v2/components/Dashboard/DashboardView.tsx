@@ -31,9 +31,24 @@ interface DashState {
   empty?: Array<{ section: string; message: string }>
 }
 
-async function fetchDashboardState(): Promise<DashState | null> {
-  const ports = [17888, 18789, 8080]
-  for (const port of ports) {
+async function fetchDashboardState(gatewayPort?: number): Promise<DashState | null> {
+  const ipc = (window as unknown as { gyshell?: { dashboard?: { state?: () => Promise<DashState> } } })
+    .gyshell?.dashboard?.state
+  if (typeof ipc === 'function') {
+    try {
+      const viaIpc = await ipc()
+      if (viaIpc && typeof viaIpc === 'object') return viaIpc
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // Old preload without dashboard:state — try HTTP. Real IPC errors surface.
+      if (!/no handler|not a function|undefined/i.test(msg)) throw e
+    }
+  }
+  const ports = [gatewayPort, 17888, 18789].filter(
+    (p): p is number => typeof p === 'number' && p > 0 && p < 65536,
+  )
+  const unique = [...new Set(ports)]
+  for (const port of unique) {
     try {
       const r = await fetch(`http://127.0.0.1:${port}/dashboard/json`, { cache: 'no-store' })
       if (!r.ok) continue
@@ -52,13 +67,18 @@ export const DashboardView: React.FC<{ store: AppStore }> = observer(({ store })
   const [query, setQuery] = React.useState('')
 
   const load = React.useCallback(() => {
-    void fetchDashboardState()
+    const port = store.settings?.gateway?.ws?.port
+    void fetchDashboardState(port)
       .then((s) => {
         setState(s)
-        setError(s ? null : 'Dashboard backend not reachable on localhost:17888.')
+        setError(
+          s
+            ? null
+            : 'Dashboard is not reachable. In the desktop app this uses IPC; if you still see this, restart RTerm. For a headless gybackend, open the WS gateway (default :17888) and retry.',
+        )
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-  }, [])
+  }, [store.settings?.gateway?.ws?.port])
 
   React.useEffect(() => {
     load()

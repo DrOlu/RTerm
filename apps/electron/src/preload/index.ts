@@ -699,6 +699,10 @@ export interface GyShellAPI {
     set: (settings: Partial<UiSettings>) => Promise<void>;
   };
 
+  dashboard: {
+    state: () => Promise<unknown>;
+  };
+
   // Agent run ledger (persisted audit + token-cost record)
   agentRunLedger: {
     list: (filter?: { limit?: number; sessionId?: string; status?: "running" | "completed" | "failed" | "aborted" }) =>
@@ -1154,6 +1158,9 @@ const api: GyShellAPI = {
   uiSettings: {
     get: () => ipcRenderer.invoke("ui-settings:get"),
     set: (settings) => ipcRenderer.invoke("ui-settings:set", settings),
+  },
+  dashboard: {
+    state: () => ipcRenderer.invoke("dashboard:state"),
   },
   agentRunLedger: {
     list: (filter) => ipcRenderer.invoke("agentRunLedger:list", filter),
