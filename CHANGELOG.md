@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.3.9 (2026-08-28)
+
+### Fix — Monid plugin argv matched the real CLI (FP/FN)
+
+3.3.8 called `monid discover <query>` and `monid run <tool>`. The CLI (0.1.6)
+requires `discover --query` and `run --provider --endpoint`. Those shapes are
+now generated; `--json` is always passed. Added `monid_inspect`. Shorthand
+`tool: "provider/endpoint"` still works (FN). Positional discover/run is
+rejected (FP). Live-verified discover + inspect against the installed CLI.
+
 ## v3.3.8 (2026-08-27)
 
 ### Feature — Monid in Settings → Plugins (API key UI + CLI tools)

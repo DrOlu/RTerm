@@ -1093,7 +1093,7 @@ const PLUGIN_PANELS: Array<{
     block: "monid",
     title: "Monid",
     description:
-      "Discover and run web data endpoints (search, enrichment, social, company/people) via the Monid CLI. Paste an API key from https://app.monid.ai/access/api-keys — no extra skill install required. Agents get monid_discover / monid_run tools.",
+      "Discover and run web data endpoints via the Monid CLI (discover --query, run --provider --endpoint). Paste an API key from https://app.monid.ai/access/api-keys. Agents get monid_health / monid_discover / monid_inspect / monid_run.",
     fields: [
       { key: "enabled", label: "Enabled", type: "boolean" },
       { key: "binaryPath", label: "CLI path", placeholder: "monid (on PATH)" },

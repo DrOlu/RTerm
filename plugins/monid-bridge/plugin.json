@@ -6,6 +6,7 @@
   "tools": [
     "monid_health",
     "monid_discover",
+    "monid_inspect",
     "monid_run"
   ],
   "permissions": [
