@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.3.8 (2026-08-27)
+
+### Feature — Monid in Settings → Plugins (API key UI + CLI tools)
+
+Thin integration: paste a Monid API key in Plugins (masked, write-only). Save
+runs `monid keys add -k … -l rterm`; the secret is **stripped** from
+settings.json. New `monid-bridge` plugin exposes `monid_health` /
+`monid_discover` / `monid_run` wrapping the official CLI. Skill + CLI remain
+the source of truth — this is not TinyFish inside RTerm.
+
 ## v3.3.7 (2026-08-27)
 
 ### Fix — Monitor panel loads but shows no local/remote metrics

@@ -1,0 +1,14 @@
+{
+  "name": "monid-bridge",
+  "version": "1.0.0",
+  "description": "Thin Monid CLI bridge: paste an API key in Settings → Plugins; agents get monid_discover / monid_run / monid_health wrapping the official CLI. Does not reimplement TinyFish.",
+  "entry": "index.mjs",
+  "tools": [
+    "monid_health",
+    "monid_discover",
+    "monid_run"
+  ],
+  "permissions": [
+    "exec"
+  ]
+}

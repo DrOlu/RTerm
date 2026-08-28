@@ -1030,12 +1030,12 @@ interface PluginFieldDef {
   key: string
   label: string
   placeholder?: string
-  type?: "text" | "boolean"
+  type?: "text" | "boolean" | "password"
   hint?: string
 }
 
 const PLUGIN_PANELS: Array<{
-  block: "webIntel" | "nats" | "synapse" | "numbat"
+  block: "webIntel" | "nats" | "synapse" | "numbat" | "monid"
   title: string
   description: string
   fields: PluginFieldDef[]
@@ -1087,6 +1087,18 @@ const PLUGIN_PANELS: Array<{
       { key: "binaryPath", label: "Binary path", placeholder: "numbat (on PATH)" },
       { key: "recordsPath", label: "Records file", placeholder: "~/.numbat/records.ndjson" },
       { key: "ingestToken", label: "Ingest token", placeholder: "(vault secretRef ok)" },
+    ],
+  },
+  {
+    block: "monid",
+    title: "Monid",
+    description:
+      "Discover and run web data endpoints (search, enrichment, social, company/people) via the Monid CLI. Paste an API key from https://app.monid.ai/access/api-keys — no extra skill install required. Agents get monid_discover / monid_run tools.",
+    fields: [
+      { key: "enabled", label: "Enabled", type: "boolean" },
+      { key: "binaryPath", label: "CLI path", placeholder: "monid (on PATH)" },
+      { key: "apiKey", label: "API key", type: "password", placeholder: "Paste key — not shown again", hint: "Saved with `monid keys add -l rterm`. Leave blank to keep the existing key." },
+      { key: "keyLabel", label: "Key label", placeholder: "rterm" },
     ],
   },
 ];
@@ -1149,6 +1161,7 @@ function PluginBlockPanel({
     for (const f of panel.fields) {
       const v = current?.[f.key];
       if (f.type === "boolean") next[f.key] = v === undefined ? true : v === true;
+      else if (f.type === "password") next[f.key] = "";
       else next[f.key] = typeof v === "string" ? v : "";
     }
     setValues(next);
@@ -1181,6 +1194,8 @@ function PluginBlockPanel({
               <input
                 className="settings-inline-input"
                 style={{ width: 320 }}
+                type={f.type === "password" ? "password" : "text"}
+                autoComplete={f.type === "password" ? "new-password" : undefined}
                 placeholder={f.placeholder ?? ""}
                 value={String(values[f.key] ?? "")}
                 onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}

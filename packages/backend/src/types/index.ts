@@ -875,6 +875,18 @@ export interface NumbatSettings {
   minSeverity?: 'info' | 'low' | 'medium' | 'high' | 'critical'
 }
 
+/** Monid CLI (discover/run web data endpoints). Key is stored via `monid keys add`. */
+export interface MonidSettings {
+  /** master switch (default true). */
+  enabled?: boolean
+  /** path to the monid binary (default "monid" on PATH). */
+  binaryPath?: string
+  /** API key from https://app.monid.ai/access/api-keys. Write-only in the UI. */
+  apiKey?: string
+  /** label used with `monid keys add -l` (default "rterm"). */
+  keyLabel?: string
+}
+
 export interface BackendSettings {
   /** Settings schema version, used for migrations */
   schemaVersion: 5
@@ -978,6 +990,8 @@ export interface BackendSettings {
   synapse?: SynapseSettings
   /** Numbat bridge (endpoint AI-agent detection → triggers). */
   numbat?: NumbatSettings
+  /** Monid CLI bridge (discover/run data endpoints). */
+  monid?: MonidSettings
 
   /** WebSocket gateway exposure policy */
   gateway: {

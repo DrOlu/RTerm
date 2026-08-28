@@ -1,4 +1,4 @@
-import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, NatsSettings, NumbatSettings, OncallSettings, SynapseSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
+import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, MonidSettings, NatsSettings, NumbatSettings, OncallSettings, SynapseSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
 import { BUILTIN_TOOL_INFO } from "../AgentHelper/tools";
 import { normalizeAgentSettingState } from "./agentSettings";
 import { deepMerge, isObject } from "./objectMerge";
@@ -128,6 +128,7 @@ function pickBackendSnapshot(raw: unknown): Partial<BackendSettings> {
     nats: raw.nats,
     synapse: raw.synapse,
     numbat: raw.numbat,
+    monid: raw.monid,
     gateway: raw.gateway,
     layout: raw.layout,
     recursionLimit: raw.recursionLimit,
@@ -261,6 +262,7 @@ function normalizeBackendSettings(settings: BackendSettings): BackendSettings {
   next.nats = normalizeNatsSettings(next.nats);
   next.synapse = normalizeSynapseSettings(next.synapse);
   next.numbat = normalizeNumbatSettings(next.numbat);
+  next.monid = normalizeMonidSettings(next.monid);
 
   next.schemaVersion = BACKEND_SETTINGS_SCHEMA_VERSION;
   return next;
@@ -582,6 +584,18 @@ export function normalizeNumbatSettings(raw: unknown): NumbatSettings {
     ...(recordsPath ? { recordsPath } : {}),
     ...(ingestToken ? { ingestToken } : {}),
     ...(minSeverity ? { minSeverity } : {}),
+  };
+}
+
+/** Strip apiKey from persisted settings — it is applied via `monid keys add`. */
+export function normalizeMonidSettings(raw: unknown): MonidSettings {
+  const src = isObject(raw) ? (raw as Record<string, unknown>) : {};
+  const binaryPath = typeof src.binaryPath === "string" && src.binaryPath.trim() ? src.binaryPath.trim() : undefined;
+  const keyLabel = typeof src.keyLabel === "string" && src.keyLabel.trim() ? src.keyLabel.trim() : undefined;
+  return {
+    enabled: src.enabled !== false,
+    ...(binaryPath ? { binaryPath } : {}),
+    ...(keyLabel ? { keyLabel } : {}),
   };
 }
 
