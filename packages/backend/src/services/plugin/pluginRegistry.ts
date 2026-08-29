@@ -291,6 +291,36 @@ export class PluginRegistry {
     return this.list().filter((p) => p.enabled && !p.error).flatMap((p) => p.tools)
   }
 
+  /** Flatten enabled plugin tools for AgentService.setPluginTools. */
+  collectAgentTools(): Array<{
+    name: string
+    description: string
+    params: Record<string, unknown>
+    handler: (params: any) => Promise<any>
+    plugin: string
+  }> {
+    const out: Array<{
+      name: string
+      description: string
+      params: Record<string, unknown>
+      handler: (params: any) => Promise<any>
+      plugin: string
+    }> = []
+    for (const record of this.list()) {
+      if (record.error || !record.enabled) continue
+      for (const tool of record.tools) {
+        out.push({
+          name: tool.name,
+          description: tool.description ?? '',
+          params: (tool.params as Record<string, unknown>) ?? {},
+          handler: tool.handler as (params: any) => Promise<any>,
+          plugin: record.manifest.name,
+        })
+      }
+    }
+    return out
+  }
+
   /** All triggers from enabled plugins. */
   allTriggers(): PluginTriggerDefinition[] {
     return this.list().filter((p) => p.enabled && !p.error).flatMap((p) => p.triggers)

@@ -422,6 +422,7 @@ export class AppStore {
   layout = new LayoutStore(this);
   mcpTools: McpToolSummary[] = [];
   builtInTools: BuiltInToolSummary[] = [];
+  pluginTools: Array<{ name: string; description: string; plugin: string; enabled: boolean }> = [];
   skills: SkillSummary[] = [];
   memoryFilePath = "";
   memoryContent = "";
@@ -485,6 +486,7 @@ export class AppStore {
       layout: observable,
       mcpTools: observable,
       builtInTools: observable,
+      pluginTools: observable,
       skills: observable,
       memoryFilePath: observable,
       memoryContent: observable,
@@ -575,6 +577,7 @@ export class AppStore {
       addCommandPolicyRule: action,
       deleteCommandPolicyRule: action,
       loadTools: action,
+      reloadPluginTools: action,
       loadSkills: action,
       openSkillsFolder: action,
       reloadSkills: action,
@@ -2114,16 +2117,30 @@ export class AppStore {
 
   async loadTools(): Promise<void> {
     try {
-      const [mcpTools, builtInTools] = await Promise.all([
+      const [mcpTools, builtInTools, pluginTools] = await Promise.all([
         window.gyshell.tools.getMcp(),
         window.gyshell.tools.getBuiltIn(),
+        window.gyshell.tools.getPlugins?.() ?? Promise.resolve([]),
       ]);
       runInAction(() => {
         this.mcpTools = mcpTools;
         this.builtInTools = builtInTools;
+        this.pluginTools = Array.isArray(pluginTools) ? pluginTools : [];
       });
     } catch (err) {
       console.error("Failed to load tools status", err);
+    }
+  }
+
+  /** Re-fetch plugin tools after delayed plugin wiring (desktop race). */
+  async reloadPluginTools(): Promise<void> {
+    try {
+      const pluginTools = (await window.gyshell.tools.getPlugins?.()) ?? [];
+      runInAction(() => {
+        this.pluginTools = Array.isArray(pluginTools) ? pluginTools : [];
+      });
+    } catch (err) {
+      console.error("Failed to reload plugin tools", err);
     }
   }
 
@@ -2924,6 +2941,11 @@ export class AppStore {
           this.mcpTools = mcpTools;
         });
       });
+      window.gyshell.tools.onPluginsUpdated?.((pluginTools) => {
+        runInAction(() => {
+          this.pluginTools = Array.isArray(pluginTools) ? pluginTools : [];
+        });
+      });
 
       window.gyshell.tools.onBuiltInUpdated((tools) => {
         runInAction(() => {
@@ -3005,8 +3027,11 @@ export class AppStore {
         });
       }
 
-      // Load tools status
+      // Load tools status. Plugin tools wire asynchronously after plugin
+      // reload (up to 10s) — retry so Settings → Tools is not stuck empty.
       void this.loadTools();
+      window.setTimeout(() => { void this.reloadPluginTools(); }, 2500);
+      window.setTimeout(() => { void this.reloadPluginTools(); }, 8000);
       void this.loadSkills();
       void this.loadMemory();
       void this.loadCommandPolicyLists();

@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.4.0 (2026-08-28)
+
+### Fix — plugin tools visible in Settings → Tools; WS getPlugins; failover already sound
+
+- **All 15 plugins** load and `register()` exactly the tools in `plugin.json` (0 FN extra, 0 FP missing). Inventory spec added.
+- **Settings → Tools** lists plugin tools (name + plugin + description) with Reload. `loadTools` retries at 2.5s/8s so a slow plugin reload does not leave the list empty. Opening Tools refreshes.
+- **FN:** `tools:getPlugins` was on Electron IPC and gybackend options but **not** on the WebSocket adapter type/switch — remote Tools UIs could not list plugins. Added.
+- Model failover (v3.3.0/3.3.3): 25/25 wiring tests pass (skip primary/dupes/keyless, persist `[]`, keyed lookup, plugin tools rebound on fallback). UI picker already filters those.
+
 ## v3.3.9 (2026-08-28)
 
 ### Fix — Monid plugin argv matched the real CLI (FP/FN)

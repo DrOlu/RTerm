@@ -401,12 +401,12 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
   {
     name: "write_file",
     description: WRITE_FILE_TOOL_DESCRIPTION,
-    hiddenFromSettings: true,
+    shortDescription: "Write a full file (replace contents)",
   },
   {
     name: "edit_file",
     description: EDIT_FILE_TOOL_DESCRIPTION,
-    hiddenFromSettings: true,
+    shortDescription: "Edit a file by replacing an exact string",
   },
   {
     name: "skill",

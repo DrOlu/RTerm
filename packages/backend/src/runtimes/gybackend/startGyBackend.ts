@@ -340,25 +340,14 @@ export async function startGyBackend(): Promise<void> {
   Promise.race([
     observability.pluginRegistry.reload(),
     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('plugin reload timeout (10s)')), 10000)),
-  ]).then((pluginRecords) => {
-    const pluginTools: Array<{ name: string; description: string; params: any; handler: (params: any) => Promise<any> }> = [];
-    for (const record of pluginRecords) {
-      if (record.error || !record.enabled) continue;
-      for (const tool of record.tools) {
-        pluginTools.push({
-          name: tool.name,
-          description: tool.description ?? '',
-          params: tool.params ?? {},
-          handler: tool.handler as (params: any) => Promise<any>,
-        });
-      }
-    }
-    if (pluginTools.length > 0) {
-      agentService.setPluginTools(pluginTools);
-      console.log(`[gybackend] Wired ${pluginTools.length} plugin tools from ${pluginRecords.filter((r: any) => !r.error && r.enabled).length} plugins into the agent.`);
-    } else {
-      console.log('[gybackend] No plugin tools found to wire.');
-    }
+  ]).then(() => {
+    const pluginTools = observability.pluginRegistry.collectAgentTools();
+    agentService.setPluginTools(pluginTools);
+    const enabled = observability.pluginRegistry.list().filter((r) => !r.error && r.enabled).length;
+    try {
+      gatewayService.broadcastRaw("tools:pluginsUpdated", agentService.listPluginTools());
+    } catch { /* UI polls */ }
+    console.log(`[gybackend] Wired ${pluginTools.length} plugin tools from ${enabled} plugins into the agent.`);
   }).catch((e) => {
     console.warn('[gybackend] Plugin tool wiring skipped:', e instanceof Error ? e.message : String(e));
   });
@@ -1108,6 +1097,7 @@ const makeRestHandler = (
             const settings = settingsService.getSettings();
             return buildBuiltInToolStatusSummary(settings.tools?.builtIn);
           },
+          getPlugins: () => agentService.listPluginTools(),
           setBuiltInEnabled: async (name, enabled) => {
             const settings = settingsService.getSettings();
             const nextBuiltIn = { ...(settings.tools?.builtIn ?? {}) };

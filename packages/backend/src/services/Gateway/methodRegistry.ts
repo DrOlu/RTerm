@@ -113,6 +113,7 @@ export const CORE_METHODS: GatewayMethod[] = [
   m('tools:getMcp', 'tools', 'List MCP tools.', '1.0.0'),
   m('tools:setMcpEnabled', 'tools', 'Enable/disable an MCP tool.', '1.0.0'),
   m('tools:getBuiltIn', 'tools', 'List built-in agent tools with enabled state.', '1.0.0'),
+  m('tools:getPlugins', 'tools', 'List plugin agent tools (name, plugin, description).', '3.4.0'),
   m('tools:setBuiltInEnabled', 'tools', 'Enable/disable a built-in tool.', '1.0.0', { name: { type: 'string' }, enabled: { type: 'boolean' } }),
 ]
 

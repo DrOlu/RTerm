@@ -1230,6 +1230,33 @@ export async function startElectronMain(): Promise<void> {
         // Wire the session recorder so terminal output feeds live recordings (asciinema).
         terminalService.setSessionRecorder(observability.recording);
 
+        // Desktop FN: gybackend wired plugin tools; Electron never did, so
+        // Monid/Synapse/Numbat/web-intel never reached the agent in the app.
+        Promise.race([
+          observability.pluginRegistry.reload(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("plugin reload timeout (10s)")), 10000),
+          ),
+        ])
+          .then(() => {
+            const pluginTools = observability.pluginRegistry.collectAgentTools();
+            agentService.setPluginTools(pluginTools);
+            try {
+              gatewayService.broadcastRaw("tools:pluginsUpdated", agentService.listPluginTools());
+            } catch {
+              /* UI will poll / reload */
+            }
+            console.log(
+              `[electron] Wired ${pluginTools.length} plugin tools from ${observability.pluginRegistry.list().filter((r) => !r.error && r.enabled).length} plugins into the agent.`,
+            );
+          })
+          .catch((e) => {
+            console.warn(
+              "[electron] Plugin tool wiring skipped:",
+              e instanceof Error ? e.message : String(e),
+            );
+          });
+
         ipcMain.handle("dashboard:state", async () => {
           if (!observabilityRef.current) {
             throw new Error("Dashboard is not ready yet.");

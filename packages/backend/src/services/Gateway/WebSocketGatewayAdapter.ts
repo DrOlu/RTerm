@@ -94,6 +94,7 @@ type WebSocketRpcMethod =
   | "tools:getMcp"
   | "tools:setMcpEnabled"
   | "tools:getBuiltIn"
+  | "tools:getPlugins"
   | "tools:setBuiltInEnabled"
   | "agent:startTask"
   | "agent:startTaskAsync"
@@ -437,6 +438,7 @@ export interface WebSocketGatewayAdapterOptions {
       enabled: boolean,
     ) => unknown | Promise<unknown>;
     getBuiltIn?: () => unknown | Promise<unknown>;
+    getPlugins?: () => unknown | Promise<unknown>;
     setBuiltInEnabled?: (
       name: string,
       enabled: boolean,
@@ -2133,6 +2135,15 @@ export class WebSocketGatewayAdapter {
           );
         }
         return await this.options.toolsBridge.getBuiltIn();
+      }
+      case "tools:getPlugins": {
+        if (!this.options.toolsBridge?.getPlugins) {
+          throw new WebSocketRpcError(
+            "METHOD_NOT_FOUND",
+            "tools:getPlugins is not available on this websocket gateway.",
+          );
+        }
+        return await this.options.toolsBridge.getPlugins();
       }
       case "tools:setBuiltInEnabled": {
         if (!this.options.toolsBridge?.setBuiltInEnabled) {

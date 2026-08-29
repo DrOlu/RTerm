@@ -1656,6 +1656,10 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
       if (store.settingsSection !== "memory") return;
       void store.loadMemory();
     }, [store, store.settingsSection]);
+    React.useEffect(() => {
+      if (store.settingsSection !== "tools") return;
+      void store.loadTools();
+    }, [store, store.settingsSection]);
 
   React.useEffect(() => {
       setWsGatewayAccessDraft(persistedWsGatewayAccess);
@@ -2964,6 +2968,39 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                   </div>
                 </>
               ) : null}
+
+              <div className="settings-divider settings-divider-spaced">
+                <span>Plugin tools</span>
+                <i />
+                <button
+                  className="btn-icon-reload"
+                  type="button"
+                  title="Reload plugin tools"
+                  onClick={() => void store.reloadPluginTools()}
+                >
+                  <RefreshCw size={14} />
+                </button>
+              </div>
+              <div className="tools-list">
+                {(store.pluginTools || []).map((tool) => (
+                  <div key={`${tool.plugin}:${tool.name}`} className="tool-item">
+                    <div className="tool-info">
+                      <div className="tool-name">{tool.name}</div>
+                      <div className="tool-meta">
+                        {tool.plugin} · {tool.description || ""}
+                      </div>
+                    </div>
+                    <div className="tool-actions">
+                      <span className={`status-dot ${tool.enabled ? "is-ok" : "is-disabled"}`} />
+                    </div>
+                  </div>
+                ))}
+                {(store.pluginTools || []).length === 0 ? (
+                  <div className="tool-empty">
+                    No plugin tools loaded yet. Plugins wire at startup (Monid, Numbat, Synapse, web-intel, …). Restart RTerm if this stays empty.
+                  </div>
+                ) : null}
+              </div>
             </>
           ) : null}
 
@@ -3145,7 +3182,7 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
               })()}
                 {store.skills.length === 0 ? (
                   <div className="tool-empty">{t.settings.noSkills}</div>
-                ) : null}
+              ) : null}
             </>
           ) : null}
 

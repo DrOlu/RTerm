@@ -14,6 +14,13 @@ export interface BuiltInToolStatusSummary {
   experimental?: boolean
 }
 
+export interface PluginToolStatusSummary {
+  name: string
+  description: string
+  plugin: string
+  enabled: boolean
+}
+
 export function buildSkillStatusSummary(
   skills: SkillInfo[],
   enabledMap: Record<string, boolean> | undefined
@@ -44,7 +51,19 @@ export function buildBuiltInToolStatusSummary(
 export function buildBuiltInToolSettingsSummary(
   enabledMap: Record<string, boolean> | undefined
 ): BuiltInToolStatusSummary[] {
-  return buildBuiltInToolStatusSummary(enabledMap).filter(
-    (tool) => !BUILTIN_TOOL_INFO.find((t) => t.name === tool.name)?.hiddenFromSettings,
-  )
+  // User request: show ALL tools in Settings, including write_file / edit_file.
+  return buildBuiltInToolStatusSummary(enabledMap)
+}
+
+export function buildPluginToolStatusSummary(
+  tools: Array<{ name: string; description?: string; plugin: string }>,
+  enabledMap?: Record<string, boolean>,
+): PluginToolStatusSummary[] {
+  const state = enabledMap ?? {}
+  return tools.map((tool) => ({
+    name: tool.name,
+    description: tool.description || tool.name,
+    plugin: tool.plugin,
+    enabled: state[tool.name] !== false,
+  }))
 }

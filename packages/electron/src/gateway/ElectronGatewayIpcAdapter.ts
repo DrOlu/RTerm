@@ -662,6 +662,10 @@ export class ElectronGatewayIpcAdapter {
       return buildBuiltInToolStatusSummary(settings.tools?.builtIn);
     });
 
+    ipcMain.handle("tools:getPlugins", async () => {
+      return this.agentService.listPluginTools?.() ?? [];
+    });
+
     ipcMain.handle(
       "tools:setBuiltInEnabled",
       async (_: any, name: string, enabled: boolean) => {

@@ -974,6 +974,7 @@ export interface GyShellAPI {
       enabled: boolean,
     ) => Promise<McpToolSummary[]>;
     getBuiltIn: () => Promise<BuiltInToolSummary[]>;
+    getPlugins: () => Promise<Array<{ name: string; description: string; plugin: string; enabled: boolean }>>;
     setBuiltInEnabled: (
       name: string,
       enabled: boolean,
@@ -981,6 +982,9 @@ export interface GyShellAPI {
     onMcpUpdated: (callback: (data: McpToolSummary[]) => void) => () => void;
     onBuiltInUpdated: (
       callback: (data: BuiltInToolSummary[]) => void,
+    ) => () => void;
+    onPluginsUpdated: (
+      callback: (data: Array<{ name: string; description: string; plugin: string; enabled: boolean }>) => void,
     ) => () => void;
   };
 
@@ -1429,6 +1433,7 @@ const api: GyShellAPI = {
     setMcpEnabled: (name, enabled) =>
       ipcRenderer.invoke("tools:setMcpEnabled", name, enabled),
     getBuiltIn: () => ipcRenderer.invoke("tools:getBuiltIn"),
+    getPlugins: () => ipcRenderer.invoke("tools:getPlugins"),
     setBuiltInEnabled: (name, enabled) =>
       ipcRenderer.invoke("tools:setBuiltInEnabled", name, enabled),
     onMcpUpdated: (callback) => {
@@ -1442,6 +1447,14 @@ const api: GyShellAPI = {
         callback(data);
       ipcRenderer.on("tools:builtInUpdated", handler);
       return () => ipcRenderer.off("tools:builtInUpdated", handler);
+    },
+    onPluginsUpdated: (callback) => {
+      const handler = (
+        _: IpcRendererEvent,
+        data: Array<{ name: string; description: string; plugin: string; enabled: boolean }>,
+      ) => callback(data);
+      ipcRenderer.on("tools:pluginsUpdated", handler);
+      return () => ipcRenderer.off("tools:pluginsUpdated", handler);
     },
   },
   themes: {

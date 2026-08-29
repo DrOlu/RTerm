@@ -545,6 +545,7 @@ export class AgentService_v2 {
   private pluginTools: Map<string, (params: any) => Promise<any>> = new Map();
   /** Plugin tool schemas (for toolsForModel injection). */
   private pluginToolSchemas: any[] = [];
+  private pluginToolMeta: Array<{ name: string; description: string; plugin: string }> = [];
   private passChatTempExportService = new PassChatTempExportService();
   private fallbackCompactionHistoryExportService: PassChatTempExportService | null =
     null;
@@ -621,13 +622,42 @@ export class AgentService_v2 {
    * Each plugin tool has: name, description, params (schema), handler (async fn).
    * The tools are injected into toolsForModel (so the model sees them) and
    * pluginTools (so the dispatch switch's default case can call them). */
-  setPluginTools(tools: Array<{ name: string; description: string; params: any; handler: (params: any) => Promise<any> }>): void {
+  setPluginTools(tools: Array<{ name: string; description: string; params: any; handler: (params: any) => Promise<any>; plugin?: string }>): void {
     this.pluginTools = new Map(tools.map((t) => [t.name, t.handler]))
-    this.pluginToolSchemas = tools.map((t) => ({
+    this.pluginToolMeta = tools.map((t) => ({
       name: t.name,
-      description: t.description,
-      schema: t.params || {},
+      description: t.description || t.name,
+      plugin: t.plugin || 'plugin',
     }))
+    // OpenAI-style function tools so bindTools actually exposes them to the model.
+    this.pluginToolSchemas = tools.map((t) => {
+      const params = t.params && typeof t.params === 'object' ? t.params : {}
+      const looksJsonSchema = typeof (params as { type?: string }).type === 'string'
+      const parameters = looksJsonSchema
+        ? params
+        : {
+            type: 'object',
+            properties: params,
+            additionalProperties: true,
+          }
+      return {
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description || t.name,
+          parameters,
+        },
+      }
+    })
+  }
+
+  /** Plugin tools in OpenAI bindTools shape (empty until setPluginTools). */
+  getPluginToolSchemas(): any[] {
+    return this.pluginToolSchemas
+  }
+
+  listPluginTools(): Array<{ name: string; description: string; plugin: string; enabled: boolean }> {
+    return this.pluginToolMeta.map((t) => ({ ...t, enabled: true }))
   }
 
   /** Wire a session-log handle so list_session_logs / read_session_log work. */
@@ -1482,9 +1512,11 @@ export class AgentService_v2 {
       const baseModel = shouldUseThinkingModelOnThisPass
         ? sessionBinding.thinkingModel || sessionBinding.model
         : sessionBinding.model;
+      const pluginOpenAiTools = this.pluginToolSchemas
       const modelWithTools = baseModel.bindTools([
         ...builtInTools,
         ...mcpTools,
+        ...pluginOpenAiTools,
       ]);
 
       const messageId = uuidv4();
@@ -1534,7 +1566,11 @@ export class AgentService_v2 {
             shouldUseThinkingModelOnThisPass ? 0.2 : 0.7,
             null,
           );
-          modelToUse = fallbackChat.bindTools([...builtInTools, ...mcpTools]) as typeof modelWithTools;
+          modelToUse = fallbackChat.bindTools([
+            ...builtInTools,
+            ...mcpTools,
+            ...pluginOpenAiTools,
+          ]) as typeof modelWithTools;
         }
         return await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,
