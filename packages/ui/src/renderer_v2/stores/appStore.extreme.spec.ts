@@ -153,6 +153,7 @@ const installBootstrapWindowMock = (
     },
   };
   (globalThis as unknown as { window: unknown }).window = {
+    setTimeout: globalThis.setTimeout.bind(globalThis),
     gyshell: {
       historyMigration: {
         getState: async () => ({
@@ -312,6 +313,7 @@ const installBootstrapWindowMock = (
       tools: {
         getMcp: async () => [],
         getBuiltIn: async () => [],
+        getPlugins: async () => [],
         onMcpUpdated: () => {},
         onBuiltInUpdated: () => {},
       },
