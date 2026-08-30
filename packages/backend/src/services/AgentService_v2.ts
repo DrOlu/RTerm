@@ -1250,6 +1250,7 @@ export class AgentService_v2 {
         | {
             memoryFilePath: string;
             memoryContent: string;
+            userInput?: string;
           }
         | undefined;
       if (memoryEnabled) {
@@ -1260,6 +1261,11 @@ export class AgentService_v2 {
           memoryPrompt = {
             memoryFilePath: snapshot.filePath,
             memoryContent: snapshot.content,
+            // v3.4.2 BUG FIX: pass the user's input so that when memory.md
+            // exceeds the injection cap, recall returns the entries RELEVANT
+            // to this request instead of just the newest ones. The field was
+            // supported since v3.0.5 but never wired at this call site.
+            userInput: displayContent,
           };
         } catch (error) {
           console.warn(

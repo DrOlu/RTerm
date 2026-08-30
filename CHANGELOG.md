@@ -1,5 +1,27 @@
 # Changelog
 
+## v3.4.4 (2026-08-30)
+
+### Memory overhaul — recall relevance, auto-write, sections, per-project
+
+**BUG FIX: memory recall ignored your question.** `buildMemoryPromptBlock`
+has accepted a `userInput` field since v3.0.5 specifically so that when
+memory.md exceeds the 12,000-char injection cap it recalls the entries most
+relevant to the current request. The call site in AgentService_v2 never
+passed it — so oversized memory returned the NEWEST entries, not the
+relevant ones. Ask about BGP and you might get last week's PDF notes.
+One line to fix; immediate effect on every session with a large memory file.
+
+| Improvement | What it does |
+|---|---|
+| **Recency-weighted scoring** | `searchMemory` ranks by relevance x recency (0.6 + 0.4 x position/total). A 3-month-old note no longer beats yesterday's on equal match; a strong old match still wins over a weak new one. |
+| **Section-aware memory** | Entries track their `## Section` (Gotchas / Decisions / Estate / Open work). Recall includes the heading, so an oversized memory returns coherent sections instead of scattered lines. |
+| **Auto-write distiller** | New `memoryDistiller.ts`: a DETERMINISTIC distiller (no extra LLM call, no tokens) that extracts durable signals from a completed run — releases, gotchas from errors, hot project dirs, unfinished work — deduped and capped. |
+| **Per-project memory** | `resolveProjectMemoryPath` maps a working directory to a scoped memory file that layers on top of the global one. RTerm notes stop polluting rmagent notes. |
+| **Memory budget** | The 12,000-char injection cap is a documented constant with a hard-truncate fallback for single oversized entries. |
+
+Tests: `memoryManager.extreme.spec.ts` — 50 assertions across 16 scenarios.
+
 ## v3.4.3 (2026-08-30)
 
 ### Fix — the 3 long-failing recording tests (stale assertions, not a product bug)

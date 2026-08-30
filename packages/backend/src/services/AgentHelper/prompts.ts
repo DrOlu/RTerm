@@ -839,6 +839,9 @@ function buildMemoryPromptBlock(opts: {
 export function createBaseSystemPromptText(memoryPrompt?: {
   memoryFilePath: string;
   memoryContent: string;
+  /** v3.4.2: forwarded to buildMemoryPromptBlock so oversized memory
+   *  recalls entries relevant to THIS request, not just the newest. */
+  userInput?: string;
 }): string {
   const baseSections = [
     `Today is ${formatTodayLocalDate()}.`,
