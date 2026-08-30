@@ -1,5 +1,32 @@
 # Changelog
 
+## v3.4.3 (2026-08-30)
+
+### Fix — the 3 long-failing recording tests (stale assertions, not a product bug)
+
+`test:v29-features` has exited red since v3.2.2 because three
+`recordingCapture` tests asserted synchronously against a write that had
+become deferred.
+
+**The story.** In v2.9.4 the tests were written against a synchronous
+recorder. In v3.2.2 a real freeze bug was fixed: recording every chunk of a
+`cat`-of-a-huge-file immediately jammed the event loop, so
+`handleData()` started batching recorder writes with `setImmediate`. The
+feature kept working — but the tests still asserted the instant the call
+returned, saw 0 events, and failed. They have failed on every run since.
+
+**The fix.** The three tests now `await` one event-loop tick
+(`flushDeferredWrites()`) before asserting, so they assert the real
+deferred behaviour instead of a stale synchronous one. Also flushed before
+`stopRecording()` / `replay()` so the ordering guarantees hold. The
+`handleData` cast is factored into a shared `funnel` helper.
+
+**Effect.** `test:v29-features` is green again — 219 PASS / 0 FAIL / exit 0
+— so it can gate CI. Before this, a genuine recording regression would
+have been drowned out by three known-broken tests.
+
+**No product code changed.** This is a test-only fix.
+
 ## v3.4.2 (2026-08-30)
 
 ### Optimization — the distributed, parallel, persistent execution loop
