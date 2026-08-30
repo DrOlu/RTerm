@@ -1,5 +1,46 @@
 # Changelog
 
+## v3.4.1 (2026-08-30)
+
+### Fix — the freeze, and the "work done, no record" data loss
+
+Two bugs with one root cause, found after a real incident where a killed
+process lost a completed agent run.
+
+**1. Data loss (the missing record).** `recordEvent()` marked a session dirty
+but NEVER flushed. Messages reached SQLite only on rename / rollback / branch
+or a graceful app close. Kill the process mid-run — freeze, crash, force-quit
+— and every message since the last flush was gone. That is exactly "the work
+was done but there was no record of it."
+
+- Messages now persist within **1.5s** of the last event (debounced auto-flush)
+- Synchronous flush on `beforeExit` / `SIGINT` / `SIGTERM`
+- A hard kill now loses at most 1.5 seconds of history, not the whole run
+
+**2. Freeze (the spinning wheel).** When flush DID run, `saveUiSessions()`
+deleted every row and re-inserted the entire message list — a large
+synchronous better-sqlite3 transaction on the main event loop. On a long
+session that is the beachball.
+
+- New `appendUiSessionMessages()`: flush appends only the NEW messages —
+  O(new), not O(all). A 500-message session appends one row in ~1.9s
+  including the debounce wait, instead of rewriting a megabyte.
+- Cursor tracking (`persistedMessageCount`) per session, invalidated on
+  rollback / delete / branch so a removed message never leaves stale rows
+- Legacy full-rewrite retained as a fallback path
+
+**3. Listener leak (introduced then fixed in the same release).** The first
+version of the shutdown hooks registered one SIGINT/SIGTERM listener per
+service instance — `MaxListenersExceededWarning` after ~10 instances. Now one
+shared handler per signal flushes every live instance.
+
+### Tests
+
+`uiHistoryPersistence.extreme.spec.ts` — 25 assertions across 8 scenarios:
+auto-persist without graceful close, shutdown flush, incremental append
+(exactly 1 row), no duplicates across restart, rollback cursor reset, delete
+cursor clear, streaming-burst merge, and the 500-message performance case.
+
 ## v3.4.0 (2026-08-28)
 
 ### Fix — plugin tools visible in Settings → Tools; WS getPlugins; failover already sound

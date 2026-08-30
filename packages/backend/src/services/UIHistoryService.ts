@@ -26,12 +26,91 @@ export class UIHistoryService {
   private sessionsCache: Record<string, UIChatSession> = {};
   private sessionSummaryCache: Record<string, UISessionSummary> = {};
   private dirtySessions: Set<string> = new Set();
+  /**
+   * v3.4.1: debounced auto-flush. Previously recordEvent() marked a session
+   * dirty but NEVER flushed — messages reached SQLite only on rename /
+   * rollback / branch or a graceful app close. Kill the process mid-run
+   * (freeze, crash, force-quit) and every message since the last flush was
+   * lost. That is the "work done, no record" bug.
+   *
+   * Now: flush within FLUSH_DEBOUNCE_MS of the last event, plus a synchronous
+   * flush on beforeExit / SIGINT / SIGTERM.
+   */
+  private flushTimer: NodeJS.Timeout | null = null;
+  private shutdownHooksInstalled = false;
+  /** v3.4.1: messages already written to SQLite per session, so flush()
+   *  appends only the new ones instead of rewriting the whole session. */
+  private persistedMessageCount = new Map<string, number>();
+
+  /** Flush debounce window — short enough to survive a crash, long enough
+   *  to batch a streaming burst into one write. */
+  static readonly FLUSH_DEBOUNCE_MS = 1_500;
 
   constructor(options?: UIHistoryServiceOptions) {
     this.store = options?.store || new HistorySqliteStore();
     this.sessionSummaryCache = this.buildSessionSummaryCache(
       this.store.listUiSessionSummaries(),
     );
+    this.installShutdownHooks();
+  }
+
+  private installShutdownHooks(): void {
+    if (this.shutdownHooksInstalled) return;
+    this.shutdownHooksInstalled = true;
+    const flushNow = () => {
+      try {
+        this.flush();
+      } catch {
+        /* best effort on shutdown */
+      }
+    };
+    process.once("beforeExit", flushNow);
+    // One shared handler per signal for ALL instances of this class —
+    // creating a listener per instance leaks (MaxListenersExceeded after
+    // ~10 services, e.g. in tests or multi-window setups).
+    for (const sig of ["SIGINT", "SIGTERM"] as const) {
+      if (!UIHistoryService.activeFlushOnSignal.has(sig)) {
+        UIHistoryService.activeFlushOnSignal.add(sig);
+        const hadListeners = process.listenerCount(sig) > 0;
+        process.once(sig, () => {
+          // flush every live instance, not just this one
+          for (const svc of UIHistoryService.instances) {
+            try {
+              svc.flush();
+            } catch {
+              /* best effort */
+            }
+          }
+          UIHistoryService.activeFlushOnSignal.delete(sig);
+          if (!hadListeners) {
+            process.kill(process.pid, sig);
+          }
+        });
+      }
+    }
+    UIHistoryService.instances.add(this);
+  }
+
+  /** Live instances — the shared signal handler flushes all of them. */
+  private static instances = new Set<UIHistoryService>();
+  private static activeFlushOnSignal = new Set<string>();
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+    }
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      try {
+        this.flush();
+      } catch (error) {
+        console.error("[UIHistory] auto-flush failed:", error);
+      }
+    }, UIHistoryService.FLUSH_DEBOUNCE_MS);
+    // do not hold the event loop open just for a pending flush
+    if (typeof this.flushTimer.unref === "function") {
+      this.flushTimer.unref();
+    }
   }
 
   private buildSessionSummaryCache(
@@ -55,6 +134,11 @@ export class UIHistoryService {
     }
     const sanitized = sanitizeUiSession(loaded);
     this.sessionsCache[sessionId] = sanitized;
+    // v3.4.1: everything on disk is already persisted — appends start
+    // after the loaded messages.
+    if (!this.persistedMessageCount.has(sessionId)) {
+      this.persistedMessageCount.set(sessionId, sanitized.messages.length);
+    }
     this.syncSessionSummary(sessionId);
     return sanitized;
   }
@@ -84,6 +168,9 @@ export class UIHistoryService {
     const actions = this.processEvent(session, event, sessionId);
     this.syncSessionSummary(sessionId);
     this.dirtySessions.add(sessionId);
+    // v3.4.1: persist within the debounce window so a crash/kill loses at
+    // most FLUSH_DEBOUNCE_MS of history instead of the whole run.
+    this.scheduleFlush();
     return actions;
   }
 
@@ -101,6 +188,9 @@ export class UIHistoryService {
       session: UIChatSession;
       summary: UISessionSummary;
     }> = [];
+    // v3.4.1: track how many messages were already persisted so flush can
+    // APPEND instead of rewriting the whole session (the freeze fix).
+    const appendFrom: Record<string, number> = {};
     sessionIds.forEach((id) => {
       const session = this.sessionsCache[id];
       if (!session) {
@@ -112,9 +202,40 @@ export class UIHistoryService {
       const summary = buildUiSessionSummary(sanitized);
       this.sessionSummaryCache[id] = summary;
       entries.push({ session: sanitized, summary });
+      const already = this.persistedMessageCount.get(id);
+      appendFrom[id] =
+        typeof already === "number" && already <= sanitized.messages.length
+          ? already
+          : 0;
     });
     if (entries.length > 0) {
-      this.store.saveUiSessions(entries);
+      let usedIncremental = false;
+      try {
+        // Fast path: append only the new messages (O(new), not O(all)).
+        let appended = 0;
+        for (const { session, summary } of entries) {
+          const from = appendFrom[session.id] ?? 0;
+          const n = this.store.appendUiSessionMessages(
+            session.id,
+            session.messages,
+            from,
+            summary,
+          );
+          appended += n;
+          this.persistedMessageCount.set(session.id, session.messages.length);
+        }
+        usedIncremental = true;
+      } catch {
+        usedIncremental = false;
+      }
+      if (!usedIncremental) {
+        // Fallback: the legacy full rewrite (older store, or a shape the
+        // append path could not handle).
+        this.store.saveUiSessions(entries);
+        entries.forEach(({ session }) =>
+          this.persistedMessageCount.set(session.id, session.messages.length),
+        );
+      }
     }
     sessionIds.forEach((id) => this.dirtySessions.delete(id));
   }
@@ -767,6 +888,8 @@ export class UIHistoryService {
       delete this.sessionsCache[id];
       delete this.sessionSummaryCache[id];
       this.dirtySessions.delete(id);
+      // v3.4.1: the persisted count is no longer valid after a delete.
+      this.persistedMessageCount.delete(id);
     });
     this.store.deleteUiSessions(ids);
   }
@@ -810,6 +933,9 @@ export class UIHistoryService {
     );
     this.syncSessionSummary(sessionId);
     this.dirtySessions.add(sessionId);
+    // v3.4.1: messages were REMOVED — the incremental append cannot express
+    // that, so reset the count and let flush do the full rewrite.
+    this.persistedMessageCount.delete(sessionId);
     this.flush(sessionId);
     return removedCount;
   }

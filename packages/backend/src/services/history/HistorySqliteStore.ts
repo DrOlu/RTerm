@@ -451,6 +451,94 @@ export class HistorySqliteStore {
     })();
   }
 
+  /**
+   * v3.4.1: append only the NEW messages for a session instead of rewriting
+   * the whole session. saveUiSessions() deletes every row and re-inserts the
+   * entire message list — on a long session that is a large synchronous
+   * better-sqlite3 transaction on the main event loop, which is the
+   * spinning-wheel freeze. This method appends from a given position in one
+   * small transaction, so a debounced flush costs O(new messages), not
+   * O(all messages).
+   *
+   * Returns the number of rows appended.
+   */
+  appendUiSessionMessages(
+    sessionId: string,
+    messages: ChatMessage[],
+    fromPosition: number,
+    summary?: UISessionSummaryRecord,
+  ): number {
+    if (messages.length === 0 || fromPosition >= messages.length) {
+      return 0;
+    }
+    const upsertSession = this.db.prepare(
+      `INSERT INTO ui_sessions (
+         id, title, updated_at, messages_count, last_message_preview
+       ) VALUES (
+         @id, @title, @updatedAt, @messagesCount, @lastMessagePreview
+       )
+       ON CONFLICT(id) DO UPDATE SET
+         title = excluded.title,
+         updated_at = excluded.updated_at,
+         messages_count = excluded.messages_count,
+         last_message_preview = excluded.last_message_preview`,
+    );
+    const insertMessage = this.db.prepare(
+      `INSERT INTO ui_session_messages (
+         session_id, position, ui_message_id, backend_message_id, role, message_type, content, metadata_json, timestamp, streaming
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const slice = messages.slice(fromPosition);
+    this.db.transaction(() => {
+      // The messages table has a FK to ui_sessions — always upsert the
+      // parent row, even without a summary, or the insert fails.
+      if (summary) {
+        upsertSession.run({
+          id: sessionId,
+          title: summary.title,
+          updatedAt: summary.updatedAt,
+          messagesCount: summary.messagesCount,
+          lastMessagePreview: summary.lastMessagePreview,
+        });
+      } else {
+        const existing = this.db
+          .prepare("SELECT title, updated_at FROM ui_sessions WHERE id = ?")
+          .get(sessionId) as { title: string; updated_at: number } | undefined;
+        upsertSession.run({
+          id: sessionId,
+          title: existing?.title ?? "New Chat",
+          updatedAt: Date.now(),
+          messagesCount: (existing ? 0 : 0) + fromPosition + slice.length,
+          lastMessagePreview: slice[slice.length - 1]?.content?.slice(0, 200) ?? "",
+        });
+      }
+      for (let i = 0; i < slice.length; i++) {
+        const message = slice[i];
+        insertMessage.run(
+          sessionId,
+          fromPosition + i,
+          message.id,
+          message.backendMessageId ?? null,
+          message.role,
+          message.type,
+          message.content,
+          message.metadata ? JSON.stringify(message.metadata) : null,
+          message.timestamp,
+          message.streaming ? 1 : 0,
+        );
+      }
+    })();
+    return slice.length;
+  }
+
+  /** v3.4.1: how many messages are already persisted for a session. */
+  countUiSessionMessages(sessionId: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM ui_session_messages WHERE session_id = ?")
+      .get(sessionId) as { n: number } | undefined;
+    return row?.n ?? 0;
+  }
+
   deleteUiSessions(sessionIds: string[]): void {
     const ids = Array.from(
       new Set(sessionIds.filter((id) => id.trim().length > 0)),
