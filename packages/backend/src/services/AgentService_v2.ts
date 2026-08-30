@@ -392,6 +392,19 @@ function canRunInParallel(toolCalls: any[]): boolean {
 }
 
 /**
+ * v3.4.2: how many fleet tools (run_fleet_command / collect_facts) are in a
+ * batch. Each fans out over many tabs internally, so batching two of them
+ * can double-write the same PTY — the batch is then demoted to sequential.
+ */
+function countFleetToolsInBatch(toolCalls: any[]): number {
+  let n = 0;
+  for (const tc of toolCalls) {
+    if (tc?.name === "run_fleet_command" || tc?.name === "collect_facts") n++;
+  }
+  return n;
+}
+
+/**
  * v3.2.5 Feature 2: Reconcile streamed tool calls before dispatch.
  * Validates that all tool calls have unique IDs, complete arguments, and
  * valid names. Drops or repairs invalid entries so multi-call turns
@@ -1971,7 +1984,11 @@ export class AgentService_v2 {
       // parallel-safe tools with no duplicate terminal targets, run them all
       // simultaneously with Promise.all. Boundary tools and non-parallel-safe
       // tools fall through to the sequential path (queue[0]).
-      if (canRunInParallel(queue)) {
+      // v3.4.2: fleet tools fan out over MANY tabs internally, so two fleet
+      // calls batched together can both write the same PTY (the duplicate-
+      // terminalId check below only sees explicit per-call targets). Never
+      // batch more than one fleet tool per turn — they run sequentially.
+      if (canRunInParallel(queue) && countFleetToolsInBatch(queue) <= 1) {
         const parallelResults = await Promise.all(
           queue.map(async (tc) => {
             const tm = this.createToolMessage(tc);

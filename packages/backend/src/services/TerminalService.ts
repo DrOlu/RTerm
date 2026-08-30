@@ -2007,6 +2007,16 @@ export class TerminalService {
     return Array.from(this.terminals.values()).filter((t) => !t.isInitializing && t.runtimeState === 'ready')
   }
 
+  /**
+   * v3.4.2: the saved connection config for a terminal (host/port/path/type…).
+   * Read-only view used by the fleet tools to key per-host concurrency —
+   * two tabs on the same SSH box must share one concurrency bucket.
+   * Returns null for unknown terminals; never throws.
+   */
+  getTerminalConfig(terminalId: string): TerminalConfig | null {
+    return this.terminalConfigs.get(terminalId) ?? null
+  }
+
   getTransferMachineIdentity(terminalId: string): string | null {
     const terminal = this.terminals.get(terminalId)
     const config = this.terminalConfigs.get(terminalId)

@@ -1,5 +1,92 @@
 # Changelog
 
+## v3.4.2 (2026-08-30)
+
+### Optimization — the distributed, parallel, persistent execution loop
+
+RTerm drives many devices, servers and OSes in parallel. This release makes
+that loop safe under load and fixes the persistence bugs the new concurrency
+exposed.
+
+**1. Per-host concurrency caps + a fair work queue (`hostConcurrency.ts`).**
+`run_fleet_command()` fanned out with bare `Promise.allSettled` over up to 25
+targets — no per-host cap, no global cap. A fleet command over N tabs on ONE
+box opened N simultaneous SSH/WinRM channels; sshd's `MaxStartups` (10:30:100
+default) refuses around the 10th, and even when accepted the box starves.
+
+- Keyed semaphore: at most **3 concurrent operations per host** (default),
+  regardless of how many tabs or agent runs target it — two tabs on one box
+  share one bucket via the new `getTerminalConfig()`
+- **Global cap (12)** so a 25-target fleet cannot open 25 channels at once
+  even across distinct hosts
+- FIFO fairness per host — no starvation and no queue-jumping (the fast
+  path is disabled while anyone is queued)
+- Queue depth + wait time are observable (`stats()`, `onWaitedMs`), and the
+  fleet summary now reports how many ops were still queued, so a slow fleet
+  is diagnosable instead of mysterious
+- Queued ops honour an AbortSignal — a cancelled run does not keep holding
+  queue slots
+- `collect_facts` runs under the same cap: a fleet inventory over many tabs
+  on one box is the same channel burst
+
+**2. Fleet tools never batch together in the parallel dispatcher.** Two
+`run_fleet_command` / `collect_facts` calls batched in one turn could both
+write the same PTY — the duplicate-`terminalId` check only sees explicit
+per-call targets. A batch with more than one fleet tool is now demoted to
+sequential.
+
+**3. Session persistence — the streaming rewrite.** The v3.4.1 append path
+can only ADD rows. A message persisted while STREAMING has truncated content
+on disk and must be rewritten later — but the scan keyed on the `streaming`
+flag goes blind the moment the message FINISHES (`done` /
+`command_finished` flips it to false). Its final content never landed: on
+reload the session showed the truncated mid-stream text.
+
+- `persistedStreamingMessageIds` records which rows were written mid-stream
+  and keeps the rewrite obligation alive across the streaming→finished
+  transition, until a flush actually rewrites them
+- `appendUiSessionMessages()` is now a TRUNCATE-AND-APPEND: rows at
+  `position >= fromPosition` are deleted inside the same transaction as the
+  inserts, which is also what makes a rollback expressible on the
+  incremental path
+- `remove_message` resets the append cursor (only rollback did before) —
+  positions shift after a removal and the cursor was stale
+- `messagesCount` in the no-summary branch is the real message-list length
+  (the old `fromPosition + slice.length` double-counted after a truncation)
+
+**4. `getLastVisiblePreview` — blank previews and the flush tax.** The
+`return ""` sat INSIDE the loop, so the first empty message (a just-opened
+sub_tool) produced a blank session preview instead of falling back to the
+last non-empty one. It also returned the FULL message body: this column is
+rewritten on EVERY flush, and an uncapped preview wrote kilobytes into
+`ui_sessions` each time — a measurable part of the v3.4.1 flush cost.
+Previews are now capped at 200 chars.
+
+**5. Abort semantics in the limiter.** A queued-op abort threw a plain
+`Error('Aborted while waiting for a host slot')`, which `isAbortError()` did
+not recognise — a user-cancelled fleet run reported N bogus per-target FAIL
+rows instead of propagating one clean abort. Queue-abort and pre-abort now
+carry `name: 'AbortError'`, and the fast path checks the signal BEFORE
+consuming a slot (an already-cancelled run no longer fires commands).
+
+**6. `UIHistoryService.dispose()`.** Every instance ever constructed stayed
+in the static `instances` set forever; the shared signal handler then flushed
+(and held) dead services on every SIGINT/SIGTERM. `dispose()` flushes once
+and deregisters. `beforeExit` is likewise installed once for the class, not
+per instance.
+
+### Tests
+
+- `hostConcurrency.extreme.spec.ts` — 30 assertions: per-host cap, global
+  cap, the double-acquire deadlock regression, FIFO fairness, abort-while-
+  queued, queue timeout, host keying (same-host tabs share a bucket),
+  stats observability, pre-abort fast path, AbortError naming
+- `uiHistoryStreamingRewrite.extreme.spec.ts` — 13 assertions: the
+  finished-streaming rewrite, growth-while-streaming, preview fallback +
+  cap, `remove_message` cursor reset, `dispose()` flush + deregister, no
+  listener leak across 12 instances
+- Both wired into `test:backend-unit-extreme` (41 specs)
+
 ## v3.4.1 (2026-08-30)
 
 ### Fix — the freeze, and the "work done, no record" data loss

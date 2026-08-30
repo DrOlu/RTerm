@@ -460,6 +460,13 @@ export class HistorySqliteStore {
    * small transaction, so a debounced flush costs O(new messages), not
    * O(all messages).
    *
+   * v3.4.3: this is a TRUNCATE-AND-APPEND from fromPosition — rows at
+   * position >= fromPosition are deleted before the slice is inserted. The
+   * caller always passes fromPosition such that messages[fromPosition..] is
+   * the authoritative content, so this is what makes a rollback (or any
+   * shrink) expressible on the incremental path: without the delete, the
+   * old tail rows would survive the flush and resurrect on reload.
+   *
    * Returns the number of rows appended.
    */
   appendUiSessionMessages(
@@ -484,9 +491,16 @@ export class HistorySqliteStore {
          last_message_preview = excluded.last_message_preview`,
     );
     const insertMessage = this.db.prepare(
-      `INSERT INTO ui_session_messages (
+      `INSERT OR REPLACE INTO ui_session_messages (
          session_id, position, ui_message_id, backend_message_id, role, message_type, content, metadata_json, timestamp, streaming
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    // v3.4.3: positions >= fromPosition hold the authoritative content, so
+    // drop any stale rows at or beyond it. For a plain append this deletes
+    // nothing; after a rollback it removes the truncated tail, which is the
+    // only way the incremental path can express a shrink.
+    const truncateFrom = this.db.prepare(
+      "DELETE FROM ui_session_messages WHERE session_id = ? AND position >= ?",
     );
     const slice = messages.slice(fromPosition);
     this.db.transaction(() => {
@@ -504,14 +518,21 @@ export class HistorySqliteStore {
         const existing = this.db
           .prepare("SELECT title, updated_at FROM ui_sessions WHERE id = ?")
           .get(sessionId) as { title: string; updated_at: number } | undefined;
+        // v3.4.3: the count is the FULL message list length, not
+        // fromPosition + slice.length — that expression happened to be
+        // equal for a pure append but was wrong whenever the caller had
+        // already truncated rows (rollback/remove), double-counting them.
         upsertSession.run({
           id: sessionId,
           title: existing?.title ?? "New Chat",
           updatedAt: Date.now(),
-          messagesCount: (existing ? 0 : 0) + fromPosition + slice.length,
+          messagesCount: messages.length,
           lastMessagePreview: slice[slice.length - 1]?.content?.slice(0, 200) ?? "",
         });
       }
+      // v3.4.3: run the truncate inside the same transaction as the inserts
+      // so the on-disk tail can never disagree with the in-memory slice.
+      truncateFrom.run(sessionId, fromPosition);
       for (let i = 0; i < slice.length; i++) {
         const message = slice[i];
         insertMessage.run(

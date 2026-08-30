@@ -42,6 +42,17 @@ export class UIHistoryService {
    *  appends only the new ones instead of rewriting the whole session. */
   private persistedMessageCount = new Map<string, number>();
 
+  /**
+   * v3.4.3: per session, the IDs of messages that were written to disk
+   * WHILE STILL STREAMING. The append path can only add rows, so a message
+   * persisted mid-stream has truncated content on disk. While it is still
+   * streaming the `streaming` scan in flush() catches it — but the moment
+   * it FINISHES (streaming flips to false) that scan goes blind and the
+   * final content would never land. This set is the historical record that
+   * keeps the rewrite alive across that transition.
+   */
+  private persistedStreamingMessageIds = new Map<string, Set<string>>();
+
   /** Flush debounce window — short enough to survive a crash, long enough
    *  to batch a streaming burst into one write. */
   static readonly FLUSH_DEBOUNCE_MS = 1_500;
@@ -57,14 +68,21 @@ export class UIHistoryService {
   private installShutdownHooks(): void {
     if (this.shutdownHooksInstalled) return;
     this.shutdownHooksInstalled = true;
-    const flushNow = () => {
-      try {
-        this.flush();
-      } catch {
-        /* best effort on shutdown */
-      }
-    };
-    process.once("beforeExit", flushNow);
+    // v3.4.2: ONE shared beforeExit handler for ALL instances — a listener
+    // per instance leaks the same way the per-instance SIGINT handlers did
+    // (MaxListenersExceeded after ~10 services in tests/multi-window).
+    if (!UIHistoryService.beforeExitInstalled) {
+      UIHistoryService.beforeExitInstalled = true;
+      process.once("beforeExit", () => {
+        for (const svc of UIHistoryService.instances) {
+          try {
+            svc.flush();
+          } catch {
+            /* best effort on shutdown */
+          }
+        }
+      });
+    }
     // One shared handler per signal for ALL instances of this class —
     // creating a listener per instance leaks (MaxListenersExceeded after
     // ~10 services, e.g. in tests or multi-window setups).
@@ -91,9 +109,32 @@ export class UIHistoryService {
     UIHistoryService.instances.add(this);
   }
 
+  /**
+   * v3.4.3: remove this instance from the shared shutdown-flush registry.
+   * Without this, every UIHistoryService ever constructed stays in the
+   * static `instances` set forever (tests, multi-window, hot reload) — the
+   * shared signal handler then flushes (and holds) dead services on every
+   * SIGINT/SIGTERM, and the set itself grows without bound.
+   */
+  dispose(): void {
+    // Flush one last time so disposing never loses buffered history.
+    try {
+      this.flush();
+    } catch {
+      /* best effort */
+    }
+    UIHistoryService.instances.delete(this);
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+  }
+
   /** Live instances — the shared signal handler flushes all of them. */
   private static instances = new Set<UIHistoryService>();
   private static activeFlushOnSignal = new Set<string>();
+  /** v3.4.2: beforeExit is installed once for the whole class. */
+  private static beforeExitInstalled = false;
 
   private scheduleFlush(): void {
     if (this.flushTimer) {
@@ -138,6 +179,19 @@ export class UIHistoryService {
     // after the loaded messages.
     if (!this.persistedMessageCount.has(sessionId)) {
       this.persistedMessageCount.set(sessionId, sanitized.messages.length);
+    }
+    // v3.4.3: rebuild the streaming-rewrite obligation from what is on
+    // disk. Any row still marked streaming was written mid-stream and must
+    // be rewritten on the next flush; everything else is final. (A stale
+    // set from before the reload would force pointless rewrites.)
+    const stillStreaming = new Set<string>();
+    for (const m of sanitized.messages) {
+      if (m.streaming) stillStreaming.add(m.id);
+    }
+    if (stillStreaming.size > 0) {
+      this.persistedStreamingMessageIds.set(sessionId, stillStreaming);
+    } else {
+      this.persistedStreamingMessageIds.delete(sessionId);
     }
     this.syncSessionSummary(sessionId);
     return sanitized;
@@ -190,6 +244,11 @@ export class UIHistoryService {
     }> = [];
     // v3.4.1: track how many messages were already persisted so flush can
     // APPEND instead of rewriting the whole session (the freeze fix).
+    // v3.4.2: a message that was persisted while STREAMING and has since
+    // grown (or finished) must be rewritten — the append path can only add
+    // rows, so a stale streaming row would keep its truncated content on
+    // disk forever. Treat any mutated streaming message as a cursor reset
+    // to its position.
     const appendFrom: Record<string, number> = {};
     sessionIds.forEach((id) => {
       const session = this.sessionsCache[id];
@@ -203,10 +262,28 @@ export class UIHistoryService {
       this.sessionSummaryCache[id] = summary;
       entries.push({ session: sanitized, summary });
       const already = this.persistedMessageCount.get(id);
-      appendFrom[id] =
+      let from =
         typeof already === "number" && already <= sanitized.messages.length
           ? already
           : 0;
+      if (from > 0) {
+        // v3.4.3: two ways a persisted row can be stale.
+        //  (a) the message is STILL streaming (it grew since the write);
+        //  (b) it was persisted while streaming and has since FINISHED —
+        //      the `streaming` flag no longer marks it, so consult the
+        //      persistedStreamingMessageIds record from the earlier flush.
+        // In both cases the append path cannot express the update, so reset
+        // the cursor to that message's position and rewrite from there.
+        const staleIds = this.persistedStreamingMessageIds.get(id);
+        for (let i = 0; i < from; i++) {
+          const m = sanitized.messages[i];
+          if (m?.streaming || (staleIds && m && staleIds.has(m.id))) {
+            from = i;
+            break;
+          }
+        }
+      }
+      appendFrom[id] = from;
     });
     if (entries.length > 0) {
       let usedIncremental = false;
@@ -223,6 +300,20 @@ export class UIHistoryService {
           );
           appended += n;
           this.persistedMessageCount.set(session.id, session.messages.length);
+          // v3.4.3: remember which of the just-persisted rows were written
+          // while streaming — the NEXT flush must still rewrite them (their
+          // content is incomplete on disk) even after they finish.
+          const stale = new Set<string>();
+          for (let i = from; i < session.messages.length; i++) {
+            const m = session.messages[i];
+            if (m?.streaming) stale.add(m.id);
+          }
+          if (stale.size > 0) {
+            this.persistedStreamingMessageIds.set(session.id, stale);
+          } else {
+            // Everything written is final — the rewrite obligation is met.
+            this.persistedStreamingMessageIds.delete(session.id);
+          }
         }
         usedIncremental = true;
       } catch {
@@ -232,9 +323,12 @@ export class UIHistoryService {
         // Fallback: the legacy full rewrite (older store, or a shape the
         // append path could not handle).
         this.store.saveUiSessions(entries);
-        entries.forEach(({ session }) =>
-          this.persistedMessageCount.set(session.id, session.messages.length),
-        );
+        entries.forEach(({ session }) => {
+          this.persistedMessageCount.set(session.id, session.messages.length);
+          // A full rewrite writes every message in its current state, so no
+          // row is stale afterwards.
+          this.persistedStreamingMessageIds.delete(session.id);
+        });
       }
     }
     sessionIds.forEach((id) => this.dirtySessions.delete(id));
@@ -623,6 +717,12 @@ export class UIHistoryService {
           sessionId,
           messageId: message.id,
         });
+        // v3.4.3: a message was REMOVED — every position after it shifts
+        // down, so the incremental append cursor is stale. Reset it so the
+        // next flush rewrites from scratch instead of appending at wrong
+        // positions (the same class of bug fixed for rollback in v3.4.2).
+        this.persistedMessageCount.delete(sessionId);
+        this.persistedStreamingMessageIds.delete(sessionId);
       }
     } else if (type === "done") {
       const stopAction = this.stopLatestStreaming(session, sessionId);
@@ -694,6 +794,11 @@ export class UIHistoryService {
           session.messages.slice(0, index),
         );
         this.dirtySessions.add(sessionId);
+        // v3.4.2: messages were REMOVED — the incremental append cannot
+        // express a shrink. Reset the cursor so the next flush does a full
+        // rewrite instead of appending past a shorter list.
+        this.persistedMessageCount.delete(sessionId);
+        this.persistedStreamingMessageIds.delete(sessionId);
         actions.push({
           type: "ROLLBACK" as any,
           sessionId,
@@ -890,6 +995,7 @@ export class UIHistoryService {
       this.dirtySessions.delete(id);
       // v3.4.1: the persisted count is no longer valid after a delete.
       this.persistedMessageCount.delete(id);
+      this.persistedStreamingMessageIds.delete(id);
     });
     this.store.deleteUiSessions(ids);
   }
@@ -936,6 +1042,7 @@ export class UIHistoryService {
     // v3.4.1: messages were REMOVED — the incremental append cannot express
     // that, so reset the count and let flush do the full rewrite.
     this.persistedMessageCount.delete(sessionId);
+    this.persistedStreamingMessageIds.delete(sessionId);
     this.flush(sessionId);
     return removedCount;
   }

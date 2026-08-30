@@ -17,6 +17,7 @@ import {
   isAbortError,
   waitWithSignal,
 } from './terminal_tools'
+import { getDefaultHostConcurrency, hostKeyForTab } from './hostConcurrency'
 
 /**
  * Fleet tools — the multiplicative agentic layer that lets the agent operate
@@ -61,13 +62,25 @@ async function runOnOneTab(
   const label = tab.title || tab.id
   try {
     abortIfNeeded(context.signal)
-    // The command is identical across the fleet; the command policy is checked
-    // once for the whole fleet (below) before fan-out, so we pass 'allow'
-    // through here by calling the lower-level runCommandAndWait directly.
-    const result: CommandResult = await context.terminalService.runCommandAndWait(
-      tab.id,
-      command,
-      { signal: context.signal, interruptOnAbort: false },
+    // v3.4.2: run under the per-host concurrency cap. A fleet command over
+    // N tabs on one box used to open N simultaneous shells (sshd MaxStartups
+    // refuses ~10+); now at most 3 run per host at a time, FIFO. The tab's
+    // connection config is required for host keying — without it every tab
+    // would get its own bucket and the cap would never group same-host tabs.
+    const host = hostKeyForTab(
+      tab,
+      context.terminalService?.getTerminalConfig?.(tab.id) ?? null,
+    )
+    const limiter = getDefaultHostConcurrency()
+    const result: CommandResult = await limiter.run(
+      host,
+      async () =>
+        context.terminalService.runCommandAndWait(tab.id, command, {
+          signal: context.signal,
+          interruptOnAbort: false,
+        }),
+      `fleet:${label}`,
+      { signal: context.signal },
     )
     return {
       target: label,
@@ -166,9 +179,12 @@ export async function runFleetCommand(
   })
 
   const okCount = allResults.filter((r) => r.ok).length
+  // v3.4.2: surface queue depth so a slow fleet is diagnosable, not mysterious
+  const limiter = getDefaultHostConcurrency()
+  const queued = limiter.globalQueuedCount
   const summary = `Fleet command finished on ${allResults.length} target(s): ${okCount} ok, ${
     allResults.length - okCount
-  } failed/errored.`
+  } failed/errored.${queued > 0 ? ` (${queued} operation(s) were still queued when this completed — per-host cap ${limiter.stats()[0]?.limit ?? 3}.)` : ''}`
   return finish(`${summary}\n${serializeResults(allResults)}`)
 }
 
@@ -326,10 +342,20 @@ export async function collectFacts(
           continue
         }
         try {
-          const res: CommandResult = await terminalService.runCommandAndWait(
-            tab.id,
-            cmd,
-            { signal: context.signal, interruptOnAbort: false },
+          // v3.4.2: per-host cap applies to fact collection too — a fleet
+          // inventory over many tabs on one box is the same channel burst.
+          const res: CommandResult = await getDefaultHostConcurrency().run(
+            hostKeyForTab(
+              tab,
+              terminalService?.getTerminalConfig?.(tab.id) ?? null,
+            ),
+            () =>
+              terminalService.runCommandAndWait(tab.id, cmd, {
+                signal: context.signal,
+                interruptOnAbort: false,
+              }),
+            `facts:${tab.title || tab.id}`,
+            { signal: context.signal },
           )
           facts[`cmd${i}`] = truncateForFleet(res.stdoutDelta || '', 800)
         } catch (e) {

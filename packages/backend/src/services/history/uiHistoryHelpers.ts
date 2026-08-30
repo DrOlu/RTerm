@@ -135,6 +135,14 @@ export function normalizeCompactionBoundaryMarkers(
 }
 
 export function getLastVisiblePreview(messages: ChatMessage[]): string {
+  // v3.4.3: walk BACKWARD past empty/trailing entries (a just-opened
+  // sub_tool has empty output) instead of returning "" on the first empty
+  // message — the old `return ""` inside the loop made the session list
+  // show a blank preview whenever the last message was still streaming.
+  // Also cap the preview: this column is re-written on EVERY flush, and an
+  // uncapped preview wrote the full message body (KBs) into ui_sessions
+  // each time — a measurable part of the v3.4.1 "1.9s flush".
+  const MAX_PREVIEW_CHARS = 200;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message.type === "tokens_count") continue;
@@ -150,9 +158,10 @@ export function getLastVisiblePreview(messages: ChatMessage[]): string {
       message.content || message.metadata?.output || imagePreview || "",
     );
     if (preview) {
-      return preview;
+      return preview.length > MAX_PREVIEW_CHARS
+        ? `${preview.slice(0, MAX_PREVIEW_CHARS)}…`
+        : preview;
     }
-    return "";
   }
   return "";
 }
