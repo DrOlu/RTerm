@@ -1,5 +1,48 @@
 # Changelog
 
+## v3.7.2 (2026-09-01)
+
+### Release-hardening audit — the pre-release sweep
+
+The formal-release audit across every feature surface: agent tools, plugins,
+connections, settings, and the newest theme system.
+
+**The wiring audit (agent tools):** all 54 declared tools verified dispatched
+— 52 via the case switch, 5 via dedicated LangGraph nodes (exec_command,
+read_file, write_file, edit_file, and create_or_edit which is a documented
+legacy alias of the file-mutation capability), plus dynamic MCP and plugin
+tools. Every declared tool has a model-facing description; no orphan dispatch
+cases; no placeholder bodies (the one `skill` placeholder description is
+replaced at runtime by `buildSkillToolDescription(skills)` — verified).
+
+**Plugins:** all 15 manifests valid JSON with correct entries; every entry
+exports `register`. All 15 load paths verified.
+
+**Connections:** the connection-manager registry + nav-label specs pass;
+live end-to-end verified — SSH (the Remote tab: real command, real output),
+WinRM (the attest question through the estate: alive, blind_count 0), and
+all three hosts reachable.
+
+**THE ONE REAL FIND — the theme system shipped untested.** The v3.7.1
+theme-switching (two modes, runtime switching, custom-scheme derivation)
+had NO spec. Wrote `appTheme.extreme.spec.ts` — 9/9 passing: builtin dark
+sets the semantic layer; builtin light flips (on-colors, ring-offset);
+custom dark/light schemes derived by shading with their own accents; the
+legacy names set alongside (stragglers keep working); the focus ring follows
+the accent; an invalid accent hex degrades gracefully (no crash, fallback
+ring); the applied marker; status colors from the scheme palette.
+
+**The kit spec's stale assertion (a test bug, not a product bug):** the
+palette-alias check froze the v3.6.0 Aurora hex values, but v3.7.1
+deliberately re-themed the default to neutral graphite dark + added runtime
+switching. The check now asserts the STRUCTURAL contract: every semantic
+color (except the legitimately-direct on-* pairs) aliases a primitive, and
+the default bg is genuinely dark (luminance < 0.08). Value-free — it will
+not go stale on the next re-theme.
+
+**Verified:** kit spec 10/10; appTheme spec 9/9 (wired into the suite);
+connection registry + nav-label specs; the full `npm test` chain.
+
 ## v3.7.1 (2026-09-01)
 
 ### Redesign — two modes, a true dark, professional typography

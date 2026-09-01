@@ -115,11 +115,33 @@ test('tokens.scss: the semantic scale is complete', () => {
   }
 })
 
-test('tokens.scss: aliases the legacy palette (same values)', () => {
-  // the semantic layer must not CHANGE the look: --color-bg === --app-bg
-  assertTrue(TOKENS_SCSS.includes('--color-bg: var(--p-ink-900)'), 'bg aliases ink-900')
-  assertTrue(TOKENS_SCSS.includes('--p-ink-900: #070a12'), 'ink-900 is the legacy app-bg value')
-  assertTrue(TOKENS_SCSS.includes('--p-cyan: #4fd8e8'), 'primary is the legacy accent value')
+test('tokens.scss: the semantic layer is structurally sound (v3.7.1 re-theme)', () => {
+  // v3.7.1 re-themed the DEFAULT palette (neutral graphite dark — the
+  // 'rterm-dark' mode in appTheme.ts) and added runtime theme switching
+  // that sets the SEMANTIC layer directly. The alias-the-legacy-palette
+  // assertion was correct for v3.6.0 but froze hex values; the design
+  // contract is now STRUCTURAL, not value-based:
+  //   1. every semantic color resolves to a primitive (no raw hex inline)
+  //   2. the default dark is actually dark (the re-theme's point: dark is DARK)
+  //   3. the appTheme runtime sets the semantic names (theme switching works)
+  // the on-* pairs (text on brand fills) are legitimately direct values;
+  // every OTHER semantic color must alias a primitive
+  const semLine = /^\s*--color-(?!on-)[a-z0-9-]+: (var\(--p-[a-z0-9-]+\)|#[0-9a-fA-F]{3,8})/gm
+  let m: RegExpExecArray | null, rawHex = 0, aliased = 0
+  while ((m = semLine.exec(TOKENS_SCSS)) !== null) {
+    if (m[1].startsWith('#')) rawHex++
+    else aliased++
+  }
+  assertTrue(aliased > 10, `semantic colors alias primitives (${aliased} aliased)`)
+  assertTrue(rawHex === 0, `no raw hex in the semantic color layer (found ${rawHex})`)
+  // dark is dark: the bg primitive must be a near-black luminance
+  const bg = TOKENS_SCSS.match(/--p-ink-900: (#[0-9a-fA-F]{6})/)
+  if (bg) {
+    const n = Number.parseInt(bg[1].slice(1), 16)
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+    const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+    assertTrue(lum < 0.08, `the default bg is genuinely dark (luminance ${lum.toFixed(3)} < 0.08)`)
+  }
 })
 
 // ---- runner ----
