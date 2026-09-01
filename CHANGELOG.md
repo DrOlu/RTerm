@@ -1,5 +1,56 @@
 # Changelog
 
+## v3.6.0 (2026-09-01)
+
+### Feature — the design-system foundation (tokens + primitive kit)
+
+The openship-style design layer for RTerm's UI, built the way openship
+builds its: **semantic design tokens + a small cva-variant primitive kit**,
+not bespoke CSS per component.
+
+**The design tokens** (`styles/tokens.scss`) — a three-layer system:
+primitives (raw palette: inks, hazes, the Aurora accents) → semantic names
+(`--color-*`, `--space-*`, `--radius-*`, `--text-*`, `--shadow-*`,
+`--ease-*`, `--z-*`) → component recipes. The semantic layer ALIASES the
+existing Aurora palette exactly — the look does not change by one pixel;
+it becomes systematic. Adds what the legacy 37 vars lacked: a space scale,
+a type scale, motion tokens, a z-scale, on-color pairs, and a focus ring.
+
+**The primitive kit** (`components/kit/`) — Button, Badge, Card (+Header/
+Title/Body/Footer), StatusDot, Input, Section, all on
+class-variance-authority + clsx (the shadcn trio; clsx was already a dep,
+cva added). Button: 6 variants × 6 sizes incl. icon sizes. Badge: 6 semantic
+variants. StatusDot: 4 statuses + pulse. Input: invalid state + focus ring.
+
+**Deliberately NOT Tailwind.** cva + plain CSS classes work with the
+existing electron-vite SCSS pipeline with zero build changes. (The first
+draft used Tailwind arbitrary-value classes — dead text without a Tailwind
+build — caught before it shipped.)
+
+**The migration rule, enforced by test:** kit.scss consumes ONLY semantic
+tokens — no legacy `--app-bg`/`--accent` names, no raw hex. Components
+ported to the kit inherit the whole token system for free.
+
+**A dev-only kit gallery** (`__preview.tsx`) — every variant on one screen
+for eyeballing during the panel-by-panel migration.
+
+**Tests** (`kit.extreme.spec.ts`, 10/10): cn merge semantics; every cva
+emitted class EXISTS in kit.scss (all 36 button variant×size combos, badge,
+card, dot, input classes — no dead classes); defaults; the token-discipline
+check (comment-stripped source scanned for legacy USAGE patterns and raw
+hex — substring-safe, so `--color-danger` is not a false `--danger` hit);
+the semantic scale completeness; and the palette-alias check (the semantic
+layer must not change the look).
+
+**Wired in:** kit spec added to test:backend-unit-extreme (44 specs, EXIT 0);
+typecheck:all EXIT 0; mobile-web build EXIT 0; full electron build EXIT 0
+(the 264 KB renderer CSS bundle includes the new layers).
+
+**What this enables:** the panel-by-panel migration (Settings →
+Connections → Monitor → Chat) where each ported surface drops its
+bespoke SCSS for kit primitives. ~2-3 days per the plan; the foundation
+lands first so every later change composes.
+
 ## v3.5.0 (2026-09-01)
 
 ### Feature — graph execution, agent-facing (plan_graph + run_graph)
