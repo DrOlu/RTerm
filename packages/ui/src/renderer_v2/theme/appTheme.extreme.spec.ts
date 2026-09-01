@@ -137,3 +137,6 @@ for (const c of cases) {
 console.log(`\n${pass}/${cases.length} passed, ${fail} failed`)
 if (fail > 0) process.exit(1)
 console.log('appTheme: ALL TESTS PASSED')
+
+// Ensure this file is treated as an ES module (top-level await requires it)
+export {}
