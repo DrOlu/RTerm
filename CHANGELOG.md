@@ -1,5 +1,59 @@
 # Changelog
 
+## v3.5.0 (2026-09-01)
+
+### Feature — graph execution, agent-facing (plan_graph + run_graph)
+
+RTerm already had graph execution in three places — the agent's own
+LangGraph StateGraph loop, the playbook DAG scheduler (dependsOn + parallel
+batches, v3.2.16), and the AgentSpan/Conductor bridge (JOIN tasks, v2.9.9) —
+but none of them were reachable by the AGENT as a live decision. The agent
+could run steps in a loop and use fleet tools for implicit parallelism, but
+it could not say "fan out these checks, join, branch on the results, fan out
+the patches." The graph lived in playbook YAML written last week, not in
+the agent's reasoning right now.
+
+**`plan_graph`** — the agent describes nodes + dependsOn edges in JSON; the
+existing dagScheduler validates (cycles, unknown deps) and plans the
+parallel batches. Returns the batches, roots, and fan-in joins for review.
+Dry-run by design — nothing executes.
+
+**`run_graph`** — executes the plan against the agent's own tool surface:
+each node is a REAL tool call (exec_command, read_file, run_fleet_command,
+…), batches run in parallel with a bounded pool (default 5, max 5), and a
+node's result is passed to its dependents via `{{nodeId}}` templating in
+string args. A node with multiple dependsOn is a JOIN — it waits for all of
+them.
+
+Semantics:
+- Bounded: max 25 nodes, max 5 parallel, 120s per-node timeout. A graph can
+  never become a worm.
+- A failed node skips its dependents (they would run on missing input);
+  a `critical: true` failed node aborts the whole graph.
+- Structured `<graph_results>` output (per-node status + output), the same
+  serialization style as the fleet tools, so the agent can reason over it.
+- Every node is a real tool call through the same dispatch — the command
+  policy and all guardrails apply inside a graph.
+
+**The effect:** "check 5 servers, then patch the ones that failed" as a
+loop takes 5× check-time + N× patch-time sequentially; as a graph the
+checks collapse to the slowest single check and the patches collapse to the
+slowest patch. The agent builds the graph from what it just learned, not
+from YAML written in advance.
+
+**Tests:** `graph_tools.extreme.spec.ts` — 22/22: planning (fan-out+join
+batches, independent roots share a batch, cycle rejected, unknown dep
+rejected, the diamond graph, maxParallel clamped, duplicate-id catch,
+>25-node schema rejection), templating ({{id}} replaced, unknown
+placeholder preserved, nested objects untouched), execution (parallel
+fan-out with the join-templating proof, non-critical failure skips only
+dependents, CRITICAL failure aborts, bounded concurrency peak ≤ 2 with
+maxParallel=2, duplicate/invalid graphs rejected without executing),
+tool fns (readable plan, cycle reported, dryRun routes to planner, unwired
+executor reported gracefully).
+
+Full backend-unit suite green (now 42 specs). typecheck clean.
+
 ## v3.4.4 (2026-08-30)
 
 ### Memory overhaul — recall relevance, auto-write, sections, per-project

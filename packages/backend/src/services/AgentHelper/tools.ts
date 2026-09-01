@@ -67,8 +67,14 @@ import {
   probeConnectivitySchema,
   runFleetCommand,
   collectFacts,
-  probeConnectivity
+  probeConnectivity,
 } from './tools/fleet_tools'
+import {
+  planGraphSchema,
+  runGraphSchema,
+  planGraphTool,
+  runGraphTool,
+} from './tools/graph_tools'
 import {
   manageDeviceMemorySchema, manageDeviceMemory,
   manageScriptSchema, manageScript,
@@ -127,6 +133,11 @@ export {
 } from './tools/terminal_tools'
 
 export { spawnSubAgentsSchema } from './tools/subAgent_tools'
+
+export {
+  planGraphSchema,
+  runGraphSchema,
+} from './tools/graph_tools'
 
 export { readFileSchema } from './tools/read_tools'
 export { waitSchema, waitTerminalIdleSchema } from './tools/wait_tools'
@@ -281,6 +292,16 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'run_fleet_command',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'run_fleet_command')?.description ?? '',
       schema: runFleetCommandSchema
+    },
+    {
+      name: 'plan_graph',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'plan_graph')?.description ?? '',
+      schema: planGraphSchema
+    },
+    {
+      name: 'run_graph',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'run_graph')?.description ?? '',
+      schema: runGraphSchema
     },
     {
       name: 'collect_facts',
@@ -457,6 +478,8 @@ export const toolImplementations = {
   runFleetCommand,
   collectFacts,
   probeConnectivity,
+  planGraphTool,
+  runGraphTool,
   manageDeviceMemory,
   manageScript,
   manageGroup,

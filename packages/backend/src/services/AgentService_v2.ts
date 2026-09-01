@@ -73,6 +73,8 @@ import {
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
+  planGraphSchema,
+  runGraphSchema,
   toolImplementations,
   buildSkillToolDescription,
 } from "./AgentHelper/tools";
@@ -2616,6 +2618,30 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "plan_graph": {
+          try {
+            const validatedArgs = planGraphSchema.parse(toolCall.args || {});
+            result = await toolImplementations.planGraphTool(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for plan_graph: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "run_graph": {
+          try {
+            const validatedArgs = runGraphSchema.parse(toolCall.args || {});
+            // v3.5.0: wire the graph executor — each node is a real tool call
+            // dispatched through this same service (guardrails apply).
+            (executionContext as any).__graphToolExecutor = {
+              executeToolByName: async (tc: any, ec: any) =>
+                this.executeToolByName(tc, ec),
+            };
+            result = await toolImplementations.runGraphTool(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for run_graph: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "collect_facts": {
           try {
             const validatedArgs = collectFactsSchema.parse(
@@ -3002,6 +3028,16 @@ export class AgentService_v2 {
       case "list_gateway_methods": return ti.listGatewayMethods(args, executionContext);
       case "collect_facts": return ti.collectFacts(args, executionContext);
       case "run_fleet_command": return ti.runFleetCommand(args, executionContext);
+      case "plan_graph": return ti.planGraphTool(args, executionContext);
+      case "run_graph": {
+        // v3.5.0: graph nodes are dispatched through this same service so
+        // every node is a real tool call under the same guardrails.
+        (executionContext as any).__graphToolExecutor = {
+          executeToolByName: async (tc: any, ec: any) =>
+            this.executeToolByName(tc, ec),
+        };
+        return ti.runGraphTool(args, executionContext);
+      }
       case "manage_secret": return ti.manageSecret(args, executionContext);
       case "manage_oncall": return ti.manageOncall(args, executionContext);
       case "manage_gitops": return ti.manageGitops(args, executionContext);

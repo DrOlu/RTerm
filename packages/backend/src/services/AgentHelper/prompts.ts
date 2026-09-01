@@ -481,6 +481,27 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     shortDescription: "Run a command on multiple terminals",
   },
   {
+    name: "plan_graph",
+    description:
+      "Plan a graph of tool calls (nodes + dependsOn edges) and validate it WITHOUT executing. " +
+      "Returns the parallel batches, roots, and fan-in joins. Use when a task has independent " +
+      "branches that should run at the same time and a join point that needs all of them — " +
+      "e.g. 'check 5 servers in parallel, then patch the ones that failed'. " +
+      "Always plan_graph first, review the batches, then run_graph with the same nodes.",
+    shortDescription: "Plan + validate a tool-call graph",
+  },
+  {
+    name: "run_graph",
+    description:
+      "Execute a planned graph of tool calls: nodes run in parallel batches (bounded), " +
+      "each node's result is available to its dependents as {{nodeId}} in string args, and a " +
+      "node with multiple dependsOn is a JOIN that waits for all of them. A failed node skips " +
+      "its dependents; a critical:true failed node aborts the whole graph. " +
+      "Every node is a real tool call — the same command policy and guardrails apply. " +
+      "Plan with plan_graph first.",
+    shortDescription: "Execute a tool-call graph (parallel + joins)",
+  },
+  {
     name: "collect_facts",
     description: COLLECT_FACTS_DESCRIPTION,
     shortDescription: "Inventory terminal tabs",
