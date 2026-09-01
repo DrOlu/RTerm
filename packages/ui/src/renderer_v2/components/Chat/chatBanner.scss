@@ -1,28 +1,28 @@
 /* Banners */
 .message-banner {
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 4px; /* CLI style sharper corners */
   overflow: hidden;
-  background: color-mix(in srgb, var(--fg) 3%, var(--panel-bg));
+  background: color-mix(in srgb, var(--color-fg) 3%, var(--color-surface));
   margin: 8px 0;
   box-shadow: none; /* No shadow for CLI */
 }
 
 .message-banner.is-scroll-active {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  background: color-mix(in srgb, var(--panel-bg) 92%, var(--accent) 8%);
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--color-primary) 8%);
 }
 
 .message-banner.alert {
-  border-color: color-mix(in srgb, var(--fg) 15%, transparent);
-  background: color-mix(in srgb, var(--fg) 2%, var(--panel-bg));
+  border-color: color-mix(in srgb, var(--color-fg) 15%, transparent);
+  background: color-mix(in srgb, var(--color-fg) 2%, var(--color-surface));
 
   .alert-head {
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
-    border-bottom: 1px solid color-mix(in srgb, var(--fg) 5%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-fg) 5%, transparent);
 
     .banner-title {
       flex: 1;
@@ -41,7 +41,7 @@
         border: none;
         padding: 2px;
         cursor: pointer;
-        color: var(--fg-muted);
+        color: var(--color-fg-muted);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -76,30 +76,30 @@
   }
 
   &.is-error {
-    border-color: color-mix(in srgb, var(--danger) 40%, transparent);
-    background: color-mix(in srgb, var(--danger) 4%, var(--panel-bg));
+    border-color: color-mix(in srgb, var(--color-danger) 40%, transparent);
+    background: color-mix(in srgb, var(--color-danger) 4%, var(--color-surface));
     
     .alert-head {
-      background: color-mix(in srgb, var(--danger) 10%, transparent);
-      border-bottom-color: color-mix(in srgb, var(--danger) 20%, transparent);
+      background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+      border-bottom-color: color-mix(in srgb, var(--color-danger) 20%, transparent);
     }
     
-    .banner-icon { color: var(--danger); }
-    .banner-type { color: var(--danger); font-weight: 700; }
+    .banner-icon { color: var(--color-danger); }
+    .banner-type { color: var(--color-danger); font-weight: 700; }
   }
 
   &.is-retry {
-    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-    background: color-mix(in srgb, var(--accent) 3%, var(--panel-bg));
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    background: color-mix(in srgb, var(--color-primary) 3%, var(--color-surface));
     border-style: dashed;
     
     .alert-head {
-      background: color-mix(in srgb, var(--accent) 8%, transparent);
-      border-bottom-color: color-mix(in srgb, var(--accent) 15%, transparent);
+      background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+      border-bottom-color: color-mix(in srgb, var(--color-primary) 15%, transparent);
     }
     
-    .banner-icon { color: var(--accent); }
-    .banner-type { color: var(--accent); font-weight: 700; }
+    .banner-icon { color: var(--color-primary); }
+    .banner-type { color: var(--color-primary); font-weight: 700; }
     
     .alert-content {
       font-style: italic;
@@ -124,8 +124,8 @@
 }
 
 .gyshell-modal {
-  background: var(--panel-bg);
-  border: 1px solid var(--border-strong);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
   border-radius: 4px;
   width: 90%;
   max-width: 900px;
@@ -136,8 +136,8 @@
 
   .modal-header {
     padding: 10px 16px;
-    background: color-mix(in srgb, var(--fg) 5%, transparent);
-    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+    border-bottom: 1px solid var(--color-border);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -149,7 +149,7 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1px;
-      color: var(--danger);
+      color: var(--color-danger);
       display: flex;
       align-items: center;
       gap: 8px;
@@ -169,7 +169,7 @@
       border: none;
       padding: 4px;
       cursor: pointer;
-      color: var(--fg-muted);
+      color: var(--color-fg-muted);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -177,8 +177,8 @@
       transition: all 0.2s;
 
       &:hover {
-        color: var(--fg);
-        background: color-mix(in srgb, var(--fg) 10%, transparent);
+        color: var(--color-fg);
+        background: color-mix(in srgb, var(--color-fg) 10%, transparent);
       }
     }
   }
@@ -186,7 +186,7 @@
   .modal-body {
     padding: 0;
     overflow-y: auto;
-    background: var(--app-bg);
+    background: var(--color-bg);
 
     .error-details-pre {
       margin: 0;
@@ -195,7 +195,7 @@
       font-family: var(--font-mono);
       font-size: 11px;
       line-height: 1.5;
-      color: var(--fg);
+      color: var(--color-fg);
       background: transparent;
       padding: 16px;
       border-radius: 0;
@@ -204,36 +204,36 @@
 }
 
 .alert-content {
-  color: var(--fg);
+  color: var(--color-fg);
   line-height: 1.4;
 }
 
 .message-banner.command.nowait {
-  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
-  background: color-mix(in srgb, var(--warning) 5%, var(--control-bg));
+  border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 5%, var(--color-fill));
 }
 
 .message-banner.ask {
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-  background: color-mix(in srgb, var(--accent) 4%, var(--panel-bg));
+  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 4%, var(--color-surface));
   
   .banner-header {
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    border-bottom-color: color-mix(in srgb, var(--accent) 20%, transparent);
+    background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--color-primary) 20%, transparent);
   }
 }
 
 .message-banner.file-edit {
-  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
-  background: color-mix(in srgb, var(--accent) 3%, var(--panel-bg));
+  border-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 3%, var(--color-surface));
 }
 
 .message-banner.command.nowait .banner-icon {
-  color: var(--warning);
+  color: var(--color-warning);
 }
 
 .message-banner.file-edit .banner-icon {
-  color: var(--accent);
+  color: var(--color-primary);
 }
 
 .message-banner.subtool {
@@ -261,7 +261,7 @@
 }
 
 .message-banner.subtool .banner-title {
-  color: var(--fg);
+  color: var(--color-fg);
   font-size: 12px;
   gap: 6px;
   flex: 0 0 auto;
@@ -270,13 +270,13 @@
 
 .message-banner.subtool.warning .banner-title,
 .message-banner.subtool.warning .banner-type {
-  color: var(--warning);
+  color: var(--color-warning);
   opacity: 0.95;
 }
 
 .message-banner.subtool.error .banner-title,
 .message-banner.subtool.error .banner-type {
-  color: var(--danger);
+  color: var(--color-danger);
   opacity: 0.95;
 }
 
@@ -297,7 +297,7 @@
    * The sweep layer uses the same hue with higher alpha.
    */
   opacity: 1;
-  color: color-mix(in srgb, var(--fg) 58%, transparent);
+  color: color-mix(in srgb, var(--color-fg) 58%, transparent);
 }
 
 .message-banner.subtool.title-sweep .banner-type::after {
@@ -305,7 +305,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  color: color-mix(in srgb, var(--fg) 92%, transparent);
+  color: color-mix(in srgb, var(--color-fg) 92%, transparent);
   opacity: 1;
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 22%, #000 78%, transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0%, #000 22%, #000 78%, transparent 100%);
@@ -321,7 +321,7 @@
 
 .subtool-hint {
   font-size: 12px;
-  color: var(--fg);
+  color: var(--color-fg);
   opacity: 0.55;
 }
 
@@ -330,7 +330,7 @@
   border-top: none;
   padding: 4px 0 2px 0;
   font-size: 12px;
-  color: var(--fg);
+  color: var(--color-fg);
   opacity: 0.75;
   width: 100%;
 }
@@ -342,7 +342,7 @@
 }
 
 .message-banner.subtool .cmd-output {
-  color: var(--fg);
+  color: var(--color-fg);
   opacity: 0.8;
   max-height: 240px;
 }
@@ -400,17 +400,17 @@
   padding: 0 12px;
   gap: 10px;
   cursor: pointer;
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  background: color-mix(in srgb, var(--color-fg) 5%, transparent);
   user-select: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--fg) 5%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-fg) 5%, transparent);
 }
 
 .banner-header:hover {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  background: color-mix(in srgb, var(--color-fg) 8%, transparent);
 }
 
 .banner-icon {
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   display: grid;
   place-items: center;
   line-height: 0;
@@ -418,7 +418,7 @@
 }
 
 .message-banner.command .banner-icon {
-  color: var(--accent);
+  color: var(--color-primary);
 }
 
 .banner-title {
@@ -427,7 +427,7 @@
   gap: 8px;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--fg);
+  color: var(--color-fg);
   overflow: hidden;
   white-space: nowrap;
   align-items: center;
@@ -464,7 +464,7 @@
         padding: 2px 4px;
         font-size: 11px;
         font-weight: 500;
-        color: var(--fg-muted);
+        color: var(--color-fg-muted);
         display: flex;
         align-items: center;
         gap: 4px;
@@ -474,7 +474,7 @@
 
         &:hover:not(:disabled) {
           opacity: 1;
-          color: var(--fg);
+          color: var(--color-fg);
         }
 
         &:disabled {
@@ -491,7 +491,7 @@
 
 .banner-content {
   padding: 12px;
-  background: color-mix(in srgb, var(--panel-bg) 40%, transparent);
+  background: color-mix(in srgb, var(--color-surface) 40%, transparent);
   border-top: none;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -535,23 +535,23 @@
     border: 1px solid transparent;
 
     &.primary {
-      background: var(--accent);
-      color: var(--panel-bg);
-      border-color: var(--accent);
+      background: var(--color-primary);
+      color: var(--color-surface);
+      border-color: var(--color-primary);
 
       &:hover:not(:disabled) {
         filter: brightness(1.1);
-        box-shadow: 0 0 15px color-mix(in srgb, var(--accent) 30%, transparent);
+        box-shadow: 0 0 15px color-mix(in srgb, var(--color-primary) 30%, transparent);
       }
     }
 
     &.secondary {
-      background: color-mix(in srgb, var(--fg) 10%, transparent);
-      color: var(--fg);
-      border-color: color-mix(in srgb, var(--fg) 20%, transparent);
+      background: color-mix(in srgb, var(--color-fg) 10%, transparent);
+      color: var(--color-fg);
+      border-color: color-mix(in srgb, var(--color-fg) 20%, transparent);
 
       &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--fg) 15%, transparent);
+        background: color-mix(in srgb, var(--color-fg) 15%, transparent);
       }
     }
 
@@ -563,7 +563,7 @@
 }
 
 .ask-status {
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   font-size: 12px;
   margin-left: 6px;
 }
@@ -581,15 +581,15 @@
 }
 
 .diff-count.add {
-  color: var(--success);
+  color: var(--color-success);
 }
 
 .diff-count.del {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .cmd-line {
-  color: var(--accent);
+  color: var(--color-primary);
   margin-bottom: 6px;
   font-weight: 500;
 }
@@ -598,7 +598,7 @@
   white-space: pre-wrap;
   word-break: break-all;
   margin: 0;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   line-height: 1.4;
 }
 
@@ -618,25 +618,25 @@
 
 .diff-line {
   line-height: 1.4;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
 }
 
 .diff-line.add {
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
 }
 
 .diff-line.del {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
 }
 
 .diff-line.meta {
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
 }
 
 .diff-empty {
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
 }
 
 .spin {
@@ -677,13 +677,13 @@
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  color: var(--accent);
+  color: var(--color-primary);
   line-height: 0;
   opacity: 0.85;
   margin-right: 3px;
 
   .seamless-tool-group.is-done & {
-    color: var(--fg-muted);
+    color: var(--color-fg-muted);
     opacity: 0.6;
   }
 }
@@ -692,7 +692,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
-  color: color-mix(in srgb, var(--fg) 85%, transparent);
+  color: color-mix(in srgb, var(--color-fg) 85%, transparent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -700,7 +700,7 @@
   min-width: 0;
 
   .seamless-tool-group.is-done & {
-    color: color-mix(in srgb, var(--fg) 55%, transparent);
+    color: color-mix(in srgb, var(--color-fg) 55%, transparent);
     font-weight: 400;
   }
 }
@@ -710,14 +710,14 @@
   position: relative;
   display: inline-block;
   --stg-sweep-width: 35%;
-  color: color-mix(in srgb, var(--fg) 50%, transparent);
+  color: color-mix(in srgb, var(--color-fg) 50%, transparent);
 
   &::after {
     content: attr(data-sweep-text);
     position: absolute;
     inset: 0;
     pointer-events: none;
-    color: color-mix(in srgb, var(--fg) 90%, transparent);
+    color: color-mix(in srgb, var(--color-fg) 90%, transparent);
     -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 20%, #000 80%, transparent 100%);
     mask-image: linear-gradient(90deg, transparent 0%, #000 20%, #000 80%, transparent 100%);
     -webkit-mask-size: var(--stg-sweep-width) 100%;
@@ -743,7 +743,7 @@
   flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   opacity: 0.5;
 
   &:not(:empty) {
@@ -774,7 +774,7 @@
   }
 
   .stg-title {
-    color: color-mix(in srgb, var(--danger, #e5534b) 80%, var(--fg));
+    color: color-mix(in srgb, var(--danger, #e5534b) 80%, var(--color-fg));
   }
 }
 
@@ -785,7 +785,7 @@
   }
 
   .stg-title {
-    color: color-mix(in srgb, var(--warning, #d29922) 70%, var(--fg));
+    color: color-mix(in srgb, var(--warning, #d29922) 70%, var(--color-fg));
   }
 }
 
@@ -796,7 +796,7 @@
   transition: opacity 0.15s ease;
   display: grid;
   place-items: center;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
 
   .stg-header:hover & {
     opacity: 0.7;
@@ -817,14 +817,14 @@
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.6;
-  color: color-mix(in srgb, var(--fg) 55%, transparent);
+  color: color-mix(in srgb, var(--color-fg) 55%, transparent);
 
   &.is-active {
-    color: color-mix(in srgb, var(--fg) 80%, transparent);
+    color: color-mix(in srgb, var(--color-fg) 80%, transparent);
   }
 
   &.is-current {
-    color: color-mix(in srgb, var(--accent) 80%, transparent);
+    color: color-mix(in srgb, var(--color-primary) 80%, transparent);
   }
 }
 
@@ -854,11 +854,11 @@
 
   // v3.2.9: failure/warning tint
   .stg-step.is-error & {
-    color: color-mix(in srgb, var(--danger, #e5534b) 75%, var(--fg));
+    color: color-mix(in srgb, var(--danger, #e5534b) 75%, var(--color-fg));
   }
 
   .stg-step.is-warning & {
-    color: color-mix(in srgb, var(--warning, #d29922) 70%, var(--fg));
+    color: color-mix(in srgb, var(--warning, #d29922) 70%, var(--color-fg));
   }
 }
 
@@ -888,7 +888,7 @@
 
 .seamless-overlay-ask .message-banner.ask {
   // Give the ask card a subtle elevated look
-  box-shadow: 0 2px 12px color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--color-primary) 15%, transparent);
 }
 
 .seamless-overlay-alert .message-banner.alert {

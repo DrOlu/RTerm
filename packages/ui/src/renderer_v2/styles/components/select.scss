@@ -56,8 +56,8 @@
   overscroll-behavior: contain;
   padding: 4px;
   border-radius: 4px;
-  background: var(--panel-bg);
-  border: 1px solid var(--border-strong);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
   box-shadow:
     0 10px 40px rgba(0, 0, 0, 0.5),
     0 0 0 1px rgba(255, 255, 255, 0.05);
@@ -78,16 +78,16 @@
 
 .win-select-menu.is-platform-windows::-webkit-scrollbar-thumb,
 .win-select-menu.is-platform-linux::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--color-fg) 12%, transparent);
   border-radius: 5px;
-  border: 2px solid var(--app-bg);
+  border: 2px solid var(--color-bg);
   background-clip: content-box;
 }
 
 .win-select-menu.is-platform-windows::-webkit-scrollbar-thumb:hover,
 .win-select-menu.is-platform-linux::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--fg) 22%, transparent);
-  border: 2px solid var(--app-bg);
+  background: color-mix(in srgb, var(--color-fg) 22%, transparent);
+  border: 2px solid var(--color-bg);
   background-clip: content-box;
 }
 
@@ -113,7 +113,7 @@
   text-align: left;
   border: none;
   background: transparent;
-  color: var(--fg);
+  color: var(--color-fg);
   padding: 4px 10px;
   border-radius: 3px;
   cursor: pointer;
@@ -132,21 +132,21 @@
 }
 
 .win-select-option:hover {
-  background: var(--control-bg-hover);
+  background: var(--color-fill-hover);
 }
 
 .win-select-option.is-selected {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--color-primary) 15%, transparent);
+  color: var(--color-primary);
   font-weight: 500;
 }
 
 // Settings language row trigger: keep it visually identical to native <select> in settings.scss
 // (but rendered as a button)
 .settings-native-select.win-select-trigger {
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-  color: var(--fg);
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+  color: var(--color-fg);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 6px 12px;
   outline: none;
@@ -159,8 +159,8 @@
 }
 
 .settings-native-select.win-select-trigger:hover {
-  background: var(--control-bg-hover);
-  border-color: var(--border-strong);
+  background: var(--color-fill-hover);
+  border-color: var(--color-border-strong);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 

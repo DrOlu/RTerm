@@ -1,8 +1,8 @@
 @mixin mention-kind-vars {
-  --mention-kind-tab: var(--accent);
-  --mention-kind-skill: var(--accent-2);
-  --mention-kind-file: color-mix(in srgb, var(--success) 82%, var(--fg));
-  --mention-kind-chat: color-mix(in srgb, var(--accent) 55%, var(--success));
+  --mention-kind-tab: var(--color-primary);
+  --mention-kind-skill: var(--color-secondary);
+  --mention-kind-file: color-mix(in srgb, var(--color-success) 82%, var(--color-fg));
+  --mention-kind-chat: color-mix(in srgb, var(--color-primary) 55%, var(--color-success));
   --mention-kind-spec: var(--mention-kind-chat);
 }
 
@@ -21,7 +21,7 @@
     var(--mention-badge-kind) 42%,
     transparent
   );
-  color: var(--fg);
+  color: var(--color-fg);
 
   &.terminal,
   &.mention-terminal {
@@ -53,10 +53,10 @@
     --mention-badge-kind: var(--mention-kind-chat);
     background: color-mix(
       in srgb,
-      var(--accent) 9%,
-      color-mix(in srgb, var(--success) 8%, transparent)
+      var(--color-primary) 9%,
+      color-mix(in srgb, var(--color-success) 8%, transparent)
     );
-    border-color: color-mix(in srgb, var(--accent) 28%, var(--success));
+    border-color: color-mix(in srgb, var(--color-primary) 28%, var(--color-success));
     text-transform: none;
   }
 }
@@ -116,7 +116,7 @@
     color: color-mix(
       in srgb,
       var(--mention-suggestion-kind) 86%,
-      var(--fg)
+      var(--color-fg)
     );
 
     &.pass-chat-spec {

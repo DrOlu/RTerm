@@ -4,7 +4,7 @@
   // Layout goal: [GYSHELL] [←── drag area ──→] [⚡][⚙] [─][□][×]
   // GYSHELL on the far left; icon buttons + window controls pushed to the right.
   .topbar {
-    background: var(--app-bg) !important;
+    background: var(--color-bg) !important;
     backdrop-filter: none !important;
     padding-left: 12px !important;
     padding-right: 12px !important;
@@ -80,7 +80,7 @@
     border-radius: 4px;
     border: 1px solid transparent;
     background: transparent;
-    color: var(--fg-muted);
+    color: var(--color-fg-muted);
     display: grid;
     place-items: center;
     cursor: pointer;
@@ -89,13 +89,13 @@
     line-height: 0;
 
     &:hover {
-      background: color-mix(in srgb, var(--fg) 8%, transparent);
-      color: var(--fg);
-      border-color: color-mix(in srgb, var(--fg) 15%, transparent);
+      background: color-mix(in srgb, var(--color-fg) 8%, transparent);
+      color: var(--color-fg);
+      border-color: color-mix(in srgb, var(--color-fg) 15%, transparent);
     }
 
     &:active {
-      background: color-mix(in srgb, var(--fg) 14%, transparent);
+      background: color-mix(in srgb, var(--color-fg) 14%, transparent);
     }
   }
 
@@ -122,14 +122,14 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--fg) 12%, transparent);
+    background: color-mix(in srgb, var(--color-fg) 12%, transparent);
     border-radius: 5px;
-    border: 2px solid var(--app-bg);
+    border: 2px solid var(--color-bg);
     background-clip: content-box;
 
     &:hover {
-      background: color-mix(in srgb, var(--fg) 22%, transparent);
-      border: 2px solid var(--app-bg);
+      background: color-mix(in srgb, var(--color-fg) 22%, transparent);
+      border: 2px solid var(--color-bg);
       background-clip: content-box;
     }
   }
@@ -140,7 +140,7 @@
 
   // Terminal viewport scrollbar — matches the Windows treatment
   .xterm-viewport::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--fg) 16%, transparent) !important;
+    background: color-mix(in srgb, var(--color-fg) 16%, transparent) !important;
     border: none;
     border-radius: 4px;
   }

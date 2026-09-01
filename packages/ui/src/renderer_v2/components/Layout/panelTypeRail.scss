@@ -6,8 +6,8 @@
   align-items: center;
   gap: 6px;
   padding: 8px 4px;
-  border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel-bg) 86%, var(--app-bg));
+  border-right: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface) 86%, var(--color-bg));
 }
 
 .gyshell-panel-type-rail-main,
@@ -22,7 +22,7 @@
   margin-top: auto;
   padding-top: 8px;
   padding-bottom: 5px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
 }
 
 .gyshell-panel-type-rail-btn,
@@ -32,7 +32,7 @@
   border-radius: 6px;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   display: inline-flex;
   flex-direction: column;
   align-items: center;
@@ -44,8 +44,8 @@
 
 .gyshell-panel-type-rail-btn:hover,
 .gyshell-layout-slot-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-  color: var(--fg);
+  background: color-mix(in srgb, var(--color-fg) 7%, transparent);
+  color: var(--color-fg);
 }
 
 .gyshell-layout-slot-btn:disabled {
@@ -54,17 +54,17 @@
 }
 
 .gyshell-panel-type-rail-btn.is-detached {
-  color: color-mix(in srgb, var(--fg-muted) 75%, var(--danger));
+  color: color-mix(in srgb, var(--color-fg-muted) 75%, var(--color-danger));
 }
 
 .gyshell-layout-slot-btn.is-active {
-  border-color: color-mix(in srgb, var(--accent) 62%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: color-mix(in srgb, var(--accent) 82%, var(--fg));
+  border-color: color-mix(in srgb, var(--color-primary) 62%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  color: color-mix(in srgb, var(--color-primary) 82%, var(--color-fg));
 }
 
 .gyshell-layout-slot-btn.is-save {
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
 }
 
 .gyshell-panel-type-rail-count {

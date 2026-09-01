@@ -2,7 +2,7 @@
   // TopBar Layout Adjustments
   .topbar {
     // Make TopBar visually identical to the native titleBarOverlay background
-    background: var(--app-bg) !important;
+    background: var(--color-bg) !important;
     backdrop-filter: none !important;
 
     // Reduce padding as no left traffic lights
@@ -60,14 +60,14 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--fg) 12%, transparent);
+    background: color-mix(in srgb, var(--color-fg) 12%, transparent);
     border-radius: 5px;
-    border: 2px solid var(--app-bg); // Creates a padding effect
+    border: 2px solid var(--color-bg); // Creates a padding effect
     background-clip: content-box;
 
     &:hover {
-      background: color-mix(in srgb, var(--fg) 22%, transparent);
-      border: 2px solid var(--app-bg);
+      background: color-mix(in srgb, var(--color-fg) 22%, transparent);
+      border: 2px solid var(--color-bg);
       background-clip: content-box;
     }
   }
@@ -79,7 +79,7 @@
   // 4. Terminal Specific Scrollbar Adjustments
   // Ensure the terminal's viewport scrollbar matches the app theme
   .xterm-viewport::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--fg) 16%, transparent) !important;
+    background: color-mix(in srgb, var(--color-fg) 16%, transparent) !important;
     border: none; // xterm scrollbar often looks better without the border padding trick
     border-radius: 4px;
   }

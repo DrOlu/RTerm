@@ -1,5 +1,49 @@
 # Changelog
 
+## v3.7.0 (2026-09-01)
+
+### Feature — Phase 3: the whole UI migrates to the design system
+
+The v3.6.0 foundation (semantic tokens + the primitive kit) now carries
+the entire interface. **1,270 token replacements across every SCSS file**
+— every panel, every component, every platform variant now consumes the
+one semantic system. Zero legacy token usage remains.
+
+**The migration, mechanically:**
+- Every `var(--app-bg)` → `var(--color-bg)`, `var(--accent)` →
+  `var(--color-primary)`, `var(--fg)` → `var(--color-fg)`, and the 17 other
+  legacy names → their semantic equivalents. Every replacement is in the
+  `var(--X)` form (with the closing paren) so `var(--fg)` can never collide
+  with `var(--fg-muted)` — order-independent and substring-safe.
+- The semantic tokens alias the legacy palette EXACTLY, so this is a
+  zero-visual-change refactor: the whole UI now reads from one place.
+- The radius polish: the legacy sharp corners (`border-radius: 2px/3px/4px`)
+  upgraded to the `--radius` scale — the one place the look softens,
+  deliberately.
+
+**The Settings panel's action buttons now render via the kit Button
+primitive** — 22 swaps (5 primary + 17 secondary across the single-line and
+multi-line JSX forms), each carrying the panel's compact mono-uppercase
+style via the `settings-kit-btn` class on top of the kit base. The bespoke
+`.btn-primary`/`.btn-secondary` SCSS remains for the four other components
+that still reference it (Chat, Terminal, ConfirmDialog) — now token-ized.
+
+**What deliberately did NOT change:**
+- Connections' `icon-btn-sm` (31 usages) — a global utility with `!important`
+  overrides and a `.primary` modifier; forcing kit Buttons there would be
+  churn with hover-behavior risk and no benefit. Its SCSS is token-ized.
+- The legacy `:root` definitions in global.scss — kept so the semantic
+  layer's aliases resolve and any straggler keeps working. They are now
+  unreferenced by usage sites.
+
+**Verified:** kit spec 10/10; typecheck:all EXIT=0; full electron build
+EXIT=0 (the renderer bundle compiles with all 1,270 migrations); the
+full backend-unit suite (44 specs) EXIT=0.
+
+**The effect:** one design system, end to end. Any future theme work —
+light mode, a palette refresh, a density toggle — is now a token-file
+edit instead of an 11,000-line SCSS hunt.
+
 ## v3.6.0 (2026-09-01)
 
 ### Feature — the design-system foundation (tokens + primitive kit)

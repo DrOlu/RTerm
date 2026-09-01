@@ -1,6 +1,6 @@
 .panel-file-editor {
   --panel-find-offset-top: 58px;
-  background: var(--panel-bg);
+  background: var(--color-surface);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -13,8 +13,8 @@
   gap: 5px;
   padding-left: 4px;
   padding-right: 6px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-fg) 3%, transparent);
 }
 
 .file-editor-header.is-draggable {
@@ -40,7 +40,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.45px;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
 }
 
 .file-editor-path {
@@ -50,14 +50,14 @@
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
 }
 
 .file-editor-dirty {
   flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: color-mix(in srgb, var(--accent) 62%, var(--fg));
+  color: color-mix(in srgb, var(--color-primary) 62%, var(--color-fg));
 }
 
 .file-editor-status-bar {
@@ -65,17 +65,17 @@
   display: flex;
   align-items: center;
   padding: 0 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   font-size: 10px;
   font-family: var(--font-mono);
 }
 
 .file-editor-status-error {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .file-editor-status-message {
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
 }
 
 .file-editor-status-placeholder {
@@ -102,11 +102,11 @@
 }
 
 .file-editor-empty-state {
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
 }
 
 .file-editor-error {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .file-editor-textarea {
@@ -117,7 +117,7 @@
   resize: none;
   padding: 10px;
   background: transparent;
-  color: var(--fg);
+  color: var(--color-fg);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.45;
@@ -194,25 +194,25 @@
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 82%, var(--fg) 2%);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--bg) 82%, var(--color-fg) 2%);
   overflow-x: auto;
 }
 
 .file-editor-preview-btn {
   height: 24px;
   min-height: 24px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 2px;
   padding: 0 7px;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
   text-transform: uppercase;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 7%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-fg) 7%, transparent);
   cursor: pointer;
   transition:
     background 0.1s,
@@ -221,13 +221,13 @@
 }
 
 .file-editor-preview-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  border-color: color-mix(in srgb, var(--fg) 15%, transparent);
-  color: var(--fg);
+  background: color-mix(in srgb, var(--color-fg) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-fg) 15%, transparent);
+  color: var(--color-fg);
 }
 
 .file-editor-preview-btn:active:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--color-fg) 12%, transparent);
 }
 
 .file-editor-preview-btn-icon {
@@ -249,7 +249,7 @@
   flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   white-space: nowrap;
 }
 
@@ -301,11 +301,11 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 1;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 2px;
   padding: 4px 8px;
-  background: color-mix(in srgb, var(--panel-bg) 94%, transparent);
-  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  color: var(--color-fg-muted);
   font-family: var(--font-mono);
   font-size: 10px;
   pointer-events: none;

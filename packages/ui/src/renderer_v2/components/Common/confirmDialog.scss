@@ -13,8 +13,8 @@
 .gy-confirm-card {
   width: 100%;
   max-width: 420px;
-  background: var(--panel-bg);
-  border: 1px solid var(--border-strong);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
   border-radius: 4px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
   overflow: hidden;
@@ -26,15 +26,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-fg) 5%, transparent);
 
   .icon-btn-sm {
-    color: var(--fg-muted);
+    color: var(--color-fg-muted);
     
     &:hover {
-      background: color-mix(in srgb, var(--fg) 8%, transparent);
-      color: var(--fg);
+      background: color-mix(in srgb, var(--color-fg) 8%, transparent);
+      color: var(--color-fg);
     }
 
     svg {
@@ -49,7 +49,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: var(--fg);
+  color: var(--color-fg);
 }
 
 .gy-confirm-body {
@@ -59,18 +59,18 @@
 .gy-confirm-message {
   font-size: 13px;
   line-height: 1.45;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   text-align: center;
   white-space: pre-line;
 }
 
 .gy-confirm-footer {
   padding: 12px 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  background: color-mix(in srgb, var(--app-bg) 85%, transparent);
+  background: color-mix(in srgb, var(--color-bg) 85%, transparent);
 }
 
 .gy-btn {
@@ -94,15 +94,15 @@
 
 .gy-btn-secondary {
   background: transparent;
-  border-color: var(--border);
-  color: var(--fg);
+  border-color: var(--color-border);
+  color: var(--color-fg);
 }
 .gy-btn-secondary:hover {
-  background: var(--control-bg-hover);
+  background: var(--color-fill-hover);
 }
 
 .gy-btn-primary {
-  background: var(--accent);
+  background: var(--color-primary);
   color: var(--bg);
 }
 .gy-btn-primary:hover {
@@ -110,7 +110,7 @@
 }
 
 .gy-btn-danger {
-  background: var(--danger);
+  background: var(--color-danger);
   color: white;
 }
 .gy-btn-danger:hover {
