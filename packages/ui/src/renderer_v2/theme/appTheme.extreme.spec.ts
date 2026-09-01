@@ -23,7 +23,6 @@ const docStub = {
   documentElement: { style: styleStub },
 } as unknown as Document
 
-// @ts-expect-error — inject before the module reads document
 (globalThis as any).document = docStub
 
 const { applyAppThemeFromTerminalScheme } = await import('./appTheme')
