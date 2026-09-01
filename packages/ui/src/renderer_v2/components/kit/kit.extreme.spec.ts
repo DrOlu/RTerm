@@ -115,11 +115,11 @@ test('tokens.scss: the semantic scale is complete', () => {
   }
 })
 
-test('tokens.scss: aliases the legacy palette (same values)', () => {
-  // the semantic layer must not CHANGE the look: --color-bg === --app-bg
+test('tokens.scss: aliases the palette primitives (same values)', () => {
+  // the semantic layer maps --color-bg to the ink-900 primitive
   assertTrue(TOKENS_SCSS.includes('--color-bg: var(--p-ink-900)'), 'bg aliases ink-900')
-  assertTrue(TOKENS_SCSS.includes('--p-ink-900: #070a12'), 'ink-900 is the legacy app-bg value')
-  assertTrue(TOKENS_SCSS.includes('--p-cyan: #4fd8e8'), 'primary is the legacy accent value')
+  assertTrue(TOKENS_SCSS.includes('--p-ink-900: #0d0d0f'), 'ink-900 is the graphite dark value')
+  assertTrue(TOKENS_SCSS.includes('--p-cyan: #60a5fa'), 'primary is the v3.7.1 accent value')
 })
 
 // ---- runner ----
