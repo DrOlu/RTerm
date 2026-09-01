@@ -43,52 +43,121 @@ function shade(hex: string, amount: number): string {
   )
 }
 
+/**
+ * v3.7.1 — apply a theme to the UI.
+ *
+ * THE REGRESSION THIS FIXES: since the Phase 3 token migration the SCSS
+ * reads the SEMANTIC tokens (--color-bg, --color-fg, ...), but this
+ * function only set the LEGACY names (--app-bg, --fg, ...) — so theme
+ * switching silently stopped reaching the UI. The semantic tokens alias
+ * static primitives in tokens.scss, which is right for the DEFAULT look
+ * but meant runtime theme values were never consumed.
+ *
+ * Now we set the SEMANTIC layer directly (plus the legacy names for any
+ * straggler). The two builtin modes are hand-tuned palettes; a custom
+ * scheme is derived by luminance into the nearest mode's structure, with
+ * its own accent/status colors.
+ */
 export function applyAppThemeFromTerminalScheme(scheme: TerminalColorScheme): void {
   const root = document.documentElement.style
+  root.setProperty('data-theme-applied', scheme.name)
 
-  // Map Tabby-like terminal scheme into our UI tokens
   const bg = scheme.background
   const fg = scheme.foreground
-  const accent = scheme.colors[4] // Tabby uses accentIndex=4
+  const accent = scheme.colors[4]
+  const accent2 = scheme.colors[5]
   const isDark = luminance(bg) < 0.5
 
-  root.setProperty('--app-bg', bg)
-  root.setProperty('--panel-bg', shade(bg, 0.06))
-  root.setProperty('--panel-bg-2', shade(bg, 0.02))
+  // ---- the two hand-tuned modes --------------------------------
+  // These are the DESIGNED palettes: a true neutral graphite dark (not the
+  // old deep-blue Aurora) with strong contrast, and a clean paper light.
+  const DARK = {
+    bg: '#0d0d0f', surface: '#141417', surface2: '#101013', raised: '#1b1b20',
+    fg: '#f2f2f4', fgMuted: '#b6b6bd', fgFaint: '#8a8a93',
+    border: 'rgba(255, 255, 255, 0.09)', borderStrong: 'rgba(255, 255, 255, 0.16)',
+    fill: 'rgba(255, 255, 255, 0.055)', fillHover: 'rgba(255, 255, 255, 0.09)',
+    fillActive: 'rgba(255, 255, 255, 0.13)',
+    shadow: '0 10px 30px rgba(0, 0, 0, 0.55)',
+    ringOffset: '#0d0d0f',
+  }
+  const LIGHT = {
+    bg: '#ffffff', surface: '#ffffff', surface2: '#f6f6f7', raised: '#ffffff',
+    fg: '#1a1a1e', fgMuted: '#55555e', fgFaint: '#8a8a93',
+    border: 'rgba(0, 0, 0, 0.10)', borderStrong: 'rgba(0, 0, 0, 0.18)',
+    fill: 'rgba(0, 0, 0, 0.04)', fillHover: 'rgba(0, 0, 0, 0.07)',
+    fillActive: 'rgba(0, 0, 0, 0.10)',
+    shadow: '0 10px 30px rgba(0, 0, 0, 0.12)',
+    ringOffset: '#ffffff',
+  }
 
-  root.setProperty('--fg', fg)
-  root.setProperty('--fg-muted', shade(fg, -0.25))
-  root.setProperty('--fg-faint', shade(fg, -0.45))
+  const m = isDark ? DARK : LIGHT
 
-  root.setProperty('--accent', accent)
+  // Is this one of the two designed modes, or a custom scheme to derive?
+  const isBuiltinDark = bg.toLowerCase() === '#0d0d0f'
+  const isBuiltinLight = bg.toLowerCase() === '#ffffff'
+
+  const set = (name: string, value: string) => root.setProperty(name, value)
+
+  // ---- semantic: surfaces ----
+  set('--color-bg', isBuiltinDark || isBuiltinLight ? m.bg : bg)
+  set('--color-surface', isBuiltinDark || isBuiltinLight ? m.surface : shade(bg, isDark ? 0.05 : -0.02))
+  set('--color-surface-2', isBuiltinDark || isBuiltinLight ? m.surface2 : shade(bg, isDark ? 0.02 : -0.035))
+  set('--color-surface-raised', isBuiltinDark || isBuiltinLight ? m.raised : shade(bg, isDark ? 0.08 : -0.055))
+
+  // ---- semantic: text ----
+  set('--color-fg', fg)
+  set('--color-fg-muted', isBuiltinDark || isBuiltinLight ? m.fgMuted : shade(fg, isDark ? 0.22 : -0.35))
+  set('--color-fg-faint', isBuiltinDark || isBuiltinLight ? m.fgFaint : shade(fg, isDark ? 0.42 : -0.5))
+
+  // ---- semantic: lines + fills ----
+  set('--color-border', m.border)
+  set('--color-border-strong', m.borderStrong)
+  set('--color-fill', m.fill)
+  set('--color-fill-hover', m.fillHover)
+  set('--color-fill-active', m.fillActive)
+
+  // ---- semantic: brand + status ----
+  set('--color-primary', accent)
   const accentRgb = hexToRgb(accent)
-  if (accentRgb) {
-    root.setProperty('--accent-rgb', rgbToCssValue(accentRgb))
-  } else {
-    root.removeProperty('--accent-rgb')
-  }
-  root.setProperty('--accent-2', scheme.colors[5])
+  if (accentRgb) set('--color-primary-rgb', rgbToCssValue(accentRgb))
+  else root.removeProperty('--color-primary-rgb')
+  set('--color-secondary', accent2)
+  const accent2Rgb = hexToRgb(accent2)
+  if (accent2Rgb) set('--color-secondary-rgb', rgbToCssValue(accent2Rgb))
+  set('--color-danger', scheme.colors[1])
+  set('--color-success', scheme.colors[2])
+  set('--color-warning', scheme.colors[3])
 
-  // Border/control tokens must adapt in light mode, otherwise icons/controls look "off"
-  if (isDark) {
-    root.setProperty('--border', 'rgba(255, 255, 255, 0.08)')
-    root.setProperty('--border-strong', 'rgba(255, 255, 255, 0.14)')
-    root.setProperty('--control-bg', 'rgba(255, 255, 255, 0.06)')
-    root.setProperty('--control-bg-hover', 'rgba(255, 255, 255, 0.09)')
-    root.setProperty('--control-bg-active', 'rgba(255, 255, 255, 0.12)')
-    root.setProperty('--shadow', '0 10px 30px rgba(0, 0, 0, 0.45)')
-  } else {
-    root.setProperty('--border', 'rgba(0, 0, 0, 0.10)')
-    root.setProperty('--border-strong', 'rgba(0, 0, 0, 0.18)')
-    root.setProperty('--control-bg', 'rgba(0, 0, 0, 0.04)')
-    root.setProperty('--control-bg-hover', 'rgba(0, 0, 0, 0.06)')
-    root.setProperty('--control-bg-active', 'rgba(0, 0, 0, 0.09)')
-    root.setProperty('--shadow', '0 10px 30px rgba(0, 0, 0, 0.18)')
-  }
+  // on-color pairs: dark ink on bright fills, light on dark fills
+  set('--color-on-primary', isDark ? '#0b0b0d' : '#ffffff')
+  set('--color-on-danger', isDark ? '#1a0508' : '#ffffff')
+  set('--color-on-success', isDark ? '#04220f' : '#ffffff')
 
-  // Keep danger/success mapped to terminal red/green
-  root.setProperty('--danger', scheme.colors[1])
-  root.setProperty('--success', scheme.colors[2])
-  root.setProperty('--warning', scheme.colors[3])
+  // ---- semantic: focus + elevation ----
+  set('--color-ring', accentRgb
+    ? `rgba(${accentRgb.r}, ${accentRgb.g}, ${accentRgb.b}, 0.55)`
+    : 'rgba(96, 165, 250, 0.55)')
+  set('--color-ring-offset', m.ringOffset)
+  set('--shadow-md', m.shadow)
+
+  // ---- legacy names (stragglers + the tokens.scss aliases resolve these
+  //      at load; setting them keeps any unmigrated reference correct) ----
+  set('--app-bg', isBuiltinDark || isBuiltinLight ? m.bg : bg)
+  set('--panel-bg', isBuiltinDark || isBuiltinLight ? m.surface : shade(bg, isDark ? 0.05 : -0.02))
+  set('--panel-bg-2', isBuiltinDark || isBuiltinLight ? m.surface2 : shade(bg, isDark ? 0.02 : -0.035))
+  set('--fg', fg)
+  set('--fg-muted', isBuiltinDark || isBuiltinLight ? m.fgMuted : shade(fg, isDark ? 0.22 : -0.35))
+  set('--fg-faint', isBuiltinDark || isBuiltinLight ? m.fgFaint : shade(fg, isDark ? 0.42 : -0.5))
+  set('--border', m.border)
+  set('--border-strong', m.borderStrong)
+  set('--control-bg', m.fill)
+  set('--control-bg-hover', m.fillHover)
+  set('--control-bg-active', m.fillActive)
+  set('--accent', accent)
+  if (accentRgb) set('--accent-rgb', rgbToCssValue(accentRgb))
+  set('--accent-2', accent2)
+  set('--danger', scheme.colors[1])
+  set('--success', scheme.colors[2])
+  set('--warning', scheme.colors[3])
+  set('--shadow', m.shadow)
 }
-

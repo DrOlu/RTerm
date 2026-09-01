@@ -16,27 +16,30 @@
    ============================================================ */
 
 :root {
-  /* ---- 1. primitives (raw) ---------------------------------- */
-  --p-ink-900: #070a12;
-  --p-ink-800: #0a0f1b;
-  --p-ink-700: #0d1322;
-  --p-ink-600: #141c30;
-  --p-ink-500: #1b2540;
+  /* ---- 1. primitives (raw) ----------------------------------
+     v3.7.1: the DEFAULT palette is the hand-tuned neutral graphite dark
+     (matching the 'rterm-dark' mode in appTheme.ts). The old deep-blue
+     Aurora inks are gone — dark is now DARK. */
+  --p-ink-900: #0d0d0f;
+  --p-ink-800: #101013;
+  --p-ink-700: #141417;
+  --p-ink-600: #1b1b20;
+  --p-ink-500: #26262c;
 
-  --p-haze-100: rgba(244, 247, 255, 0.96);
-  --p-haze-200: rgba(204, 214, 245, 0.68);
-  --p-haze-300: rgba(160, 174, 215, 0.46);
-  --p-haze-line: rgba(148, 178, 255, 0.10);
-  --p-haze-line-strong: rgba(148, 178, 255, 0.20);
-  --p-haze-fill: rgba(148, 178, 255, 0.07);
-  --p-haze-fill-hover: rgba(148, 178, 255, 0.12);
-  --p-haze-fill-active: rgba(148, 178, 255, 0.17);
+  --p-haze-100: rgba(242, 242, 244, 0.96);
+  --p-haze-200: rgba(182, 182, 189, 0.72);
+  --p-haze-300: rgba(138, 138, 147, 0.48);
+  --p-haze-line: rgba(255, 255, 255, 0.09);
+  --p-haze-line-strong: rgba(255, 255, 255, 0.16);
+  --p-haze-fill: rgba(255, 255, 255, 0.055);
+  --p-haze-fill-hover: rgba(255, 255, 255, 0.09);
+  --p-haze-fill-active: rgba(255, 255, 255, 0.13);
 
-  --p-cyan: #4fd8e8;
-  --p-violet: #8b7bff;
-  --p-rose: #ff5d7e;
-  --p-mint: #3ddc97;
-  --p-amber: #ffc44d;
+  --p-cyan: #60a5fa;
+  --p-violet: #c084fc;
+  --p-rose: #f87171;
+  --p-mint: #4ade80;
+  --p-amber: #facc15;
 
   /* ---- 2. semantic (what components use) --------------------- */
   /* surfaces */
@@ -69,29 +72,36 @@
   --color-warning: var(--p-amber);
 
   /* on-color (text placed on brand/status fills) */
-  --color-on-primary: #06282c;
-  --color-on-danger: #2b0710;
-  --color-on-success: #04251a;
+  --color-on-primary: #0b0b0d;
+  --color-on-danger: #1a0508;
+  --color-on-success: #04220f;
 
   /* focus */
   --color-ring: rgba(var(--color-primary-rgb), 0.55);
   --color-ring-offset: var(--p-ink-900);
 
-  /* typography */
-  --font-sans: var(--font-ui);
-  --font-mono: var(--font-mono);
+  /* typography — v3.7.1: Inter first (a real UI face, not just the system
+     stack), with the system stack as fallback. Loaded from the bundled
+     font set when present, else the OS substitutes gracefully. */
+  --font-sans: 'Inter', 'Inter Variable', ui-sans-serif, system-ui, -apple-system,
+    'SF Pro Text', 'Segoe UI Variable', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', SFMono-Regular,
+    Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  /* the CHAT face: readable prose, not mono. Chat text is for reading. */
+  --font-chat: var(--font-sans);
+  --font-chat-mono: var(--font-mono);
 
-  /* type scale */
+  /* type scale — v3.7.1: slightly larger base for readability */
   --text-2xs: 10px;
   --text-xs: 11px;
-  --text-sm: 12.5px;
+  --text-sm: 13px;
   --text-base: 14px;
   --text-lg: 16px;
   --text-xl: 20px;
   --text-2xl: 26px;
-  --leading-tight: 1.25;
-  --leading-normal: 1.45;
-  --leading-relaxed: 1.65;
+  --leading-tight: 1.3;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.7;
 
   /* space scale (4px base) */
   --space-1: 4px;

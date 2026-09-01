@@ -1,5 +1,52 @@
 # Changelog
 
+## v3.7.1 (2026-09-01)
+
+### Redesign — two modes, a true dark, professional typography
+
+**The theme system is now TWO MODES: Dark and Light.** The 190 Tabby-imported
+schemes are removed. What ships is one hand-tuned pair (`rtermSchemes.ts`):
+
+- **Dark** — a true neutral GRAPHITE (#0d0d0f base, near-black), not the old
+  deep-blue Aurora. Foreground at 94% white for strong contrast; borders and
+  fills on white-alpha so the chrome reads as layers of the same dark, not
+  blue-tinted glass. The 16 ANSI terminal colors tuned for legibility on
+  graphite.
+- **Light** — clean paper white, ink foreground, print-grade ANSI colors.
+
+**A REGRESSION FIXED (found during this work):** the Phase 3 token migration
+had silently BROKEN theme switching — `appTheme.ts` set only the legacy
+names (`--app-bg`, `--fg`...) while the migrated SCSS reads the semantic
+tokens, which alias static primitives. Runtime theme values never reached
+the UI. `appTheme.ts` now sets the SEMANTIC layer directly (plus legacy for
+stragglers): the two builtin modes are hand-tuned palettes; a custom scheme
+is derived by luminance into the nearest mode's structure with its own
+accent/status colors. Legacy theme ids map to the nearest mode so a stored
+settings.themeId never breaks.
+
+**Typography, professional-grade:**
+- The UI face is now **Inter first** (with the full system stack as
+  fallback); mono is JetBrains Mono first. A real designed face instead of
+  whatever the OS hands over.
+- **The chat panel reads as prose now, not terminal output.** The
+  markdown-body (assistant responses) and plain-text (user messages) use
+  the sans chat face at 13.5px / 1.65 line-height — comfortable reading.
+  Code blocks stay mono (12.5px). The composer matches what you read:
+  you type in the same face your messages render in.
+- The type scale's base bumped 12.5→13px and leading relaxed (1.45→1.55)
+  across the whole UI.
+
+**The overall feel:** neutral graphite chrome with white-alpha layering,
+consistent radius, the focus ring, and the kit primitives from v3.6/3.7 —
+a calm, professional surface with nothing shouting.
+
+**The Settings theme section** now shows the two modes as large tiles
+(custom schemes still supported below, if defined). The renderer bundle
+shrank 3,066→2,991 KB with the 190 schemes removed.
+
+**Verified:** typecheck:all EXIT=0; kit spec 10/10; full electron build
+EXIT=0.
+
 ## v3.7.0 (2026-09-01)
 
 ### Feature — Phase 3: the whole UI migrates to the design system

@@ -1,6 +1,5 @@
 import type { TerminalColorScheme } from './terminalColorSchemes'
-import { TABBY_DEFAULT_DARK, TABBY_DEFAULT_LIGHT } from './terminalColorSchemes'
-import { builtInSchemes } from './builtInSchemes'
+import { RTerm_DARK, RTerm_LIGHT } from './rtermSchemes'
 
 export type ThemeId = string
 
@@ -10,14 +9,20 @@ export interface AppTheme {
   terminal: TerminalColorScheme
 }
 
+/**
+ * v3.7.1 — the theme system is TWO MODES: light and dark.
+ *
+ * The 190 Tabby-imported schemes were removed. What shipped instead is one
+ * hand-tuned pair: a true neutral dark (not the old deep-blue Aurora) with
+ * strong contrast, and a clean light. The terminal colors follow the mode.
+ *
+ * Custom themes (the user's own schemes file) still work — they are offered
+ * alongside the two modes and are mapped by luminance into the nearest
+ * mode's UI tokens.
+ */
 export const BUILTIN_THEMES: AppTheme[] = [
-  { id: 'gyshell-dark', name: 'Default Dark', terminal: TABBY_DEFAULT_DARK },
-  { id: 'gyshell-light', name: 'Default Light', terminal: TABBY_DEFAULT_LIGHT },
-  ...builtInSchemes.map((s) => ({
-    id: s.name,
-    name: s.name,
-    terminal: s
-  }))
+  { id: 'rterm-dark', name: 'Dark', terminal: RTerm_DARK },
+  { id: 'rterm-light', name: 'Light', terminal: RTerm_LIGHT },
 ]
 
 export function getAllThemes(customThemes: TerminalColorScheme[] = []): AppTheme[] {
@@ -34,7 +39,13 @@ export function resolveTheme(themeId: string | undefined, customThemes: Terminal
   if (custom) {
     return { id: custom.name, name: custom.name, terminal: custom }
   }
-  return BUILTIN_THEMES.find((t) => t.id === themeId) ?? BUILTIN_THEMES[0]
+  const builtin = BUILTIN_THEMES.find((t) => t.id === themeId)
+  if (builtin) return builtin
+  // Legacy ids from the old 190-theme system map to the nearest mode so a
+  // stored settings.themeId never breaks.
+  const legacyLight = ['gyshell-light', 'Tabby Default Light']
+  if (themeId && legacyLight.some((id) => themeId.toLowerCase().includes(id.toLowerCase().replace('Tabby ', '')))) {
+    return BUILTIN_THEMES[1]
+  }
+  return BUILTIN_THEMES[0]
 }
-
-

@@ -598,6 +598,14 @@ body.chat-drag-selection-suppressed * {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+  /* v3.7.1: chat text is PROSE — a readable sans face at a comfortable
+     size with relaxed leading, not the mono the old panel used. Code
+     blocks inside stay mono via --font-chat-mono. */
+  font-family: var(--font-chat);
+  font-size: 13.5px;
+  line-height: 1.65;
+  letter-spacing: 0.005em;
+  color: var(--color-fg);
 
   p {
     margin: 0;
@@ -647,8 +655,8 @@ body.chat-drag-selection-suppressed * {
   }
 
   code {
-    font-family: var(--font-mono);
-    font-size: 12px;
+    font-family: var(--font-chat-mono);
+    font-size: 12.5px;
   }
 
   pre code {
@@ -805,6 +813,11 @@ body.chat-drag-selection-suppressed * {
 .plain-text {
   white-space: pre-wrap;
   word-break: break-word;
+  /* v3.7.1: the user's own messages read as prose too, matching the
+     assistant's markdown-body. */
+  font-family: var(--font-chat);
+  font-size: 13.5px;
+  line-height: 1.65;
 }
 
 /* Chat Input Area */
@@ -835,12 +848,13 @@ body.chat-drag-selection-suppressed * {
   padding: 12px 16px;
   color: var(--color-fg);
   outline: none;
-  font-family: var(--font-mono);
-  font-size: 13px;
+  /* v3.7.1: the composer matches the message prose — you type what you read */
+  font-family: var(--font-chat);
+  font-size: 13.5px;
   resize: none;
   min-height: 44px;
   max-height: 200px;
-  line-height: 1.5;
+  line-height: 1.6;
   width: 100%;
 }
 

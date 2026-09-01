@@ -2255,27 +2255,10 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                   </InfoTooltip>
                 </div>
               </div>
+              {/* v3.7.1: TWO MODES — the 190-scheme grid is gone. The
+                  builtin pair first (large tiles), then any custom schemes
+                  the user has defined, still supported. */}
               <div className="theme-grid">
-                <div className="theme-divider">
-                  <span>{t.settings.themeSectionCustom}</span>
-                  <i />
-                </div>
-                {store.customThemes.map((theme) => (
-                  <ThemeTile
-                    key={`custom-${theme.name}`}
-                      theme={{
-                        id: theme.name,
-                        name: theme.name,
-                        terminal: theme,
-                      }}
-                    active={store.settings?.themeId === theme.name}
-                    onClick={() => store.setThemeId(theme.name)}
-                  />
-                ))}
-                <div className="theme-divider">
-                  <span>{t.settings.themeSectionBuiltIn}</span>
-                  <i />
-                </div>
                 {BUILTIN_THEMES.map((theme) => (
                   <ThemeTile
                     key={`builtin-${theme.id}`}
@@ -2284,6 +2267,26 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                     onClick={() => store.setThemeId(theme.id)}
                   />
                 ))}
+                {store.customThemes.length > 0 ? (
+                  <>
+                    <div className="theme-divider">
+                      <span>{t.settings.themeSectionCustom}</span>
+                      <i />
+                    </div>
+                    {store.customThemes.map((theme) => (
+                      <ThemeTile
+                        key={`custom-${theme.name}`}
+                          theme={{
+                            id: theme.name,
+                            name: theme.name,
+                            terminal: theme,
+                          }}
+                        active={store.settings?.themeId === theme.name}
+                        onClick={() => store.setThemeId(theme.name)}
+                      />
+                    ))}
+                  </>
+                ) : null}
               </div>
             </>
           ) : null}
