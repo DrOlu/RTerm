@@ -1,0 +1,135 @@
+/* ============================================================
+   DESIGN TOKENS — the semantic layer (v3.6.0)
+   ============================================================
+   The openship-style token system mapped onto RTerm's Aurora palette.
+   Three layers:
+
+     1. PRIMITIVES  — raw values, never used directly in components
+     2. SEMANTIC    — the names components consume (--color-*, --space-*)
+     3. COMPONENT   — per-component recipes composed from semantic tokens
+
+   Everything below ALIASES the existing --app-bg/--accent/etc so the
+   current SCSS keeps working unchanged during the migration. Components
+   ported to the primitive kit consume the semantic names only.
+
+   The palette itself is unchanged — this layer makes it SYSTEMATIC.
+   ============================================================ */
+
+:root {
+  /* ---- 1. primitives (raw) ---------------------------------- */
+  --p-ink-900: #070a12;
+  --p-ink-800: #0a0f1b;
+  --p-ink-700: #0d1322;
+  --p-ink-600: #141c30;
+  --p-ink-500: #1b2540;
+
+  --p-haze-100: rgba(244, 247, 255, 0.96);
+  --p-haze-200: rgba(204, 214, 245, 0.68);
+  --p-haze-300: rgba(160, 174, 215, 0.46);
+  --p-haze-line: rgba(148, 178, 255, 0.10);
+  --p-haze-line-strong: rgba(148, 178, 255, 0.20);
+  --p-haze-fill: rgba(148, 178, 255, 0.07);
+  --p-haze-fill-hover: rgba(148, 178, 255, 0.12);
+  --p-haze-fill-active: rgba(148, 178, 255, 0.17);
+
+  --p-cyan: #4fd8e8;
+  --p-violet: #8b7bff;
+  --p-rose: #ff5d7e;
+  --p-mint: #3ddc97;
+  --p-amber: #ffc44d;
+
+  /* ---- 2. semantic (what components use) --------------------- */
+  /* surfaces */
+  --color-bg: var(--p-ink-900);
+  --color-surface: var(--p-ink-700);
+  --color-surface-2: var(--p-ink-800);
+  --color-surface-raised: var(--p-ink-600);
+
+  /* text */
+  --color-fg: var(--p-haze-100);
+  --color-fg-muted: var(--p-haze-200);
+  --color-fg-faint: var(--p-haze-300);
+
+  /* lines */
+  --color-border: var(--p-haze-line);
+  --color-border-strong: var(--p-haze-line-strong);
+
+  /* fills (controls) */
+  --color-fill: var(--p-haze-fill);
+  --color-fill-hover: var(--p-haze-fill-hover);
+  --color-fill-active: var(--p-haze-fill-active);
+
+  /* brand + status */
+  --color-primary: var(--p-cyan);
+  --color-primary-rgb: 79, 216, 232;
+  --color-secondary: var(--p-violet);
+  --color-secondary-rgb: 139, 123, 255;
+  --color-danger: var(--p-rose);
+  --color-success: var(--p-mint);
+  --color-warning: var(--p-amber);
+
+  /* on-color (text placed on brand/status fills) */
+  --color-on-primary: #06282c;
+  --color-on-danger: #2b0710;
+  --color-on-success: #04251a;
+
+  /* focus */
+  --color-ring: rgba(var(--color-primary-rgb), 0.55);
+  --color-ring-offset: var(--p-ink-900);
+
+  /* typography */
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  /* type scale */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.45;
+  --leading-relaxed: 1.65;
+
+  /* space scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  /* elevation */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 12px 36px rgba(0, 0, 0, 0.52);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.60);
+  --shadow-glow: 0 0 0 1px rgba(var(--color-primary-rgb), 0.30),
+    0 0 18px rgba(var(--color-primary-rgb), 0.18);
+
+  /* motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+
+  /* z-scale */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 100;
+  --z-overlay: 1000;
+  --z-modal: 2000;
+  --z-toast: 3000;
+}
