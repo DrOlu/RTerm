@@ -10,7 +10,7 @@
   overflow-y: auto;
   padding-right: 4px;
   scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--color-border) transparent;
 }
 
 .queue-stack.is-running {
@@ -23,8 +23,8 @@
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  background: color-mix(in srgb, var(--fg) 3%, var(--panel-bg));
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--color-fg) 3%, var(--color-surface));
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   cursor: grab;
   transition: all 0.15s ease;
@@ -36,17 +36,17 @@
     top: 0;
     bottom: 0;
     width: 3px;
-    background: color-mix(in srgb, var(--fg) 15%, transparent);
+    background: color-mix(in srgb, var(--color-fg) 15%, transparent);
   }
 }
 
 .queue-card:hover {
   z-index: 200;
-  border-color: var(--fg-muted);
-  background: color-mix(in srgb, var(--fg) 6%, var(--panel-bg));
+  border-color: var(--color-fg-muted);
+  background: color-mix(in srgb, var(--color-fg) 6%, var(--color-surface));
 
   &::before {
-    background: var(--accent);
+    background: var(--color-primary);
   }
 }
 
@@ -56,7 +56,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--fg);
+  color: var(--color-fg);
   max-height: 18px;
   overflow: hidden;
   white-space: nowrap;
@@ -70,7 +70,7 @@
 
   &::before {
     content: "$";
-    color: var(--accent);
+    color: var(--color-primary);
     opacity: 0.7;
     font-weight: bold;
     margin-right: 6px;
@@ -84,7 +84,7 @@
     font-size: 11px;
     font-family: var(--font-mono);
     margin: 0 2px;
-    border: 1px solid color-mix(in srgb, var(--accent-2) 42%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-secondary) 42%, transparent);
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
     line-height: inherit;
@@ -106,9 +106,9 @@
     padding: 0 6px;
     margin-left: 6px;
     border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 35%, transparent);
+    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+    color: var(--color-primary);
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.02em;
@@ -140,11 +140,11 @@
   border-radius: 4px !important;
 
   &.is-active {
-    color: var(--accent) !important;
-    background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+    color: var(--color-primary) !important;
+    background: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
 
     &:hover {
-      background: color-mix(in srgb, var(--accent) 20%, transparent) !important;
+      background: color-mix(in srgb, var(--color-primary) 20%, transparent) !important;
     }
   }
 }
@@ -156,7 +156,7 @@
 .queue-drop-line {
   height: 2px;
   border-radius: 1px;
-  background: var(--accent);
+  background: var(--color-primary);
   margin: 6px 8px;
   pointer-events: none;
 }
@@ -175,6 +175,6 @@
 }
 
 .queue-stack::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--color-border);
   border-radius: 3px;
 }

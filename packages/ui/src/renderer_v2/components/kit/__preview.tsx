@@ -4,7 +4,6 @@
  *   temporarily import { KitPreview } from './components/kit/__preview'
  * Never shipped (the __ prefix + the note below).
  */
-import * as React from 'react'
 import { Button, Badge, Card, CardHeader, CardTitle, CardBody, CardFooter,
   StatusDot, Input, Section } from './index'
 

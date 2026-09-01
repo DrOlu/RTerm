@@ -26,7 +26,7 @@
   --control-bg-active: rgba(148, 178, 255, 0.17);
   --shadow: 0 12px 36px rgba(0, 0, 0, 0.52);
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.60);
-  --glow-accent: 0 0 0 1px rgba(var(--accent-rgb), 0.30), 0 0 18px rgba(var(--accent-rgb), 0.18);
+  --glow-accent: 0 0 0 1px rgba(var(--color-primary-rgb), 0.30), 0 0 18px rgba(var(--color-primary-rgb), 0.18);
   --panel-tab-header-height: 30px;
   --panel-tab-font-size: 10px;
   --panel-tab-font-weight: 600;
@@ -58,8 +58,8 @@ body {
 
 body {
   margin: 0;
-  background: var(--app-bg);
-  color: var(--fg);
+  background: var(--color-bg);
+  color: var(--color-fg);
   font-family: var(--font-ui);
   font-size: 12.5px;
   line-height: 1.45;
@@ -81,8 +81,8 @@ input[type="checkbox"],
 input[type="radio"] {
   appearance: none;
   -webkit-appearance: none;
-  background: var(--control-bg);
-  border: 1px solid var(--border);
+  background: var(--color-fill);
+  border: 1px solid var(--color-border);
   cursor: pointer;
   transition: all 0.15s ease;
   position: relative;
@@ -104,13 +104,13 @@ input[type="radio"] {
 }
 
 input[type="checkbox"]:checked {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 
 input[type="radio"]:checked {
-  background: var(--control-bg);
-  border-color: var(--accent);
+  background: var(--color-fill);
+  border-color: var(--color-primary);
 }
 
 input[type="checkbox"]:checked::after {
@@ -120,7 +120,7 @@ input[type="checkbox"]:checked::after {
   left: 4px;
   width: 4px;
   height: 8px;
-  border: solid var(--app-bg);
+  border: solid var(--color-bg);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
@@ -133,18 +133,18 @@ input[type="radio"]:checked::after {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--color-primary);
 }
 
 input[type="checkbox"]:hover,
 input[type="radio"]:hover {
-  background: var(--control-bg-hover);
-  border-color: var(--border-strong);
+  background: var(--color-fill-hover);
+  border-color: var(--color-border-strong);
 }
 
 input[type="checkbox"]:focus-visible,
 input[type="radio"]:focus-visible {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
 
 /* lucide-react sets .lucide on svg */
@@ -171,7 +171,7 @@ textarea {
   border-radius: var(--radius-sm) !important;
   border: 1px solid transparent !important;
   background: transparent !important;
-  color: var(--fg-muted) !important;
+  color: var(--color-fg-muted) !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -181,40 +181,40 @@ textarea {
   flex-shrink: 0 !important;
 
   &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--fg) 8%, transparent) !important;
-    color: var(--fg) !important;
-    border-color: color-mix(in srgb, var(--fg) 15%, transparent) !important;
+    background: color-mix(in srgb, var(--color-fg) 8%, transparent) !important;
+    color: var(--color-fg) !important;
+    border-color: color-mix(in srgb, var(--color-fg) 15%, transparent) !important;
   }
 
   &.primary {
-    background: color-mix(in srgb, var(--accent) 15%, transparent) !important;
-    color: var(--fg) !important;
-    border-color: color-mix(in srgb, var(--accent) 30%, transparent) !important;
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent) !important;
+    color: var(--color-fg) !important;
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent) !important;
     
     &:hover:not(:disabled) {
-      background: color-mix(in srgb, var(--accent) 25%, transparent) !important;
-      border-color: var(--accent) !important;
+      background: color-mix(in srgb, var(--color-primary) 25%, transparent) !important;
+      border-color: var(--color-primary) !important;
     }
   }
 
   &.danger {
-    color: var(--danger) !important;
+    color: var(--color-danger) !important;
     &:hover:not(:disabled) {
-      background: color-mix(in srgb, var(--danger) 10%, transparent) !important;
-      color: var(--danger) !important;
-      border-color: color-mix(in srgb, var(--danger) 20%, transparent) !important;
+      background: color-mix(in srgb, var(--color-danger) 10%, transparent) !important;
+      color: var(--color-danger) !important;
+      border-color: color-mix(in srgb, var(--color-danger) 20%, transparent) !important;
     }
   }
 
   &.secondary {
     background: transparent !important;
-    color: var(--fg-muted) !important;
+    color: var(--color-fg-muted) !important;
   }
 
   &.is-active {
-    background: color-mix(in srgb, var(--accent) 15%, transparent) !important;
-    color: var(--accent) !important;
-    border-color: color-mix(in srgb, var(--accent) 30%, transparent) !important;
+    background: color-mix(in srgb, var(--color-primary) 15%, transparent) !important;
+    color: var(--color-primary) !important;
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent) !important;
   }
 
   &:disabled {

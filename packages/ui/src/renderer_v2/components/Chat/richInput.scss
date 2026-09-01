@@ -20,10 +20,10 @@
   width: 72px;
   min-width: 72px;
   height: 52px;
-  border: 1px solid color-mix(in srgb, var(--danger) 42%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 42%, transparent);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--danger) 14%, var(--control-bg));
-  color: var(--danger);
+  background: color-mix(in srgb, var(--color-danger) 14%, var(--color-fill));
+  color: var(--color-danger);
   display: grid;
   place-items: center;
   padding: 0;
@@ -36,8 +36,8 @@
   height: 52px;
   padding: 0;
   border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--fg) 10%, transparent);
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-fg) 10%, transparent);
+  background: color-mix(in srgb, var(--color-fg) 3%, transparent);
   overflow: hidden;
 
   img,
@@ -53,7 +53,7 @@
   .rich-input-image-missing {
     display: grid;
     place-items: center;
-    color: var(--fg-muted);
+    color: var(--color-fg-muted);
     font-size: 10px;
     font-family: var(--font-mono);
     font-weight: 700;
@@ -86,7 +86,7 @@
   background: transparent;
   border: none;
   padding: 12px 16px;
-  color: var(--fg);
+  color: var(--color-fg);
   outline: none;
   font-family: var(--font-mono);
   font-size: 13px;
@@ -100,7 +100,7 @@
 
   &:empty::before {
     content: attr(data-placeholder);
-    color: var(--fg-muted);
+    color: var(--color-fg-muted);
     opacity: 0.4;
     pointer-events: none;
   }
@@ -117,7 +117,7 @@
     margin: 0 2px;
     font-weight: 700;
     font-family: var(--font-mono);
-    border: 1px solid color-mix(in srgb, var(--accent-2) 42%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-secondary) 42%, transparent);
     box-decoration-break: clone;
     -webkit-box-decoration-break: clone;
     user-select: none;
@@ -139,8 +139,8 @@
 .mention-suggestions {
   box-sizing: border-box;
   width: min(280px, calc(100vw - 16px));
-  background: var(--panel-bg);
-  border: 1px solid var(--border-strong);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
   border-radius: 2px;
   box-shadow:
     0 10px 30px rgba(0, 0, 0, 0.4),
@@ -161,7 +161,7 @@
     border-radius: 2px;
     cursor: pointer;
     font-size: 12px;
-    color: var(--fg-muted);
+    color: var(--color-fg-muted);
     transition: all 0.1s;
     margin-bottom: 1px;
 
@@ -170,8 +170,8 @@
     }
 
     &.active {
-      background: color-mix(in srgb, var(--accent) 10%, transparent);
-      color: var(--accent);
+      background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+      color: var(--color-primary);
     }
 
     .item-content {
@@ -199,18 +199,18 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      color: var(--fg); // Use normal text color from theme
+      color: var(--color-fg); // Use normal text color from theme
     }
   }
 
   .suggestion-status {
     padding: 6px 8px;
     font-size: 12px;
-    color: var(--fg-muted);
+    color: var(--color-fg-muted);
     white-space: nowrap;
 
     &.warning {
-      color: var(--danger);
+      color: var(--color-danger);
     }
   }
 

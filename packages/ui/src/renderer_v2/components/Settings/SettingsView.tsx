@@ -31,6 +31,7 @@ import {
   Puzzle,
 } from "lucide-react";
 import { observer } from "mobx-react-lite";
+import { Button as KitButton } from "../kit";
 import type { AppStore } from "../../stores/AppStore";
 import type { ModelDefinition, ModelProfile } from "../../lib/ipcTypes";
 import { BUILTIN_THEMES } from "../../theme/themes";
@@ -226,9 +227,9 @@ function CostPanel({ store }: { store: AppStore }) {
           {(store.i18n.t.settings as any).cost ?? "AI Cost"}
         </div>
         <div className="settings-actions">
-          <button className="btn-primary" onClick={save} disabled={saving}>
+          <KitButton variant="primary" size="sm" className="settings-kit-btn" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
-          </button>
+          </KitButton>
         </div>
       </div>
       <div className="settings-section-desc">
@@ -296,12 +297,14 @@ function CostPanel({ store }: { store: AppStore }) {
         ))}
       </div>
       <div style={{ margin: "6px 0 18px" }}>
-        <button
-          className="btn-secondary"
+        <KitButton
+          className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
           onClick={() => setPriceRows((rows) => [...rows, { model: "", promptPer1M: "", completionPer1M: "" }])}
         >
           <Plus size={14} /> Add price
-        </button>
+        </KitButton>
       </div>
 
       <div className="settings-subsection-header">Budgets</div>
@@ -355,8 +358,10 @@ function CostPanel({ store }: { store: AppStore }) {
         {!budgetRows.length ? <div className="connections-empty">No budgets. Add one to cap spend per day or month.</div> : null}
       </div>
       <div style={{ margin: "6px 0 18px" }}>
-        <button
-          className="btn-secondary"
+        <KitButton
+          className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
           onClick={() =>
             setBudgetRows((rows) => [
               ...rows,
@@ -365,7 +370,7 @@ function CostPanel({ store }: { store: AppStore }) {
           }
         >
           <Plus size={14} /> Add budget
-        </button>
+        </KitButton>
       </div>
     </>
   );
@@ -498,9 +503,9 @@ function AlertsPanel({ store }: { store: AppStore }) {
           {(store.i18n.t.settings as any).alerts ?? "Alerts"}
         </div>
         <div className="settings-actions">
-          <button className="btn-primary" onClick={save} disabled={saving}>
+          <KitButton variant="primary" size="sm" className="settings-kit-btn" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
-          </button>
+          </KitButton>
         </div>
       </div>
       <div className="settings-section-desc">
@@ -575,9 +580,9 @@ function AlertsPanel({ store }: { store: AppStore }) {
         {!rows.length ? <div className="connections-empty">No alert channels. Add one to route SRE alerts out of RTerm.</div> : null}
       </div>
       <div style={{ margin: "6px 0 18px" }}>
-        <button className="btn-secondary" onClick={() => setRows((rows) => [...rows, newRow()])}>
+        <KitButton variant="secondary" size="sm" className="settings-kit-btn" onClick={() => setRows((rows) => [...rows, newRow()])}>
           <Plus size={14} /> Add channel
-        </button>
+        </KitButton>
       </div>
     </>
   );
@@ -689,9 +694,9 @@ function OncallPanel({ store }: { store: AppStore }) {
           {(store.i18n.t.settings as any).oncall ?? "On-Call"}
         </div>
         <div className="settings-actions">
-          <button className="btn-primary" onClick={save} disabled={saving}>
+          <KitButton variant="primary" size="sm" className="settings-kit-btn" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
-          </button>
+          </KitButton>
         </div>
       </div>
       <div className="settings-section-desc">
@@ -766,9 +771,9 @@ function OncallPanel({ store }: { store: AppStore }) {
         {!rows.length ? <div className="connections-empty">No paging channels. Add one so escalation policies can page on-call.</div> : null}
       </div>
       <div style={{ margin: "6px 0 18px" }}>
-        <button className="btn-secondary" onClick={() => setRows((rows) => [...rows, newRow()])}>
+        <KitButton variant="secondary" size="sm" className="settings-kit-btn" onClick={() => setRows((rows) => [...rows, newRow()])}>
           <Plus size={14} /> Add paging channel
-        </button>
+        </KitButton>
       </div>
     </>
   );
@@ -857,9 +862,9 @@ function CloudPanel({ store }: { store: AppStore }) {
           {(store.i18n.t.settings as any).cloud ?? "Cloud"}
         </div>
         <div className="settings-actions">
-          <button className="btn-primary" onClick={save} disabled={saving}>
+          <KitButton variant="primary" size="sm" className="settings-kit-btn" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
-          </button>
+          </KitButton>
         </div>
       </div>
       <div className="settings-section-desc">
@@ -912,9 +917,9 @@ function CloudPanel({ store }: { store: AppStore }) {
         {!rows.length ? <div className="connections-empty">No cloud accounts. Using ambient CLI credentials. Add one to inventory a specific account.</div> : null}
       </div>
       <div style={{ margin: "6px 0 18px" }}>
-        <button className="btn-secondary" onClick={() => setRows((rows) => [...rows, newRow()])}>
+        <KitButton variant="secondary" size="sm" className="settings-kit-btn" onClick={() => setRows((rows) => [...rows, newRow()])}>
           <Plus size={14} /> Add account
-        </button>
+        </KitButton>
       </div>
     </>
   );
@@ -961,9 +966,9 @@ function AgentspanPanel({ store }: { store: AppStore }) {
           {(store.i18n.t.settings as any).agentspan ?? "AgentSpan"}
         </div>
         <div className="settings-actions">
-          <button className="btn-primary" onClick={save} disabled={saving}>
+          <KitButton variant="primary" size="sm" className="settings-kit-btn" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
-          </button>
+          </KitButton>
         </div>
       </div>
       <div className="settings-section-desc">
@@ -1205,9 +1210,9 @@ function PluginBlockPanel({
         ))}
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0 24px" }}>
-        <button className="btn-secondary" disabled={saving} onClick={() => void onSave(panel.block, values)}>
+        <KitButton variant="secondary" size="sm" className="settings-kit-btn" disabled={saving} onClick={() => void onSave(panel.block, values)}>
           Save {panel.title}
-        </button>
+        </KitButton>
         {saved ? <span style={{ fontSize: 12, opacity: 0.7 }}>Saved ✓</span> : null}
       </div>
     </>
@@ -1481,15 +1486,19 @@ const ModelEditor = observer(
                     </div>
                 </div>
                 <div className="editor-footer">
-            <button
-              className="btn-secondary"
+            <KitButton
+              className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
               onClick={onClose}
               disabled={isSaving}
             >
               {t.common.cancel}
-            </button>
-            <button
-              className="btn-primary"
+            </KitButton>
+            <KitButton
+              className="settings-kit-btn"
+            variant="primary"
+            size="sm"
               onClick={save}
               disabled={!draft.name || !draft.model || isSaving}
             >
@@ -1498,7 +1507,7 @@ const ModelEditor = observer(
               ) : (
                 t.common.save
               )}
-                    </button>
+                    </KitButton>
                 </div>
             </div>
         </div>
@@ -2226,12 +2235,14 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                   </div>
                 <div className="settings-actions">
                   <InfoTooltip content={t.settings.tooltips.themeCustom}>
-                      <button
-                        className="btn-secondary"
+                      <KitButton
+                        className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                         onClick={() => store.openCustomThemeFile()}
                       >
                       {t.settings.openCustomThemes}
-                    </button>
+                    </KitButton>
                   </InfoTooltip>
                   <InfoTooltip content={t.settings.tooltips.themeReload}>
                     <button
@@ -2642,12 +2653,14 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                     {t.settings.security}
                   </div>
                 <div className="settings-actions">
-                    <button
-                      className="btn-secondary"
+                    <KitButton
+                      className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                       onClick={() => store.openCommandPolicyFile()}
                     >
                     {t.settings.editCommandPolicyFile}
-                  </button>
+                  </KitButton>
                   <button
                     className="btn-icon-reload"
                     onClick={() => store.loadCommandPolicyLists()}
@@ -2828,12 +2841,14 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                 </div>
                 <div className="settings-actions">
                   <InfoTooltip content={t.settings.tooltips.mcpConfig}>
-                      <button
-                        className="btn-secondary"
+                      <KitButton
+                        className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                         onClick={() => store.openMcpConfig()}
                       >
                       {t.settings.editMcpConfig}
-                    </button>
+                    </KitButton>
                   </InfoTooltip>
                   <button
                     className="btn-icon-reload"
@@ -3013,12 +3028,14 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                 </div>
                 <div className="settings-actions">
                   <InfoTooltip content={t.settings.tooltips.skills}>
-                      <button
-                        className="btn-secondary"
+                      <KitButton
+                        className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                         onClick={() => store.openSkillsFolder()}
                       >
                       {t.settings.openSkillsFolder}
-                    </button>
+                    </KitButton>
                   </InfoTooltip>
                     <button
                       className="icon-btn-sm"
@@ -3205,19 +3222,23 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                         className={memoryBusy ? "spin" : ""}
                       />
                   </button>
-                    <button
-                      className="btn-secondary"
+                    <KitButton
+                      className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                       onClick={() => store.openMemoryFile()}
                     >
                     {t.settings.openMemoryFile}
-                  </button>
-                    <button
-                      className="btn-secondary"
+                  </KitButton>
+                    <KitButton
+                      className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                       onClick={() => void saveMemory()}
                       disabled={memoryBusy}
                     >
                     {t.settings.saveMemory}
-                  </button>
+                  </KitButton>
                 </div>
               </div>
 
@@ -3740,15 +3761,17 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                               >
                                 {url}
                               </code>
-                              <button
-                                className="btn-secondary"
+                              <KitButton
+                                className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                                 style={{ flexShrink: 0 }}
                                 onClick={() =>
                                   navigator.clipboard.writeText(url)
                                 }
                               >
                                 {t.settings.mobileWebCopyLink}
-                              </button>
+                              </KitButton>
                             </div>
                           ))}
                         </div>
@@ -3764,8 +3787,10 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                   onChange={(event) => setAccessTokenName(event.target.value)}
                   disabled={accessTokenBusy}
                 />
-                  <button
-                    className="btn-secondary"
+                  <KitButton
+                    className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                     onClick={createAccessToken}
                     disabled={accessTokenBusy}
                   >
@@ -3774,7 +3799,7 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                     ) : (
                       t.common.create
                     )}
-                </button>
+                </KitButton>
               </div>
 
                 {accessTokenError ? (
@@ -3857,15 +3882,17 @@ export const SettingsView: React.FC<{ store: AppStore }> = observer(
                     {t.settings.version}
                   </div>
                 <div className="settings-actions">
-                  <button
-                    className="btn-secondary"
+                  <KitButton
+                    className="settings-kit-btn"
+            variant="secondary"
+            size="sm"
                     onClick={() => store.checkVersion()}
                     disabled={store.versionCheckInProgress}
                   >
                       {store.versionCheckInProgress
                         ? `${t.settings.checkingVersion}...`
                         : t.settings.checkVersion}
-                  </button>
+                  </KitButton>
                 </div>
               </div>
 

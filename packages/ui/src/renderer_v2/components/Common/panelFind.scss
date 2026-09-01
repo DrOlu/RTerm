@@ -9,9 +9,9 @@
   align-items: center;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--color-border-strong);
   border-radius: 2px;
-  background: color-mix(in srgb, var(--panel-bg) 96%, black 4%);
+  background: color-mix(in srgb, var(--color-surface) 96%, black 4%);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
 }
 
@@ -19,10 +19,10 @@
   min-width: 0;
   flex: 1;
   height: 22px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 2px;
-  background: color-mix(in srgb, var(--app-bg) 88%, transparent);
-  color: var(--fg);
+  background: color-mix(in srgb, var(--color-bg) 88%, transparent);
+  color: var(--color-fg);
   outline: none;
   padding: 0 7px;
   font-family: var(--font-mono);
@@ -31,14 +31,14 @@
 }
 
 .panel-find-input:focus {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
-  background: color-mix(in srgb, var(--app-bg) 84%, transparent);
+  border-color: color-mix(in srgb, var(--color-primary) 58%, var(--color-border));
+  background: color-mix(in srgb, var(--color-bg) 84%, transparent);
 }
 
 .panel-find-count {
   flex: 0 0 auto;
   white-space: nowrap;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
@@ -60,15 +60,15 @@
   border: none;
   border-radius: 2px;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   padding: 0;
   line-height: 0;
   flex: 0 0 auto;
 }
 
 .panel-find-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--fg) 8%, transparent);
-  color: var(--fg);
+  background: color-mix(in srgb, var(--color-fg) 8%, transparent);
+  color: var(--color-fg);
 }
 
 .panel-find-btn:disabled {

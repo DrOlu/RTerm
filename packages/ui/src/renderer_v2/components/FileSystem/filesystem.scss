@@ -11,7 +11,7 @@
     calc(var(--filesystem-font-size) - 2px),
     27px
   );
-  background: var(--panel-bg);
+  background: var(--color-surface);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -24,8 +24,8 @@
   display: flex;
   align-items: center;
   padding-left: 4px;
-  background: color-mix(in srgb, var(--fg) 3%, transparent);
-  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--color-fg) 3%, transparent);
+  border-bottom: 1px solid var(--color-border);
   min-width: 0;
 }
 
@@ -68,7 +68,7 @@
   border-radius: 4px;
   border: none;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   display: grid;
   place-items: center;
   cursor: pointer;
@@ -78,8 +78,8 @@
 }
 
 .filesystem-tab-more-btn:hover {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
-  color: var(--fg);
+  background: color-mix(in srgb, var(--color-fg) 10%, transparent);
+  color: var(--color-fg);
 }
 
 .filesystem-tab-more-btn:disabled {
@@ -89,14 +89,14 @@
 
 .filesystem-tab-more-btn:disabled:hover {
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
 }
 
 .filesystem-tab {
   height: var(--panel-tab-header-height);
   padding: 0 7px;
-  border-right: 1px solid var(--border);
-  color: var(--fg-muted);
+  border-right: 1px solid var(--color-border);
+  color: var(--color-fg-muted);
   font-family: var(--font-mono);
   font-size: var(--panel-tab-font-size);
   font-weight: 600;
@@ -110,14 +110,14 @@
 }
 
 .filesystem-tab:hover {
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-  color: var(--fg);
+  background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+  color: var(--color-fg);
 }
 
 .filesystem-tab.is-active {
-  background: var(--panel-bg-2);
-  color: var(--accent);
-  box-shadow: inset 0 2px 0 var(--accent);
+  background: var(--color-surface-2);
+  color: var(--color-primary);
+  box-shadow: inset 0 2px 0 var(--color-primary);
 }
 
 .filesystem-tab-icon {
@@ -140,8 +140,8 @@
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 82%, var(--fg) 2%);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--bg) 82%, var(--color-fg) 2%);
 }
 
 .filesystem-toolbar-main,
@@ -214,7 +214,7 @@
 }
 
 .filesystem-context-menu-item.is-danger {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .filesystem-context-menu-item:disabled {
@@ -229,7 +229,7 @@
 .filesystem-context-menu-separator {
   height: 1px;
   margin: 3px 4px;
-  background: var(--border);
+  background: var(--color-border);
 }
 
 .filesystem-toolbar-menu-marker {
@@ -251,7 +251,7 @@
 }
 
 .filesystem-toolbar-menu-marker.is-selected {
-  color: var(--accent);
+  color: var(--color-primary);
 }
 
 .filesystem-toolbar-menu-marker.is-selected .filesystem-toolbar-menu-dot {
@@ -267,9 +267,9 @@
   flex: 1;
   min-width: 120px;
   height: 24px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--bg) 84%, transparent);
-  color: var(--fg);
+  color: var(--color-fg);
   border-radius: 4px;
   padding: 0 7px;
   font-size: var(--filesystem-font-size-sm);
@@ -281,7 +281,7 @@
 }
 
 .filesystem-path-input:focus {
-  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  border-color: color-mix(in srgb, var(--color-primary) 60%, var(--color-border));
 }
 
 .filesystem-tabs-select {
@@ -295,17 +295,17 @@
   display: flex;
   align-items: center;
   padding: 0 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   font-size: var(--filesystem-font-size-sm);
   font-family: var(--font-mono);
 }
 
 .filesystem-status-error {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .filesystem-status-message {
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
 }
 
 .filesystem-status-placeholder {
@@ -333,9 +333,9 @@
 }
 
 .filesystem-list.is-drop-hot {
-  outline: 1px dashed color-mix(in srgb, var(--accent) 62%, var(--border));
+  outline: 1px dashed color-mix(in srgb, var(--color-primary) 62%, var(--color-border));
   outline-offset: -1px;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
 }
 
 .filesystem-row {
@@ -345,9 +345,9 @@
   justify-content: space-between;
   gap: 5px;
   padding: 0 6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
   cursor: pointer;
-  color: var(--fg);
+  color: var(--color-fg);
   font-size: var(--filesystem-font-size);
 }
 
@@ -356,12 +356,12 @@
 }
 
 .filesystem-row:hover {
-  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  background: color-mix(in srgb, var(--color-fg) 6%, transparent);
 }
 
 .filesystem-row.is-selected {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: color-mix(in srgb, var(--accent) 56%, var(--fg));
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: color-mix(in srgb, var(--color-primary) 56%, var(--color-fg));
 }
 
 .filesystem-row-main {
@@ -396,13 +396,13 @@
 }
 
 .filesystem-row-highlight {
-  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 26%, transparent);
   color: inherit;
   padding: 0;
 }
 
 .filesystem-row-meta {
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
   font-size: var(--filesystem-font-size-xs);
   flex-shrink: 0;
 }
@@ -411,7 +411,7 @@
   display: grid;
   place-items: center;
   height: 100%;
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
   font-size: var(--filesystem-font-size);
   font-family: var(--font-mono);
 }
@@ -421,8 +421,8 @@
   display: flex;
   align-items: center;
   padding: 0 8px;
-  border-top: 1px solid var(--border);
-  color: var(--fg-faint);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-fg-faint);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
 }
@@ -433,14 +433,14 @@
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 84%, var(--fg) 3%);
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--bg) 84%, var(--color-fg) 3%);
 }
 
 .filesystem-inline-action-label {
   flex-shrink: 0;
   font-size: var(--filesystem-font-size-xs);
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   font-family: var(--font-mono);
   text-transform: uppercase;
   letter-spacing: 0.32px;
@@ -450,22 +450,22 @@
   flex: 1;
   min-width: 80px;
   height: 24px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   background: color-mix(in srgb, var(--bg) 84%, transparent);
-  color: var(--fg);
+  color: var(--color-fg);
   padding: 0 7px;
   font-size: var(--filesystem-font-size-sm);
   outline: none;
 }
 
 .filesystem-inline-action-input:focus {
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  border-color: color-mix(in srgb, var(--color-primary) 62%, var(--color-border));
 }
 
 .filesystem-transfer-panel {
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 88%, var(--fg) 2%);
+  border-top: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--bg) 88%, var(--color-fg) 2%);
 }
 
 .filesystem-transfer-panel-header {
@@ -478,7 +478,7 @@
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
   letter-spacing: 0.32px;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   text-transform: uppercase;
 }
 
@@ -492,14 +492,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: right;
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
   font-variant-numeric: tabular-nums;
 }
 
 .filesystem-transfer-list {
   max-height: 170px;
   overflow: auto;
-  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent);
 }
 
 .filesystem-transfer-section-header {
@@ -509,9 +509,9 @@
   justify-content: space-between;
   gap: 8px;
   padding: 0 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-  background: color-mix(in srgb, var(--bg) 82%, var(--fg) 4%);
-  color: var(--fg-faint);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
+  background: color-mix(in srgb, var(--bg) 82%, var(--color-fg) 4%);
+  color: var(--color-fg-faint);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
   text-transform: uppercase;
@@ -525,7 +525,7 @@
 .filesystem-transfer-item {
   min-height: 64px;
   padding: 4px 8px 5px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 65%, transparent);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -540,7 +540,7 @@
 }
 
 .filesystem-transfer-kind {
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
   text-transform: uppercase;
@@ -548,7 +548,7 @@
 }
 
 .filesystem-transfer-origin {
-  color: var(--accent);
+  color: var(--color-primary);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
   text-transform: uppercase;
@@ -562,11 +562,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--filesystem-font-size-sm);
-  color: var(--fg);
+  color: var(--color-fg);
 }
 
 .filesystem-transfer-status {
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -582,7 +582,7 @@
 .filesystem-transfer-cancel-btn {
   border: 0;
   background: transparent;
-  color: var(--fg-muted);
+  color: var(--color-fg-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -595,8 +595,8 @@
 }
 
 .filesystem-transfer-cancel-btn:hover {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
 }
 
 .filesystem-transfer-progress {
@@ -609,7 +609,7 @@
   flex: 1;
   min-width: 50px;
   height: 4px;
-  background: color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--color-border) 70%, transparent);
   border-radius: 99px;
   overflow: hidden;
 }
@@ -617,11 +617,11 @@
 .filesystem-transfer-progress-fill {
   display: block;
   height: 100%;
-  background: color-mix(in srgb, var(--accent) 80%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 80%, transparent);
 }
 
 .filesystem-transfer-progress-label {
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
   min-width: 11ch;
@@ -631,7 +631,7 @@
 }
 
 .filesystem-transfer-message {
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
   font-size: var(--filesystem-font-size-xs);
   font-family: var(--font-mono);
   overflow: hidden;
@@ -641,15 +641,15 @@
 
 .filesystem-transfer-item.is-error .filesystem-transfer-status,
 .filesystem-transfer-item.is-error .filesystem-transfer-message {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .filesystem-transfer-item.is-success .filesystem-transfer-status {
-  color: color-mix(in srgb, #31c761 78%, var(--fg));
+  color: color-mix(in srgb, #31c761 78%, var(--color-fg));
 }
 
 .filesystem-transfer-item.is-cancelled .filesystem-transfer-status {
-  color: var(--fg-faint);
+  color: var(--color-fg-faint);
 }
 
 @media (prefers-reduced-motion: no-preference) {
