@@ -3,7 +3,7 @@ import type { BaseMessage } from '@langchain/core/messages'
 import type { AgentEvent, ModelDefinition, ModelProfile, BackendSettings } from '../../types'
 import { buildActionModelHistory } from './utils/action_model_history'
 import { extractText, parseStrictJsonObject, isEphemeral, markEphemeral } from './utils/common'
-import { createChatModel, getMaxTokensForModel, computeReadFileSupport, getEnabledBuiltInTools } from './utils/model_config'
+import { createChatModel, getMaxTokensForModel, computeReadFileSupport, getEnabledBuiltInTools, dedupeToolsByName } from './utils/model_config'
 import { invokeWithRetry, isAbortError, isRetryableError, extractErrorDetails } from './utils/runtime'
 
 /**
@@ -111,6 +111,11 @@ export class AgentHelpers {
    */
   getEnabledBuiltInTools(allTools: any[], enabledMap: Record<string, boolean>) {
     return getEnabledBuiltInTools(allTools, enabledMap)
+  }
+
+  /** Dedupe tool definitions by name before bindTools (v3.7.3 duplicate-tool fix). */
+  dedupeToolsByName(tools: any[]): any[] {
+    return dedupeToolsByName(tools)
   }
 
   isAbortError(error: unknown): boolean {
