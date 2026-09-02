@@ -102,3 +102,18 @@ export function getEnabledBuiltInTools(allTools: any[], enabledMap: Record<strin
     return enabled !== false
   })
 }
+
+/** Dedupe tool definitions by name before binding them to a model (v3.7.3).
+ * The built-in, MCP, and plugin tool lists come from independent sources;
+ * a name collision or a source appended twice makes strict providers
+ * (Grok, Fable) reject the whole request with HTTP 400 ("duplicate tool
+ * definitions"). First definition wins; entries without a name are dropped. */
+export function dedupeToolsByName(tools: any[]): any[] {
+  const seen = new Set<string>()
+  return tools.filter((tool: any) => {
+    const name = tool?.function?.name ?? tool?.name
+    if (!name || seen.has(name)) return false
+    seen.add(name)
+    return true
+  })
+}

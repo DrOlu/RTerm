@@ -1001,8 +1001,12 @@ export class AgentService_v2 {
       compactionItem?.apiKey ? compactionItem.profile : undefined,
     );
     const toolsForModel = buildToolsForModel(readFileSupport);
-    // Inject plugin tool schemas so the model knows they exist and can call them.
-    const allToolsForModel = [...toolsForModel, ...this.pluginToolSchemas];
+    // NOTE (v3.7.3 duplicate-tool fix): plugin tool schemas are NOT injected
+    // here. They are appended fresh at bindTools() time in the agent loop —
+    // appending them in BOTH places sent every plugin tool to the provider
+    // twice, which strict providers (Grok, Fable) reject with HTTP 400
+    // ("duplicate tool definitions"). The bind-time append is also the
+    // fresher source (setPluginTools may run after this binding was cached).
 
     return {
       profileId,
@@ -1018,7 +1022,7 @@ export class AgentService_v2 {
       compactionModelSupportsStructuredOutput,
       compactionModelSupportsObjectToolChoice,
       readFileSupport,
-      toolsForModel: allToolsForModel,
+      toolsForModel,
       globalMaxTokens:
         typeof globalItem.maxTokens === "number"
           ? globalItem.maxTokens
@@ -1533,12 +1537,19 @@ export class AgentService_v2 {
       const baseModel = shouldUseThinkingModelOnThisPass
         ? sessionBinding.thinkingModel || sessionBinding.model
         : sessionBinding.model;
-      const pluginOpenAiTools = this.pluginToolSchemas
-      const modelWithTools = baseModel.bindTools([
-        ...builtInTools,
-        ...mcpTools,
-        ...pluginOpenAiTools,
-      ]);
+      // v3.7.3 duplicate-tool fix: dedupe by tool name before binding. The
+      // built-ins, MCP tools, and plugin tools come from three different
+      // sources that can evolve independently; a name collision (or a source
+      // accidentally appended twice) makes strict providers (Grok, Fable)
+      // reject the whole request with HTTP 400. First definition wins.
+      const pluginOpenAiTools = this.pluginToolSchemas;
+      const modelWithTools = baseModel.bindTools(
+        this.helpers.dedupeToolsByName([
+          ...builtInTools,
+          ...mcpTools,
+          ...pluginOpenAiTools,
+        ]),
+      );
 
       const messageId = uuidv4();
 
@@ -1587,11 +1598,13 @@ export class AgentService_v2 {
             shouldUseThinkingModelOnThisPass ? 0.2 : 0.7,
             null,
           );
-          modelToUse = fallbackChat.bindTools([
-            ...builtInTools,
-            ...mcpTools,
-            ...pluginOpenAiTools,
-          ]) as typeof modelWithTools;
+          modelToUse = fallbackChat.bindTools(
+            this.helpers.dedupeToolsByName([
+              ...builtInTools,
+              ...mcpTools,
+              ...pluginOpenAiTools,
+            ]),
+          ) as typeof modelWithTools;
         }
         return await invokeWithRetryAndSanitizedInput({
         helpers: this.helpers,

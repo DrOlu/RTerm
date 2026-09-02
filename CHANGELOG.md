@@ -1,5 +1,45 @@
 # Changelog
 
+## v3.7.3 (2026-09-02)
+
+### Fix — duplicate tool definitions sent to the model (HTTP 400 on strict providers)
+
+**The bug:** every plugin tool (`agentspan_*`, `web_*`, `synapse_*`,
+`fraudops_*`, `iam_*`, `patch_*`, `sop_*`, …) was sent to the model
+provider **twice** in the same request. Strict providers that validate
+tool-name uniqueness (Grok 4.6, Fable 5.1) rejected the whole request
+with HTTP 400 before the model even ran; lenient providers (OpenAI,
+Anthropic, most OpenAI-compatible gateways) deduped silently — so the
+malformed request looked like a provider-specific failure when it was
+an RTerm request-building bug all along.
+
+**Root cause — two commits, each correct alone, double-appending
+together:** v3.1.8 (6bb8082) injected plugin schemas into the session
+binding's `toolsForModel` so the model could see them; v3.4.0 (c009c46)
+appended the same `pluginToolSchemas` again at `bindTools()` time to fix
+async-wiring staleness. From v3.4.0 onward, `builtInTools` (derived from
+the cached binding) already contained the plugin schemas, and the
+bind-time spread added them a second time.
+
+**The fix, two layers:**
+- The session binding no longer carries plugin schemas — the bind-time
+  append is kept because it is the *fresher* source (`setPluginTools`
+  may run after a binding was cached).
+- `dedupeToolsByName()` (new, exported from `AgentHelper/utils/model_config`,
+  exposed via `AgentHelpers`) now guards **every** `bindTools()` call —
+  primary and fallback — so no future duplicate source (built-in/MCP/
+  plugin collision, or a list appended twice) can ever reach a provider.
+
+**Regression spec:** `duplicateToolBinding.extreme.spec.ts` — 9/9,
+testing the real `dedupeToolsByName()` plus the exact bind-time
+composition, including the historical double-append scenario and an
+MCP/plugin name collision.
+
+**Verified:** new spec 9/9; toolVisibility 6/6; parallelToolExecution
+21/21; pluginRegistry 17/17; offensivePlugins 47/47; backend typecheck
+clean (the one `typecheck:web` error in `appTheme.extreme.spec.ts` is
+pre-existing on the v3.7.2 tag — verified by stashing).
+
 ## v3.7.2 (2026-09-01)
 
 ### Release-hardening audit — the pre-release sweep
