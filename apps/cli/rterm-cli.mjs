@@ -91,11 +91,31 @@ function loadToken() {
   return null
 }
 
+/**
+ * Append the token as an `access_token` query parameter. The gateway accepts
+ * the token from the Authorization header OR this query param; the query param
+ * works on every WebSocket client (native WS ignores constructor options on
+ * some runtimes, and browsers cannot send custom headers at all).
+ */
+function urlWithToken(url, token) {
+  if (!token) return url
+  try {
+    const u = new URL(url)
+    if (!u.searchParams.has('access_token')) u.searchParams.set('access_token', token)
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
 async function openSocket(url, token) {
   const headers = token ? { Authorization: `Bearer ${token}` } : undefined
   if (typeof globalThis.WebSocket === 'function') {
     return await new Promise((resolve, reject) => {
-      const ws = new globalThis.WebSocket(url)
+      // Pass the token BOTH ways: as a query param (always works) and try the
+      // options object (native WebSocket in Node >= 22 forwards extra options
+      // to undici and sends the header; browsers ignore it harmlessly).
+      const ws = new globalThis.WebSocket(urlWithToken(url, token), headers ? { headers } : undefined)
       ws.onopen = () => resolve(ws)
       ws.onerror = () => reject(new Error(`Cannot connect to ${url}. Is the backend running? (gybackend)`))
     })
@@ -105,7 +125,7 @@ async function openSocket(url, token) {
     const require = createRequire(import.meta.url)
     const WS = require('ws')
     return await new Promise((resolve, reject) => {
-      const ws = new WS(url, { headers })
+      const ws = new WS(urlWithToken(url, token), { headers })
       ws.on('open', () => resolve(ws))
       ws.on('error', () => reject(new Error(`Cannot connect to ${url}. Is the backend running? (gybackend)`)))
     })
