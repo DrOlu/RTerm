@@ -181,7 +181,7 @@ export interface WinRMConnectionEntry {
   port: number
   username: string
   password: string
-  transport?: 'http' | 'https'
+  transport?: 'http' | 'https' | 'psrp'
   auth?: 'basic' | 'negotiate'
   domain?: string
   rejectUnauthorized?: boolean
@@ -1072,8 +1072,11 @@ export interface WinRMConnectionConfig extends BaseConnectionConfig {
   port: number
   username: string
   password: string
-  /** 'http' (5985) or 'https' (5986). Default derived from port. */
-  transport?: 'http' | 'https'
+  /** 'http' (5985) or 'https' (5986) — the WS-Man transport. Default derived
+   * from port. 'psrp' selects the PowerShell Remoting Protocol over the same
+   * WS-Man channel (same port, same Basic auth) — the script then travels
+   * INSIDE the PSRP message body, lifting the 8191-char command-line budget. */
+  transport?: 'http' | 'https' | 'psrp'
   /** Auth scheme. v1 implements 'basic' (the common lab/non-domain path).
    * 'negotiate'/'kerberos' are accepted for forward-compat but route to the
    * same Basic header today. */

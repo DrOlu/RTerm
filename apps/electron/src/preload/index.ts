@@ -145,7 +145,7 @@ interface BackendSettings {
       port: number;
       username: string;
       password: string;
-      transport?: "http" | "https";
+      transport?: "http" | "https" | "psrp";
       auth?: "basic" | "negotiate";
       domain?: string;
       rejectUnauthorized?: boolean;

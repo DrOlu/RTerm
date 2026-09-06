@@ -1,5 +1,87 @@
 # Changelog
 
+## v3.7.4 (2026-09-06)
+
+### Feature — PSRP (PowerShell Remoting) as an opt-in WinRM transport
+
+Managed Connections → WinRM now offers a third transport next to HTTP and
+HTTPS: **PSRP (PowerShell Remoting, 5985)**. Same port, same Basic auth,
+same command/response tab — but the command runs in a real PowerShell
+runspace pool (`Microsoft.PowerShell` shell) instead of a `cmd.exe` shell.
+
+**Why you would pick it:** the WinRM cmd-shell path carries the script on
+the `CommandLine`, which Windows caps at **8191 characters** — every
+larger script has to be base64-encoded and squeezed under the budget.
+PSRP carries the script *inside* the WS-Man message body as a
+`CREATE_PIPELINE` fragment, so there is **no command-length limit**.
+Live-verified: a 20 000-character script runs with exit 0 and full
+output. Structured error records arrive as real `ERROR_RECORD` messages
+rather than text on stderr.
+
+**Default is unchanged.** Existing HTTP/HTTPS WinRM connections behave
+exactly as before; PSRP is strictly opt-in (`transport: 'psrp'` on the
+connection, via the UI select or `manage_winrm_connection`). NTLM /
+Kerberos are not implemented — Basic over 5985/5986 only, identical in
+scope to the existing WinRM transport.
+
+**Implementation:** `PSRPTransport.ts` is a dependency-free MS-PSRP 2.3
+client on top of WS-Man (SOAP over HTTP): Create (`creationXml` =
+SESSION_CAPABILITY + INIT_RUNSPACEPOOL) → Receive until
+`RunspaceState=2` → Command (`CREATE_PIPELINE` in `Arguments`) → Receive
+loop (PIPELINE_OUTPUT / ERROR_RECORD / PIPELINE_STATE) → Delete. The
+message fragmenter/reassembler (MS-PSRP 2.2.4) handles multi-fragment
+payloads with session-unique object ids. `WinRMBackend` dispatches on
+`transport === 'psrp'` and reuses the persistent-cwd + cmd→PowerShell
+translation (`cd`/`dir`/`type`/`echo`) so the agent's habits keep working.
+
+**Live-verified end to end** against AWS Windows Server 2022 (PS 5.1)
+through the real `WinRMBackend` — not just the raw transport: banner,
+`$env:COMPUTERNAME`, structured `Write-Error` surfacing on stderr with a
+non-zero exit, a 20k-char script, `getSystemInfo()`, clean `kill()`. Wire
+format was validated **byte-for-byte against a pypsrp 0.8.1 capture**.
+
+**Two protocol bugs that took the transport from "Create succeeds,
+everything after it fails with `w:InvalidSelectors`" to working — both
+invisible at Create time because Windows accepts the shell and only then
+fails runspace init, leaving the ShellId unbound:**
+
+1. **Message Destination byte.** MS-PSRP 2.2.1 defines Destination as
+   *who receives* the message (1 = client, 2 = server), not "runspace
+   pool vs pipeline". Every client→server message is `dest=2`. We were
+   sending `dest=1` for SESSION_CAPABILITY and INIT_RUNSPACEPOOL.
+2. **INIT_RUNSPACEPOOL payload.** `PSThreadOptions`, `ApartmentState`
+   and `HostInfo` must be full serialized objects (enum `TN` +
+   `ToString` + `I32`; `HostInfo` with the four `_isHost*Null`
+   booleans). `<Nil/>` is accepted on the wire but the runspace never
+   opens.
+
+**Exit-code semantics (worth knowing):** a PSRP pipeline does not
+propagate a process exit code — Windows reports `ExitCode 0` in
+`CommandState` even after `exit 3` or a terminating error, and signals
+failure through `ERROR_RECORD` / `PIPELINE_STATE=Failed` instead (this
+is why pypsrp exposes `had_errors`, not an exit code). `WinRMBackend`
+maps `hadErrors` → `exitCode 1` so a failed PowerShell command is never
+reported as success to `run_fleet_command`, the agent's `exec_command`,
+or playbook `validate` steps.
+
+**Tests:** `PSRPTransport.extreme.spec.ts` — GUID little-endian layout,
+`dest=2` for every client message type, fragment/unfragment round-trip,
+session-unique object ids, multi-fragment reassembly, and the real
+Windows `CommandState/ExitCode` response shape. Backend typecheck and
+node/web typecheck (incl. the UI select) are clean.
+
+### Fix — `rterm-cli` dropped the access token on remote gateways (3.7.4)
+
+On Node ≥ 21 the CLI used the native `WebSocket` without the options
+object, so `Authorization: Bearer …` was silently never sent. Against a
+gateway in `internet` access mode the socket was accepted and then closed
+(1008 "missing access token") before any RPC ran — every remote command
+failed with "Connection closed before response" while localhost
+(token-exempt) worked, making it look like a server problem. Fixed
+belt-and-braces: `urlWithToken()` appends `?access_token=<token>` (works
+on every WebSocket client incl. browsers) *and* the header is passed to
+native WS / `ws`. Published as `rterm-cli@3.7.4`.
+
 ## v3.7.3 (2026-09-02)
 
 ### Fix — duplicate tool definitions sent to the model (HTTP 400 on strict providers)

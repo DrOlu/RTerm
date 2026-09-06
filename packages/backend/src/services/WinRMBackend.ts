@@ -6,6 +6,7 @@ import type {
   TerminalBackend,
 } from '../types'
 import { WinRMTransport } from './WinRMTransport'
+import { PSRPTransport } from './PSRPTransport'
 
 /**
  * WinRM (Windows Remote Management) terminal backend.
@@ -24,7 +25,13 @@ import { WinRMTransport } from './WinRMTransport'
 
 interface WinRMInstance {
   config: WinRMConnectionConfig
-  transport: WinRMTransport
+  /** The active transport. WinRM and PSRP expose different execution APIs —
+   * use the type guards (`instance.psrp` / `instance.winrm`) to dispatch. */
+  transport: WinRMTransport | PSRPTransport
+  /** Narrowed WinRM transport (set when transport is WinRMTransport). */
+  winrm?: WinRMTransport
+  /** Narrowed PSRP transport (set when transport is PSRPTransport). */
+  psrp?: PSRPTransport
   dataCallback?: (data: string) => void
   exitCallback?: (code: number) => void
   /** Set once spawn's connectivity probe finishes; the tab is ready then. */
@@ -52,7 +59,15 @@ export class WinRMBackend implements TerminalBackend {
     const cfg = config as WinRMConnectionConfig
     const ptyId = `winrm-${randomUUID()}`
     const transport = this.buildTransport(cfg)
-    const instance: WinRMInstance = { config: cfg, transport, ready: false, failed: false, commandQueue: Promise.resolve() }
+    const instance: WinRMInstance = {
+      config: cfg,
+      transport,
+      winrm: transport instanceof WinRMTransport ? transport : undefined,
+      psrp: transport instanceof PSRPTransport ? transport : undefined,
+      ready: false,
+      failed: false,
+      commandQueue: Promise.resolve(),
+    }
     this.instances.set(ptyId, instance)
 
     // Verify reachability in the background so the tab flips to ready/exited
@@ -61,9 +76,12 @@ export class WinRMBackend implements TerminalBackend {
     void this.probe(instance).then((ok) => {
       if (ok) {
         instance.ready = true
+        const mode = cfg.transport === 'psrp'
+          ? 'PSRP / PowerShell Remoting — no command-length limit'
+          : 'WinRM command/response — Windows Server'
         instance.dataCallback?.(
-          `\x1b[32m✔ WinRM session ready to ${cfg.host}:${cfg.port} (command/response mode — Windows Server).\x1b[0m\r\n` +
-            `Run commands with exec_command / run_fleet_command. Interactive TUI apps are not supported over WinRM.\r\n`,
+          `\x1b[32m✔ ${cfg.transport === 'psrp' ? 'PSRP' : 'WinRM'} session ready to ${cfg.host}:${cfg.port} (${mode}).\x1b[0m\r\n` +
+            `Run commands with exec_command / run_fleet_command. Interactive TUI apps are not supported over WinRM/PSRP.\r\n`,
         )
       } else {
         instance.failed = true
@@ -76,7 +94,7 @@ export class WinRMBackend implements TerminalBackend {
 
   private async probe(instance: WinRMInstance): Promise<boolean> {
     try {
-      await instance.transport.ping()
+      await (instance.winrm ?? instance.transport).ping()
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -87,10 +105,23 @@ export class WinRMBackend implements TerminalBackend {
     }
   }
 
-  private buildTransport(cfg: WinRMConnectionConfig): WinRMTransport {
+  private buildTransport(cfg: WinRMConnectionConfig): WinRMTransport | PSRPTransport {
+    const username = cfg.domain ? `${cfg.domain}\\${cfg.username}` : cfg.username
+    // PSRP: PowerShell Remoting Protocol over the same WS-Man channel — the
+    // script travels inside the message body (no 8191-char command budget).
+    if (cfg.transport === 'psrp') {
+      return new PSRPTransport({
+        host: cfg.host,
+        port: cfg.port,
+        username,
+        password: cfg.password,
+        transport: cfg.port === 5986 ? 'https' : 'http',
+        rejectUnauthorized: cfg.rejectUnauthorized,
+        timeoutMs: 30000,
+      })
+    }
     const transport =
       cfg.transport ?? (cfg.port === 5986 ? 'https' : 'http')
-    const username = cfg.domain ? `${cfg.domain}\\${cfg.username}` : cfg.username
     return new WinRMTransport({
       host: cfg.host,
       port: cfg.port,
@@ -126,20 +157,96 @@ export class WinRMBackend implements TerminalBackend {
 
     // Serialize commands on the persistent shell (one WS-Man command per shell).
     const run = instance.commandQueue.then(() =>
-      this.executeOnPersistentShell(instance, command, options),
+      this.executeOnTransport(instance, command, options),
     )
     instance.commandQueue = run.catch(() => { /* keep the queue alive */ })
     return run
   }
 
+  /**
+   * Dispatch to the right execution path for the configured transport.
+   * - WinRM (cmd shell): persistent shell + cwd tracking + cmd echo.
+   * - PSRP (PowerShell runspace): each command runs as a fresh one-shot
+   *   script in a real PowerShell runspace (cwd is seeded per command; the
+   *   script travels in the message body — no 8191-char budget). PSRP runspaces
+   *   are heavier to keep open, so v1 runs one-shot per command.
+   */
+  private async executeOnTransport(
+    instance: WinRMInstance,
+    command: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    if (instance.psrp) {
+      return this.executeOnPsrp(instance, command, options)
+    }
+    return this.executeOnPersistentShell(instance, command, options)
+  }
+
+  /** PSRP execution path: wrap the (possibly cmd-flavored) command for
+   * PowerShell, run one-shot, surface hadErrors as stderr. */
+  private async executeOnPsrp(
+    instance: WinRMInstance,
+    command: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const transport = instance.psrp
+    if (!transport) {
+      throw new Error('PSRP execution path invoked without a PSRP transport')
+    }
+    // Surface the command echo to the command/response log view.
+    instance.dataCallback?.(`\r\n\x1b[36m❯ ${command}\x1b[0m\r\n`)
+    // PSRP runs PowerShell, not cmd: translate the common cmd builtins the
+    // agent emits (cd/dir/type) so the command/response experience matches.
+    const ps = this.translateCmdToPowerShell(command, instance.cwd)
+    const result = await transport.runScript(ps, {
+      timeoutMs: options?.timeoutMs ?? DEFAULT_WINRM_TIMEOUT_MS,
+      signal: options?.signal,
+    })
+    if (result.stdout) instance.dataCallback?.(result.stdout)
+    if (result.stderr) instance.dataCallback?.(`\x1b[33m${result.stderr}\x1b[0m`)
+    // Track cwd across commands (best-effort, same contract as the WinRM path).
+    if (/^\s*(Set-Location|cd)\s+/i.test(command) && !result.hadErrors) {
+      const target = command.replace(/^\s*(Set-Location|cd)\s+/i, '').replace(/"/g, '').trim()
+      instance.cwd = this.resolveWinCwd(instance.cwd, target)
+    }
+    // PSRP pipelines do not propagate a process exit code — Windows reports 0
+    // in CommandState even after `exit 3` or a terminating error, and signals
+    // failure via ERROR_RECORD / PIPELINE_STATE=Failed instead (that is why
+    // pypsrp exposes `had_errors`, not an exit code). Map that onto the
+    // exitCode contract every caller relies on (run_fleet_command, the agent's
+    // exec_command, playbook validate) so a failed PowerShell command is not
+    // reported as success. 1 is the conventional PowerShell failure code.
+    const exitCode = result.exitCode !== 0 ? result.exitCode : result.hadErrors ? 1 : 0
+    return { stdout: result.stdout, stderr: result.stderr, exitCode }
+  }
+
+  /** Translate the common cmd.exe builtins the agent emits into PowerShell
+   * equivalents (PSRP runs a real PowerShell runspace, not cmd). */
+  private translateCmdToPowerShell(command: string, cwd?: string): string {
+    const cdPrefix = cwd ? `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'; ` : ''
+    let ps = command
+    // `cd /d X` / `cd X` → Set-Location
+    ps = ps.replace(/^\s*cd\s+\/d\s+/i, 'Set-Location -LiteralPath ')
+    ps = ps.replace(/^\s*cd\s+/i, 'Set-Location -LiteralPath ')
+    // `dir` → Get-ChildItem (bare `dir` works in PS but normalize for flags)
+    ps = ps.replace(/^\s*dir\s*$/i, 'Get-ChildItem')
+    // `type X` → Get-Content
+    ps = ps.replace(/^\s*type\s+/i, 'Get-Content ')
+    // `cls` → Clear-Host
+    ps = ps.replace(/^\s*cls\s*$/i, 'Clear-Host')
+    // `echo X` → Write-Output X (PS echo exists but Write-Output is explicit)
+    ps = ps.replace(/^\s*echo\s+/i, 'Write-Output ')
+    return cdPrefix + ps
+  }
+
   /** Lazily create (or recreate) the persistent runspace. */
   private async ensurePersistentShell(instance: WinRMInstance): Promise<string> {
     if (instance.persistentShellId) return instance.persistentShellId
-    const shellId = await instance.transport.createShell()
+    const shellId = await instance.winrm!.createShell()
     instance.persistentShellId = shellId
     // Seed the cwd from the fresh runspace.
     try {
-      const r = await instance.transport.runCommandOnShell(shellId, 'cd', { timeoutMs: 10000 })
+      const r = await instance.winrm!.runCommandOnShell(shellId, 'cd', { timeoutMs: 10000 })
       const cwd = r.stdout.trim()
       if (cwd) instance.cwd = cwd
     } catch { /* best-effort */ }
@@ -163,7 +270,7 @@ export class WinRMBackend implements TerminalBackend {
     const isCd = /^\s*(cd|chdir)\s+/i.test(command)
     try {
       const shellId = await this.ensurePersistentShell(instance)
-      result = await instance.transport.runCommandOnShell(shellId, cwdPrefix + command, {
+      result = await instance.winrm!.runCommandOnShell(shellId, cwdPrefix + command, {
         timeoutMs: options?.timeoutMs ?? DEFAULT_WINRM_TIMEOUT_MS,
         signal: options?.signal,
         onChunk: (stream, text) => {
@@ -178,10 +285,10 @@ export class WinRMBackend implements TerminalBackend {
         instance.cwd = this.resolveWinCwd(instance.cwd, target)
       } else if (result.exitCode === 0) {
         // Re-read cwd within the tracked dir so relative moves are captured.
-        const probe = await instance.transport
+        const probe = await instance.winrm!
           .runCommandOnShell(shellId, `${cwdPrefix}cd`, { timeoutMs: 10000 })
           .catch(() => null)
-        const probeCwd = probe?.stdout.trim().split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[A-Za-z]:\\/.test(l)).pop()
+        const probeCwd = probe?.stdout.trim().split(/\r?\n/).map((l: string) => l.trim()).filter((l: string) => /^[A-Za-z]:\\/.test(l)).pop()
         if (probeCwd) instance.cwd = probeCwd
       }
     } catch (error) {
@@ -189,10 +296,10 @@ export class WinRMBackend implements TerminalBackend {
       // it and retry once on a fresh runspace before surfacing the error.
       instance.persistentShellId = undefined
       const shellId = await this.ensurePersistentShell(instance)
-      result = await instance.transport.runCommandOnShell(shellId, cwdPrefix + command, {
+      result = await instance.winrm!.runCommandOnShell(shellId, cwdPrefix + command, {
         timeoutMs: options?.timeoutMs ?? DEFAULT_WINRM_TIMEOUT_MS,
         signal: options?.signal,
-        onChunk: (stream, text) => {
+        onChunk: (stream: 'stdout' | 'stderr', text: string) => {
           if (text) instance.dataCallback?.(stream === 'stderr' ? `\x1b[33m${text}\x1b[0m` : text)
         },
       })
@@ -254,7 +361,7 @@ export class WinRMBackend implements TerminalBackend {
     this.instances.delete(ptyId)
     // Close the persistent runspace (best-effort), then notify exit.
     if (instance.persistentShellId) {
-      void instance.transport.deleteShell(instance.persistentShellId)
+      void instance.winrm!.deleteShell(instance.persistentShellId)
       instance.persistentShellId = undefined
     }
     instance.exitCallback?.(0)
@@ -288,10 +395,12 @@ export class WinRMBackend implements TerminalBackend {
     const instance = this.instances.get(ptyId)
     if (!instance || (!instance.ready && !instance.failed)) return undefined
     try {
-      const r = await instance.transport.runCommand(
-        'powershell -NoProfile -Command "$env:COMPUTERNAME"',
-        { timeoutMs: 15000 },
-      )
+      const r = instance.psrp
+        ? await instance.psrp.runScript('$env:COMPUTERNAME', { timeoutMs: 15000 })
+        : await instance.winrm!.runCommand(
+            'powershell -NoProfile -Command "$env:COMPUTERNAME"',
+            { timeoutMs: 15000 },
+          )
       return {
         hostname: r.stdout.trim() || instance.config.host,
         os: 'win32',

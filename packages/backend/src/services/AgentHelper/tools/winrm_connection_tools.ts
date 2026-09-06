@@ -17,9 +17,11 @@ const winrmConnectionFieldsSchema = z.object({
   username: z.string().min(1).describe('Windows admin username.'),
   password: z.string().min(1).describe('Windows password (Basic auth).'),
   transport: z
-    .enum(['http', 'https'])
+    .enum(['http', 'https', 'psrp'])
     .optional()
-    .describe('http (5985) or https (5986). Defaults from port.'),
+    .describe(
+      'http (5985), https (5986), or psrp (PowerShell Remoting over the same port — scripts travel in the message body, no command-length limit). Defaults from port.',
+    ),
   auth: z
     .enum(['basic', 'negotiate'])
     .optional()

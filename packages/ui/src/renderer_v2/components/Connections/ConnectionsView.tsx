@@ -521,10 +521,15 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                       <Select
                         className="editor-select"
                         value={draft.transport ?? 'http'}
-                        onChange={(val) => setDraft({ ...draft, transport: val as 'http' | 'https', port: val === 'https' ? 5986 : 5985 })}
+                        onChange={(val) => setDraft({
+                          ...draft,
+                          transport: val as 'http' | 'https' | 'psrp',
+                          port: val === 'https' ? 5986 : (draft.port ?? 5985),
+                        })}
                         options={[
-                          { value: 'http', label: 'Transport: HTTP (5985)' },
-                          { value: 'https', label: 'Transport: HTTPS (5986)' },
+                          { value: 'http', label: 'Transport: HTTP / WinRM (5985)' },
+                          { value: 'https', label: 'Transport: HTTPS / WinRM (5986)' },
+                          { value: 'psrp', label: 'Transport: PSRP (PowerShell Remoting, 5985)' },
                         ]}
                       />
                     </div>
