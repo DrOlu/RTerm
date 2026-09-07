@@ -1,11 +1,11 @@
-import http from 'node:http'
-import https from 'node:https'
 import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
+import { WinHttpAuth, type WinHttpAuthKind } from './WinHttpAuth'
 
 /**
  * Minimal, dependency-free WS-Management (WinRM) transport for command
- * execution over HTTP (5985) / HTTPS (5986) with Basic auth.
+ * execution over HTTP (5985) / HTTPS (5986) with Basic, NTLMv2, Negotiate,
+ * or Kerberos auth (see WinHttpAuth).
  *
  * Scope is deliberately the stateless command-execution cycle that the RTerm
  * agent tools (exec_command / run_fleet_command / collect_facts /
@@ -44,6 +44,12 @@ export interface WinRMTransportOptions {
   rejectUnauthorized?: boolean
   /** Per-request timeout (ms). */
   timeoutMs?: number
+  /** Auth scheme. Default 'basic'. 'ntlm'/'negotiate'/'kerberos' use NTLMv2
+   * (Kerberos GSSAPI is used when auth='kerberos' AND the optional `kerberos`
+   * npm package is installed; otherwise NTLM under Negotiate). */
+  auth?: WinHttpAuthKind
+  /** Optional AD domain (DOMAIN\\user). Also accepted as username 'DOMAIN\\user'. */
+  domain?: string
 }
 
 export interface WinRMCommandResult {
@@ -103,23 +109,25 @@ function extractShellId(xml: string): string {
 }
 
 export class WinRMTransport {
-  private readonly opts: Required<Omit<WinRMTransportOptions, 'rejectUnauthorized'>> &
-    Pick<WinRMTransportOptions, 'rejectUnauthorized'>
-  private readonly authHeader: string
+  private readonly http: WinHttpAuth
 
   constructor(opts: WinRMTransportOptions) {
-    this.opts = {
-      path: opts.path ?? '/wsman',
-      timeoutMs: opts.timeoutMs ?? 30000,
+    this.http = new WinHttpAuth({
+      host: opts.host,
+      port: opts.port,
+      username: opts.username,
+      password: opts.password,
+      domain: opts.domain,
+      transport: opts.transport,
+      path: opts.path,
       rejectUnauthorized: opts.rejectUnauthorized,
-      ...opts,
-    } as any
-    this.authHeader =
-      'Basic ' + Buffer.from(`${opts.username}:${opts.password}`, 'utf8').toString('base64')
+      timeoutMs: opts.timeoutMs,
+      auth: opts.auth ?? 'basic',
+    })
   }
 
   private endpoint(): string {
-    return `${this.opts.transport}://${this.opts.host}:${this.opts.port}${this.opts.path}`
+    return this.http.endpoint()
   }
 
   /** Build a full SOAP envelope with the required WS-Addressing + WS-Man headers. */
@@ -143,37 +151,8 @@ export class WinRMTransport {
 
   private async post(action: string, body: string, extraHeaders: string): Promise<SoapResponse> {
     const envelope = this.envelope(action, body, extraHeaders)
-    const url = new URL(this.endpoint())
-    const isHttps = this.opts.transport === 'https'
-    const lib = isHttps ? https : http
-    const options: http.RequestOptions = {
-      method: 'POST',
-      hostname: url.hostname,
-      port: url.port,
-      path: url.pathname,
-      headers: {
-        'Content-Type': 'application/soap+xml;charset=UTF-8',
-        Authorization: this.authHeader,
-        'Content-Length': Buffer.byteLength(envelope, 'utf8'),
-      },
-      // @ts-expect-error rejectUnauthorized is https-only
-      rejectUnauthorized: isHttps ? this.opts.rejectUnauthorized ?? true : undefined,
-      timeout: this.opts.timeoutMs,
-    }
-    return new Promise((resolve, reject) => {
-      const req = lib.request(options, (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (c: Buffer) => chunks.push(c))
-        res.on('end', () => {
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') })
-        })
-        res.on('error', reject)
-      })
-      req.on('timeout', () => req.destroy(new Error(`WinRM request timed out after ${this.opts.timeoutMs}ms`)))
-      req.on('error', reject)
-      req.write(envelope)
-      req.end()
-    })
+    const res = await this.http.post(envelope)
+    return { status: res.status, body: res.body }
   }
 
   /** Create a cmd shell resource; returns the ShellId. */

@@ -1,7 +1,6 @@
-import http from 'node:http'
-import https from 'node:https'
 import { Buffer } from 'node:buffer'
 import { randomUUID } from 'node:crypto'
+import { WinHttpAuth, type WinHttpAuthKind } from './WinHttpAuth'
 
 /**
  * PSRP (PowerShell Remoting Protocol) transport — dependency-free, rides on
@@ -107,6 +106,9 @@ export interface PSRPTransportOptions {
   rejectUnauthorized?: boolean
   /** Per-request timeout (ms). */
   timeoutMs?: number
+  /** Auth scheme. Default 'basic'. Same as WinRMTransport. */
+  auth?: WinHttpAuthKind
+  domain?: string
 }
 
 export interface PSRPCommandResult {
@@ -313,33 +315,27 @@ function extractShellId(xml: string): string {
 }
 
 export class PSRPTransport {
-  private readonly opts: Required<Omit<PSRPTransportOptions, 'rejectUnauthorized'>> &
-    Pick<PSRPTransportOptions, 'rejectUnauthorized'>
-  private readonly authHeader: string
   /** pypsrp WSMan.session_id — one uuid for the life of the transport. */
   private readonly sessionId = `uuid:${randomUUID().toUpperCase()}`
-  /** Reuse the TCP connection. Windows' PSRP plugin binds the ShellId to the
-   * HTTP session — a new TCP socket per SOAP call is why Receive after Create
-   * returned InvalidSelectors even with a correct SelectorSet. */
-  private readonly httpAgent: http.Agent | https.Agent
+  private readonly http: WinHttpAuth
 
   constructor(opts: PSRPTransportOptions) {
-    this.opts = {
-      path: opts.path ?? '/wsman',
-      timeoutMs: opts.timeoutMs ?? 30000,
+    this.http = new WinHttpAuth({
+      host: opts.host,
+      port: opts.port,
+      username: opts.username,
+      password: opts.password,
+      domain: opts.domain,
+      transport: opts.transport,
+      path: opts.path,
       rejectUnauthorized: opts.rejectUnauthorized,
-      ...opts,
-    } as any
-    this.authHeader =
-      'Basic ' + Buffer.from(`${opts.username}:${opts.password}`, 'utf8').toString('base64')
-    this.httpAgent =
-      this.opts.transport === 'https'
-        ? new https.Agent({ keepAlive: true, maxSockets: 1, rejectUnauthorized: this.opts.rejectUnauthorized ?? true })
-        : new http.Agent({ keepAlive: true, maxSockets: 1 })
+      timeoutMs: opts.timeoutMs,
+      auth: opts.auth ?? 'basic',
+    })
   }
 
   private endpoint(): string {
-    return `${this.opts.transport}://${this.opts.host}:${this.opts.port}${this.opts.path}`
+    return this.http.endpoint()
   }
 
   private envelope(action: string, body: string, extraHeaders: string): string {
@@ -357,38 +353,8 @@ export class PSRPTransport {
 
   private async post(action: string, body: string, extraHeaders: string): Promise<SoapResponse> {
     const envelope = this.envelope(action, body, extraHeaders)
-    const url = new URL(this.endpoint())
-    const isHttps = this.opts.transport === 'https'
-    const lib = isHttps ? https : http
-    const options: http.RequestOptions = {
-      method: 'POST',
-      hostname: url.hostname,
-      port: url.port,
-      path: url.pathname,
-      headers: {
-        'Content-Type': 'application/soap+xml;charset=UTF-8',
-        Authorization: this.authHeader,
-        'Content-Length': Buffer.byteLength(envelope, 'utf8'),
-      },
-      // @ts-expect-error rejectUnauthorized is https-only
-      rejectUnauthorized: isHttps ? this.opts.rejectUnauthorized ?? true : undefined,
-      timeout: this.opts.timeoutMs,
-      agent: this.httpAgent,
-    }
-    return new Promise((resolve, reject) => {
-      const req = lib.request(options, (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', (c: Buffer) => chunks.push(c))
-        res.on('end', () => {
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') })
-        })
-        res.on('error', reject)
-      })
-      req.on('timeout', () => req.destroy(new Error(`PSRP request timed out after ${this.opts.timeoutMs}ms`)))
-      req.on('error', reject)
-      req.write(envelope)
-      req.end()
-    })
+    const res = await this.http.post(envelope)
+    return { status: res.status, body: res.body }
   }
 
   /**

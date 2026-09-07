@@ -106,9 +106,11 @@ export class WinRMBackend implements TerminalBackend {
   }
 
   private buildTransport(cfg: WinRMConnectionConfig): WinRMTransport | PSRPTransport {
-    const username = cfg.domain ? `${cfg.domain}\\${cfg.username}` : cfg.username
-    // PSRP: PowerShell Remoting Protocol over the same WS-Man channel — the
-    // script travels inside the message body (no 8191-char command budget).
+    // Don't pre-prefix DOMAIN\ — WinHttpAuth.parseUsername already splits
+    // DOMAIN\user, user@domain, and a separate `domain` field.
+    const username = cfg.username
+    const auth = cfg.auth ?? 'basic'
+    const domain = cfg.domain
     if (cfg.transport === 'psrp') {
       return new PSRPTransport({
         host: cfg.host,
@@ -118,6 +120,8 @@ export class WinRMBackend implements TerminalBackend {
         transport: cfg.port === 5986 ? 'https' : 'http',
         rejectUnauthorized: cfg.rejectUnauthorized,
         timeoutMs: 30000,
+        auth,
+        domain,
       })
     }
     const transport =
@@ -130,6 +134,8 @@ export class WinRMBackend implements TerminalBackend {
       transport,
       rejectUnauthorized: cfg.rejectUnauthorized,
       timeoutMs: 30000,
+      auth,
+      domain,
     })
   }
 

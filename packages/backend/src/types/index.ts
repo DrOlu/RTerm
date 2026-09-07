@@ -182,7 +182,7 @@ export interface WinRMConnectionEntry {
   username: string
   password: string
   transport?: 'http' | 'https' | 'psrp'
-  auth?: 'basic' | 'negotiate'
+  auth?: 'basic' | 'ntlm' | 'negotiate' | 'kerberos'
   domain?: string
   rejectUnauthorized?: boolean
   /** Optional group/folder id this connection belongs to (see automation.groups). */
@@ -1077,10 +1077,10 @@ export interface WinRMConnectionConfig extends BaseConnectionConfig {
    * WS-Man channel (same port, same Basic auth) — the script then travels
    * INSIDE the PSRP message body, lifting the 8191-char command-line budget. */
   transport?: 'http' | 'https' | 'psrp'
-  /** Auth scheme. v1 implements 'basic' (the common lab/non-domain path).
-   * 'negotiate'/'kerberos' are accepted for forward-compat but route to the
-   * same Basic header today. */
-  auth?: 'basic' | 'negotiate'
+  /** Auth scheme. 'basic' (lab/non-domain), 'ntlm' (NTLMv2), 'negotiate'
+   * (SPNEGO: NTLMv2, or Kerberos when a ticket is available), 'kerberos'
+   * (GSSAPI via optional `kerberos` npm package; falls back to NTLM). */
+  auth?: 'basic' | 'ntlm' | 'negotiate' | 'kerberos'
   /** Optional Active Directory domain (prepended to username as DOMAIN\user). */
   domain?: string
   /** For HTTPS with self-signed certs, set false to skip cert verification. */

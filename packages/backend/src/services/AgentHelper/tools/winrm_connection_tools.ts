@@ -23,9 +23,11 @@ const winrmConnectionFieldsSchema = z.object({
       'http (5985), https (5986), or psrp (PowerShell Remoting over the same port — scripts travel in the message body, no command-length limit). Defaults from port.',
     ),
   auth: z
-    .enum(['basic', 'negotiate'])
+    .enum(['basic', 'ntlm', 'negotiate', 'kerberos'])
     .optional()
-    .describe('Auth scheme. v1 implements basic (lab/non-domain).'),
+    .describe(
+      'Auth scheme. basic (lab), ntlm (NTLMv2), negotiate (SPNEGO/NTLMv2; Kerberos when a ticket is available), kerberos (GSSAPI via optional kerberos package, else NTLM).',
+    ),
   domain: z.string().optional().describe('Active Directory domain (sent as DOMAIN\\user).'),
   rejectUnauthorized: z
     .boolean()

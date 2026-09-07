@@ -1,5 +1,44 @@
 # Changelog
 
+## v3.7.5 (2026-09-07)
+
+### Feature — NTLMv2 / Negotiate / Kerberos auth for WinRM and PSRP
+
+Managed Connections → WinRM now has an **Auth** select next to Transport:
+
+- **Basic** — lab / workgroup (unchanged default)
+- **NTLMv2** — connection-oriented NTLM (MS-NLMP), no extra deps
+- **Negotiate** — SPNEGO; Windows WinRM advertises this (not a bare `NTLM`
+  scheme). Speaks NTLMv2 under Negotiate; Kerberos when a ticket is available
+- **Kerberos** — GSSAPI via the optional `kerberos` npm package (`kinit`
+  first). If the package isn't installed, falls through to NTLMv2 under
+  Negotiate
+
+The same four schemes apply to **both** the WinRM cmd-shell path and the
+PSRP PowerShell-Remoting path. Domain can be a separate field, `DOMAIN\user`,
+or `user@realm`.
+
+**Implementation:** `WinHttpAuth` is a shared keep-alive HTTP client (NTLM
+Type 3 must reuse the Type 2 TCP connection). NTLMv2 is pure JS: MD4
+(OpenSSL 3 disabled it; RFC 1320 in `md4.ts`), NTHash, HMAC-MD5 NTLMv2
+response, Type 1/2/3. No new npm dependencies.
+
+**Live-verified** on AWS Windows Server 2022 workgroup (44.197.31.152) through
+the real `WinRMBackend` — all six combinations pass (`winrm|psrp` ×
+`basic|ntlm|negotiate`), each returning `EC2AMAZ-8NK9FUP`. Windows advertises
+`Negotiate, Basic realm="WSMAN"` (no bare NTLM), so `auth: 'ntlm'` is sent as
+Negotiate on the wire.
+
+**Kerberos / DC promotion:** true Kerberos needs a KDC. Promoting this host
+to an AD DC was **not** done — C: has 2.93 GB free (AD DS needs far more)
+and a reboot would take down the live neuralos node. When a domain exists,
+set Auth to Negotiate or Kerberos and Domain to `CORP` (or use
+`CORP\user` / `user@CORP.LOCAL`).
+
+**Tests:** `md4.extreme.spec.ts` (RFC 1320 vectors), `ntlm.extreme.spec.ts`
+(Type 1/2/3, parseUsername, NTHash, NTLMv2 HMAC). Backend + node/web
+typecheck clean.
+
 ## v3.7.4 (2026-09-06)
 
 ### Feature — PSRP (PowerShell Remoting) as an opt-in WinRM transport

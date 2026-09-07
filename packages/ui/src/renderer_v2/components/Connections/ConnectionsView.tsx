@@ -533,6 +533,20 @@ export const ConnectionsView: React.FC<{ store: AppStore }> = observer(({ store 
                         ]}
                       />
                     </div>
+                    <div className="editor-row">
+                      <span className="editor-icon"><Shield size={16} strokeWidth={2} /></span>
+                      <Select
+                        className="editor-select"
+                        value={draft.auth ?? 'basic'}
+                        onChange={(val) => setDraft({ ...draft, auth: val as 'basic' | 'ntlm' | 'negotiate' | 'kerberos' })}
+                        options={[
+                          { value: 'basic', label: 'Auth: Basic (lab / workgroup)' },
+                          { value: 'ntlm', label: 'Auth: NTLMv2' },
+                          { value: 'negotiate', label: 'Auth: Negotiate (NTLM / Kerberos)' },
+                          { value: 'kerberos', label: 'Auth: Kerberos (GSSAPI, falls back to NTLM)' },
+                        ]}
+                      />
+                    </div>
                     <div className="editor-actions">
                       <button className="icon-btn-sm" title={t.common.save} onClick={saveDraft}><Save size={16} /></button>
                       <button className="icon-btn-sm danger" title={t.common.delete} onClick={deleteCurrent}><Trash2 size={16} strokeWidth={2} /></button>
