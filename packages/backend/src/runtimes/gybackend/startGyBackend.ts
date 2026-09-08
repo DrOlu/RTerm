@@ -37,7 +37,7 @@ import { SessionLogService } from "../../services/automation/sessionLogService";
 import { SchedulerService } from "../../services/automation/schedulerService";
 import { SettingsBackupService } from "../../services/settings/settingsBackup";
 import { IdleTimeoutService } from "../../services/terminal/idleTimeout";
-import { defaultRestRoutes, handleRestRequest } from "../../services/Gateway/restApi";
+import { makeRestCatchAllHandler } from "../../services/Gateway/restApi";
 import { GatewayRateLimiter } from "../../services/Gateway/gatewayRateLimit";
 import { executeScheduledTask } from "../../services/automation/scheduledTaskRunner";
 import { HistoryStorageMigration } from "../../services/history/HistoryStorageMigration";
@@ -589,71 +589,12 @@ const restDispatch = async (method: string, params: Record<string, unknown>): Pr
   return await target.handleRequest(method, params);
 };
 
-  /**
-   * Build the /api/v1/* HTTP routes from the REST route table (sync — the
-   * route table is static). Each route authorizes via the same token check as
-   * the dashboard, parses the JSON body for POSTs, and dispatches through the
-   * gateway.
-   */
   const buildRestHttpRoutesSync = (opts: {
     isAuthorized: (req: unknown) => Promise<boolean>;
     dispatch: (method: string, params: Record<string, unknown>) => Promise<unknown>;
   }): Array<{ path: string; handler: (req: unknown, res: unknown) => Promise<void> }> => {
-    const routes = defaultRestRoutes();
-    // The HTTP route table matches paths EXACTLY, so register each concrete
-    // REST path. Parameterized paths (:id) register per-segment wildcards via
-    // a single /api/v1 catch-all is NOT possible — instead we register the
-    // static paths exactly and one dynamic handler per parameterized prefix.
-    const staticRoutes = routes
-      .filter((r) => !r.path.includes(":"))
-      .map((route) => ({
-        path: route.path,
-        handler: makeRestHandler(routes, opts),
-      }));
-    // Parameterized paths: the adapter matches exactly, so we cannot register
-    // /api/v1/terminals/:id/write directly. Instead expose them through the
-    // /api/v1/rpc escape hatch (POST {method:"terminal:write", params:{...}}),
-    // which covers every gateway method including these.
-    return staticRoutes;
+    return [{ path: "/api/v1/*", handler: makeRestCatchAllHandler(opts) }];
   };
-
-const makeRestHandler = (
-  routes: ReturnType<typeof defaultRestRoutes>,
-  opts: { isAuthorized: (req: unknown) => Promise<boolean>; dispatch: (method: string, params: Record<string, unknown>) => Promise<unknown> },
-) => {
-    return async (req: unknown, res: unknown): Promise<void> => {
-      const r = req as { method?: string; url?: string };
-      const s = res as { writeHead?: (n: number, h: Record<string, string>) => void; end?: (b: string) => void };
-      try {
-        if (!(await opts.isAuthorized(r))) {
-          s.writeHead?.(401, { "content-type": "application/json" });
-          s.end?.(JSON.stringify({ error: "unauthorized" }));
-          return;
-        }
-        const url = new URL(r.url ?? "/", "http://localhost");
-        const body = r.method === "POST" ? await readJsonBody(r as never) : Object.fromEntries(url.searchParams.entries());
-        const result = await handleRestRequest(routes, opts.dispatch, {
-          method: r.method ?? "GET",
-          path: url.pathname,
-          body,
-        });
-        s.writeHead?.(result.status, { "content-type": "application/json" });
-        s.end?.(JSON.stringify(result.body));
-      } catch (e) {
-        s.writeHead?.(500, { "content-type": "application/json" });
-        s.end?.(JSON.stringify({ error: "internal", message: e instanceof Error ? e.message : String(e) }));
-      }
-    };
-  };
-
-  const readJsonBody = (req: { on?: (e: string, cb: (d?: Buffer) => void) => void }): Promise<unknown> =>
-    new Promise((resolve) => {
-      let data = "";
-      req.on?.("data", (d) => { data += String(d ?? "") });
-      req.on?.("end", () => {
-        try { resolve(data ? JSON.parse(data) : {}) } catch { resolve({}) }
-      });
-    });
 
   const wsGatewayControlService = new WebSocketGatewayControlService({
     createAdapter: (host, port, ipFilter) => {
@@ -1188,6 +1129,9 @@ const makeRestHandler = (
     );
     console.log(
       `[gybackend] Live dashboard: http://${wsState.host}:${wsState.port}/dashboard`,
+    );
+    console.log(
+      `[gybackend] REST API: http://${wsState.host}:${wsState.port}/api/v1/health  (OpenAPI /api/v1/openapi.json)`,
     );
   } else {
     console.log("[gybackend] WebSocket RPC endpoint: disabled");

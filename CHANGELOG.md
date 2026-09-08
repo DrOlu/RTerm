@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.7.7 (2026-09-08)
+
+### Fix — desktop freeze (sync SQLite + huge tool JSON)
+
+Compounding knowledge (v3.7.6) read SQLite on every agent turn via promptBlock/listGoals using better-sqlite3 (synchronous). Combined with uncapped JSON.stringify of plugin/MCP tool results, that stalled the Node isolate / Electron UI.
+
+- CompoundingStore.promptBlock is cached for 2s and invalidated on writes (lessons, estate, goals, probes).
+- Tool results are clipped to 32 KB (stringifyToolResult / clipTextMiddle) so a large PSRP dump cannot freeze the renderer.
+
+### Feature — comprehensive HTTP overlay (/api/v1)
+
+REST was a thin shim: exact-path matching meant :id routes never registered; Electron had no REST at all.
+
+- HTTP adapter matches prefix (/api/v1/*) and :param segments (httpRouteMatches).
+- Catch-all /api/v1/* on gybackend and Electron (same auth as dashboard).
+- Parameterized: POST /api/v1/terminals/:id/write, GET .../buffer, POST /api/v1/sessions/:id/chat-async (agent:startTaskAsync).
+- GET /api/v1/openapi.json, POST /api/v1/sessions (create), OPTIONS/CORS.
+- POST /api/v1/rpc still reaches every JSON-RPC method. Streaming stays on WebSocket.
+
+7 restApi.extreme.spec tests. Backend + node/web typecheck clean.
+
 ## v3.7.6 (2026-09-08)
 
 ### Feature — compounding knowledge (auto-learn from mistakes)

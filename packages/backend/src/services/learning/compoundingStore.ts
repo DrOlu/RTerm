@@ -53,6 +53,9 @@ export interface GoalRow {
 export class CompoundingStore {
   private readonly filePath: string
   private readonly db: DatabaseHandle
+  /** Avoid sync SQLite on every agent turn (desktop freeze). Invalidated on writes. */
+  private promptCache: { at: number; text: string } | null = null
+  private static readonly PROMPT_CACHE_MS = 2000
 
   constructor(options?: { filePath?: string }) {
     this.filePath = options?.filePath || path.join(resolveHistoryStorageDir(), COMPOUNDING_DB_FILE)
@@ -108,6 +111,7 @@ export class CompoundingStore {
   recordLessons(lessons: ExtractedLesson[], runId?: string): LessonRow[] {
     const now = Date.now()
     const out: LessonRow[] = []
+    this.promptCache = null
     try {
       const sel = this.db.prepare('SELECT * FROM lessons WHERE fingerprint = ?')
       const ins = this.db.prepare(
@@ -173,6 +177,7 @@ export class CompoundingStore {
     auth?: string
     facts?: Record<string, unknown>
   }): void {
+    this.promptCache = null
     try {
       const now = Date.now()
       this.db
@@ -230,6 +235,7 @@ export class CompoundingStore {
     blockedBy?: string
     nextProbe?: string
   }): void {
+    this.promptCache = null
     try {
       this.db
         .prepare(
@@ -273,6 +279,7 @@ export class CompoundingStore {
   }
 
   recordProbe(sessionId: string, tag: string, hypothesis: string, command: string, ok: boolean): void {
+    this.promptCache = null
     try {
       this.db
         .prepare(
@@ -310,6 +317,11 @@ export class CompoundingStore {
    */
   promptBlock(maxChars = 4000): string {
     try {
+      const now = Date.now()
+      if (this.promptCache && now - this.promptCache.at < CompoundingStore.PROMPT_CACHE_MS) {
+        const cached = this.promptCache.text
+        return cached.length > maxChars ? cached.slice(0, maxChars) + '\n…' : cached
+      }
       const lessons = this.listLessons(20)
       const facts = this.listEstateFacts()
       const lines: string[] = ['# Compounding knowledge (auto)']
@@ -331,6 +343,7 @@ export class CompoundingStore {
         }
       }
       const text = lines.join('\n')
+      this.promptCache = { at: now, text }
       return text.length > maxChars ? text.slice(0, maxChars) + '\n…' : text
     } catch {
       return ''

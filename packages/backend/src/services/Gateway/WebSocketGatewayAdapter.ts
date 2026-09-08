@@ -460,6 +460,28 @@ class WebSocketRpcError extends Error {
 }
 
 /**
+ * Exact path, prefix (`/api/v1/*`), or `:param` segment match.
+ * Prefix routes must be registered before more-specific ones only when both
+ * could match — callers prepend `/api/v1/*` so parameterized REST works.
+ */
+export function httpRouteMatches(pattern: string, pathname: string): boolean {
+  if (pattern === pathname) return true
+  if (pattern.endsWith('/*')) {
+    const prefix = pattern.slice(0, -1) // keep trailing slash semantics: /api/v1/
+    const base = pattern.slice(0, -2)
+    return pathname === base || pathname.startsWith(prefix) || pathname.startsWith(base + '/')
+  }
+  const a = pattern.split('/').filter(Boolean)
+  const b = pathname.split('/').filter(Boolean)
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].startsWith(':')) continue
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+/**
  * Default server factory. When `httpRoutes` are provided (e.g. /dashboard),
  * creates ONE node http.Server that serves those routes on plain HTTP requests
  * and upgrades WebSocket connections on the same port; otherwise it's the
@@ -493,8 +515,8 @@ export function createDefaultWebSocketServerFactory(
               `http://${String(req.headers.host ?? "localhost")}`,
             ).pathname;
           } catch { /* keep default */ }
-          const route = routes.find((r) => r.path === pathname);
-          if (!route) {
+           const route = routes.find((r) => httpRouteMatches(r.path, pathname));
+           if (!route) {
             res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
             res.end("not found");
             return;

@@ -453,6 +453,14 @@ function reconcileToolCalls(toolCalls: any[]): any[] {
   return result
 }
 
+/** Cap tool JSON so huge WinRM/PSRP dumps cannot freeze the isolate / renderer. */
+const TOOL_RESULT_MAX_CHARS = 32_768
+
+function stringifyToolResult(result: unknown): string {
+  const raw = typeof result === "string" ? result : JSON.stringify(result)
+  return clipTextMiddle(raw, TOOL_RESULT_MAX_CHARS)
+}
+
 function clipTextMiddle(input: string, maxChars: number): string {
   if (maxChars <= 0) return "";
   if (input.length <= maxChars) return input;
@@ -2798,9 +2806,7 @@ export class AgentService_v2 {
                 ? JSON.parse(toolCall.args)
                 : (toolCall.args || {})
               const pluginResult = await pluginHandler(pluginArgs)
-              result = typeof pluginResult === "string"
-                ? pluginResult
-                : JSON.stringify(pluginResult)
+               result = stringifyToolResult(pluginResult)
             } catch (err) {
               result = `Plugin tool "${toolCall.name}" error: ${(err as Error).message}`
             }
@@ -3111,7 +3117,7 @@ export class AgentService_v2 {
         const pluginHandler = this.pluginTools.get(name);
         if (pluginHandler) {
           const result = await pluginHandler(args);
-          return typeof result === 'string' ? result : JSON.stringify(result);
+          return stringifyToolResult(result);
         }
         return `Tool "${name}" is not supported in parallel execution mode.`;
       }
@@ -3213,8 +3219,7 @@ export class AgentService_v2 {
           args,
           signal,
         );
-        resultText =
-          typeof result === "string" ? result : JSON.stringify(result, null, 2);
+        resultText = stringifyToolResult(result);
       } catch (err) {
         if (this.helpers.isAbortError(err)) throw err;
         resultText = err instanceof Error ? err.message : String(err);

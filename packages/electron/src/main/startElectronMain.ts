@@ -37,6 +37,7 @@ import { GatewayService } from "../../../backend/src/services/Gateway/GatewaySer
 import { ElectronGatewayIpcAdapter } from "../gateway/ElectronGatewayIpcAdapter";
 import { ElectronWindowTransport } from "../gateway/ElectronWindowTransport";
 import { WebSocketGatewayAdapter } from "../../../backend/src/services/Gateway/WebSocketGatewayAdapter";
+import { makeRestCatchAllHandler } from "../../../backend/src/services/Gateway/restApi";
 import {
   WebSocketGatewayControlService,
   resolveWsGatewayPolicyFromEnv,
@@ -473,9 +474,16 @@ export async function startElectronMain(): Promise<void> {
         // runs (observability is built later in startup), so the bridge reads a
         // ref that is filled in once observability is wired.
         const observabilityRef: { current: import("../../../backend/src/services/observability").Observability | null } = { current: null };
+        type RestDispatchTarget = { handleRequest?: (m: string, p: Record<string, unknown>) => Promise<unknown> } | null;
+        let restDispatchTarget: RestDispatchTarget = null;
+        const restDispatch = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
+          const target = restDispatchTarget;
+          if (!target?.handleRequest) throw new Error("REST API is not ready yet");
+          return await target.handleRequest(method, params);
+        };
         webSocketGatewayControlService = new WebSocketGatewayControlService({
-          createAdapter: (host, port, ipFilter) =>
-            new WebSocketGatewayAdapter(gatewayService, {
+          createAdapter: (host, port, ipFilter) => {
+            const adapter = new WebSocketGatewayAdapter(gatewayService, {
               host,
               port,
               accessTokenAuth: {
@@ -487,9 +495,17 @@ export async function startElectronMain(): Promise<void> {
                // Browser dashboard on the SAME port as the WS gateway (v3.0.2+):
                // /dashboard = live page (WS push), /dashboard/json = state. Auth
                // mirrors the gateway (loopback open, remote needs a token).
-               httpRoutes: [
-                 {
-                   path: "/dashboard",
+                httpRoutes: [
+                  {
+                    path: "/api/v1/*",
+                    handler: makeRestCatchAllHandler({
+                      isAuthorized: (req) =>
+                        dashboardHttpAuthorized(req as never, (t) => accessTokenService.verifyToken(t)),
+                      dispatch: restDispatch,
+                    }),
+                  },
+                  {
+                    path: "/dashboard",
                     handler: async (req, res) => {
                       if (!(await dashboardHttpAuthorized(req, (t) => accessTokenService.verifyToken(t)))) {
                         res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
@@ -965,8 +981,11 @@ export async function startElectronMain(): Promise<void> {
                   gatewayService.broadcastRaw("tools:builtInUpdated", summary);
                   return summary;
                 },
-              },
-            }),
+               },
+             });
+            restDispatchTarget = adapter as unknown as RestDispatchTarget;
+            return adapter;
+          },
         });
         // Initialize mobile web server
         // Packaged: bundled into app resources via electron-builder extraResources
