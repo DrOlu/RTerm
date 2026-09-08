@@ -121,6 +121,10 @@ export interface IMemoryRuntime {
     content: string,
     profileId?: string | null,
   ): Promise<MemorySnapshot>;
+  appendMemory?(
+    chunk: string,
+    profileId?: string | null,
+  ): Promise<MemorySnapshot>;
   copyMemory?(
     sourceProfileId: string | null | undefined,
     targetProfileId: string | null | undefined,

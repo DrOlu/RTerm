@@ -220,6 +220,31 @@ export async function startGyBackend(): Promise<void> {
   const agentRunLedger = new AgentRunLedger();
   agentRunLedger.markStaleRunsAborted(Date.now());
   agentService.setAgentRunLedger(agentRunLedger);
+  const { CompoundingStore } = await import("../../services/learning/compoundingStore");
+  const compoundingStore = new CompoundingStore();
+  agentService.setCompoundingStore(compoundingStore);
+  try {
+    const { connectionIdentity } = await import("../../services/learning/compoundingKnowledge");
+    const winrm = settingsService.getSettings()?.connections?.winrm ?? [];
+    for (const c of winrm) {
+      compoundingStore.upsertEstateFact({
+        identity: connectionIdentity({
+          name: c.name,
+          host: c.host,
+          transport: c.transport,
+          auth: c.auth,
+          domain: c.domain,
+        }),
+        host: c.host,
+        role: /dc/i.test(c.name || "") ? "dc" : undefined,
+        domain: c.domain,
+        transport: c.transport,
+        auth: c.auth,
+      });
+    }
+  } catch (e) {
+    console.warn(`[gybackend] compounding estate seed skipped: ${e instanceof Error ? e.message : String(e)}`);
+  }
   const changeLedger = new ChangeLedger();
   changeLedger.markStaleChangesAborted(Date.now());
   agentService.setChangeLedger(changeLedger);

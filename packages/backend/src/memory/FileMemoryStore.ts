@@ -47,6 +47,15 @@ export class FileMemoryStore {
     }
   }
 
+  /** Append text to memory.md (used by auto-lesson writer). */
+  async appendMemory(chunk: string): Promise<MemorySnapshot> {
+    const filePath = await this.ensureMemoryFile()
+    const current = await fs.readFile(filePath, 'utf8')
+    const next = current.endsWith('\n') || current === '' ? current + chunk : current + '\n' + chunk
+    await fs.writeFile(filePath, next, 'utf8')
+    return { filePath, content: next }
+  }
+
   async getMemorySnapshot(): Promise<MemorySnapshot> {
     const filePath = await this.ensureMemoryFile()
     const content = await fs.readFile(filePath, 'utf8')

@@ -40,6 +40,8 @@ export interface ToolExecutionContext {
   }
   /** Optional persisted run audit + token-cost ledger (get_run_ledger). */
   agentRunLedger?: Pick<AgentRunLedger, 'listRuns' | 'getRun' | 'summarize'>
+  /** Compounding knowledge (lessons, estate facts, goals, session probes). */
+  compoundingStore?: import('../learning/compoundingStore').CompoundingStore
   changeLedger?: import('../changeLedger').ChangeLedger
   /** Optional event-driven trigger engine (Advanced Automation v1.9.1). */
   triggerEngine?: import('../automation/triggerEngine').TriggerEngine

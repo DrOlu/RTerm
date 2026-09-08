@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.7.6 (2026-09-08)
+
+### Feature — compounding knowledge (auto-learn from mistakes)
+
+The agent now writes durable lessons after every run and injects them on the next one, so knowledge compounds without a human pasting memory.md.
+
+- Deterministic extractors (no extra LLM call) fingerprint known production failures: PSRP InvalidSelectors, NetUseAdd 64 / djoin, CLI dropped Bearer token, duplicate tool definitions, npm EACCES root cache, Basic 401 after DC promo, WinRM dollar mangle, SOAP-guess loops, multiline exec_command poison.
+- False-positive / false-negative locked in compoundingKnowledge.extreme.spec.ts (25 tests): BGP SELECTORS, nginx 401, /etc/shadow EACCES, DNS network name, duplicate IP, OAuth access-token prose, and rterm ping must NOT fire; the real failure strings MUST fire.
+- SQLite store (gyshell-compounding.sqlite): occurrence counts, estate facts keyed by connection name not IP (CORP-DC1 vs neuralos-win1 on the same host), session goals, session probes. Same best-effort contract as the run ledger.
+- memory.md: new fingerprints append a LESSON (auto) section once; repeats increment SQLite only.
+- Prompt injection: never-do list + estate snapshot + open goals on every turn.
+- Tools: ops_experiment, manage_goal, estate_facts. Gated mutations (Add-Computer, Install-ADDSForest, djoin /provision, Set-SmbServerConfiguration, SG ingress, ...) refuse until ops_experiment has recorded the matching tag in this session.
+
+Wired in both gybackend and Electron.
+
 ## v3.7.5 (2026-09-07)
 
 ### Feature — NTLMv2 / Negotiate / Kerberos auth for WinRM and PSRP

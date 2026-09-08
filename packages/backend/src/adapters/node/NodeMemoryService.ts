@@ -55,6 +55,13 @@ export class NodeMemoryService {
     return await this.createStore(profileId).writeMemory(content)
   }
 
+  async appendMemory(
+    chunk: string,
+    profileId?: MemoryProfileId,
+  ): Promise<MemorySnapshot> {
+    return await this.createStore(profileId).appendMemory(chunk)
+  }
+
   async copyMemory(
     sourceProfileId: MemoryProfileId,
     targetProfileId: MemoryProfileId,

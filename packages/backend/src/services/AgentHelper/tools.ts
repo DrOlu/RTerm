@@ -62,6 +62,11 @@ import {
   getRunLedger,
 } from './tools/run_ledger_tools'
 import {
+  opsExperimentSchema, opsExperiment,
+  manageGoalSchema, manageGoal,
+  estateFactsSchema, estateFacts,
+} from './tools/learning_tools'
+import {
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -147,6 +152,7 @@ export { manageWinrmConnectionSchema } from './tools/winrm_connection_tools'
 export { manageSerialConnectionSchema } from './tools/serial_connection_tools'
 export { listSessionLogsSchema, readSessionLogSchema, searchSessionLogsSchema } from './tools/session_log_tools'
 export { getRunLedgerSchema } from './tools/run_ledger_tools'
+export { opsExperimentSchema, manageGoalSchema, estateFactsSchema } from './tools/learning_tools'
 export {
   runFleetCommandSchema,
   collectFactsSchema,
@@ -287,6 +293,21 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'get_run_ledger',
       description: BUILTIN_TOOL_INFO.find((t) => t.name === 'get_run_ledger')?.description ?? '',
       schema: getRunLedgerSchema
+    },
+    {
+      name: 'ops_experiment',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'ops_experiment')?.description ?? '',
+      schema: opsExperimentSchema
+    },
+    {
+      name: 'manage_goal',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'manage_goal')?.description ?? '',
+      schema: manageGoalSchema
+    },
+    {
+      name: 'estate_facts',
+      description: BUILTIN_TOOL_INFO.find((t) => t.name === 'estate_facts')?.description ?? '',
+      schema: estateFactsSchema
     },
     {
       name: 'run_fleet_command',
@@ -475,6 +496,9 @@ export const toolImplementations = {
   readSessionLog,
   searchSessionLogs,
   getRunLedger,
+  opsExperiment,
+  manageGoal,
+  estateFacts,
   runFleetCommand,
   collectFacts,
   probeConnectivity,

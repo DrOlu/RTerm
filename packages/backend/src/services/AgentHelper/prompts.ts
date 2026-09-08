@@ -6,6 +6,11 @@ import {
 import type { TerminalTab, SSHConnectionEntry, WinRMConnectionEntry } from "../../types";
 import { z } from "zod";
 import { recallForPrompt } from "../../memory/memoryManager";
+import {
+  OPS_EXPERIMENT_DESCRIPTION,
+  MANAGE_GOAL_DESCRIPTION,
+  ESTATE_FACTS_DESCRIPTION,
+} from "./tools/learning_tools";
 
 /**
  * Prompt constants and utilities for AgentService_v2
@@ -474,6 +479,21 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     name: "get_run_ledger",
     description: GET_RUN_LEDGER_DESCRIPTION,
     shortDescription: "Query agent run audit ledger",
+  },
+  {
+    name: "ops_experiment",
+    description: OPS_EXPERIMENT_DESCRIPTION,
+    shortDescription: "Hypothesis + probe before mutations",
+  },
+  {
+    name: "manage_goal",
+    description: MANAGE_GOAL_DESCRIPTION,
+    shortDescription: "Persistent session goals",
+  },
+  {
+    name: "estate_facts",
+    description: ESTATE_FACTS_DESCRIPTION,
+    shortDescription: "Estate snapshot by connection name",
   },
   {
     name: "run_fleet_command",

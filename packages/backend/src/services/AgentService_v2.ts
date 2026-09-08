@@ -60,6 +60,9 @@ import {
   readSessionLogSchema,
   searchSessionLogsSchema,
   getRunLedgerSchema,
+  opsExperimentSchema,
+  manageGoalSchema,
+  estateFactsSchema,
   manageDeviceMemorySchema,
   manageScriptSchema,
   manageGroupSchema,
@@ -516,6 +519,7 @@ export class AgentService_v2 {
   /** Optional run ledger — persisted audit + token-cost record of every
    * agent run (start/finish lifecycle + per-call token usage). */
   private agentRunLedger?: import("./agentRunLedger").AgentRunLedger;
+  private compoundingStore?: import("./learning/compoundingStore").CompoundingStore;
   private changeLedger?: import("./changeLedger").ChangeLedger;
   private mcpToolService: IMcpRuntime;
   private skillService: ISkillRuntime;
@@ -687,6 +691,10 @@ export class AgentService_v2 {
   }
   setAgentRunLedger(ledger: import("./agentRunLedger").AgentRunLedger | null): void {
     this.agentRunLedger = ledger ?? undefined;
+  }
+
+  setCompoundingStore(store: import("./learning/compoundingStore").CompoundingStore | null): void {
+    this.compoundingStore = store ?? undefined;
   }
 
   setFeedbackWaiter(
@@ -1280,7 +1288,20 @@ export class AgentService_v2 {
           );
         }
       }
-      const baseSystemText = createBaseSystemPromptText(memoryPrompt);
+      let baseSystemText = createBaseSystemPromptText(memoryPrompt);
+      if (this.compoundingStore) {
+        const block = this.compoundingStore.promptBlock(3500);
+        const goals = this.compoundingStore.listGoals(sessionId).filter((g) => g.status === "open" || g.status === "blocked");
+        const extra: string[] = [];
+        if (block) extra.push(block);
+        if (goals.length) {
+          extra.push(
+            "# Open goals this session\n" +
+              goals.map((g) => `- [${g.status}] ${g.text}${g.blockedBy ? ` (${g.blockedBy})` : ""}`).join("\n"),
+          );
+        }
+        if (extra.length) baseSystemText = `${baseSystemText}\n\n${extra.join("\n\n")}`;
+      }
       const newMessages = upsertSingleSystemMessageByText(
         [...messages, humanMessage],
         baseSystemText,
@@ -2392,6 +2413,33 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "ops_experiment": {
+          try {
+            const validatedArgs = opsExperimentSchema.parse(toolCall.args || {});
+            result = await toolImplementations.opsExperiment(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for ops_experiment: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_goal": {
+          try {
+            const validatedArgs = manageGoalSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageGoal(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_goal: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "estate_facts": {
+          try {
+            const validatedArgs = estateFactsSchema.parse(toolCall.args || {});
+            result = await toolImplementations.estateFacts(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for estate_facts: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "get_metrics": {
           try {
             const validatedArgs = getMetricsSchema.parse(toolCall.args || {});
@@ -3038,6 +3086,9 @@ export class AgentService_v2 {
       case "get_dem_summary": return ti.getDemSummary(args, executionContext);
       case "get_cost": return ti.getCost(args, executionContext);
       case "get_run_ledger": return ti.getRunLedger(args, executionContext);
+      case "ops_experiment": return ti.opsExperiment(args, executionContext);
+      case "manage_goal": return ti.manageGoal(args, executionContext);
+      case "estate_facts": return ti.estateFacts(args, executionContext);
       case "list_gateway_methods": return ti.listGatewayMethods(args, executionContext);
       case "collect_facts": return ti.collectFacts(args, executionContext);
       case "run_fleet_command": return ti.runFleetCommand(args, executionContext);
@@ -3604,6 +3655,7 @@ export class AgentService_v2 {
       automationManager: this.automationManager,
       sessionLogger: this.sessionLogger,
       agentRunLedger: this.agentRunLedger,
+      compoundingStore: this.compoundingStore,
       changeLedger: this.changeLedger,
       triggerEngine: this.triggerEngine,
       observability: this.observability,
@@ -4840,7 +4892,59 @@ export class AgentService_v2 {
       }
       this.currentRunIdBySession.delete(sessionId);
       this.agentRunLedger?.finishRun(ledgerRunId, ledgerExitStatus, ledgerExitError);
+      void this.recordCompoundingLessons(sessionId, ledgerRunId, ledgerExitStatus, ledgerExitError);
       await this.clearCheckpoint(sessionId);
+    }
+  }
+
+  /**
+   * After every run, extract durable lessons from the error + input preview
+   * and append them to memory.md (deduped by fingerprint). Best-effort: a
+   * failure here must never throw out of the agent finally block.
+   */
+  private async recordCompoundingLessons(
+    _sessionId: string,
+    ledgerRunId: string | undefined,
+    status: string,
+    error?: string,
+  ): Promise<void> {
+    try {
+      if (!this.compoundingStore) return;
+      const { extractLessons, isTrivialRun, appendLessonsToMemory, formatLessonMarkdown } =
+        await import("./learning/compoundingKnowledge");
+      const run = ledgerRunId ? this.agentRunLedger?.getRun(ledgerRunId) : null;
+      const inputPreview = run?.run.inputPreview;
+      if (isTrivialRun(inputPreview, error)) return;
+      const lessons = extractLessons(error, inputPreview, status === "failed" ? status : "");
+      if (!lessons.length) return;
+      const rows = this.compoundingStore.recordLessons(lessons, ledgerRunId);
+      const snapshot = await this.memoryService.getMemorySnapshot(this.getActiveMemoryProfileId());
+      const { next, added } = appendLessonsToMemory(snapshot.content, lessons, {
+        runId: ledgerRunId,
+        at: new Date().toISOString().slice(0, 10),
+      });
+      if (added.length && this.memoryService.appendMemory) {
+        const chunk = added
+          .map((fp) => {
+            const lesson = lessons.find((l) => l.fingerprint === fp);
+            const row = rows.find((r) => r.fingerprint === fp);
+            return lesson
+              ? formatLessonMarkdown(lesson, {
+                  runId: ledgerRunId,
+                  at: new Date().toISOString().slice(0, 10),
+                  occurrence: row?.occurrences,
+                })
+              : "";
+          })
+          .join("");
+        if (chunk) {
+          await this.memoryService.appendMemory(chunk, this.getActiveMemoryProfileId());
+        }
+      } else if (added.length) {
+        await this.memoryService.writeMemory(next, this.getActiveMemoryProfileId());
+      }
+    } catch (err) {
+      console.warn("[AgentService_v2] compounding lesson write failed:", err);
     }
   }
 

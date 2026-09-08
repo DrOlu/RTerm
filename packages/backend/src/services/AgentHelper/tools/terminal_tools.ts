@@ -278,6 +278,33 @@ export async function runCommand(
     )
   }
 
+  const { matchGatedMutation } = await import('../../learning/compoundingKnowledge').catch(() => ({ matchGatedMutation: () => null })) as typeof import('../../learning/compoundingKnowledge')
+  const gated = matchGatedMutation(command)
+  if (gated && context.compoundingStore && !context.compoundingStore.hasProbe(context.sessionId, gated.requireProbeTag)) {
+    const block =
+      `Blocked gated mutation "${gated.id}" until ops_experiment runs with tag="${gated.requireProbeTag}" in this session. ` +
+      `Call ops_experiment (hypothesis + cheap probe) first. If that probe already failed, do NOT retry ${gated.id} — use the INSTEAD from compounding lessons.`
+    abortIfNeeded(context.signal)
+    context.sendEvent(sessionId, {
+      messageId,
+      type: 'command_started',
+      command,
+      commandId: messageId,
+      tabName: bestMatch.title || bestMatch.id,
+      isNowait: false
+    })
+    context.sendEvent(sessionId, {
+      messageId,
+      type: 'command_finished',
+      command,
+      commandId: messageId,
+      tabName: bestMatch.title || bestMatch.id,
+      exitCode: -1,
+      outputDelta: block
+    })
+    return block
+  }
+
   const allowed = await checkCommandPolicy(command, 'run_command', context)
   if (!allowed.allowed) {
     abortIfNeeded(context.signal)
