@@ -1,5 +1,25 @@
 # Changelog
 
+## v3.8.0 (2026-09-08)
+
+### Persistent PSRP runspace (live-verified)
+
+WinRM PSRP tabs keep one Microsoft.PowerShell shell across commands (`ensurePool` / `runScriptOnPool` / `closePool` on kill). `$global:x` survives the next command. Live: CORP-DC1 and CORP-WS2, pool2 same=true, Write-Output 42 twice. PIPELINE_OUTPUT now parses I32 as well as strings.
+
+### Gateway capability tokens
+
+Optional `scopesForToken` on WS auth. Empty scopes = legacy full access. `terminals:*` matches `terminal:list`. Forbidden methods return FORBIDDEN.
+
+### secretRef + redaction
+
+`vault:KEY` / `secretRef:KEY` helpers. Tool results pass through `redactText` (tokens, PEMs, password=).
+
+### Ops modules (tested)
+
+Offline djoin playbook, jump-path break-glass TTL, two-operator takeConn, output snapshot/diff, two-person approval + TTL expire, stubbed agent replay, incident bundles, CDP/config-mode, plugin allowlist + SHA-256 SBOM, SSPI contract (false on macOS; SPN WSMAN/fqdn).
+
+Live persist + 8 PSRP protocol tests + 13 v38 feature tests. Backend typecheck clean.
+
 ## v3.7.7 (2026-09-08)
 
 ### Fix — desktop freeze (sync SQLite + huge tool JSON)

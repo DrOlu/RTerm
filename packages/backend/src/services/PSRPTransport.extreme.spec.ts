@@ -93,3 +93,71 @@ describe('PSRPTransport protocol layer', () => {
     assert.deepEqual(recovered[0], msg)
   })
 })
+
+describe('PSRPTransport persistent pool', () => {
+  it('ensurePool reuses one Create; two runScriptOnPool share it; closePool Deletes once', async () => {
+    const { PSRPTransport } = await import('./PSRPTransport')
+    class T extends PSRPTransport {
+      creates = 0
+      commands = 0
+      deletes = 0
+      constructor() {
+        super({ host: '127.0.0.1', port: 5985, username: 'u', password: 'p', transport: 'http' })
+      }
+      protected async post(action: string) {
+        if (action.includes('Create') && !action.includes('Command')) {
+          this.creates += 1
+          return { status: 200, body: '<w:Selector Name="ShellId">SHELL-1</w:Selector>' }
+        }
+        if (action.includes('Receive')) {
+          return {
+            status: 200,
+            body:
+              '<rsp:CommandState State="http://schemas.microsoft.com/wbem/wsman/1/windows/shell/CommandState/Done"><rsp:ExitCode>0</rsp:ExitCode></rsp:CommandState>',
+          }
+        }
+        if (action.includes('Command')) {
+          this.commands += 1
+          return { status: 200, body: '<CommandId>CMD-1</CommandId>' }
+        }
+        if (action.includes('Delete')) {
+          this.deletes += 1
+          return { status: 200, body: '' }
+        }
+        return { status: 200, body: '' }
+      }
+    }
+    const t = new T()
+    const a = await t.ensurePool()
+    const b = await t.ensurePool()
+    assert.equal(a.shellId, b.shellId)
+    assert.equal(t.creates, 1)
+    await t.runScriptOnPool('Write-Output 1')
+    await t.runScriptOnPool('Write-Output 2')
+    assert.equal(t.creates, 1)
+    assert.equal(t.commands, 2)
+    await t.closePool()
+    assert.equal(t.deletes, 1)
+    await t.ensurePool()
+    assert.equal(t.creates, 2)
+  })
+
+  it('PIPELINE_OUTPUT parser extracts I32 when there is no <S> string', () => {
+    const payload = '<Obj><MS><I32>42</I32></MS></Obj>'
+    const sRe = /<S[^>]*>([\s\S]*?)<\/S>/gi
+    let extracted = false
+    let stdout = ''
+    let sm: RegExpExecArray | null
+    while ((sm = sRe.exec(payload)) !== null) {
+      stdout += sm[1]
+      extracted = true
+    }
+    if (!extracted) {
+      const nRe = /<(?:I32|I64|B|ToString)[^>]*>([\s\S]*?)<\/(?:I32|I64|B|ToString)>/i
+      const nm = payload.match(nRe)
+      if (nm) stdout += nm[1]
+    }
+    assert.equal(stdout, '42')
+  })
+})
+

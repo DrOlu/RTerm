@@ -28,6 +28,7 @@ import type {
   ISkillRuntime,
   IMemoryRuntime,
 } from "./runtimeContracts";
+import { redactText } from "./redaction/secretRedact";
 import type { UIHistoryService } from "./UIHistoryService";
 import { v4 as uuidv4 } from "uuid";
 import type { z } from "zod";
@@ -458,7 +459,7 @@ const TOOL_RESULT_MAX_CHARS = 32_768
 
 function stringifyToolResult(result: unknown): string {
   const raw = typeof result === "string" ? result : JSON.stringify(result)
-  return clipTextMiddle(raw, TOOL_RESULT_MAX_CHARS)
+  return redactText(clipTextMiddle(raw, TOOL_RESULT_MAX_CHARS))
 }
 
 function clipTextMiddle(input: string, maxChars: number): string {

@@ -22,6 +22,7 @@ import type {
 } from "../FileTransferService";
 import { buildDescribePayload } from "./methodRegistry";
 import { OBSERVABILITY_METHODS } from "./observabilityBridge";
+import { methodAllowed } from "../security/tokenScopes";
 
 type WebSocketRpcMethod =
   | "gateway:ping"
@@ -119,6 +120,8 @@ interface WebSocketRpcRequest {
 export interface WebSocketAccessTokenAuth {
   verifyToken: (token: string) => Promise<boolean> | boolean;
   allowLocalhostWithoutToken?: boolean;
+  /** v3.8.0: empty/omit = full access (legacy). */
+  scopesForToken?: (token: string) => Promise<string[] | undefined> | string[] | undefined;
 }
 
 export interface IWebSocketServerLike {
@@ -573,6 +576,7 @@ export class WebSocketGatewayAdapter {
     new Map();
   private isSameMachineBySocket: WeakMap<IWebSocketConnectionLike, boolean> =
     new WeakMap();
+  private scopesBySocket: WeakMap<IWebSocketConnectionLike, string[]> = new WeakMap();
   private readonly serverFactory: WebSocketServerFactory;
   private readonly logger: IWebSocketGatewayAdapterLogger;
 
@@ -699,6 +703,12 @@ export class WebSocketGatewayAdapter {
       this.isLoopbackAddress(String(remote)),
     );
     this.gateway.registerTransport(transport);
+    const token = this.extractAccessToken(request);
+    const scopeFn = this.options.accessTokenAuth?.scopesForToken;
+    if (token && scopeFn) {
+      const scopes = await scopeFn(token);
+      if (scopes && scopes.length) this.scopesBySocket.set(socket, scopes);
+    }
     state.authorized = true;
     this.logger.info(
       `[WebSocketGatewayAdapter] Client connected: ${remote} (${transport.id})`,
@@ -1056,6 +1066,13 @@ export class WebSocketGatewayAdapter {
     request: WebSocketRpcRequest,
     socket: IWebSocketConnectionLike,
   ): Promise<any> {
+    const scopes = this.scopesBySocket.get(socket)
+    if (scopes && !methodAllowed(request.method, scopes)) {
+      throw new WebSocketRpcError(
+        "FORBIDDEN",
+        `Token is not allowed to call ${request.method}`,
+      )
+    }
     const params = request.params ?? {};
     // Observability bridge (v2.9.x): dispatch any observability:* method to the
     // bridge by stripping the prefix and camel-casing the remainder.

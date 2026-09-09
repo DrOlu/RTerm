@@ -204,7 +204,7 @@ export class WinRMBackend implements TerminalBackend {
     // PSRP runs PowerShell, not cmd: translate the common cmd builtins the
     // agent emits (cd/dir/type) so the command/response experience matches.
     const ps = this.translateCmdToPowerShell(command, instance.cwd)
-    const result = await transport.runScript(ps, {
+    const result = await transport.runScriptOnPool(ps, {
       timeoutMs: options?.timeoutMs ?? DEFAULT_WINRM_TIMEOUT_MS,
       signal: options?.signal,
     })
@@ -369,6 +369,9 @@ export class WinRMBackend implements TerminalBackend {
     if (instance.persistentShellId) {
       void instance.winrm!.deleteShell(instance.persistentShellId)
       instance.persistentShellId = undefined
+    }
+    if (instance.psrp) {
+      void instance.psrp.closePool()
     }
     instance.exitCallback?.(0)
   }

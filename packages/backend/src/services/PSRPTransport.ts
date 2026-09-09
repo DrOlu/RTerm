@@ -318,6 +318,8 @@ export class PSRPTransport {
   /** pypsrp WSMan.session_id — one uuid for the life of the transport. */
   private readonly sessionId = `uuid:${randomUUID().toUpperCase()}`
   private readonly http: WinHttpAuth
+  /** Persistent runspace (v3.8.0): reuse one Microsoft.PowerShell shell across commands. */
+  private pool: { shellId: string; rpid: string; nextObjectId: number } | null = null
 
   constructor(opts: PSRPTransportOptions) {
     this.http = new WinHttpAuth({
@@ -351,7 +353,8 @@ export class PSRPTransport {
     return `<s:Envelope xmlns:s="${NS.s}" xmlns:wsa="${NS.a}" xmlns:wsman="${NS.w}" xmlns:wsmv="${wsmv}" xmlns:rsp="${NS.rsp}" xml:lang="en-US"><s:Header><wsa:Action s:mustUnderstand="true">${action}</wsa:Action><wsmv:DataLocale s:mustUnderstand="false" xml:lang="en-US" /><wsman:Locale s:mustUnderstand="false" xml:lang="en-US" /><wsman:MaxEnvelopeSize s:mustUnderstand="true">512000</wsman:MaxEnvelopeSize><wsa:MessageID>${mid}</wsa:MessageID><wsman:OperationTimeout>PT60.000S</wsman:OperationTimeout><wsa:ReplyTo><wsa:Address s:mustUnderstand="true">${NS.a}/role/anonymous</wsa:Address></wsa:ReplyTo><wsman:ResourceURI s:mustUnderstand="true">${PSRP_SHELL_URI}</wsman:ResourceURI><wsmv:SessionId s:mustUnderstand="false">${this.sessionId}</wsmv:SessionId><wsa:To>${to}</wsa:To>${extraHeaders}</s:Header><s:Body>${body}</s:Body></s:Envelope>`
   }
 
-  private async post(action: string, body: string, extraHeaders: string): Promise<SoapResponse> {
+  /** Test hook: subclasses may override. */
+  protected async post(action: string, body: string, extraHeaders: string): Promise<SoapResponse> {
     const envelope = this.envelope(action, body, extraHeaders)
     const res = await this.http.post(envelope)
     return { status: res.status, body: res.body }
@@ -365,6 +368,81 @@ export class PSRPTransport {
    *   Receive loop (PIPELINE_OUTPUT / ERROR_RECORD / PIPELINE_STATE) → Delete.
    * The script travels inside the PSRP message body — no command-line length limit.
    */
+  /** Open (or return) a persistent runspace pool. */
+  async ensurePool(opts?: { timeoutMs?: number; signal?: AbortSignal }): Promise<{ shellId: string; rpid: string }> {
+    if (this.pool) return { shellId: this.pool.shellId, rpid: this.pool.rpid }
+    const deadline = Date.now() + (opts?.timeoutMs ?? 120000)
+    const rpid = randomUUID().toUpperCase()
+    const creation = fragmentMessages([
+      psrpMessage(MSG.SESSION_CAPABILITY, rpid, '00000000-0000-0000-0000-000000000000', sessionCapabilityXml()),
+      psrpMessage(MSG.INIT_RUNSPACEPOOL, rpid, '00000000-0000-0000-0000-000000000000', initRunspacePoolXml()),
+    ], 1)
+    const createBody =
+      `<rsp:Shell ShellId="${rpid}">` +
+      `<rsp:InputStreams>stdin pr</rsp:InputStreams>` +
+      `<rsp:OutputStreams>stdout</rsp:OutputStreams>` +
+      `<creationXml xmlns="http://schemas.microsoft.com/powershell">` +
+      creation.blob.toString('base64') +
+      `</creationXml>` +
+      `</rsp:Shell>`
+    const createHeaders =
+      `<wsman:OptionSet s:mustUnderstand="true">` +
+      `<wsman:Option MustComply="true" Name="protocolversion">2.3</wsman:Option>` +
+      `</wsman:OptionSet>`
+    const created = await this.post(
+      'http://schemas.xmlsoap.org/ws/2004/09/transfer/Create',
+      createBody,
+      createHeaders,
+    )
+    this.assertOk(created, 'Create')
+    const shellId = extractShellId(created.body)
+    if (!shellId) throw new Error('PSRP Create succeeded but no ShellId returned.')
+    await this.waitForRunspaceOpened(shellId, deadline, opts?.signal)
+    this.pool = { shellId, rpid, nextObjectId: creation.nextObjectId }
+    return { shellId, rpid }
+  }
+
+  async closePool(): Promise<void> {
+    const p = this.pool
+    this.pool = null
+    if (p) await this.deleteShell(p.shellId)
+  }
+
+  /**
+   * Run a script on the persistent pool (opens one if needed). Does NOT delete
+   * the shell — call closePool() when the tab dies.
+   */
+  async runScriptOnPool(
+    script: string,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<PSRPCommandResult> {
+    const deadline = Date.now() + (opts?.timeoutMs ?? 120000)
+    const pool = await this.ensurePool(opts)
+    const pipelineId = randomUUID().toUpperCase()
+    const createPipelineMsg = psrpMessage(MSG.CREATE_PIPELINE, pool.rpid, pipelineId, createPipelineXml(script))
+    const frag = fragmentMessages([createPipelineMsg], this.pool!.nextObjectId)
+    this.pool!.nextObjectId = frag.nextObjectId
+    const commandBody =
+      `<rsp:CommandLine CommandId="${pipelineId}">` +
+      `<rsp:Command></rsp:Command>` +
+      `<rsp:Arguments>${frag.blob.toString('base64')}</rsp:Arguments>` +
+      `</rsp:CommandLine>`
+    const commandHeaders =
+      `<wsman:OptionSet s:mustUnderstand="true">` +
+      `<wsman:Option Name="WINRS_SKIP_CMD_SHELL">False</wsman:Option>` +
+      `</wsman:OptionSet>` +
+      this.shellHeaders(pool.shellId)
+    const commanded = await this.post(
+      'http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Command',
+      commandBody,
+      commandHeaders,
+    )
+    this.assertOk(commanded, 'Command')
+    const commandId = firstText(commanded.body, 'CommandId')
+    if (!commandId) throw new Error('PSRP Command succeeded but no CommandId returned.')
+    return this.receivePipeline(pool.shellId, commandId, deadline, opts)
+  }
+
   async runScript(
     script: string,
     opts?: { timeoutMs?: number; signal?: AbortSignal },
@@ -428,75 +506,84 @@ export class PSRPTransport {
       this.assertOk(commanded, 'Command')
       const commandId = firstText(commanded.body, 'CommandId')
       if (!commandId) throw new Error('PSRP Command succeeded but no CommandId returned.')
-
-      // 3. Receive loop until PIPELINE_STATE says the pipeline is done.
-      let stdout = ''
-      let stderr = ''
-      let hadErrors = false
-      let exitCode = 0
-      let pipelineDone = false
-      for (;;) {
-        if (opts?.signal?.aborted) throw new Error('AbortError')
-        if (Date.now() > deadline) {
-          throw new Error(`PSRP command timed out after ${opts?.timeoutMs ?? 120000}ms`)
-        }
-        const receiveBody =
-          `<rsp:Receive><rsp:DesiredStream CommandId="${commandId}">stdout</rsp:DesiredStream></rsp:Receive>`
-        const receiveHeaders =
-          `<wsman:OptionSet s:mustUnderstand="true"><wsman:Option Name="WSMAN_CMDSHELL_OPTION_KEEPALIVE">True</wsman:Option></wsman:OptionSet>` +
-          this.shellHeaders(shellId)
-        const received = await this.post(
-          'http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Receive',
-          receiveBody,
-          receiveHeaders,
-        )
-        this.assertOk(received, 'Receive')
-        const streamRe = /<\w*:?Stream\b[^>]*\bName="(?:stdout|stderr|pr)"[^>]*>([\s\S]*?)<\/\w*:?Stream>/gi
-        let m: RegExpExecArray | null
-        while ((m = streamRe.exec(received.body)) !== null) {
-          const b64 = m[1].replace(/\s+/g, '')
-          if (!b64) continue
-          for (const raw of unfragmentMessages(Buffer.from(b64, 'base64'))) {
-            if (raw.length < 40) continue
-            const messageType = raw.readUInt32LE(4)
-            const payload = raw.subarray(40).toString('utf8').replace(/^\uFEFF/, '')
-            if (messageType === MSG.PIPELINE_OUTPUT) {
-              const sRe = /<S[^>]*>([\s\S]*?)<\/S>/gi
-              let sm: RegExpExecArray | null
-              while ((sm = sRe.exec(payload)) !== null) stdout += sm[1]
-            } else if (messageType === MSG.ERROR_RECORD) {
-              hadErrors = true
-              const mRe = payload.match(/<S N="Message">([\s\S]*?)<\/S>/i)
-              stderr += (mRe ? mRe[1] : payload) + '\n'
-            } else if (messageType === MSG.PIPELINE_STATE) {
-              pipelineDone = true
-              const stateMatch = payload.match(/<I32 N="State">(\d+)<\/I32>/i)
-              if (stateMatch) {
-                // 4 = Completed, 5 = Failed, 6 = Stopped (PSInvocationState)
-                if (parseInt(stateMatch[1], 10) === 5) hadErrors = true
-              }
-              const ec = payload.match(/N="ExitCode"[^>]*>(-?\d+)</i)
-              if (ec) exitCode = parseInt(ec[1], 10)
-            }
-          }
-        }
-        // The WS-Man CommandState carries an ExitCode, but for a PSRP pipeline
-        // Windows reports 0 there even after `exit 3` / a terminating error —
-        // the PSRP pipeline does not propagate a process exit code the way
-        // the cmd shell does (verified live; pypsrp exposes `had_errors`, not
-        // an exit code, for exactly this reason). Read it anyway (it is
-        // authoritative for shell-level failures) but treat hadErrors as the
-        // primary error signal — see the backend adapter.
-        const wsExit = received.body.match(/<\w*:?ExitCode>\s*(-?\d+)\s*<\/\w*:?ExitCode>/i)
-        if (wsExit) exitCode = parseInt(wsExit[1], 10)
-        if (pipelineDone) break
-        if (/CommandState\/Done/i.test(received.body)) break
-      }
-      if (exitCode !== 0) hadErrors = true
-      return { stdout, stderr, exitCode, hadErrors }
+      return await this.receivePipeline(shellId, commandId, deadline, opts)
     } finally {
       await this.deleteShell(shellId)
     }
+  }
+
+  private async receivePipeline(
+    shellId: string,
+    commandId: string,
+    deadline: number,
+    opts?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<PSRPCommandResult> {
+    let stdout = ''
+    let stderr = ''
+    let hadErrors = false
+    let exitCode = 0
+    let pipelineDone = false
+    for (;;) {
+      if (opts?.signal?.aborted) throw new Error('AbortError')
+      if (Date.now() > deadline) {
+        throw new Error(`PSRP command timed out after ${opts?.timeoutMs ?? 120000}ms`)
+      }
+      const receiveBody =
+        `<rsp:Receive><rsp:DesiredStream CommandId="${commandId}">stdout</rsp:DesiredStream></rsp:Receive>`
+      const receiveHeaders =
+        `<wsman:OptionSet s:mustUnderstand="true"><wsman:Option Name="WSMAN_CMDSHELL_OPTION_KEEPALIVE">True</wsman:Option></wsman:OptionSet>` +
+        this.shellHeaders(shellId)
+      const received = await this.post(
+        'http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Receive',
+        receiveBody,
+        receiveHeaders,
+      )
+      this.assertOk(received, 'Receive')
+      const streamRe = /<\w*:?Stream\b[^>]*\bName="(?:stdout|stderr|pr)"[^>]*>([\s\S]*?)<\/\w*:?Stream>/gi
+      let m: RegExpExecArray | null
+      while ((m = streamRe.exec(received.body)) !== null) {
+        const b64 = m[1].replace(/\s+/g, '')
+        if (!b64) continue
+        for (const raw of unfragmentMessages(Buffer.from(b64, 'base64'))) {
+          if (raw.length < 40) continue
+          const messageType = raw.readUInt32LE(4)
+          const payload = raw.subarray(40).toString('utf8').replace(/^\uFEFF/, '')
+          if (messageType === MSG.PIPELINE_OUTPUT) {
+            const sRe = /<S[^>]*>([\s\S]*?)<\/S>/gi
+            let sm: RegExpExecArray | null
+            let extracted = false
+            while ((sm = sRe.exec(payload)) !== null) {
+              stdout += sm[1]
+              extracted = true
+            }
+            if (!extracted) {
+              const nRe = /<(?:I32|I64|B|ToString)[^>]*>([\s\S]*?)<\/(?:I32|I64|B|ToString)>/i
+              const nm = payload.match(nRe)
+              if (nm) stdout += nm[1]
+              else stdout += payload.replace(/<[^>]+>/g, '').trim()
+            }
+          } else if (messageType === MSG.ERROR_RECORD) {
+            hadErrors = true
+            const mRe = payload.match(/<S N="Message">([\s\S]*?)<\/S>/i)
+            stderr += (mRe ? mRe[1] : payload) + '\n'
+          } else if (messageType === MSG.PIPELINE_STATE) {
+            pipelineDone = true
+            const stateMatch = payload.match(/<I32 N="State">(\d+)<\/I32>/i)
+            if (stateMatch) {
+              if (parseInt(stateMatch[1], 10) === 5) hadErrors = true
+            }
+            const ec = payload.match(/N="ExitCode"[^>]*>(-?\d+)</i)
+            if (ec) exitCode = parseInt(ec[1], 10)
+          }
+        }
+      }
+      const wsExit = received.body.match(/<\w*:?ExitCode>\s*(-?\d+)\s*<\/\w*:?ExitCode>/i)
+      if (wsExit) exitCode = parseInt(wsExit[1], 10)
+      if (pipelineDone) break
+      if (/CommandState\/Done/i.test(received.body)) break
+    }
+    if (exitCode !== 0) hadErrors = true
+    return { stdout, stderr, exitCode, hadErrors }
   }
 
   /**
