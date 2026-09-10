@@ -67,6 +67,16 @@ import {
   estateFactsSchema, estateFacts,
 } from './tools/learning_tools'
 import {
+  manageIncidentSchema, manageIncident,
+  manageCollabSchema, manageCollab,
+  manageJumpPathSchema, manageJumpPath,
+  manageApprovalSchema, manageApproval,
+  snapshotOutputSchema, snapshotOutput,
+  replayAgentRunSchema, replayAgentRun,
+  planOfflineJoinSchema, planOfflineJoin,
+  netDeviceSchema, netDevice,
+} from './tools/ops_tools'
+import {
   runFleetCommandSchema,
   collectFactsSchema,
   probeConnectivitySchema,
@@ -153,6 +163,16 @@ export { manageSerialConnectionSchema } from './tools/serial_connection_tools'
 export { listSessionLogsSchema, readSessionLogSchema, searchSessionLogsSchema } from './tools/session_log_tools'
 export { getRunLedgerSchema } from './tools/run_ledger_tools'
 export { opsExperimentSchema, manageGoalSchema, estateFactsSchema } from './tools/learning_tools'
+export {
+  manageIncidentSchema,
+  manageCollabSchema,
+  manageJumpPathSchema,
+  manageApprovalSchema,
+  snapshotOutputSchema,
+  replayAgentRunSchema,
+  planOfflineJoinSchema,
+  netDeviceSchema,
+} from './tools/ops_tools'
 export {
   runFleetCommandSchema,
   collectFactsSchema,
@@ -468,6 +488,46 @@ export function buildToolsForModel(readFileSupport: ReadFileSupport) {
       name: 'manage_etw',
       description: 'Windows ETW diagnostics — start/stop a trace (logman), parse captured Get-WinEvent/Get-Counter output, list sessions. Use against a Windows host for network/file/registry/process/DNS diagnostics.',
       schema: manageEtwSchema
+    },
+    {
+      name: 'manage_incident',
+      description: 'Incident bundles — pack chat + terminals + recording + run id into one INC-* you can reopen (open/get/list/close).',
+      schema: manageIncidentSchema
+    },
+    {
+      name: 'manage_collab',
+      description: 'Two-operator session presence: join, takeConn ("I have the conn"), whoHasConn, list.',
+      schema: manageCollabSchema
+    },
+    {
+      name: 'manage_jump_path',
+      description: 'Named multi-hop jump paths with time-boxed break-glass (define/list/breakGlass/allowed).',
+      schema: manageJumpPathSchema
+    },
+    {
+      name: 'manage_approval',
+      description: 'Queued HITL approvals with TTL auto-deny and optional two-person approve (request/list/get/decide/sweep).',
+      schema: manageApprovalSchema
+    },
+    {
+      name: 'snapshot_output',
+      description: 'Remember command output per connection and diff against the last snapshot.',
+      schema: snapshotOutputSchema
+    },
+    {
+      name: 'replay_agent_run',
+      description: 'Replay agent steps with stubbed tool outputs — debug without touching live hosts.',
+      schema: replayAgentRunSchema
+    },
+    {
+      name: 'plan_offline_join',
+      description: 'Plan offline domain join (djoin provision on DC + requestODJ on member) when SMB IPC$ is blocked.',
+      schema: planOfflineJoinSchema
+    },
+    {
+      name: 'net_device',
+      description: 'Network device helpers: parse CDP neighbors, diff running vs startup config, detect config mode.',
+      schema: netDeviceSchema
     }
   ].map((tool) => convertToOpenAITool(tool))
 }
@@ -531,6 +591,14 @@ export const toolImplementations = {
   collectInfra,
   manageEtw,
   listGatewayMethods,
+  manageIncident,
+  manageCollab,
+  manageJumpPath,
+  manageApproval,
+  snapshotOutput,
+  replayAgentRun,
+  planOfflineJoin,
+  netDevice,
   writeFile,
   editFile,
   writeAndEdit,

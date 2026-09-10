@@ -79,6 +79,14 @@ import {
   probeConnectivitySchema,
   planGraphSchema,
   runGraphSchema,
+  manageIncidentSchema,
+  manageCollabSchema,
+  manageJumpPathSchema,
+  manageApprovalSchema,
+  snapshotOutputSchema,
+  replayAgentRunSchema,
+  planOfflineJoinSchema,
+  netDeviceSchema,
   toolImplementations,
   buildSkillToolDescription,
 } from "./AgentHelper/tools";
@@ -529,6 +537,7 @@ export class AgentService_v2 {
    * agent run (start/finish lifecycle + per-call token usage). */
   private agentRunLedger?: import("./agentRunLedger").AgentRunLedger;
   private compoundingStore?: import("./learning/compoundingStore").CompoundingStore;
+  private opsService?: import("./ops/opsService").OpsService;
   private changeLedger?: import("./changeLedger").ChangeLedger;
   private mcpToolService: IMcpRuntime;
   private skillService: ISkillRuntime;
@@ -704,6 +713,10 @@ export class AgentService_v2 {
 
   setCompoundingStore(store: import("./learning/compoundingStore").CompoundingStore | null): void {
     this.compoundingStore = store ?? undefined;
+  }
+
+  setOpsService(svc: import("./ops/opsService").OpsService | null): void {
+    this.opsService = svc ?? undefined;
   }
 
   setFeedbackWaiter(
@@ -2584,6 +2597,78 @@ export class AgentService_v2 {
           }
           break;
         }
+        case "manage_incident": {
+          try {
+            const validatedArgs = manageIncidentSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageIncident(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_incident: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_collab": {
+          try {
+            const validatedArgs = manageCollabSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageCollab(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_collab: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_jump_path": {
+          try {
+            const validatedArgs = manageJumpPathSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageJumpPath(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_jump_path: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "manage_approval": {
+          try {
+            const validatedArgs = manageApprovalSchema.parse(toolCall.args || {});
+            result = await toolImplementations.manageApproval(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for manage_approval: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "snapshot_output": {
+          try {
+            const validatedArgs = snapshotOutputSchema.parse(toolCall.args || {});
+            result = await toolImplementations.snapshotOutput(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for snapshot_output: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "replay_agent_run": {
+          try {
+            const validatedArgs = replayAgentRunSchema.parse(toolCall.args || {});
+            result = await toolImplementations.replayAgentRun(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for replay_agent_run: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "plan_offline_join": {
+          try {
+            const validatedArgs = planOfflineJoinSchema.parse(toolCall.args || {});
+            result = await toolImplementations.planOfflineJoin(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for plan_offline_join: ${(err as Error).message}`;
+          }
+          break;
+        }
+        case "net_device": {
+          try {
+            const validatedArgs = netDeviceSchema.parse(toolCall.args || {});
+            result = await toolImplementations.netDevice(validatedArgs, executionContext);
+          } catch (err) {
+            result = `Parameter validation error for net_device: ${(err as Error).message}`;
+          }
+          break;
+        }
         case "manage_device_memory": {
           try {
             const validatedArgs = manageDeviceMemorySchema.parse(toolCall.args || {});
@@ -3096,6 +3181,14 @@ export class AgentService_v2 {
       case "ops_experiment": return ti.opsExperiment(args, executionContext);
       case "manage_goal": return ti.manageGoal(args, executionContext);
       case "estate_facts": return ti.estateFacts(args, executionContext);
+      case "manage_incident": return ti.manageIncident(args, executionContext);
+      case "manage_collab": return ti.manageCollab(args, executionContext);
+      case "manage_jump_path": return ti.manageJumpPath(args, executionContext);
+      case "manage_approval": return ti.manageApproval(args, executionContext);
+      case "snapshot_output": return ti.snapshotOutput(args, executionContext);
+      case "replay_agent_run": return ti.replayAgentRun(args, executionContext);
+      case "plan_offline_join": return ti.planOfflineJoin(args, executionContext);
+      case "net_device": return ti.netDevice(args, executionContext);
       case "list_gateway_methods": return ti.listGatewayMethods(args, executionContext);
       case "collect_facts": return ti.collectFacts(args, executionContext);
       case "run_fleet_command": return ti.runFleetCommand(args, executionContext);
@@ -3662,6 +3755,7 @@ export class AgentService_v2 {
       sessionLogger: this.sessionLogger,
       agentRunLedger: this.agentRunLedger,
       compoundingStore: this.compoundingStore,
+      opsService: this.opsService,
       changeLedger: this.changeLedger,
       triggerEngine: this.triggerEngine,
       observability: this.observability,

@@ -42,6 +42,9 @@ export interface ToolExecutionContext {
   agentRunLedger?: Pick<AgentRunLedger, 'listRuns' | 'getRun' | 'summarize'>
   /** Compounding knowledge (lessons, estate facts, goals, session probes). */
   compoundingStore?: import('../learning/compoundingStore').CompoundingStore
+  /** Operator ops service (v3.8.1): collab, incidents, jump paths, approvals,
+   * output snapshots, agent replay, offline join, network-device helpers. */
+  opsService?: import('../ops/opsService').OpsService
   changeLedger?: import('../changeLedger').ChangeLedger
   /** Optional event-driven trigger engine (Advanced Automation v1.9.1). */
   triggerEngine?: import('../automation/triggerEngine').TriggerEngine

@@ -170,8 +170,14 @@ export class FileAccessTokenStore {
   }
 
   async verify(tokenRaw: string): Promise<boolean> {
+    const identified = await this.identify(tokenRaw)
+    return identified !== null
+  }
+
+  /** Return the matching token's id+name, or null. Used as operator identity. */
+  async identify(tokenRaw: string): Promise<{ id: string; name: string } | null> {
     const token = String(tokenRaw || '').trim()
-    if (!token) return false
+    if (!token) return null
 
     const payload = await this.readPayload()
     for (const record of payload.tokens) {
@@ -179,13 +185,13 @@ export class FileAccessTokenStore {
         const expected = Buffer.from(record.tokenHash, 'base64')
         const actual = await deriveTokenHash(token, record.tokenSalt)
         if (expected.length === actual.length && timingSafeEqual(expected, actual)) {
-          return true
+          return { id: record.id, name: record.name }
         }
       } catch {
         // Skip malformed record and continue checking other tokens.
       }
     }
-    return false
+    return null
   }
 
   private async runExclusive<T>(operation: () => Promise<T>): Promise<T> {

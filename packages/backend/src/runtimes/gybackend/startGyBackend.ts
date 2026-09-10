@@ -46,6 +46,7 @@ import { AgentSettingProfileService } from "../../services/AgentSettingProfileSe
 import { createTriggerRuntime } from "../../services/automation/triggerRuntime";
 import { createObservability } from "../../services/observability";
 import { createObservabilityBridge } from "../../services/Gateway/observabilityBridge";
+import { createOpsBridge } from "../../services/Gateway/opsBridge";
 import { renderLiveDashboardHtml } from "../../services/dashboard/renderDashboardHtml";
 import { dashboardHttpAuthorized } from "../../services/dashboard/dashboardHttpAuth";
 import { searchMemory, appendMemoryNote } from "../../memory/memoryManager";
@@ -223,6 +224,9 @@ export async function startGyBackend(): Promise<void> {
   const { CompoundingStore } = await import("../../services/learning/compoundingStore");
   const compoundingStore = new CompoundingStore();
   agentService.setCompoundingStore(compoundingStore);
+  const { OpsService } = await import("../../services/ops/opsService");
+  const opsService = new OpsService();
+  agentService.setOpsService(opsService);
   try {
     const { connectionIdentity } = await import("../../services/learning/compoundingKnowledge");
     const winrm = settingsService.getSettings()?.connections?.winrm ?? [];
@@ -1087,6 +1091,9 @@ const restDispatch = async (method: string, params: Record<string, unknown>): Pr
         observabilityBridge: createObservabilityBridge({
           observability: () => observability,
           terminalService: () => terminalService,
+        }),
+        opsBridge: createOpsBridge({
+          ops: () => opsService,
         }),
       });
       // v3.2.18: the REST routes dispatch through this adapter.

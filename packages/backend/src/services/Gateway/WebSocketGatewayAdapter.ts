@@ -22,6 +22,7 @@ import type {
 } from "../FileTransferService";
 import { buildDescribePayload } from "./methodRegistry";
 import { OBSERVABILITY_METHODS } from "./observabilityBridge";
+import { OPS_METHODS, OPS_METHOD_INFO } from "./opsBridge";
 import { methodAllowed } from "../security/tokenScopes";
 
 type WebSocketRpcMethod =
@@ -449,6 +450,8 @@ export interface WebSocketGatewayAdapterOptions {
   };
   /** observability bridge (v2.9.x): the 9 platform capabilities over RPC. */
   observabilityBridge?: import('./observabilityBridge').ObservabilityBridge;
+  /** ops bridge (v3.8.1): collab / incidents / jump paths / approvals / replay / djoin / net device. */
+  opsBridge?: import('./opsBridge').OpsBridge;
   serverFactory?: WebSocketServerFactory;
   logger?: IWebSocketGatewayAdapterLogger;
 }
@@ -1117,6 +1120,28 @@ export class WebSocketGatewayAdapter {
       }
       return await (fn as (p: Record<string, any>) => unknown)(params);
     }
+    // Ops bridge (v3.8.1): dispatch any ops:* method to the bridge by stripping
+    // the prefix. This is the wiring that makes the v3.8.x operator modules
+    // (collab, incidents, jump paths, approvals, replay, djoin, net device)
+    // actually reachable from the app, the agent and any RPC client.
+    if (request.method.startsWith("ops:")) {
+      const ops = this.options.opsBridge;
+      if (!ops) {
+        throw new WebSocketRpcError(
+          "METHOD_NOT_FOUND",
+          `${request.method} is not available on this websocket gateway.`,
+        );
+      }
+      const opName = request.method.slice("ops:".length);
+      const opFn = (ops as unknown as Record<string, unknown>)[opName];
+      if (typeof opFn !== "function") {
+        throw new WebSocketRpcError(
+          "METHOD_NOT_FOUND",
+          `Unknown ops method: ${request.method}`,
+        );
+      }
+      return await (opFn as (p: Record<string, any>) => unknown)(params);
+    }
     switch (request.method) {
       case "gateway:ping":
         return { pong: true, ts: Date.now() };
@@ -1127,7 +1152,11 @@ export class WebSocketGatewayAdapter {
         // observability), so clients/agents/SDKs can introspect the surface
         // without reading source. Optional category / prefix filters.
         const obs = (OBSERVABILITY_METHODS as readonly string[]).map((name) => ({ name }))
-        const payload = buildDescribePayload(obs)
+        const opsMethods = (OPS_METHODS as readonly string[]).map((name) => {
+          const info = OPS_METHOD_INFO.find((m) => m.name === name)
+          return { name, description: info?.description, since: info?.since }
+        })
+        const payload = buildDescribePayload([...obs, ...opsMethods])
         const category = typeof params.category === "string" && params.category ? params.category : undefined
         const prefix = typeof params.prefix === "string" && params.prefix ? params.prefix : undefined
         let methods = payload.methods

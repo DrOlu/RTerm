@@ -52,4 +52,8 @@ export class AccessTokenService {
   async verifyToken(token: string): Promise<boolean> {
     return await this.store.verify(token)
   }
+
+  async identifyToken(token: string): Promise<{ id: string; name: string } | null> {
+    return await this.store.identify(token)
+  }
 }

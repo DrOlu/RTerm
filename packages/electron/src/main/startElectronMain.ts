@@ -50,6 +50,8 @@ import { ElectronAppSettingsMigration } from "../settings/ElectronAppSettingsMig
 import { cleanupDeprecatedCliLaunchers } from "./DeprecatedCliCleanupService";
 import { createObservability } from "../../../backend/src/services/observability";
 import { createObservabilityBridge } from "../../../backend/src/services/Gateway/observabilityBridge";
+import { createOpsBridge } from "../../../backend/src/services/Gateway/opsBridge";
+import type { OpsService } from "../../../backend/src/services/ops/opsService";
 import { renderLiveDashboardHtml } from "../../../backend/src/services/dashboard/renderDashboardHtml";
 import { dashboardHttpAuthorized } from "../../../backend/src/services/dashboard/dashboardHttpAuth";
 import { searchMemory, appendMemoryNote } from "../../../backend/src/memory/memoryManager";
@@ -474,6 +476,7 @@ export async function startElectronMain(): Promise<void> {
         // runs (observability is built later in startup), so the bridge reads a
         // ref that is filled in once observability is wired.
         const observabilityRef: { current: import("../../../backend/src/services/observability").Observability | null } = { current: null };
+        const opsRef: { current: OpsService | null } = { current: null };
         type RestDispatchTarget = { handleRequest?: (m: string, p: Record<string, unknown>) => Promise<unknown> } | null;
         let restDispatchTarget: RestDispatchTarget = null;
         const restDispatch = async (method: string, params: Record<string, unknown>): Promise<unknown> => {
@@ -544,6 +547,9 @@ export async function startElectronMain(): Promise<void> {
                observabilityBridge: createObservabilityBridge({
                  observability: () => observabilityRef.current,
                  terminalService: () => terminalService,
+               }),
+               opsBridge: createOpsBridge({
+                 ops: () => opsRef.current,
                }),
               terminalBridge: {
                 listTerminals: () =>
@@ -1189,6 +1195,10 @@ export async function startElectronMain(): Promise<void> {
         const { CompoundingStore } = await import("../../../backend/src/services/learning/compoundingStore");
         const compoundingStore = new CompoundingStore();
         agentService.setCompoundingStore(compoundingStore);
+        const { OpsService } = await import("../../../backend/src/services/ops/opsService");
+        const opsService = new OpsService();
+        opsRef.current = opsService;
+        agentService.setOpsService(opsService);
         try {
           const { connectionIdentity } = await import("../../../backend/src/services/learning/compoundingKnowledge");
           const winrm = settingsService.getSettings()?.connections?.winrm ?? [];

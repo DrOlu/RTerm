@@ -1,5 +1,27 @@
 # Changelog
 
+## v3.8.1 (2026-09-08)
+
+### Wire v3.8.0 operator modules (they were unimported)
+
+v3.8.0 shipped nine ops modules with tests but they were unreachable from the
+app, CLI, and agent (zero non-spec importers). 3.8.1 wires them:
+
+- **OpsService + SQLite store** (`gyshell-ops.sqlite`) for incidents, jump
+  paths, output snapshots, and approvals (survives restart).
+- **25 `ops:*` gateway RPC methods** via `createOpsBridge`, injected in
+  gybackend and Electron.
+- **8 agent tools**: manage_incident, manage_collab, manage_jump_path,
+  manage_approval, snapshot_output, replay_agent_run, plan_offline_join,
+  net_device.
+- **Operator identity**: `FileAccessTokenStore.identify()` returns the
+  matching token's `{id, name}` so collab/approvals can use the token name
+  instead of an unauthenticated string (callers still pass `who`/`operator`
+  until the adapter threads the Bearer through).
+- Presence/conn-holder remain **in-memory** (single daemon, advisory lock).
+
+Backend typecheck exit 0.
+
 ## v3.8.0 (2026-09-08)
 
 ### Persistent PSRP runspace (live-verified)
