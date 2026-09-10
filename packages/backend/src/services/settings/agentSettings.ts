@@ -60,7 +60,7 @@ export function normalizeBooleanMap(value: unknown): Record<string, boolean> {
 export function normalizeCommandPolicyMode(value: unknown): CommandPolicyMode {
   return value === 'safe' || value === 'smart' || value === 'standard'
     ? value
-    : 'standard'
+    : 'smart'
 }
 
 export function normalizeAgentSettingCommandPolicyLists(

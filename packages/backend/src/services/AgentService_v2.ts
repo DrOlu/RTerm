@@ -3749,7 +3749,7 @@ export class AgentService_v2 {
       sendEvent: this.helpers.sendEvent.bind(this.helpers),
       waitForFeedback: this.waitForFeedback ?? undefined,
       commandPolicyService: this.commandPolicyService,
-      commandPolicyMode: this.settings?.commandPolicyMode || "standard",
+      commandPolicyMode: this.settings?.commandPolicyMode || "smart",
       connectionManager: this.connectionManager,
       automationManager: this.automationManager,
       sessionLogger: this.sessionLogger,

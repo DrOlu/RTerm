@@ -14,6 +14,23 @@ const assertEqual = (actual: unknown, expected: unknown, message: string): void 
   }
 }
 
+test('DEFAULT_BACKEND_SETTINGS.commandPolicyMode is smart (unattended default)', () => {
+  assertEqual(DEFAULT_BACKEND_SETTINGS.commandPolicyMode, 'smart', 'fresh installs should default to smart')
+})
+
+test('migrateBackendSettings fills missing commandPolicyMode with smart', () => {
+  const stored = { ...DEFAULT_BACKEND_SETTINGS, schemaVersion: 4 } as any
+  delete stored.commandPolicyMode
+  const migrated = migrateBackendSettings(stored)
+  assertEqual(migrated.commandPolicyMode, 'smart', 'absent mode should become smart')
+})
+
+test('migrateBackendSettings preserves an explicit standard mode', () => {
+  const stored = { ...DEFAULT_BACKEND_SETTINGS, schemaVersion: 4, commandPolicyMode: 'standard' } as any
+  const migrated = migrateBackendSettings(stored)
+  assertEqual(migrated.commandPolicyMode, 'standard', 'operator-chosen standard must not be overwritten')
+})
+
 test('migrateBackendSettings preserves a persisted automation block (groups survive restart)', () => {
   // Regression: pickBackendSnapshot used to omit `automation`, so every
   // migration pass (run on both getSettings and setSettings) wiped groups,

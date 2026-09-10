@@ -15,7 +15,7 @@ const DEFAULT_BUILTIN_TOOLS = BUILTIN_TOOL_INFO.reduce(
 
 export const DEFAULT_BACKEND_SETTINGS: BackendSettings = {
   schemaVersion: BACKEND_SETTINGS_SCHEMA_VERSION,
-  commandPolicyMode: "standard",
+  commandPolicyMode: "smart",
   tools: {
     builtIn: DEFAULT_BUILTIN_TOOLS,
     skills: {},

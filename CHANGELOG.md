@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.8.2 (2026-09-08)
+
+### Default command policy is now `smart`
+
+Fresh installs and missing/invalid `commandPolicyMode` default to **smart**
+(unknown commands run unless denylisted). `standard` (ask) remains available
+in Settings. An **explicitly saved** `standard` or `safe` is not overwritten
+on migrate.
+
+- `DEFAULT_BACKEND_SETTINGS.commandPolicyMode`: `standard` → `smart`
+- `normalizeCommandPolicyMode()` fallback: `standard` → `smart`
+- AgentService execution context fallback: `|| "smart"`
+- Mobile-web initial view state: `smart`
+
+Unattended neuralos / rterm-cli / CyberAgent-Pi no longer stall on
+`command_ask` out of the box. Denylist still wins.
+
 ## v3.8.1 (2026-09-08)
 
 ### Wire v3.8.0 operator modules (they were unimported)

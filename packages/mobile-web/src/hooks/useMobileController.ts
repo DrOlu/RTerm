@@ -124,7 +124,7 @@ const INITIAL_VIEW_STATE: ViewState = {
   activeProfileId: "",
   agentSettings: null,
   memoryEnabled: true,
-  commandPolicyMode: "standard",
+  commandPolicyMode: "smart",
   commandPolicyLists: {
     allowlist: [],
     denylist: [],
