@@ -50,6 +50,34 @@ interface UiSessionMessageRow {
   streaming: number;
 }
 
+/**
+ * One message as it will be written: the record plus the write-time position
+ * and serialized body. These two are produced during save and never stored on
+ * `StoredChatMessageRecord` (historyTypes.ts stays the public shape).
+ */
+interface DeltaMessageRow {
+  id: string;
+  type: string;
+  position: number;
+  dataJson: string;
+}
+
+/**
+ * Per-message fingerprint, used ONLY to decide whether a row must be written.
+ *
+ * FULL serialized body — deliberately NOT `substr(json, 1, 200)`. A prefix
+ * fingerprint MISSES a message whose content grows past the first 200
+ * characters (exactly what streaming does to the last AI message): the prefix
+ * is unchanged, so the row is skipped and the persisted history silently stays
+ * STALE. Comparing the whole body is what makes "unchanged => skip" safe.
+ *
+ * The expensive half of the old freeze was JSON.parse (~1.5 s / 117 MB), and
+ * that is still never paid here — this compares already-serialized text.
+ */
+function digestFor(message: { type: string; dataJson?: string | null }): string {
+  return `${message.type}\u0000${message.dataJson ?? ""}`;
+}
+
 export class HistorySqliteStore {
   private readonly filePath: string;
   private readonly db: DatabaseHandle;
@@ -252,12 +280,170 @@ export class HistorySqliteStore {
       );
   }
 
-  saveChatSession(session: StoredChatSessionRecord): void {
-    const existingCreatedAt = this.db
-      .prepare("SELECT created_at FROM chat_sessions WHERE id = ?")
-      .get(session.id) as { created_at: number } | undefined;
-    const createdAt = existingCreatedAt?.created_at ?? session.createdAt;
+  /**
+   * Session meta WITHOUT messages.
+   *
+   * Two fixed-cost hot-path bugs this closes:
+   *
+   *  1. `ChatHistoryService.saveSession` called `loadChatSession()` purely to
+   *     learn `createdAt`. That JSON.parse'd the ENTIRE session — measured
+   *     ~117 MB / ~1.5 s of parse for a 6k-message session — and threw every
+   *     parsed message away, on every save.
+   *  2. `AgentService_v2.trySaveSessionFromCheckpoint` called `loadSession()`
+   *     for a default it never used, because `updateSessionFromMessages()`
+   *     rebuilds `session.messages` from scratch. Dropping that call outright
+   *     would have reset the session TITLE to "New Session" on every restore,
+   *     so the title is read here too.
+   */
+  getChatSessionMeta(
+    sessionId: string,
+  ): { createdAt: number; title: string } | null {
+    const row = this.db
+      .prepare("SELECT created_at, title FROM chat_sessions WHERE id = ?")
+      .get(sessionId) as { created_at: number; title: string } | undefined;
+    return row ? { createdAt: row.created_at, title: row.title } : null;
+  }
 
+  /** Created-at scalar only — a single indexed row, never a message parse. */
+  getChatSessionCreatedAt(sessionId: string): number | undefined {
+    return this.getChatSessionMeta(sessionId)?.createdAt;
+  }
+
+  /**
+   * Existing message bodies as RAW TEXT, ordered by position, WITHOUT parsing.
+   *
+   * The raw `message_data_json` is needed for a byte-exact comparison against
+   * the newly serialized body. Deliberately NOT JSON.parse'd: the parse is the
+   * expensive half of the freeze (~1.5 s / 117 MB measured) and is unnecessary
+   * for an equality test.
+   *
+   * (An earlier revision compared only `substr(json, 1, 200)`. That was WRONG:
+   * a message whose content grows past the first 200 characters — exactly what
+   * streaming does to the last AI message — leaves the prefix untouched, so the
+   * row would be skipped and the persisted history would silently stay STALE.
+   * Full-text comparison is what makes "unchanged => skip" safe.)
+   */
+  loadSessionMessageState(
+    sessionId: string,
+  ): Array<{ id: string; type: string; position: number; jsonText: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT message_id, message_type, position, message_data_json
+         FROM chat_session_messages
+         WHERE session_id = ?
+         ORDER BY position ASC`,
+      )
+      .all(sessionId) as Array<{
+      message_id: string;
+      message_type: string;
+      position: number;
+      message_data_json: string | null;
+    }>;
+    return rows.map((row) => ({
+      id: row.message_id,
+      type: row.message_type,
+      position: row.position,
+      jsonText: row.message_data_json ?? "",
+    }));
+  }
+
+  /**
+   * Incremental write: touch only the rows that actually moved.
+   *
+   * The old path ran `DELETE ALL` + `INSERT ALL` on every save, rewriting the
+   * whole session payload each time. Here, unchanged messages stay on disk
+   * untouched; messages that are genuinely absent (compaction, rollback) are
+   * removed individually.
+   */
+  applyChatSessionDelta(
+    sessionId: string,
+    desired: DeltaMessageRow[],
+    existingDigests: Map<string, string>,
+    writeAll: boolean,
+  ): void {
+    // Populated BEFORE the removal scan below — an empty set here would delete
+    // every message in the session.
+    const desiredIds = new Set<string>();
+    for (const m of desired) {
+      desiredIds.add(m.id);
+    }
+
+    const changed = writeAll
+      ? desired
+      : desired.filter((m) => existingDigests.get(m.id) !== digestFor(m));
+
+    const toRemove: string[] = [];
+    for (const id of existingDigests.keys()) {
+      if (!desiredIds.has(id)) {
+        toRemove.push(id);
+      }
+    }
+
+    if (changed.length === 0 && toRemove.length === 0) {
+      return;
+    }
+
+    const upsert = this.db.prepare(
+      `INSERT INTO chat_session_messages (
+         session_id, position, message_id, message_type, message_data_json
+       ) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, message_id) DO UPDATE SET
+         position = excluded.position,
+         message_type = excluded.message_type,
+         message_data_json = excluded.message_data_json`,
+    );
+    const removeOne = this.db.prepare(
+      "DELETE FROM chat_session_messages WHERE session_id = ? AND message_id = ?",
+    );
+
+    this.db.transaction(() => {
+      for (const id of toRemove) {
+        removeOne.run(sessionId, id);
+      }
+      for (const m of changed) {
+        upsert.run(sessionId, m.position, m.id, m.type, m.dataJson);
+      }
+    })();
+  }
+
+  /**
+   * Full positional rewrite. Positions are `PRIMARY KEY (session_id,
+   * position)`, so an in-place UPDATE cannot express a reorder without a
+   * transient collision — the order guard in saveChatSession routes here when
+   * (and only when) the surviving ids changed relative order.
+   *
+   * Therefore this really does DELETE + INSERT rather than upsert. An
+   * `ON CONFLICT(session_id, message_id)` upsert looks like it would work but
+   * does NOT: reassigning `position` collides on the (session_id, position)
+   * PRIMARY KEY against a row that has not moved yet, and that conflict is not
+   * absorbed by an ON CONFLICT clause targeting a different key —
+   *   SqliteError: UNIQUE constraint failed:
+   *     chat_session_messages.session_id, chat_session_messages.position
+   * Clearing first (inside the same transaction) sidesteps the ordering
+   * problem entirely. This path is rare by design, so the rewrite is cheap
+   * enough, and it matches the old DELETE-ALL/INSERT-ALL semantics exactly.
+   */
+  private replaceAllMessages(
+    sessionId: string,
+    desired: DeltaMessageRow[],
+  ): void {
+    const removeAll = this.db.prepare(
+      "DELETE FROM chat_session_messages WHERE session_id = ?",
+    );
+    const insert = this.db.prepare(
+      `INSERT INTO chat_session_messages (
+         session_id, position, message_id, message_type, message_data_json
+       ) VALUES (?, ?, ?, ?, ?)`,
+    );
+    this.db.transaction(() => {
+      removeAll.run(sessionId);
+      desired.forEach((m, index) => {
+        insert.run(sessionId, index, m.id, m.type, m.dataJson);
+      });
+    })();
+  }
+
+  saveChatSession(session: StoredChatSessionRecord): void {
     const upsertSession = this.db.prepare(
       `INSERT INTO chat_sessions (
          id, title, last_checkpoint_offset, last_profile_max_tokens, created_at, updated_at
@@ -270,35 +456,68 @@ export class HistorySqliteStore {
          last_profile_max_tokens = excluded.last_profile_max_tokens,
          updated_at = excluded.updated_at`,
     );
-    const deleteMessages = this.db.prepare(
-      "DELETE FROM chat_session_messages WHERE session_id = ?",
-    );
-    const insertMessage = this.db.prepare(
-      `INSERT INTO chat_session_messages (
-         session_id, position, message_id, message_type, message_data_json
-       ) VALUES (?, ?, ?, ?, ?)`,
-    );
 
+    // Session row FIRST, so re-inserting messages can never trip the
+    // ON DELETE CASCADE foreign key (e.g. a compaction that emptied it).
+    // DO UPDATE deliberately never assigns created_at: an existing row keeps
+    // its original creation time no matter what the caller passes, which is
+    // why no read-before-write is needed here.
     this.db.transaction(() => {
       upsertSession.run({
         id: session.id,
         title: session.title,
         lastCheckpointOffset: session.lastCheckpointOffset,
         lastProfileMaxTokens: session.lastProfileMaxTokens ?? null,
-        createdAt,
+        createdAt: session.createdAt,
         updatedAt: session.updatedAt,
       });
-      deleteMessages.run(session.id);
-      session.messages.forEach((message, index) => {
-        insertMessage.run(
-          session.id,
-          index,
-          message.id,
-          message.type,
-          JSON.stringify(message.data),
-        );
-      });
     })();
+
+    // Bodies must be serialized to reach disk — that cost is inherent — but
+    // only the rows that moved are written.
+    const desired: DeltaMessageRow[] = session.messages.map(
+      (message, index) => ({
+        id: message.id,
+        type: message.type,
+        position: index,
+        dataJson: JSON.stringify(message.data),
+      }),
+    );
+
+    const existingState = this.loadSessionMessageState(session.id);
+    const existingDigests = new Map<string, string>();
+    for (const row of existingState) {
+      // digestFor over the STORED text, so the comparison in
+      // applyChatSessionDelta is byte-exact against digestFor(desired).
+      existingDigests.set(
+        row.id,
+        digestFor({ type: row.type, dataJson: row.jsonText }),
+      );
+    }
+
+    // Order guard: compare the SUBSEQUENCE of already-stored ids (in stored
+    // position order) against the same ids in the desired order. If they
+    // differ, a reorder happened and the position PRIMARY KEY cannot be fixed
+    // by targeted UPDATEs — fall back to the full positional rewrite.
+    // Note `storedOrder` must NOT be built by scanning existingDigests: that
+    // map's order is whatever the SELECT returned.
+    const storedOrder = existingState.map((row) => row.id);
+    const desiredOrderOfStored: string[] = [];
+    for (const m of desired) {
+      if (existingDigests.has(m.id)) {
+        desiredOrderOfStored.push(m.id);
+      }
+    }
+    const reordered =
+      storedOrder.length !== desiredOrderOfStored.length ||
+      storedOrder.some((id, i) => id !== desiredOrderOfStored[i]);
+
+    if (reordered) {
+      this.replaceAllMessages(session.id, desired);
+      return;
+    }
+
+    this.applyChatSessionDelta(session.id, desired, existingDigests, false);
   }
 
   deleteChatSessions(sessionIds: string[]): void {

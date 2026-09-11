@@ -5077,9 +5077,20 @@ export class AgentService_v2 {
         this.lastAbortedMessage = null; // Clear after use
       }
 
-      const session = this.chatHistoryService.loadSession(sessionId) || {
+      // FREEZE FIX: this used to be
+      //   this.chatHistoryService.loadSession(sessionId) || { ...defaults }
+      // which parsed EVERY stored message of the session (measured ~1.5 s /
+      // ~117 MB at 6k messages) on every checkpoint save — and then threw the
+      // messages away, because updateSessionFromMessages() below rebuilds
+      // `session.messages` wholesale. Only the session ROW is needed here
+      // (id, title, created_at), so read that instead. The title must be
+      // preserved: a blank default would rename the session to "New Session"
+      // on every checkpoint restore.
+      const sessionMeta = this.chatHistoryService.getSessionMeta(sessionId);
+      const session: ChatSession = {
         id: sessionId,
-        title: "New Session",
+        title: sessionMeta?.title || "New Session",
+        // Placeholder only — replaced by updateSessionFromMessages() below.
         messages: new Map(),
         lastCheckpointOffset: 0,
         lastProfileMaxTokens: this.getEffectiveMaxTokensForSession(sessionId),

@@ -1,5 +1,54 @@
 # Changelog
 
+## v3.8.3 (2026-09-11)
+
+### Incremental history save — the real freeze fix
+
+`saveChatSession` ran `DELETE ALL` + `INSERT ALL` on **every** save, rewriting
+the whole session payload. Measured on a 6,102-message / 116.9 MB session, the
+old block cost **2.59 s** per save, of which **1.50 s was `JSON.parse` alone**
+(SQLite I/O was only 0.07 s delete + 0.37 s insert + 0.65 s flush).
+
+Saving is now **incremental** — only rows that actually moved are written:
+
+- New `loadSessionMessageState()` reads raw `message_data_json` **without
+  parsing** (the parse was the expensive half and is unnecessary for an
+  equality test).
+- `applyChatSessionDelta()` upserts only changed rows and deletes only absent
+  ones (compaction / rollback), inside one transaction.
+- `replaceAllMessages()` handles the rare reorder case.
+
+Two silent-staleness bugs fixed on the way in:
+
+- **`digestFor` was a 200-char prefix fingerprint.** A message whose body grows
+  past character 200 — exactly what streaming does to the last AI message —
+  kept an identical prefix, so the row was skipped and the persisted history
+  silently stayed **stale**. It now fingerprints the full serialized body.
+- **`replaceAllMessages` upserted in place**, which collides on the
+  `(session_id, position)` PRIMARY KEY during a reorder (`UNIQUE constraint
+  failed`). Any chat reorder/branch would have crashed the save. It now clears
+  the session's rows and re-inserts inside one transaction.
+
+### Two full-session reads removed from hot paths
+
+`ChatHistoryService.saveSession` called `loadChatSession()` purely to learn
+`createdAt`, and `AgentService_v2.trySaveSessionFromCheckpoint` called
+`loadSession()` for a default it never used — each parse discarded immediately.
+Both now read a single indexed row via the new `getChatSessionMeta()` /
+`getChatSessionCreatedAt()`. The checkpoint path still preserves the session
+title (a blank default would have renamed sessions to "New Session").
+
+### Tests
+
+- New `HistorySqliteStore.delta.extreme.spec.ts` (7 cases, wired into
+  `test:backend-unit-extreme`): growth past char 200 reaches disk, no-op saves
+  don't duplicate rows, append / remove / reorder / createdAt preservation,
+  and emptying a session.
+- `AgentSettingProfileService.extreme.spec.ts` asserted the literal
+  `'standard'` where the contract is "apply restores the *saved* value". The
+  v3.8.2 default change (standard → smart) broke it; it now captures the saved
+  value so it cannot rot again. **v3.8.2 shipped with this spec failing.**
+
 ## v3.8.2 (2026-09-08)
 
 ### Default command policy is now `smart`

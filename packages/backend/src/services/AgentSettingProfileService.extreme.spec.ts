@@ -363,6 +363,11 @@ const run = async (): Promise<void> => {
       const harness = createHarness()
       await harness.service.saveCurrent()
       const slotId = getAgentSettingProfileId(1)
+      // Capture what the profile actually SAVED rather than hardcoding a
+      // literal. The contract under test is "apply restores the saved value",
+      // so this assertion must not break when the DEFAULT mode changes
+      // (it did: the default moved standard -> smart).
+      const savedMode = harness.settingsService.getSettings().commandPolicyMode
 
       harness.settingsService.setSettings({
         commandPolicyMode: 'safe',
@@ -407,7 +412,7 @@ const run = async (): Promise<void> => {
       const settings = harness.settingsService.getSettings()
       assertEqual(
         settings.commandPolicyMode,
-        'standard',
+        savedMode,
         'saved policy mode should be restored',
       )
       assertDeepEqual(

@@ -37,6 +37,12 @@ export interface ISettingsRuntime {
 export interface IChatHistoryRuntime {
   saveSession(session: ChatSession): void;
   loadSession(sessionId: string): ChatSession | null;
+  /**
+   * Session row only (title/createdAt) — must NOT parse stored messages.
+   * The checkpoint save path calls this so it no longer pays a full session
+   * parse just to preserve the title (freeze fix).
+   */
+  getSessionMeta(sessionId: string): { createdAt: number; title: string } | null;
   getAllSessions(): StoredChatSession[];
   getAllSessionSummaries(): ChatSessionSummaryRecord[];
   deleteSession(sessionId: string): void;

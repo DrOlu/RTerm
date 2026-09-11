@@ -23,7 +23,13 @@ export class ChatHistoryService {
   }
 
   saveSession(session: ChatSession): void {
-    const existing = this.store.loadChatSession(session.id);
+    // FREEZE FIX: was `this.store.loadChatSession(session.id)` purely to read
+    // `createdAt`. That parsed every stored message of the session (measured
+    // ~1.5 s / ~117 MB on a 6k-message session) and discarded the result on
+    // EVERY save. The scalar read below is a single indexed row.
+    // `store.saveChatSession` also preserves an existing created_at on
+    // conflict, so this value only matters for a brand-new session.
+    const createdAt = this.store.getChatSessionCreatedAt(session.id);
     const now = Date.now();
 
     this.store.saveChatSession({
@@ -38,9 +44,20 @@ export class ChatHistoryService {
       })),
       lastCheckpointOffset: session.lastCheckpointOffset,
       lastProfileMaxTokens: session.lastProfileMaxTokens,
-      createdAt: existing?.createdAt || now,
+      createdAt: createdAt || now,
       updatedAt: now,
     });
+  }
+
+  /**
+   * Session row only (title/createdAt) — never parses stored messages.
+   * Used on the checkpoint save path, which previously paid a full session
+   * parse just to preserve the title.
+   */
+  getSessionMeta(
+    sessionId: string,
+  ): { createdAt: number; title: string } | null {
+    return this.store.getChatSessionMeta(sessionId);
   }
 
   loadSession(sessionId: string): ChatSession | null {
