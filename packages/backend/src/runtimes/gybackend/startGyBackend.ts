@@ -42,6 +42,7 @@ import { GatewayRateLimiter } from "../../services/Gateway/gatewayRateLimit";
 import { executeScheduledTask } from "../../services/automation/scheduledTaskRunner";
 import { HistoryStorageMigration } from "../../services/history/HistoryStorageMigration";
 import { HistorySqliteStore } from "../../services/history/HistorySqliteStore";
+import { searchChatHistoryBounded } from "../../services/history/historySearch";
 import { AgentSettingProfileService } from "../../services/AgentSettingProfileService";
 import { createTriggerRuntime } from "../../services/automation/triggerRuntime";
 import { createObservability } from "../../services/observability";
@@ -1043,6 +1044,21 @@ const restDispatch = async (method: string, params: Record<string, unknown>): Pr
             }
             return agentService.getAllChatHistory() ?? [];
           },
+          // v3.8.4 FREEZE FIX: the gateway's history:search called
+          // `getAllSessions()`, which JSON.parses EVERY message of EVERY
+          // session synchronously — seconds of blocked event loop on a large
+          // store, freezing the UI. This searches one session at a time and
+          // yields between them, so nothing blocks.
+          searchBounded: async (
+            query: string,
+            options?: Record<string, unknown>,
+          ) =>
+            searchChatHistoryBounded(
+              () => historyStore.listChatSessionSummaries(),
+              (id) => historyStore.loadChatSession(id),
+              query,
+              (options ?? {}) as never,
+            ),
         },
         commandPolicyBridge: {
           getLists: async () => {

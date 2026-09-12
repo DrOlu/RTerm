@@ -97,6 +97,50 @@ export function getStreamedResponseModelName(
   );
 }
 
+/**
+ * Collapse a garbled finish reason back to one canonical token.
+ *
+ * ROOT CAUSE (v3.8.4): `appendStreamedModelResponseChunk` merges chunks with
+ * `response.concat(chunk)`, and LangChain's `AIMessageChunk.concat()`
+ * CONCATENATES string fields — including `response_metadata.finish_reason`.
+ * A provider that reports the same reason on more than one chunk (a truncating
+ * response sends `finish_reason: "length"` on the final chunks) therefore
+ * produced "lengthlength", and `describeStreamedResponseFinish` rendered the
+ * nonsense "lengthlength, length" into the error, logs and UI.
+ *
+ * Proven locally against the installed @langchain/core:
+ *   a="length", b="length" -> a.concat(b) === "lengthlength"
+ *
+ * Detection is safe rather than greedy: a legitimate reason is one of a small
+ * known set, so we only collapse when the value is exactly a known reason
+ * repeated 2-5 times. Anything else (a genuinely unknown provider string) is
+ * returned untouched — we do not invent a canonical value.
+ */
+const KNOWN_FINISH_REASONS = [
+  "stop",
+  "length",
+  "tool_calls",
+  "content_filter",
+  "function_call",
+  "error",
+] as const;
+
+export function normalizeFinishReason(reason: unknown): string {
+  if (typeof reason !== "string") return "";
+  const trimmed = reason.trim();
+  if (!trimmed) return "";
+
+  const lowered = trimmed.toLowerCase();
+  for (const known of KNOWN_FINISH_REASONS) {
+    for (let repeats = 5; repeats >= 2; repeats--) {
+      if (lowered === known.repeat(repeats)) {
+        return known;
+      }
+    }
+  }
+  return trimmed;
+}
+
 export function isEmptyMalformedToolCallFinish(
   response: any,
   rawChunks: any[],
@@ -190,7 +234,7 @@ function extractRawResponseMetadata(rawChunk: any): Record<string, any> {
 function getRawFinishReason(rawChunk: any): string | undefined {
   const choices = Array.isArray(rawChunk?.choices) ? rawChunk.choices : [];
   return choices
-    .map((choice: any) => choice?.finish_reason ?? choice?.finishReason)
+    .map((choice: any) => normalizeFinishReason(choice?.finish_reason ?? choice?.finishReason))
     .find((reason: any) => hasNonEmptyString(reason));
 }
 
@@ -209,7 +253,9 @@ function getFinishReasons(response: any, rawChunks: any[]): string[] {
     ),
   ];
 
-  return candidates.filter(hasNonEmptyString);
+  // normalizeFinishReason collapses the concat-induced "lengthlength" garble
+  // (see its doc comment) so callers see one canonical token per reason.
+  return candidates.map((c) => normalizeFinishReason(c)).filter(hasNonEmptyString);
 }
 
 function getMessageType(message: any): string {

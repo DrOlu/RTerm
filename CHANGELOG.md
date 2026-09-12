@@ -1,5 +1,75 @@
 # Changelog
 
+## v3.8.4 (2026-09-12)
+
+### `history:search` no longer freezes the app
+
+The gateway's `history:search` called `getAllSessions()`, which **JSON.parses
+every message of every session in one synchronous burst** before comparing a
+single character. On a 1.6 GB multi-session store that is seconds of blocked
+event loop — and because better-sqlite3 is synchronous and runs on the same
+thread, the whole UI froze while searching.
+
+Searching is now **bounded**: `searchChatHistoryBounded()` reads one session,
+searches it, releases it, then **yields to the event loop** before the next.
+Peak memory becomes one session instead of the whole store, and the loop is
+blocked for one session at a time instead of all of them.
+
+- New `searchBounded()` on the gateway's history bridge; the `history:search`
+  handler prefers it and falls back to `getAllSessions()` when absent (e.g. the
+  desktop app's in-memory bridge), so behaviour stays correct either way.
+- `listChatSessions()` is now documented as a freeze hazard: it parses every
+  message of every session and is only for genuinely whole-store work. Callers
+  that need a session *list* use `listChatSessionSummaries()` (COUNT only).
+
+### Deterministic model errors fail fast (retries were pure latency)
+
+`invokeWithRetry` retried **every** non-abort error, so a truncated response or
+a code bug burned 4 attempts plus ~13 s of backoff and then failed anyway, with
+"Retrying (3/4)…" shown in the UI the whole time.
+
+Only genuinely transient failures retry now: network/socket errors, timeouts,
+429, and 5xx. Deterministic errors (4xx, truncation, malformed payloads) fail
+fast with the real reason.
+
+The subtle part is that an empty response has two very different causes that
+arrive as the **same** thrown message:
+
+```
+Model stream ended with an empty unusable response (finish_reason=X).
+```
+
+| `finish_reason` | Cause | Behaviour |
+|---|---|---|
+| `error` | provider-side, often transient | **retry** |
+| `length` | truncated answer, repeats | fail fast |
+| `content_filter` | policy block, repeats | fail fast |
+
+The classifier splits on the finish reason rather than the wording. (An earlier
+revision matched the blanket substring `"finish_reason="` and killed the
+provider-error retry, which a behavioural spec asserts must happen.)
+
+### Fixed: `"lengthlength"` finish reason garble
+
+`getRawFinishReason` read `choice.finish_reason` from langchain chunks, whose
+streamed value can be a **concatenation** of every chunk's reason — a streamed
+response ending with `finish_reason: "length"` produced `"lengthlength"`, which
+rendered into errors, logs and the UI as `"lengthlength, length"`.
+
+`normalizeFinishReason()` collapses a value that is exactly a known reason
+repeated 2–5 times back to the canonical token. Detection is deliberately
+conservative: an unrecognised provider string is returned untouched, so no
+canonical value is invented.
+
+### Tests
+
+- `historySearchBounded.extreme.spec.ts` (7 cases) — loads one session at a
+  time, yields to the event loop, preserves ranking/limit/truncated semantics,
+  skips a session deleted between summary and load.
+- `runtimeRetry.extreme.spec.ts` (9 cases) — pins the finish-reason split,
+  abort behaviour, transient retries, and deterministic fail-fast.
+- Both wired into `test:backend-unit-extreme`.
+
 ## v3.8.3 (2026-09-11)
 
 ### Incremental history save — the real freeze fix

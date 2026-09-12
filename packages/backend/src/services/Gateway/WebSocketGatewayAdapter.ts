@@ -196,6 +196,16 @@ export interface WebSocketGatewayAdapterOptions {
   /** v3.2.18: cross-session history search bridge. */
   historyBridge?: {
     getAllSessions?: () => unknown | Promise<unknown>;
+    /**
+     * v3.8.4 freeze fix: search one session at a time, yielding between them,
+     * instead of getAllSessions() (which JSON.parses EVERY message of EVERY
+     * session synchronously and blocks the event loop for seconds).
+     * Preferred over getAllSessions whenever the runtime provides it.
+     */
+    searchBounded?: (
+      query: string,
+      options?: Record<string, unknown>,
+    ) => unknown | Promise<unknown>;
   };
   terminalBridge?: {
     listTerminals: () => Array<{ id: string; title: string; type: string }>;
@@ -1185,20 +1195,34 @@ export class WebSocketGatewayAdapter {
       case "history:search": {
         // v3.2.18: cross-session full-text search.
         const bridge = this.options.historyBridge;
-        if (!bridge?.getAllSessions) {
+        if (!bridge?.searchBounded && !bridge?.getAllSessions) {
           throw new WebSocketRpcError(
             "METHOD_NOT_FOUND",
             "history:search is not available on this gateway (no history bridge).",
           );
         }
-        const { searchChatHistory } = await import("../history/historySearch");
-        const sessions = (await bridge.getAllSessions()) as never[];
         const query = this.readStringParam(params, "query");
         const wholeWord = params?.wholeWord === true;
         const includeTitles = params?.includeTitles !== false;
         const sessionLimit = typeof params?.sessionLimit === "number" ? params.sessionLimit : undefined;
         const snippetLimit = typeof params?.snippetLimit === "number" ? params.snippetLimit : undefined;
-        return searchChatHistory(sessions, query, { wholeWord, includeTitles, sessionLimit, snippetLimit });
+        const options = { wholeWord, includeTitles, sessionLimit, snippetLimit };
+
+        // v3.8.4 FREEZE FIX: prefer the bounded path. The old path called
+        // getAllSessions(), which JSON.parses EVERY message of EVERY session
+        // synchronously before a single match is compared — seconds of blocked
+        // event loop on a large store, so the UI froze while searching.
+        // searchBounded() reads one session at a time and yields between them.
+        if (bridge.searchBounded) {
+          return await bridge.searchBounded(query, options);
+        }
+
+        // Fallback for runtimes that only expose getAllSessions (e.g. the
+        // desktop app's in-memory bridge): unchanged behaviour, still correct,
+        // just not the bounded read.
+        const { searchChatHistory } = await import("../history/historySearch");
+        const sessions = (await bridge.getAllSessions!()) as never[];
+        return searchChatHistory(sessions, query, options);
       }
       case "settings:listBackups": {
         const bridge = this.options.settingsBridge;

@@ -143,6 +143,67 @@ export function normalizeMessages(messages: unknown): Array<{ id?: string; type?
   return []
 }
 
+/**
+ * Search every session by streaming it off disk ONE SESSION AT A TIME,
+ * yielding to the event loop between sessions.
+ *
+ * FREEZE FIX (v3.8.4): the history bridge used to call
+ * `historyStore.listChatSessions()`, which JSON.parses EVERY message of EVERY
+ * session in one synchronous burst. With a 1.6 GB multi-session store that
+ * blocks the event loop for seconds — and because better-sqlite3 is
+ * synchronous, the whole app (including the UI) freezes while a search runs.
+ *
+ * Here each session is loaded, searched, and RELEASED before the next one is
+ * read, and a macrotask yield between sessions lets the process service other
+ * work. Peak memory becomes one session instead of the whole store, and the
+ * event loop is blocked for one session at a time instead of all of them.
+ *
+ * `loadSession` is injected so this stays testable without SQLite.
+ */
+export async function searchChatHistoryBounded(
+  loadSummaries: () => Array<{ id: string }>,
+  loadSession: (id: string) => StoredChatSession | null,
+  query: string,
+  options: HistorySearchOptions = {},
+): Promise<HistorySearchResult> {
+  const trimmed = (query ?? '').trim()
+  if (!trimmed) {
+    return { query: trimmed, totalSessions: 0, totalMatches: 0, sessions: [], truncated: false }
+  }
+
+  const summaries = loadSummaries()
+  const results: HistorySearchSessionResult[] = []
+  const yieldTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+  for (const summary of summaries) {
+    const session = loadSession(summary.id)
+    if (session) {
+      const hit = searchChatHistory([session], trimmed, {
+        ...options,
+        // Per-session we want ALL snippets; the cap is applied per session by
+        // searchChatHistory, and truncated is recomputed globally below.
+        sessionLimit: 1,
+      })
+      if (hit.sessions.length > 0) results.push(hit.sessions[0])
+    }
+    // Hand the event loop back so a long search cannot starve the UI.
+    await yieldTick()
+  }
+
+  results.sort((a, b) => b.matchCount - a.matchCount || b.updatedAt - a.updatedAt)
+  const sessionLimit = options.sessionLimit ?? DEFAULT_SESSION_LIMIT
+  const totalMatches = results.reduce((sum, s) => sum + s.matchCount, 0)
+  const truncated = results.length > sessionLimit
+
+  return {
+    query: trimmed,
+    totalSessions: results.length,
+    totalMatches,
+    sessions: results.slice(0, sessionLimit),
+    truncated,
+  }
+}
+
 /** Search across all sessions. Pure: no I/O. */
 export function searchChatHistory(
   sessions: readonly StoredChatSession[],

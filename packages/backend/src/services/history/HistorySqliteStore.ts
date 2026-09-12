@@ -272,6 +272,19 @@ export class HistorySqliteStore {
     }));
   }
 
+  /**
+   * Every session WITH all messages.
+   *
+   * FREEZE WARNING (v3.8.4): this JSON.parses every message of every session
+   * in one synchronous burst — on this machine's 1.6 GB / multi-session store
+   * that is seconds of blocked event loop (so the UI freezes, because
+   * better-sqlite3 is synchronous and runs on the same thread).
+   *
+   * It is only acceptable for genuinely whole-store work. Callers that merely
+   * need session *lists* must use `listChatSessionSummaries()` (COUNT only, no
+   * message bodies) — see `searchChatHistoryBounded` in historySearch.ts,
+   * which replaced the old bridge call to this method.
+   */
   listChatSessions(): StoredChatSessionRecord[] {
     return this.listChatSessionSummaries()
       .map((summary) => this.loadChatSession(summary.id))
