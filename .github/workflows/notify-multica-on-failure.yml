@@ -14,10 +14,10 @@ jobs:
     steps:
       - name: Notify Multica autopilot
         env:
-          WEBHOOK_URL: https://api.multica.ai/api/webhooks/autopilots/awt_azjpEQ-2NJYENF86fUIV8Zm6pWE7_0qanO76WOaG0kw
+          WEBHOOK_URL: https://multica.ai/api/webhooks/autopilots/awt_JX96SKAvb-Z8iYLlhuHwXlqk39o4to1xzCRwkiovZb4
         run: |
           python3 -c "
-          import json, urllib.request, os
+          import json, urllib.request, os, time, urllib.error
           payload = json.dumps({
             'action': 'failure',
             'workflow_run': {
@@ -32,11 +32,26 @@ jobs:
               'name': '${{ github.event.repository.name }}'
             }
           }).encode()
-          req = urllib.request.Request(
-            os.environ['WEBHOOK_URL'],
-            data=payload,
-            headers={'Content-Type': 'application/json'}
-          )
-          urllib.request.urlopen(req)
-          print('Notified Multica autopilot of workflow failure')
+          url = os.environ['WEBHOOK_URL']
+          max_attempts = 5
+          for attempt in range(1, max_attempts + 1):
+            req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'})
+            try:
+              urllib.request.urlopen(req, timeout=30)
+              print(f'Notified Multica autopilot of workflow failure (attempt {attempt})')
+              break
+            except urllib.error.HTTPError as e:
+              if e.code in (429, 500, 502, 503, 504) and attempt < max_attempts:
+                wait = min(2 ** attempt, 60)
+                print(f'Attempt {attempt} got HTTP {e.code}; retrying in {wait}s')
+                time.sleep(wait)
+                continue
+              raise
+            except urllib.request.URLError as e:
+              if attempt < max_attempts:
+                wait = min(2 ** attempt, 60)
+                print(f'Attempt {attempt} network error: {e}; retrying in {wait}s')
+                time.sleep(wait)
+                continue
+              raise
           "
