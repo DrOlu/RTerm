@@ -1,4 +1,4 @@
-import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, MonidSettings, NatsSettings, NumbatSettings, OncallSettings, SynapseSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
+import type { AgentspanSettings, AlertsSettings, BackendSettings, CloudSettings, CostSettings, MonidSettings, NatsSettings, NumbatSettings, OncallSettings, ReactorProSettings, SynapseSettings, WebIntelSettings, WsGatewayAccess } from "../../types";
 import { BUILTIN_TOOL_INFO } from "../AgentHelper/tools";
 import { normalizeAgentSettingState } from "./agentSettings";
 import { deepMerge, isObject } from "./objectMerge";
@@ -127,6 +127,7 @@ function pickBackendSnapshot(raw: unknown): Partial<BackendSettings> {
     webIntel: raw.webIntel,
     nats: raw.nats,
     synapse: raw.synapse,
+    reactorpro: raw.reactorpro,
     numbat: raw.numbat,
     monid: raw.monid,
     gateway: raw.gateway,
@@ -261,6 +262,7 @@ function normalizeBackendSettings(settings: BackendSettings): BackendSettings {
   next.webIntel = normalizeWebIntelSettings(next.webIntel);
   next.nats = normalizeNatsSettings(next.nats);
   next.synapse = normalizeSynapseSettings(next.synapse);
+  next.reactorpro = normalizeReactorProSettings(next.reactorpro);
   next.numbat = normalizeNumbatSettings(next.numbat);
   next.monid = normalizeMonidSettings(next.monid);
 
@@ -568,6 +570,53 @@ export function normalizeSynapseSettings(raw: unknown): SynapseSettings {
     ...(prefix ? { prefix } : {}),
     ...(agentId ? { agentId } : {}),
     ...(hasAuth ? { auth: auth as SynapseSettings["auth"] } : {}),
+  };
+}
+
+/**
+ * Sanitize the ReactorPro bridge settings block (reactorpro-bridge plugin).
+ * Same shape discipline as synapse: strings trimmed, auth keys whitelisted,
+ * secrets only ever referenced by secretRef (resolved at connect time).
+ */
+export function normalizeReactorProSettings(raw: unknown): ReactorProSettings {
+  const src = isObject(raw) ? (raw as Record<string, unknown>) : {};
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v.trim() ? v.trim() : undefined;
+  const url = str(src.url);
+  const servers = Array.isArray(src.servers)
+    ? (src.servers as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim())
+    : undefined;
+  const prefix = str(src.prefix);
+  const agentId = str(src.agentId);
+  const name = str(src.name);
+  const identityPath = str(src.identityPath);
+  const capabilities = Array.isArray(src.capabilities)
+    ? (src.capabilities as unknown[]).filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim())
+    : undefined;
+  const dispatchTimeout =
+    typeof src.dispatchTimeout === "number" && src.dispatchTimeout > 0
+      ? src.dispatchTimeout
+      : undefined;
+
+  const rawAuth = isObject(src.auth) ? (src.auth as Record<string, unknown>) : undefined;
+  const authKeys = ["token", "tokenSecretRef", "username", "password", "passwordSecretRef", "nkeySeed", "jwt", "jwtSeed", "creds", "tlsCert", "tlsKey", "tlsCa"] as const;
+  const auth = rawAuth
+    ? Object.fromEntries(authKeys.filter((k) => str(rawAuth[k])).map((k) => [k, str(rawAuth[k])]))
+    : undefined;
+  const hasAuth = auth && Object.keys(auth).length > 0;
+
+  return {
+    enabled: src.enabled !== false,
+    autoServe: src.autoServe !== false,
+    ...(url ? { url } : {}),
+    ...(servers && servers.length > 0 ? { servers } : {}),
+    ...(prefix ? { prefix } : {}),
+    ...(agentId ? { agentId } : {}),
+    ...(name ? { name } : {}),
+    ...(identityPath ? { identityPath } : {}),
+    ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
+    ...(dispatchTimeout ? { dispatchTimeout } : {}),
+    ...(hasAuth ? { auth: auth as ReactorProSettings["auth"] } : {}),
   };
 }
 

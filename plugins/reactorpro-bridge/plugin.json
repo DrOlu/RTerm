@@ -1,0 +1,26 @@
+{
+  "name": "reactorpro-bridge",
+  "version": "1.0.0",
+  "description": "ReactorPro mesh bridge for RTerm — full-duplex ReactorPro mesh citizen (auto-started on boot): discover peers, dispatch signed tasks, register RTerm with the mesh registry, AND serve as a peer (answer inbound requests on mesh.agent.{id}.inbox, auto-started), publish signed heartbeats, answer discovery broadcasts. Speaks the ReactorPro wire convention (sig/pub/fp Ed25519, v0.3.0 envelopes) over a shared NATS server — the same convention the ReactorPro gateway enforces, so ReactorPro desktops and edges see RTerm as a first-class verified peer (gated invoke included). Identity is minted once and persisted (identityPath); the agent id is permanent (hashed into the fingerprint). Config in Settings (reactorpro block); secrets via the vault.",
+  "entry": "index.mjs",
+  "tools": [
+    "reactorpro_health",
+    "reactorpro_discover",
+    "reactorpro_dispatch",
+    "reactorpro_invoke_edge",
+    "reactorpro_register",
+    "reactorpro_agents_summary",
+    "reactorpro_serve",
+    "reactorpro_serve_status",
+    "reactorpro_identity"
+  ],
+  "triggers": [
+    "reactorpro_mesh_event"
+  ],
+  "panels": [
+    "reactorpro-mesh-peers"
+  ],
+  "permissions": [
+    "exec"
+  ]
+}

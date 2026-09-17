@@ -859,6 +859,57 @@ export interface SynapseMesh {
 }
 
 /**
+ * ReactorPro mesh bridge configuration (reactorpro-bridge plugin). Makes
+ * RTerm a full-duplex ReactorPro mesh citizen: discover peers, dispatch
+ * signed tasks, serve inbound requests on its own inbox, heartbeat, register
+ * with the mesh registry. Speaks the ReactorPro wire convention (sig/pub/fp
+ * Ed25519) — the same convention the ReactorPro gateway enforces.
+ */
+export interface ReactorProSettings {
+  /** master switch (default true when a server is configured). */
+  enabled?: boolean
+  /** NATS server url (default nats://localhost:4222). */
+  url?: string
+  /** multiple server urls (takes precedence over `url`). */
+  servers?: string[]
+  /** mesh subject prefix (default "mesh"). */
+  prefix?: string
+  /** this instance's mesh agent id (default "rterm-001"). PERMANENT once an
+   *  identity exists: it is hashed into the fingerprint; changing it means a
+   *  new identity that peers must re-pin. Use <org>/<site>/<name>. */
+  agentId?: string
+  /** friendly name peers see in the mesh directory. */
+  name?: string
+  /** path to the mesh identity JSON (minted on first use if absent; 0600).
+   *  The identity is not reproducible — back it up; losing it means peers
+   *  that pinned the old fingerprint will refuse this instance (3004). */
+  identityPath?: string
+  /** capabilities this edge advertises beyond rterm/agent. */
+  capabilities?: string[]
+  /** auth options (token / user-pass / nkey / jwt / creds / tls). */
+  auth?: {
+    token?: string
+    tokenSecretRef?: string
+    username?: string
+    password?: string
+    passwordSecretRef?: string
+    nkeySeed?: string
+    jwt?: string
+    jwtSeed?: string
+    creds?: string
+    tlsCert?: string
+    tlsKey?: string
+    tlsCa?: string
+  }
+  /** auto-start the full-duplex citizen (responder+heartbeat+registry) on
+   *  boot (default true). */
+  autoServe?: boolean
+  /** dispatch timeout in ms (default 180000 = the edge's 3-minute invoke
+   *  floor; a caller may only narrow it, never extend). */
+  dispatchTimeout?: number
+}
+
+/**
  * Numbat bridge configuration (numbat-bridge plugin). Deploy Numbat (endpoint
  * AI-agent detection/EDR) to hosts and ingest its findings to fire RTerm triggers.
  */
@@ -988,6 +1039,8 @@ export interface BackendSettings {
   nats?: NatsSettings
   /** Synapse mesh bridge (discover/dispatch/register mesh agents). */
   synapse?: SynapseSettings
+  /** ReactorPro mesh bridge (full-duplex ReactorPro mesh citizen). */
+  reactorpro?: ReactorProSettings
   /** Numbat bridge (endpoint AI-agent detection → triggers). */
   numbat?: NumbatSettings
   /** Monid CLI bridge (discover/run data endpoints). */
