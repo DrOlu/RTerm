@@ -1,5 +1,51 @@
 # Changelog
 
+## v3.8.5 (2026-09-17)
+
+### New plugin: `reactorpro-bridge` — full-duplex ReactorPro mesh citizen
+
+Makes RTerm a first-class **verified peer** on a ReactorPro mesh. ReactorPro
+desktops and edges see RTerm like one of their own — signatures check, the
+fingerprint binds, gated invoke included.
+
+- **Discover** live mesh peers and their manifests; **dispatch** signed tasks;
+  **register** with the mesh registry; and — the half that matters — **serve**
+  inbound requests on `mesh.agent.{id}.inbox` (auto-started), so other agents
+  can call RTerm, not just be called by it. Signed heartbeats keep the peer
+  alive in the directory.
+- Speaks the ReactorPro wire convention (sig/pub/fp Ed25519, v0.3.0 envelopes)
+  over a shared NATS server — the same convention the ReactorPro gateway
+  enforces. The signing layer mirrors the gateway's `identity.go`
+  byte-for-byte: length-prefixed field digest over
+  `v,id,type,ts,from,to,task_id,in_reply_to,fp,[trace],[error]` + `sha256(payload)`;
+  fingerprint = `sha256(agentID + "\n" + raw_pubkey)[:16]`.
+- **9 tools** (`reactorpro_health/discover/dispatch/invoke_edge/register/
+  agents_summary/serve/serve_status/identity`), the `reactorpro_mesh_event`
+  trigger, and a `reactorpro-mesh-peers` panel.
+- **Identity is minted once and persisted** (0600). The agent id is permanent —
+  it is hashed into the fingerprint, so changing it means a new identity peers
+  must re-pin. A tampered identity file is rejected on load.
+- **Settings:** new `reactorpro` block (url/servers/prefix/agentId/name/
+  identityPath/capabilities/auth incl. secretRefs/autoServe/dispatchTimeout),
+  with `ReactorProSettings` + `normalizeReactorProSettings` + the snapshot
+  whitelist key — a settings block missing from that whitelist is silently
+  wiped on save (the v3.1.3 lesson, applied up front this time).
+
+**Cross-verified against the real Go gateway** (`rterm_crossverify_test.go`):
+the plugin's signed envelope passes the gateway's `VerifyEnvelope`, the
+fingerprint binds to the claimed sender, `SigningPayload` matches
+byte-for-byte, and the gateway's own signed envelope verifies under the
+plugin's rules. 28/28 spec cases.
+
+### Fixture-fidelity fix (found live during that cross-verify)
+
+The cross-verify fixture is now written **compact**. The gateway's
+`Envelope.Payload` is a `json.RawMessage`, which captures payload bytes
+verbatim from the file — a pretty-printed fixture made the gateway re-hash
+different bytes than were signed (whitespace changed the digest) and fail,
+even though the real wire exchange was correct all along. The fixture is now
+byte-faithful to the wire, with a comment explaining why.
+
 ## v3.8.4 (2026-09-12)
 
 ### `history:search` no longer freezes the app
