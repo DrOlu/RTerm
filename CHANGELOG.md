@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.8.6 (2026-09-18)
+
+### ReactorPro Mesh Bridge settings panel (desktop Settings UI)
+
+The `reactorpro` plugin shipped in 3.8.5 with its backend settings wiring
+complete but **no Settings panel** — configuration was only reachable via
+`settings:set` or by asking the agent. This closes that gap: the desktop
+Settings view now shows a **ReactorPro Mesh Bridge** panel (enabled, NATS
+URL, mesh prefix, agent id, display name, identity file, auto-serve),
+following the same generic plugin-panel pattern as webIntel / nats /
+synapse / numbat / monid. Blank fields are omitted on save so server
+defaults apply.
+
+The two fields that deserve warnings carry them in the UI:
+
+- **agent id** — PERMANENT once an identity exists. It is hashed into the
+  fingerprint; changing it means a new identity peers must re-pin.
+- **identity file** — minted on first use (0600). Back it up: losing it means
+  peers that pinned the old fingerprint will refuse this instance.
+
+### Settings round-trip guard
+
+New test pins the v3.1.3 lesson for this block: the `reactorpro` settings
+block must survive save+reload. It shipped with the `pickBackendSnapshot`
+whitelist key, but a future refactor of that list would have silently wiped
+it — now that regression is loud instead of silent. Settings migrations
+spec: 23/23.
+
 ## v3.8.5 (2026-09-17)
 
 ### New plugin: `reactorpro-bridge` — full-duplex ReactorPro mesh citizen
