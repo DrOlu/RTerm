@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Trigger Multica autopilot
         env:
-          WEBHOOK_URL: https://api.multica.ai/api/webhooks/autopilots/awt_jZXas3khd6pPhcNi7CkZTSBRbI_iDUsz-jSV2PN_blw
+          WEBHOOK_URL: https://multica.ai/api/webhooks/autopilots/awt_Ck-qW6nGGtoptV4EH662pBxDOFUKKZSLd8Ko7pXkSpI
           TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
         run: |
           python3 -c "
