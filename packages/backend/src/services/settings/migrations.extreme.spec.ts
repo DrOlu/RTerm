@@ -31,6 +31,31 @@ test('migrateBackendSettings preserves an explicit standard mode', () => {
   assertEqual(migrated.commandPolicyMode, 'standard', 'operator-chosen standard must not be overwritten')
 })
 
+test('migrateBackendSettings preserves the reactorpro block across save+reload (v3.1.3 lesson)', () => {
+  // Same failure family as the v3.1.3 nats lesson: a settings block missing
+  // from pickBackendSnapshot's whitelist is silently WIPED on save/load.
+  // reactorpro shipped WITH the key, but this pins it so a future refactor
+  // of the snapshot list cannot regress it unnoticed.
+  const stored = { ...DEFAULT_BACKEND_SETTINGS, schemaVersion: 5 } as any
+  stored.reactorpro = {
+    enabled: true,
+    url: 'nats://mesh.internal:4222',
+    prefix: 'mesh',
+    agentId: 'hyperspace/lagos/rterm-001',
+    name: 'Lagos RTerm',
+    identityPath: '/etc/rterm/mesh-identity.json',
+    autoServe: true,
+    auth: { token: 'sekrit' },
+  }
+  const migrated = migrateBackendSettings(stored)
+  const rp = (migrated as any).reactorpro
+  assertEqual(rp.url, 'nats://mesh.internal:4222', 'reactorpro.url must survive migration')
+  assertEqual(rp.agentId, 'hyperspace/lagos/rterm-001', 'reactorpro.agentId must survive migration')
+  assertEqual(rp.identityPath, '/etc/rterm/mesh-identity.json', 'reactorpro.identityPath must survive migration')
+  assertEqual(rp.autoServe, true, 'reactorpro.autoServe must survive migration')
+  assertEqual(rp.auth.token, 'sekrit', 'reactorpro.auth must survive migration')
+})
+
 test('migrateBackendSettings preserves a persisted automation block (groups survive restart)', () => {
   // Regression: pickBackendSnapshot used to omit `automation`, so every
   // migration pass (run on both getSettings and setSettings) wiped groups,

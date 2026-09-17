@@ -1040,7 +1040,7 @@ interface PluginFieldDef {
 }
 
 const PLUGIN_PANELS: Array<{
-  block: "webIntel" | "nats" | "synapse" | "numbat" | "monid"
+  block: "webIntel" | "nats" | "synapse" | "numbat" | "monid" | "reactorpro"
   title: string
   description: string
   fields: PluginFieldDef[]
@@ -1104,6 +1104,21 @@ const PLUGIN_PANELS: Array<{
       { key: "binaryPath", label: "CLI path", placeholder: "monid (on PATH)" },
       { key: "apiKey", label: "API key", type: "password", placeholder: "Paste key — not shown again", hint: "Saved with `monid keys add -l rterm`. Leave blank to keep the existing key." },
       { key: "keyLabel", label: "Key label", placeholder: "rterm" },
+    ],
+  },
+  {
+    block: "reactorpro",
+    title: "ReactorPro Mesh Bridge",
+    description:
+      "Full-duplex ReactorPro mesh citizen over a shared NATS server: discover peers, dispatch signed tasks, register with the mesh registry, and answer inbound requests on this instance's inbox. Signed Ed25519 envelopes — the same convention the ReactorPro gateway enforces, so ReactorPro desktops and edges see RTerm as a verified peer.",
+    fields: [
+      { key: "enabled", label: "Enabled", type: "boolean" },
+      { key: "url", label: "NATS URL", placeholder: "nats://localhost:4222" },
+      { key: "prefix", label: "Mesh prefix", placeholder: "mesh" },
+      { key: "agentId", label: "Agent id", placeholder: "rterm-001", hint: "PERMANENT once an identity exists — it is hashed into the fingerprint. Changing it means a new identity peers must re-pin." },
+      { key: "name", label: "Display name", placeholder: "(peers see this in the mesh directory)" },
+      { key: "identityPath", label: "Identity file", placeholder: "(minted on first use; back it up)", hint: "Ed25519 identity, 0600. Losing it means peers that pinned the old fingerprint will refuse this instance." },
+      { key: "autoServe", label: "Serve inbound requests on boot", type: "boolean" },
     ],
   },
 ];
