@@ -32,9 +32,19 @@ export class ChatHistoryService {
     const createdAt = this.store.getChatSessionCreatedAt(session.id);
     const now = Date.now();
 
+    // RENAME-FIX (v3.8.9): the session object handed to saveSession was
+    // loaded at RUN START; a rename issued DURING the run persists a new
+    // title, and this save would write the stale in-memory title back
+    // (the store's upsert does `title = excluded.title` unconditionally).
+    // The stored title is authoritative for an existing session — same
+    // discipline as created_at. The in-memory title only names a NEW
+    // session (first save), so a rename can never be clobbered by a save.
+    const storedMeta = this.store.getChatSessionMeta(session.id);
+    const title = storedMeta?.title ?? session.title;
+
     this.store.saveChatSession({
       id: session.id,
-      title: session.title,
+      title,
       messages: Array.from(session.messages.entries()).map(([id, message]) => ({
         id,
         type: (message as any)._getType
