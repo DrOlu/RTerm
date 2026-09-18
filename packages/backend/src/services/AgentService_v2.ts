@@ -4877,16 +4877,6 @@ export class AgentService_v2 {
     });
     let ledgerExitStatus: "completed" | "failed" | "aborted" = "completed";
     let ledgerExitError: string | undefined;
-    // v3.8.9 INTERRUPTION MARKER: set before the run starts, cleared only in
-    // the finally block. A force quit mid-run leaves it behind in SQLite, so
-    // the NEXT run can detect the interruption and tell the model. The
-    // graceful paths (success, abort, error) all pass through finally, which
-    // is exactly the distinction we need: only a hard kill skips it.
-    this.chatHistoryService.setRunMarker(sessionId, {
-      runId: ledgerRunId,
-      startedAt: Date.now(),
-      inputPreview: ledgerInputPreview.slice(0, 500),
-    });
     this.selfCorrectionRuntimeManager.clearSession(sessionId);
     const sessionBinding = this.ensureSessionModelBinding(
       sessionId,
@@ -4973,6 +4963,18 @@ export class AgentService_v2 {
       writeStdinActionModelEnabled:
         runExperimentalFlags.writeStdinActionModelEnabled,
     };
+
+    // v3.8.9 INTERRUPTION MARKER (the actual set): by this point the
+    // restore path above has already loaded the history and consumed any
+    // LEFTOVER marker from a previous hard kill, so this set cannot be seen
+    // by our own detection. From here until the finally block clears it,
+    // the marker's presence means "this run is in flight" — and only a
+    // force quit (which skips finally) leaves it behind for the next run.
+    this.chatHistoryService.setRunMarker(sessionId, {
+      runId: ledgerRunId,
+      startedAt: Date.now(),
+      inputPreview: ledgerInputPreview.slice(0, 500),
+    });
 
     try {
       const result = await this.graph.invoke(initialState, {
