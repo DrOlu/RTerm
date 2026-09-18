@@ -1,5 +1,50 @@
 # Changelog
 
+## v3.8.8 (2026-09-18)
+
+### New: inbound `invoke` — mesh peers can now drive RTerm's agent
+
+Found live: the ReactorPro manifest **advertised** an `invoke` skill, but
+`defaultServeSkills` had no handler for it — a peer dispatching `invoke` got
+`SKILL_NOT_FOUND` while the manifest promised "invoke routes a prompt into a
+real RTerm agent turn". RTerm could *call* other agents but couldn't be
+*usefully called* by them.
+
+`invoke` is now real. A mesh peer sends a prompt; RTerm runs it as a
+**genuine agent turn** — tools, command policy, and the audit ledger all
+apply — and the final assistant text goes back over the mesh.
+
+- **New `runAgentTask` PluginContext hook** — one real agent turn, resolve
+  with the final answer. Wired on the daemon and desktop; absent in bare
+  test harnesses, where `invoke` returns a clear `INVOKE_UNAVAILABLE` error
+  instead of pretending.
+- **Prompt extraction** accepts `arguments.prompt` (the gateway's shape),
+  `prompt`, `text`, `message`, or a bare string.
+- **`conversation_id` round-trips** — a peer that passes the previous
+  reply's `conversation_id` continues the same agent session.
+- **Budget-aware** — the agent turn is capped at `dispatchTimeout − 10s`
+  (default 170 s) so the reply reaches the caller before its own mesh
+  dispatch timeout fires.
+
+Two live-found details worth recording:
+
+- **`say` events are deltas, not full text.** The first implementation
+  captured only the last `say` event and "PONG" came back as "ONG" — the
+  final streamed fragment. The publisher-chaining hook now accumulates
+  `say` deltas in order; the concatenation is the answer.
+- **The event publisher is chained, not replaced** — `say` events for the
+  mesh-invoke session are captured while everything still passes through to
+  the gateway's broadcast unchanged, and the original publisher is restored
+  in `finally`.
+
+Live-verified end to end: a Synapse-convention dispatch of `invoke` to
+RTerm's inbox now returns a real agent answer (previously `SKILL_NOT_FOUND`),
+and RTerm → grip-cli-001 `invoke` returns a real LLM reply (previously
+verified; unchanged).
+
+Spec: 10 new inbound-invoke cases (prompt extraction, conversation
+persistence, budget clamping, unavailable-runtime degradation).
+
 ## v3.8.7 (2026-09-18)
 
 ### Fixed: ReactorPro gateway dropped RTerm from mesh discovery

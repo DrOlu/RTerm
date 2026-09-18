@@ -406,7 +406,7 @@ export async function register(ctx) {
     const nc = await connectMesh(ctx)
     const identity = loadOrCreateIdentity(cfg)
     const effCfg = { ...cfg, fingerprint: identity.fingerprint }
-    const serveCtx = { skills: skills ?? defaultServeSkills(effCfg, { startedAt }), identity, getSkills: () => serveCtx.skills }
+    const serveCtx = { skills: skills ?? defaultServeSkills(effCfg, { startedAt, runAgentTask: ctx.runAgentTask }), identity, getSkills: () => serveCtx.skills }
     if (responderStop) responderStop()
     responderStop = await startResponder(nc, effCfg, serveCtx, log)
     if (heartbeatStop) heartbeatStop()
@@ -426,7 +426,7 @@ export async function register(ctx) {
       skills: { type: 'object', description: 'Map of skillId -> async (input, ctx) => output (defaults to ping/describe/status/invoke)', optional: true },
     },
     handler: async (p) => guarded(async () => {
-      const base = defaultServeSkills({ ...cfg, fingerprint: loadOrCreateIdentity(cfg).fingerprint }, { startedAt })
+      const base = defaultServeSkills({ ...cfg, fingerprint: loadOrCreateIdentity(cfg).fingerprint }, { startedAt, runAgentTask: ctx.runAgentTask })
       const skills = p?.skills ?? base
       const served = await serveSkills(skills)
       return { serving: true, inbox: `${cfg.prefix}.agent.${cfg.agentId}.inbox`, skills: served, note: 'RTerm is now a full ReactorPro mesh citizen (responder + heartbeat + registry live)' }
@@ -487,7 +487,7 @@ export async function register(ctx) {
   if (cfg.enabled && cfg.autoServe) {
     setTimeout(() => {
       Promise.race([
-        serveSkills(defaultServeSkills({ ...cfg, fingerprint: loadOrCreateIdentity(cfg, log).fingerprint }, { startedAt })),
+        serveSkills(defaultServeSkills({ ...cfg, fingerprint: loadOrCreateIdentity(cfg, log).fingerprint }, { startedAt, runAgentTask: ctx.runAgentTask })),
         new Promise((_, reject) => setTimeout(() => reject(new Error('auto-serve connect timeout (5s)')), 5000)),
       ])
         .then((skills) => log(`[reactorpro] auto-started citizen on ${cfg.prefix}.agent.${cfg.agentId}.inbox (skills: ${skills.join(', ')})`))

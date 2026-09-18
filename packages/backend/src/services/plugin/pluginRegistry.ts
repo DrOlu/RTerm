@@ -99,6 +99,18 @@ export interface PluginContext {
   /** optional live settings snapshot (or a getter) for plugins that read config blocks. */
   settings?: Record<string, unknown>
   getSettings?: () => Record<string, unknown>
+  /**
+   * Run ONE real agent turn with a prompt and resolve with the final
+   * assistant text. Optional — only present in runtimes that wire an agent
+   * (the standalone daemon and the desktop); plugins must degrade gracefully
+   * when it's absent. This is the inbound-`invoke` path: a mesh peer sends a
+   * prompt, RTerm runs it as a genuine agent turn (tools, policy, audit all
+   * apply) and the answer goes back over the mesh.
+   */
+  runAgentTask?: (prompt: string, opts?: {
+    sessionId?: string
+    timeoutMs?: number
+  }) => Promise<{ ok: boolean; answer: string; error?: string; sessionId: string }>
 }
 
 export type PluginRegisterFn = (ctx: PluginContext) => void | Promise<void>
@@ -340,6 +352,7 @@ export class PluginRegistry {
     log: PluginContext['log'],
     spawnProcess?: PluginContext['spawnProcess'],
     getSettings?: PluginContext['getSettings'],
+    runAgentTask?: PluginContext['runAgentTask'],
   ): PluginContext {
     return {
       registerTool: (tool) => { record.tools.push(tool) },
@@ -356,6 +369,7 @@ export class PluginRegistry {
       log,
       ...(spawnProcess ? { spawnProcess } : {}),
       ...(getSettings ? { getSettings, get settings() { return getSettings() } } : {}),
+      ...(runAgentTask ? { runAgentTask } : {}),
     }
   }
 }

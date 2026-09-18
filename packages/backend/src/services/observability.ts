@@ -586,6 +586,54 @@ const reviewService = new ReviewService({
       },
       // Live settings snapshot for plugins that read config blocks (webIntel, agentspan, …).
       () => (deps.settingsService?.getSettings?.() as Record<string, unknown>) ?? {},
+      // Real agent turns for plugins that serve an inbound `invoke` skill
+      // (reactorpro-bridge): a mesh peer sends a prompt, RTerm runs it as a
+      // genuine agent turn and the answer goes back over the mesh.
+      // Chained onto the agent's event publisher for the duration of the
+      // turn: `say` events for OUR session are captured, everything passes
+      // through to the original (gateway) publisher unchanged, and the
+      // publisher is restored in finally. dispatchTask resolves when the
+      // run completes, so the last captured `say` is the final answer.
+      deps.agentService
+        ? async (prompt: string, opts?: { sessionId?: string; timeoutMs?: number }) => {
+            const agent = deps.agentService as unknown as {
+              setEventPublisher: (p: (sid: string, ev: { type?: string; content?: unknown }) => void) => void
+              getEventPublisher: () => ((sid: string, ev: { type?: string; content?: unknown }) => void) | null
+            }
+            const sessionId = opts?.sessionId ?? `mesh-invoke-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+            const timeoutMs = Math.min(Math.max(opts?.timeoutMs ?? 170_000, 5_000), 600_000)
+            const previous = agent.getEventPublisher()
+            // `say` events are DELTAS (one per streamed chunk), not full
+            // text — accumulate them in order and the concatenation IS the
+            // final assistant text. (Taking only the last say returns just
+            // the last fragment — found live: "PONG" came back as "ONG".)
+            const sayParts: string[] = []
+            const chained = (sid: string, ev: { type?: string; content?: unknown }) => {
+              if (sid === sessionId && ev?.type === 'say' && typeof ev.content === 'string' && ev.content) {
+                sayParts.push(ev.content)
+              }
+              if (previous) { try { previous(sid, ev) } catch { /* best-effort */ } }
+            }
+            agent.setEventPublisher(chained)
+            let timer: NodeJS.Timeout | undefined
+            try {
+              // dispatchTask resolves when the run completes (its own
+              // runCompletion promise); race it against a hard timeout so a
+              // stuck turn cannot hold the mesh reply slot forever.
+              await Promise.race([
+                deps.gatewayService.dispatchTask(sessionId, prompt, undefined),
+                new Promise((_, reject) => {
+                  timer = setTimeout(() => reject(new Error(`agent turn timed out after ${timeoutMs}ms`)), timeoutMs)
+                }),
+              ])
+            } finally {
+              if (timer) clearTimeout(timer)
+              agent.setEventPublisher((sid, ev) => { if (previous) previous(sid, ev) })
+            }
+            const answer = sayParts.join('')
+            return { ok: answer.trim() !== '', answer, sessionId }
+          }
+        : undefined,
     ),
     onLog: deps.onLog,
   })

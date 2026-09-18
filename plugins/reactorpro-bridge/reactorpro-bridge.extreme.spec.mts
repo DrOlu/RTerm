@@ -29,6 +29,7 @@ import {
   buildManifest,
   buildRespond,
   checkIdentity,
+  defaultServeSkills,
   envelope,
   fingerprintFor,
   mintIdentity,
@@ -265,6 +266,85 @@ function ok(cond: unknown, label: string, note = ''): void {
           : []
     ok(candidates.length > 0, `discover parser accepts payload shape ${JSON.stringify(Object.keys(p))}`)
   }
+}
+
+// ─── A3. Inbound invoke skill (v3.8.8) ───────────────────────────────────────
+// Found live: the manifest ADVERTISED invoke but defaultServeSkills had no
+// handler, so a peer dispatching invoke got SKILL_NOT_FOUND while the
+// manifest promised it. These pin the corrected contract.
+
+{
+  // A3.1 invoke exists in the default skills and routes to runAgentTask.
+  const cfg = { agentId: 'rterm/xcheck/invoke', dispatchTimeout: 180000 }
+  const skills = defaultServeSkills(cfg, {
+    startedAt: Date.now(),
+    runAgentTask: async (prompt: string, opts?: { sessionId?: string; timeoutMs?: number }) => {
+      ok(prompt === 'Reply with exactly one word: PONG',
+        'invoke passes the prompt through to runAgentTask (arguments.prompt)',
+        JSON.stringify({ prompt }))
+      ok(typeof opts?.timeoutMs === 'number' && opts.timeoutMs === 170000,
+        'invoke stays under the mesh dispatch budget (dispatchTimeout - 10s)',
+        JSON.stringify(opts))
+      return { ok: true, answer: 'PONG', sessionId: 'mesh-invoke-test' }
+    },
+  })
+  ok(typeof skills.invoke === 'function', 'defaultServeSkills includes an invoke handler')
+
+  const r1 = await skills.invoke({ arguments: { prompt: 'Reply with exactly one word: PONG' } } as never)
+  ok(r1?.output === 'PONG', 'invoke returns the agent answer as output', JSON.stringify(r1))
+  ok(r1?.conversation_id === 'mesh-invoke-test', 'invoke returns conversation_id for session persistence')
+
+  // A3.2 prompt extraction: text/ prompt/ message all work.
+  const skills2 = defaultServeSkills({ agentId: 'a' }, {
+    runAgentTask: async (prompt: string) => ({ ok: true, answer: `got:${prompt}`, sessionId: 's' }),
+  })
+  const viaText = await skills2.invoke({ text: 'hello' } as never)
+  ok(viaText?.output === 'got:hello', 'invoke extracts input.text')
+  const viaPrompt = await skills2.invoke({ prompt: 'hi' } as never)
+  ok(viaPrompt?.output === 'got:hi', 'invoke extracts input.prompt')
+  const viaString = await skills2.invoke('plain' as never)
+  ok(viaString?.output === 'got:plain', 'invoke extracts a bare string input')
+
+  // A3.3 conversation_id routes the follow-up to the same agent session.
+  const seenSessions: Array<string | undefined> = []
+  const skills3 = defaultServeSkills({ agentId: 'a' }, {
+    runAgentTask: async (_p: string, o?: { sessionId?: string }) => {
+      seenSessions.push(o?.sessionId)
+      return { ok: true, answer: 'x', sessionId: o?.sessionId ?? 'new' }
+    },
+  })
+  const first = await skills3.invoke({ text: 'one' } as never)
+  // First call: no conversation_id yet -> the hook generates a session.
+  ok(seenSessions[0] === undefined, 'first invoke has no session yet (the hook mints one)')
+  await skills3.invoke({ text: 'two', conversation_id: first.conversation_id } as never)
+  ok(seenSessions[1] === first.conversation_id && first.conversation_id !== undefined,
+    'conversation_id reuses the same agent session on the follow-up',
+    JSON.stringify({ seenSessions, firstId: first.conversation_id }))
+
+  // A3.4 no runAgentTask hook -> a CLEAR error, not SKILL_NOT_FOUND.
+  const skills4 = defaultServeSkills({ agentId: 'a' }, {})
+  const r4 = await skills4.invoke({ text: 'x' } as never)
+  ok(r4?.error?.code === 3002 && String(r4?.error?.message).includes('INVOKE_UNAVAILABLE'),
+    'invoke without the runAgentTask hook returns INVOKE_UNAVAILABLE (not SKILL_NOT_FOUND)',
+    JSON.stringify(r4))
+
+  // A3.5 empty prompt -> a clear error.
+  const skills5 = defaultServeSkills({ agentId: 'a' }, {
+    runAgentTask: async () => ({ ok: true, answer: 'should not run', sessionId: 's' }),
+  })
+  const r5 = await skills5.invoke({} as never)
+  ok(r5?.error?.code === 3003 && String(r5?.error?.message).includes('INVOKE_NEEDS_PROMPT'),
+    'invoke with no prompt returns INVOKE_NEEDS_PROMPT without running the agent',
+    JSON.stringify(r5))
+
+  // A3.6 a failed agent turn -> a retryable error carrying the reason.
+  const skills6 = defaultServeSkills({ agentId: 'a' }, {
+    runAgentTask: async () => ({ ok: false, answer: '', error: 'model offline', sessionId: 's' }),
+  })
+  const r6 = await skills6.invoke({ text: 'x' } as never)
+  ok(r6?.error?.code === 5001 && String(r6?.error?.message).includes('model offline'),
+    'a failed agent turn surfaces as a retryable error with the reason',
+    JSON.stringify(r6))
 }
 
 // ─── B. Go cross-check against the REAL gateway ──────────────────────────────

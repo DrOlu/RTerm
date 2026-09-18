@@ -224,6 +224,39 @@ export function defaultServeSkills(cfg, deps = {}) {
       skills: ['ping', 'describe', 'status', 'invoke'],
       uptime_seconds: Math.floor((Date.now() - (deps.startedAt ?? Date.now())) / 1000),
     }),
+    // `invoke` routes a prompt into a REAL RTerm agent turn (tools, policy,
+    // audit all apply) and returns the final assistant text. Requires the
+    // runAgentTask PluginContext hook — present on the daemon and desktop,
+    // absent in bare test harnesses. When absent, return a clear error
+    // instead of pretending: a peer must know invoke is unavailable here.
+    invoke: async (input = {}) => {
+      const runner = deps.runAgentTask
+      if (typeof runner !== 'function') {
+        return { error: { code: 3002, message: 'INVOKE_UNAVAILABLE: this runtime does not expose agent turns (runAgentTask hook absent)', retryable: false } }
+      }
+      const prompt = input?.arguments?.prompt
+        ?? input?.prompt
+        ?? input?.text
+        ?? input?.message
+        ?? (typeof input === 'string' ? input : '')
+      if (!prompt || !String(prompt).trim()) {
+        return { error: { code: 3003, message: 'INVOKE_NEEDS_PROMPT: pass arguments.prompt (or text)', retryable: false } }
+      }
+      const conversationId = typeof input?.conversation_id === 'string' ? input.conversation_id : undefined
+      const result = await runner(String(prompt), {
+        sessionId: conversationId,
+        // Stay under the mesh dispatch budget (180s default) so the reply
+        // reaches the caller before its own timeout fires.
+        timeoutMs: Math.max(5_000, (cfg.dispatchTimeout ?? 180_000) - 10_000),
+      })
+      if (!result?.ok) {
+        return { error: { code: 5001, message: result?.error || 'agent turn produced no answer', retryable: true } }
+      }
+      return {
+        output: result.answer,
+        conversation_id: result.sessionId,
+      }
+    },
     ...(deps.skills ?? {}),
   }
 }

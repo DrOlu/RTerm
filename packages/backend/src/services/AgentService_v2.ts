@@ -633,6 +633,12 @@ export class AgentService_v2 {
     this.helpers.setEventPublisher(publisher);
   }
 
+  /** Current event publisher (or null) — lets a runtime chain onto it
+   * temporarily (plugin runAgentTask hook) without replacing it. */
+  getEventPublisher(): ((sessionId: string, event: any) => void) | null {
+    return this.helpers.getEventPublisher();
+  }
+
   /** Wire the connection manager so `manage_ssh_connection` can mutate saved
    * connections + notify the UI. Optional; only needed in full runtimes. */
   setConnectionManager(manager: IConnectionManagerRuntime): void {

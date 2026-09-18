@@ -20,6 +20,16 @@ export class AgentHelpers {
   }
 
   /**
+   * Current event publisher (or null). Lets a runtime CHAIN onto the
+   * publisher temporarily — e.g. the plugin runAgentTask hook captures
+   * `say` events for one mesh-invoke session while passing everything
+   * through to the gateway's broadcast unchanged.
+   */
+  getEventPublisher(): ((sessionId: string, event: AgentEvent) => void) | null {
+    return this.eventPublisher
+  }
+
+  /**
    * Build a temporary history for the action model to make decisions.
    * This includes the last 3 special marker messages and recent execution details.
    */
