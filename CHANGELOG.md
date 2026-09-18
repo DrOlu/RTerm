@@ -1,5 +1,77 @@
 # Changelog
 
+## v3.8.9 (2026-09-18)
+
+Four fixes for the extended-chat freeze family and session durability — all
+found by reading the actual code paths, three of them live-observed.
+
+### The MemorySaver checkpoint leak — the real extended-chat freeze root cause
+
+LangGraph's `MemorySaver` keeps **every checkpoint of every graph step,
+forever**: `storage[threadId][ns][checkpoint.id]` holds a serialized copy of
+the full conversation state per step. A 100-step multi-tool run retains
+~100 copies in RAM — unbounded growth, GC thrash, and the "app freezes in
+extended chats until force-quit" behavior. The earlier pruning work (v3.8.3)
+shrank each *blob* but never evicted *old* blobs; the count kept climbing.
+
+`SafeMemorySaver` now evicts: after each put it keeps only the newest
+**8** checkpoints per (thread, ns), enforced on all three put paths (normal,
+OOM-retry, skip-persist). Insertion order is tracked per (thread, ns) since
+MemorySaver exposes no timestamps; untracked ids (from before this process)
+are kept rather than risk dropping the resume point. Safe because LangGraph
+resumes from the latest checkpoint and parent-chain walking touches only
+recent entries.
+
+### Interruption marker — force-quit recovery for chat sessions
+
+A force quit mid-run leaves the session's last AI message **partial**, but
+stored looking exactly like a completed turn. After restart the model reads
+it as complete and treats the next message as a fresh topic — the
+interrupted task is silently abandoned.
+
+Now a run marker (in the `history_meta` table, survives restart) is set
+just before `graph.invoke` and cleared in the run's `finally` block. Only a
+hard kill skips `finally`, so a leftover marker means the run was
+interrupted; the next run detects it, injects a system notice telling the
+model the prior response may be partial (with the interrupted task's input
+preview), and offers to continue rather than start from scratch.
+
+**Ordering bug caught in review before release:** the marker was initially
+set *before* the detection block — every run found its own marker, injected
+a false notice, and consumed the real one, so a genuine force-quit left
+nothing behind. The feature was inverted. The set now happens *after* the
+restore path has consumed any leftover marker.
+
+### Rename race — renames reverted by the run-end save
+
+Renaming a chat session during a running agent task silently reverted when
+the task finished: the agent's in-memory session object carried the old
+title from run start, and the store's upsert (`title = excluded.title`)
+wrote it back over the rename at run end. `ChatHistoryService.saveSession`
+now treats the **stored** title as authoritative for an existing session —
+the in-memory title only names a brand-new session. Same discipline the
+store already applied to `created_at`, which is why creation dates never
+had this bug.
+
+### Also
+
+- Dead code documented: `lastCheckpointOffset` is written on every run but
+  has **no reader** — the v3.2.5 "recovery can resume from this offset"
+  promise was never built. Left in place (harmless) pending a real consumer.
+- `GatewayService.resumeTask` remains an empty stub.
+
+### Tests
+
+- `safeMemorySaverEviction.extreme.spec.ts` (6) — retention window, per-thread
+  isolation, getTuple resolves newest after eviction, deleteThread, and the
+  control: vanilla MemorySaver retains all 50 (the leak), SafeMemorySaver caps.
+- `runMarker.extreme.spec.ts` (7) — marker survives store close+reopen (the
+  force-quit case), per-session isolation, corrupt marker reads as absent,
+  consume-once semantics.
+- `renameRace.extreme.spec.ts` (4) — the exact live race: load → rename
+  mid-run → save the stale object → the rename survives.
+- All wired into `test:backend-unit-extreme`.
+
 ## v3.8.8 (2026-09-18)
 
 ### New: inbound `invoke` — mesh peers can now drive RTerm's agent
