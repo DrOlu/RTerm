@@ -43,6 +43,23 @@ export interface IChatHistoryRuntime {
    * parse just to preserve the title (freeze fix).
    */
   getSessionMeta(sessionId: string): { createdAt: number; title: string } | null;
+  /**
+   * v3.8.9 interruption markers: set at run start, cleared in the run's
+   * finally. A leftover marker (only a hard kill skips finally) means the
+   * session's previous run was interrupted — the restore path injects an
+   * interruption notice into the model's context so a partial response is
+   * not mistaken for a completed turn.
+   */
+  setRunMarker(
+    sessionId: string,
+    marker: { runId: string; startedAt: number; inputPreview?: string },
+  ): void;
+  getRunMarker(sessionId: string): {
+    runId: string;
+    startedAt: number;
+    inputPreview?: string;
+  } | null;
+  clearRunMarker(sessionId: string): void;
   getAllSessions(): StoredChatSession[];
   getAllSessionSummaries(): ChatSessionSummaryRecord[];
   deleteSession(sessionId: string): void;

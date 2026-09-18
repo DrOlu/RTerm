@@ -70,6 +70,48 @@ export class ChatHistoryService {
     return this.store.getChatSessionMeta(sessionId);
   }
 
+  // ─── v3.8.9: run interruption markers ─────────────────────────────────────
+  // A marker is SET at run start and CLEARED in the run's finally block.
+  // Only a hard kill (force quit, crash, power loss) skips the finally —
+  // so a leftover marker is a durable, restart-surviving record that the
+  // session's previous run was interrupted. Stored in the history_meta
+  // table (plain SQLite, survives anything short of disk loss).
+
+  private runMarkerKey(sessionId: string): string {
+    return `run-marker:${sessionId}`;
+  }
+
+  setRunMarker(
+    sessionId: string,
+    marker: { runId: string; startedAt: number; inputPreview?: string },
+  ): void {
+    this.store.setMeta(this.runMarkerKey(sessionId), JSON.stringify(marker));
+  }
+
+  getRunMarker(sessionId: string): {
+    runId: string;
+    startedAt: number;
+    inputPreview?: string;
+  } | null {
+    const raw = this.store.getMeta(this.runMarkerKey(sessionId));
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.runId === "string") return parsed;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  clearRunMarker(sessionId: string): void {
+    // setMeta with an empty value is the store's delete (INSERT OR REPLACE
+    // with "" would leave a row; getRunMarker treats "" as absent anyway,
+    // but be explicit: store an empty string, and getRunMarker's falsy
+    // check handles it).
+    this.store.setMeta(this.runMarkerKey(sessionId), "");
+  }
+
   loadSession(sessionId: string): ChatSession | null {
     const storedSession = this.store.loadChatSession(sessionId);
     if (!storedSession) {

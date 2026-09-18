@@ -3,6 +3,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import {
   HumanMessage,
   AIMessage,
+  SystemMessage,
   ToolMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
@@ -4876,6 +4877,16 @@ export class AgentService_v2 {
     });
     let ledgerExitStatus: "completed" | "failed" | "aborted" = "completed";
     let ledgerExitError: string | undefined;
+    // v3.8.9 INTERRUPTION MARKER: set before the run starts, cleared only in
+    // the finally block. A force quit mid-run leaves it behind in SQLite, so
+    // the NEXT run can detect the interruption and tell the model. The
+    // graceful paths (success, abort, error) all pass through finally, which
+    // is exactly the distinction we need: only a hard kill skips it.
+    this.chatHistoryService.setRunMarker(sessionId, {
+      runId: ledgerRunId,
+      startedAt: Date.now(),
+      inputPreview: ledgerInputPreview.slice(0, 500),
+    });
     this.selfCorrectionRuntimeManager.clearSession(sessionId);
     const sessionBinding = this.ensureSessionModelBinding(
       sessionId,
@@ -4899,6 +4910,44 @@ export class AgentService_v2 {
       baseMessages = mapStoredMessagesToChatMessages(
         sanitizedStoredMessages.messages as any[],
       );
+
+      // v3.8.9 INTERRUPTION DETECTION: a leftover run marker means the
+      // previous run on this session ended by HARD KILL (force quit /
+      // crash / power loss) — every graceful exit clears it in finally.
+      // The stored history therefore ends with a PARTIAL response the model
+      // would otherwise read as complete. Inject a system note so the model
+      // KNOWS the turn was cut off and can offer to continue the task
+      // instead of treating the new input as a fresh topic.
+      const interruptedRun = this.chatHistoryService.getRunMarker(sessionId);
+      if (interruptedRun) {
+        const minutesAgo = Math.max(
+          0,
+          Math.round((Date.now() - (interruptedRun.startedAt || 0)) / 60000),
+        );
+        baseMessages.push(
+          new SystemMessage(
+            `[INTERRUPTION NOTICE] The previous task on this session was ` +
+              `interrupted ${minutesAgo > 0 ? `${minutesAgo} minutes ` : ""}ago ` +
+              `(the application stopped before the response completed — ` +
+              `likely a force quit or crash). The last assistant response ` +
+              `above may be PARTIAL: it can end mid-sentence, mid-tool-call, ` +
+              `or before the task was actually finished. ` +
+              (interruptedRun.inputPreview
+                ? `The interrupted task began with: "${interruptedRun.inputPreview}"\n`
+                : "") +
+              `Do not assume the prior task completed. If the user's next ` +
+              `message relates to it, offer to continue or finish the ` +
+              `interrupted work rather than starting from scratch.`,
+          ),
+        );
+        // The marker is consumed: the notice is injected once, not on every
+        // subsequent run. (The new run sets its own marker below.)
+        this.chatHistoryService.clearRunMarker(sessionId);
+        console.warn(
+          `[AgentService_v2] Restored session ${sessionId} after an interrupted run ` +
+            `(${interruptedRun.runId}); injected interruption notice into context.`,
+        );
+      }
     }
 
     const runExperimentalFlags = resolveRunExperimentalFlags(
@@ -4999,6 +5048,10 @@ export class AgentService_v2 {
       this.currentRunIdBySession.delete(sessionId);
       this.agentRunLedger?.finishRun(ledgerRunId, ledgerExitStatus, ledgerExitError);
       void this.recordCompoundingLessons(sessionId, ledgerRunId, ledgerExitStatus, ledgerExitError);
+      // v3.8.9: the run reached a graceful end (completed / aborted /
+      // failed) — clear the interruption marker. Only a hard kill (force
+      // quit, crash, power loss) skips this line and leaves it behind.
+      this.chatHistoryService.clearRunMarker(sessionId);
       await this.clearCheckpoint(sessionId);
     }
   }
