@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.8.7 (2026-09-18)
+
+### Fixed: ReactorPro gateway dropped RTerm from mesh discovery
+
+Three wire-shape bugs in the `reactorpro-bridge` plugin made RTerm
+**invisible** to ReactorPro gateway discovery — even though every envelope
+signature verified correctly.
+
+1. **`identity` vs `id`** — the manifest advertised `identity:` where the
+   gateway's `Manifest` struct unmarshals `json:"id"`. The gateway's
+   `manifestMatches` drops a manifest whose ID is empty, so every manifest
+   RTerm published was discarded at the filter: signed correctly, silently
+   dropped.
+2. **Skills as bare strings** — the gateway's `Skill` struct unmarshals
+   `[]{id,name,description}` objects; bare strings became empty entries,
+   breaking `skill_id` discovery filters.
+3. **Payload nesting** — register/discover payloads were wrapped under
+   `{manifest: {...}}`, but the gateway attaches the **bare** manifest. The
+   plugin's reply parser now accepts all three shapes the wire actually
+   carries: bare manifest, `{agents:[...]}`, and the legacy nested form.
+
+**Live-verified both directions against the real gateway:**
+- RTerm `discoverPeers` → the gateway answers (`reactorpro/bionic-01`)
+- The gateway's own Go discovery (`TestRtermBridgeReverseDiscover`,
+  `RTERM_BRIDGE_LIVE=1`) → lists `reactorpro/rterm-01` alongside
+  grip-001, agentspan-001, grip-cli-001, omp-cli-001
+
+Spec: 39/39 — 11 new manifest-shape cases pin the gateway's struct
+contract (`id` key, skills as objects, bare-manifest payloads) so this
+class of bug is loud instead of silent.
+
+**The lesson:** a signature verifies bytes, not semantics. The signing
+cross-verify passed while discovery was broken — interop contracts need a
+test per direction per semantic layer.
+
 ## v3.8.6 (2026-09-18)
 
 ### ReactorPro Mesh Bridge settings panel (desktop Settings UI)
