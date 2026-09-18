@@ -185,13 +185,30 @@ export async function discoverPeers(ctx, filter = {}) {
         if (isPublishAck(msg.data)) continue
         const env = uj(msg.data)
         if (env?.type !== 'respond' || env?.from === cfg.agentId) continue
-        const m = env?.payload?.manifest ?? env?.payload
-        if (m?.identity || m?.id) replies.push(m)
+        // SHAPE: the gateway's handleDiscoverRequest replies with the BARE
+        // manifest as the payload (attachPayload(reply, manifest)), and a
+        // registry may reply with {agents:[...]}. manifestsFrom on the gateway
+        // side accepts both; so do we. Some peers may still nest under
+        // payload.manifest, so accept that legacy shape too.
+        const p = env?.payload
+        const candidates = Array.isArray(p?.agents) ? p.agents
+          : (p?.id || p?.identity) ? [p]
+          : (p?.manifest?.id || p?.manifest?.identity) ? [p.manifest]
+          : []
+        for (const m of candidates) {
+          const id = m?.id ?? m?.identity
+          if (id && id !== cfg.agentId) replies.push(m)
+        }
       } catch { /* ignore malformed */ }
     }
   })()
   loop.catch(() => {})
-  nc.publish(`${cfg.prefix}.registry.discover`, j(signed))
+  // BUG FIX (found live against the real gateway): the discover publish MUST
+  // carry a reply subject. The gateway's handleDiscoverRequest returns
+  // immediately when message.Reply == "" ("a discovery query with no reply
+  // subject cannot be answered"), so the old bare publish made discovery
+  // silently return zero peers even though every peer was listening.
+  nc.publish(`${cfg.prefix}.registry.discover`, j(signed), { reply: '_INBOX.discover' })
   await new Promise((r) => setTimeout(r, windowMs))
   try { replySub.unsubscribe() } catch { /* best-effort */ }
 

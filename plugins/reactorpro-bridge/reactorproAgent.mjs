@@ -299,31 +299,50 @@ export function startHeartbeat(nc, cfg, identity, intervalMs = 30000, log = () =
 
 // ─── 5. REGISTRY ─────────────────────────────────────────────────────────────
 
-/** The manifest this RTerm advertises. */
+/** The manifest this RTerm advertises.
+ *
+ * SHAPE CONTRACT (mirrors the gateway's Manifest struct, envelope.go:146):
+ *   id            — json:"id" (NOT "identity"; manifestMatches drops a
+ *                   manifest whose ID is empty, so the old `identity` key made
+ *                   this peer invisible to gateway discovery)
+ *   skills        — []{id, name?, description?} objects, NOT bare strings
+ *                   (the gateway's Skill struct unmarshals objects)
+ *   fingerprint   — json:"fingerprint,omitempty" — pins trust-on-first-use
+ * The register/discover payloads are the BARE manifest (the gateway's
+ * Register/handleDiscoverRequest both attachPayload(manifest) directly), so
+ * callers must not nest it under a "manifest" key. */
 export function buildManifest(cfg, skillIds) {
+  const skills = (skillIds ?? []).map((s) =>
+    typeof s === 'string' ? { id: s, name: s } : s)
   return {
-    identity: cfg.agentId,
+    id: cfg.agentId,
     name: cfg.name ?? cfg.agentId,
     capabilities: ['rterm', 'agent', ...(cfg.capabilities ?? [])],
-    skills: skillIds,
+    skills,
     fingerprint: cfg.fingerprint ?? null,
     local_agents: [{ id: cfg.agentId, name: cfg.name ?? cfg.agentId, capabilities: ['rterm', 'agent'] }],
   }
 }
 
-/** Register with the mesh registry (mesh.registry.register). */
+/** Register with the mesh registry (mesh.registry.register).
+ * Payload is the BARE manifest — the gateway's Register does
+ * attachPayload(envelope, a.Manifest()) with no wrapper object. */
 export function registerManifest(nc, cfg, identity, manifest) {
-  const env = envelope('register', { manifest }, cfg, { to: 'REGISTRY' })
+  const env = envelope('register', manifest, cfg, { to: 'REGISTRY' })
   nc.publish(`${cfg.prefix}.registry.register`, j(signEnvelope(env, identity)))
 }
 
 /** Graceful exit. */
 export function deregisterManifest(nc, cfg, identity) {
-  const env = envelope('register', { manifest: { identity: cfg.agentId, gone: true } }, cfg, { to: 'REGISTRY' })
+  const env = envelope('register', { id: cfg.agentId, gone: true }, cfg, { to: 'REGISTRY' })
   nc.publish(`${cfg.prefix}.registry.deregister`, j(signEnvelope(env, identity)))
 }
 
-/** Answer discovery broadcasts with our manifest. */
+/** Answer discovery broadcasts with our manifest.
+ * The reply payload is the BARE manifest — the gateway's
+ * handleDiscoverRequest does attachPayload(reply, manifest), and its
+ * manifestsFrom accepts either {agents:[...]} or a bare manifest with
+ * id != "". Nesting under "manifest" would make it invisible. */
 export async function answerDiscovery(nc, cfg, identity, manifest, log = () => {}) {
   const subject = `${cfg.prefix}.registry.discover`
   const sub = nc.subscribe(subject)
@@ -336,7 +355,7 @@ export async function answerDiscovery(nc, cfg, identity, manifest, log = () => {
         const req = uj(msg.data)
         if (req?.from === cfg.agentId) continue // don't answer ourselves
         if (msg.reply) {
-          const env = envelope('respond', { manifest }, cfg, { to: req?.from, in_reply_to: req?.id })
+          const env = envelope('respond', manifest, cfg, { to: req?.from, in_reply_to: req?.id })
           nc.publish(msg.reply, j(signEnvelope(env, identity)))
         }
       } catch (e) { log(`[reactorpro] discovery answer failed: ${e?.message ?? e}`) }

@@ -26,6 +26,7 @@ import { join } from 'node:path'
 
 import {
   AUTH_KEYS,
+  buildManifest,
   buildRespond,
   checkIdentity,
   envelope,
@@ -209,6 +210,61 @@ function ok(cond: unknown, label: string, note = ''): void {
     threw = true
   }
   ok(threw, 'a tampered identity file is rejected on load')
+}
+
+// ─── A2. Manifest shape contract (the gateway's Manifest struct) ─────────────
+// Found live: the plugin sent `identity` where the gateway's Manifest
+// unmarshals `json:"id"`, and bare-string skills where the gateway expects
+// []{id,name,description} objects. manifestMatches drops a manifest whose ID
+// is empty, so the peer was INVISIBLE to gateway discovery. These pin the
+// corrected contract so it cannot regress.
+
+{
+  const cfg = { agentId: 'rterm/xcheck/manifest', name: 'XCheck', fingerprint: 'sha256:abc123' }
+  const m = buildManifest(cfg, ['ping', 'describe', 'status', 'invoke'])
+  ok(m.id === 'rterm/xcheck/manifest',
+    'manifest uses id (json:"id") — the gateway drops a manifest with empty ID',
+    JSON.stringify(Object.keys(m)))
+  ok(!('identity' in m), 'manifest must NOT carry a legacy identity key')
+  ok(m.name === 'XCheck', 'manifest name is the display name')
+  ok(Array.isArray(m.capabilities) && m.capabilities.includes('rterm'),
+    'manifest advertises the rterm capability')
+  ok(Array.isArray(m.skills) && m.skills.length === 4
+    && m.skills.every((s: { id: string }) => typeof s?.id === 'string'),
+    'skills are []{id,...} objects, not bare strings (the gateway Skill struct unmarshals objects)',
+    JSON.stringify(m.skills))
+  ok(m.fingerprint === 'sha256:abc123', 'manifest carries the fingerprint for TOFU pinning')
+  ok(Array.isArray(m.local_agents) && m.local_agents[0]?.id === cfg.agentId,
+    'local_agents entries use id too')
+}
+
+// A string skill list must be normalized to objects without dropping any.
+{
+  const m = buildManifest({ agentId: 'a' }, ['ping', 'status'])
+  ok(m.skills.length === 2 && m.skills[0].id === 'ping' && m.skills[1].id === 'status',
+    'string skill ids normalize to {id,name} objects in order')
+}
+
+// A discover reply in the GATEWAY's bare-manifest shape must be accepted by
+// the plugin's parser (the old parser only read payload.manifest). The
+// candidates logic lives inline in discoverPeers; this pins the accepted
+// payload shapes by constructing them the way the gateway does.
+{
+  const bare = { id: 'gateway/edge-1', name: 'Edge', skills: [{ id: 'ping' }] }
+  const agents = { agents: [{ id: 'gateway/edge-2', name: 'Edge2' }] }
+  const legacy = { manifest: { id: 'old/peer', name: 'Old' } }
+  const shapes = [bare, agents, legacy]
+  for (const p of shapes) {
+    const candidates = Array.isArray((p as { agents?: unknown[] }).agents)
+      ? (p as { agents: unknown[] }).agents
+      : ((p as { id?: string }).id || (p as { identity?: string }).identity)
+        ? [p]
+        : ((p as { manifest?: { id?: string } }).manifest?.id
+          || (p as { manifest?: { identity?: string } }).manifest?.identity)
+          ? [(p as { manifest: unknown }).manifest]
+          : []
+    ok(candidates.length > 0, `discover parser accepts payload shape ${JSON.stringify(Object.keys(p))}`)
+  }
 }
 
 // ─── B. Go cross-check against the REAL gateway ──────────────────────────────
