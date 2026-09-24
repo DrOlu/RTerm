@@ -1,5 +1,39 @@
 # Changelog
 
+## v3.9.3 (2026-09-24)
+
+**Fix: synapse-bridge default dispatch timeout 600s → 180s (the edge
+invoke floor) — and the tool schema no longer lies to the model.**
+
+A real LLM-backed agent turn over the mesh takes 60s+ (live-measured:
+grip-cli-001 → reactorpro/rterm-01 invoke RTT 1m54s; a tool-call-only
+turn 25s). Two problems surfaced in the same session:
+
+- The 600s default held the reply slot open far past every caller's own
+  budget — callers timed out while RTerm was still legitimately working.
+- The `synapse_dispatch` tool schema told the model "default 30000" while
+  the code used 600000. A model passing no timeout expected 30s, waited,
+  and reported a hang that wasn't one.
+
+The new 180s default matches reactorpro-bridge and the documented 3-minute
+edge invoke floor. Settings `synapse.dispatchTimeout` still overrides.
+
+Same session, cross-agent federation proven live: grip-cli-001's agent
+dispatched a signed envelope over NATS; RTerm's `invoke` skill ran a real
+agent turn which called the `neuralos_ask` tool directly (chinook,
+$2,328.60, conf 0.88) — plugin tools now work in mesh turns on the
+daemon (the installed neuralos@3.8.9 predated the neuralos plugin;
+upgrading to 3.9.2+ wires 78 tools from 16 plugins, +4 neuralos).
+
+The host-managed `rterm-synapse-bridge.mjs` CLI dispatch was raised 30s →
+180s (with `DISPATCH_TIMEOUT_MS` override) in the same session; that file
+is host-managed and not part of this repo.
+
+Spec: synapse-bridge default assertion updated; 6/6 synapse + 52/52
+reactorpro green; full Test workflow green (typecheck, lint, units,
+build smoke).
+
+
 ## v3.9.2 (2026-09-24)
 
 **Fix: the bundled neuralOS engine shipped without its exec bit — every
