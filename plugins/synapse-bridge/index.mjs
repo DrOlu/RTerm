@@ -47,8 +47,9 @@ export function resolveConfig(ctx = {}, env = process.env) {
     auth: block.auth || undefined,
     enabled: block.enabled !== false,
     autoServe: block.autoServe !== false,
-    /** dispatch timeout in ms (default 600s = 10min for LLM-backed agents). */
-    dispatchTimeout: block.dispatchTimeout ?? 600000,
+    /** dispatch timeout in ms (default 180s = the edge invoke floor; a real
+     * LLM agent turn takes 60s+, and callers time out at 30s without it). */
+    dispatchTimeout: block.dispatchTimeout ?? 180000,
     /** multiple meshes (v3.2.0). Each: {name, url/servers, auth, prefix?}. */
     meshes: Array.isArray(block.meshes) ? block.meshes : undefined,
   }
@@ -167,7 +168,7 @@ export async function discoverAgents(ctx, filter = {}) {
 
 export async function dispatchTask(ctx, target, skill, input = {}, opts = {}) {
   const cfg = resolveConfig(ctx)
-  const timeout = opts.timeout ?? cfg.dispatchTimeout ?? 600000
+  const timeout = opts.timeout ?? cfg.dispatchTimeout ?? 180000
   const nc = await connectMesh(ctx)
   const reqEnv = envelope('request', { skill, input }, cfg, { to: target, task_id: randomUUID() })
   const inbox = `${cfg.prefix}.agent.${target}.inbox`
@@ -276,7 +277,7 @@ export function register(ctx) {
       target: { type: 'string', description: 'Target agent id (e.g. grip-cli-001)' },
       skill: { type: 'string', description: 'Skill id from the target manifest' },
       input: { type: 'object', description: 'Input payload for the skill', optional: true },
-      timeout: { type: 'number', description: 'Reply timeout ms (default 30000)', optional: true },
+      timeout: { type: 'number', description: 'Reply timeout ms (default 180000 — the edge invoke floor; a real LLM agent turn takes 60s+)', optional: true },
     },
     handler: async (p) => guarded(async () => {
       if (!p?.target || !p?.skill) return { error: 'synapse_dispatch needs target and skill' }

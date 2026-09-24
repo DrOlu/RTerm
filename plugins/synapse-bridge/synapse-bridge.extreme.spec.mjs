@@ -86,9 +86,9 @@ function mkCtx(settings = {}, conn) {
 
 // ─── config ─────────────────────────────────────────────────────────────────
 
-test('resolveConfig includes dispatchTimeout (default 600000) + meshes', () => {
+test('resolveConfig includes dispatchTimeout (default 180000 = the edge invoke floor) + meshes', () => {
   const c = resolveConfig({ settings: {} }, {})
-  eq(c.dispatchTimeout, 600000, 'default dispatchTimeout 600s')
+  eq(c.dispatchTimeout, 180000, 'default dispatchTimeout 180s (edge invoke floor; LLM turns take 60s+)')
   eq(c.meshes, undefined, 'no meshes by default')
 })
 
