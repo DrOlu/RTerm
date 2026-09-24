@@ -707,9 +707,14 @@ export class HistorySqliteStore {
     fromPosition: number,
     summary?: UISessionSummaryRecord,
   ): number {
-    if (messages.length === 0 || fromPosition >= messages.length) {
-      return 0;
-    }
+    // v3.9.4: a rename arrives as a summary update with NOTHING new to
+    // append (all messages already persisted). The old early-exit at
+    // `messages.length === 0 || fromPosition >= messages.length` skipped
+    // the summary upsert entirely, so the title never reached disk and the
+    // rename "didn't stick" — it came back as the old title on the next
+    // load (reproduced: rename-repro, title stayed "New Chat"). The
+    // summary upsert now ALWAYS runs; only the message-append loop is
+    // conditional on there being new rows.
     const upsertSession = this.db.prepare(
       `INSERT INTO ui_sessions (
          id, title, updated_at, messages_count, last_message_preview
@@ -738,6 +743,10 @@ export class HistorySqliteStore {
     this.db.transaction(() => {
       // The messages table has a FK to ui_sessions — always upsert the
       // parent row, even without a summary, or the insert fails.
+      // v3.4.3: the count is the FULL message list length, not
+      // fromPosition + slice.length — that expression happened to be
+      // equal for a pure append but was wrong whenever the caller had
+      // already truncated rows (rollback/remove), double-counting them.
       if (summary) {
         upsertSession.run({
           id: sessionId,
@@ -750,10 +759,6 @@ export class HistorySqliteStore {
         const existing = this.db
           .prepare("SELECT title, updated_at FROM ui_sessions WHERE id = ?")
           .get(sessionId) as { title: string; updated_at: number } | undefined;
-        // v3.4.3: the count is the FULL message list length, not
-        // fromPosition + slice.length — that expression happened to be
-        // equal for a pure append but was wrong whenever the caller had
-        // already truncated rows (rollback/remove), double-counting them.
         upsertSession.run({
           id: sessionId,
           title: existing?.title ?? "New Chat",

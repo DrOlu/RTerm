@@ -198,5 +198,101 @@ runCase("emptying a session removes every message (cascade-safe)", () => {
   });
 });
 
+// ------------------------------------------------- v3.9.4 rename persistence
+// The rename bug: a rename arrives as a summary update with NOTHING new to
+// append (all messages already persisted). The old early-exit
+// `if (messages.length === 0 || fromPosition >= messages.length) return 0`
+// skipped the ui_sessions upsert entirely, so the title never reached disk —
+// reproduced live: rename a 2-message session, reload, the old title returns.
+runCase("v3.9.4: rename persists when the flush has nothing new to append (no-op append still upserts the summary)", () => {
+  withStore((store) => {
+    const uiMessages = [
+      { id: "u-1", role: "user", type: "text", content: "hi", timestamp: 1 },
+      { id: "a-1", role: "assistant", type: "text", content: "hello", timestamp: 2 },
+    ] as never;
+    // initial append: establishes the session row with the OLD title
+    store.appendUiSessionMessages("s-1", uiMessages, 0, {
+      id: "s-1",
+      title: "New Chat",
+      updatedAt: 1,
+      messagesCount: 2,
+      lastMessagePreview: "hello",
+    });
+    // rename: same messages, fromPosition = 2 (nothing new), NEW title
+    const appended = store.appendUiSessionMessages("s-1", uiMessages, 2, {
+      id: "s-1",
+      title: "Renamed by user",
+      updatedAt: 2,
+      messagesCount: 2,
+      lastMessagePreview: "hello",
+    });
+    assertEqual(appended, 0, "nothing appended (already persisted)");
+    const reloaded = store.loadUiSession("s-1");
+    assertCondition(reloaded, "session row exists after no-op append");
+    assertEqual(
+      reloaded!.title,
+      "Renamed by user",
+      "the rename reached disk through the no-op append path (was: old title)",
+    );
+  });
+});
+
+runCase("v3.9.4: empty-messages append with a summary still upserts the title (rename of an empty session)", () => {
+  withStore((store) => {
+    // create the row with one message, then empty the session and rename
+    const one = [
+      { id: "u-1", role: "user", type: "text", content: "hi", timestamp: 1 },
+    ] as never;
+    store.appendUiSessionMessages("s-1", one, 0, {
+      id: "s-1",
+      title: "New Chat",
+      updatedAt: 1,
+      messagesCount: 1,
+      lastMessagePreview: "hi",
+    });
+    // rollback emptied the messages; the rename ships a summary with 0 rows
+    store.appendUiSessionMessages("s-1", [], 0, {
+      id: "s-1",
+      title: "Renamed empty",
+      updatedAt: 2,
+      messagesCount: 0,
+      lastMessagePreview: "",
+    });
+    const reloaded = store.loadUiSession("s-1");
+    assertCondition(reloaded, "session row exists");
+    assertEqual(
+      reloaded!.title,
+      "Renamed empty",
+      "rename of an emptied session persists (empty-slice upsert)",
+    );
+    assertEqual(
+      reloaded!.messages.length,
+      0,
+      "the truncate from position 0 removed the stale row",
+    );
+  });
+});
+
+runCase("v3.9.4: a no-summary no-op append does not corrupt an existing session", () => {
+  withStore((store) => {
+    const one = [
+      { id: "u-1", role: "user", type: "text", content: "hi", timestamp: 1 },
+    ] as never;
+    store.appendUiSessionMessages("s-1", one, 0, {
+      id: "s-1",
+      title: "Keep me",
+      updatedAt: 1,
+      messagesCount: 1,
+      lastMessagePreview: "hi",
+    });
+    // caller with no summary and nothing new — must not touch the title
+    store.appendUiSessionMessages("s-1", one, 1, undefined);
+    const reloaded = store.loadUiSession("s-1");
+    assertCondition(reloaded, "session survives");
+    assertEqual(reloaded!.title, "Keep me", "no-summary no-op append keeps the title");
+    assertEqual(reloaded!.messages.length, 1, "message rows untouched");
+  });
+});
+
 console.log(`\n${passed} passed, 0 failed`);
 console.log("HistorySqliteStore.delta: ALL TESTS PASSED");

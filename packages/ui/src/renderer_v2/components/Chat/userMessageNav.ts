@@ -86,3 +86,36 @@ export function userNavScrollTop(targetTop: number, paddingPx: number = USER_NAV
   const pad = Number.isFinite(paddingPx) ? paddingPx : 0
   return Math.max(0, top - Math.max(0, pad))
 }
+
+/**
+ * v3.9.4: state machine for the nav-jump correction budget.
+ *
+ * A virtualized list only has MEASURED heights for rendered rows; a jump
+ * over unrendered rows lands on ESTIMATED offsets. The jump is therefore
+ * applied immediately and then RE-APPLIED as measurements settle — but
+ * bounded, so it can never become the v3.2.10 scroll-trap (a loop that
+ * fights the user's drag). Pure so the budget semantics are unit-tested.
+ *
+ * Returns the next budget (0 = stop correcting).
+ */
+export const USER_NAV_CORRECTION_BUDGET = 6
+
+export function nextUserNavCorrectionBudget(args: {
+  isNewClick: boolean
+  budget: number
+  /** scrollTop computed from the CURRENT layout for the target */
+  nextScrollTop: number
+  /** scrollTop we applied on the previous pass (null on the first) */
+  lastAppliedScrollTop: number | null
+}): number {
+  if (args.isNewClick) return USER_NAV_CORRECTION_BUDGET
+  if (args.budget <= 0) return 0
+  // Converged: the layout agrees with what we already applied.
+  if (
+    args.lastAppliedScrollTop !== null &&
+    Math.abs(args.lastAppliedScrollTop - args.nextScrollTop) < 1
+  ) {
+    return 0
+  }
+  return args.budget - 1
+}

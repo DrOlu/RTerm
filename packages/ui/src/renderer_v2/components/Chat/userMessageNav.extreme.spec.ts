@@ -1,6 +1,8 @@
 import {
   anchorFor,
+  nextUserNavCorrectionBudget,
   resolveUserMessageNavTarget,
+  USER_NAV_CORRECTION_BUDGET,
   userMessageIds,
   userNavScrollTop,
 } from "./userMessageNav";
@@ -130,6 +132,68 @@ await runCase("wrap cycle visits every user query then returns (never assistant)
     cur = t!.id;
   }
   assert(JSON.stringify(seen) === JSON.stringify(["u1", "u2", "u3", "u1", "u2", "u3"]), `cycle=${seen}`);
+});
+
+// ---------------------------- v3.9.4 correction-budget state machine
+await runCase("v3.9.4: a new click always resets the correction budget", () => {
+  const b = nextUserNavCorrectionBudget({
+    isNewClick: true,
+    budget: 0,
+    nextScrollTop: 1234,
+    lastAppliedScrollTop: 1234,
+  });
+  assert(b === USER_NAV_CORRECTION_BUDGET, `new click budget=${b}`);
+});
+
+await runCase("v3.9.4: converged layout (same scrollTop twice) stops correcting", () => {
+  const b = nextUserNavCorrectionBudget({
+    isNewClick: false,
+    budget: 3,
+    nextScrollTop: 1000,
+    lastAppliedScrollTop: 1000,
+  });
+  assert(b === 0, `converged must stop, got ${b}`);
+  // and from the converged state with budget 0, stays 0
+  const b2 = nextUserNavCorrectionBudget({
+    isNewClick: false,
+    budget: 0,
+    nextScrollTop: 1000,
+    lastAppliedScrollTop: 999.5,
+  });
+  assert(b2 === 0, `exhausted budget stays 0`);
+});
+
+await runCase("v3.9.4: unsettled layout decrements the budget, never exceeds the cap", () => {
+  // first correction pass: measurement shifted the target (estimated->measured)
+  const b = nextUserNavCorrectionBudget({
+    isNewClick: false,
+    budget: 6,
+    nextScrollTop: 1100,
+    lastAppliedScrollTop: 1000,
+  });
+  assert(b === 5, `drifting layout decrements, got ${b}`);
+  // the budget drains to zero even if the layout never converges — the
+  // v3.2.10 scroll-trap can NEVER come back from this path
+  let budget = 6;
+  for (let i = 0; i < 10; i++) {
+    budget = nextUserNavCorrectionBudget({
+      isNewClick: false,
+      budget,
+      nextScrollTop: 1000 + i, // always drifting
+      lastAppliedScrollTop: 1000 + i - 1,
+    });
+  }
+  assert(budget === 0, `perpetually-drifting layout must drain to 0, got ${budget}`);
+});
+
+await runCase("v3.9.4: first correction with no prior applied scrollTop proceeds (null)", () => {
+  const b = nextUserNavCorrectionBudget({
+    isNewClick: false,
+    budget: 6,
+    nextScrollTop: 500,
+    lastAppliedScrollTop: null,
+  });
+  assert(b === 5, `null last-applied must not count as converged, got ${b}`);
 });
 
 console.log("userMessageNav: all cases passed");

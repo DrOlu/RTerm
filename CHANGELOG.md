@@ -1,5 +1,80 @@
 # Changelog
 
+## v3.9.4 (2026-09-24)
+
+**Three user-facing fixes: thread rename not sticking, Prev/Next user
+navigation landing imprecisely, and a hardened no-regression pass over the
+chat nav, mesh bridges, and neuralOS.**
+
+### Thread rename didn't stick (root-caused + reproduced)
+
+A rename arrives as a summary update with NOTHING new to append — all
+messages are already persisted, so the flush calls
+`appendUiSessionMessages` with `fromPosition >= messages.length`. The old
+early-exit `return 0` at that guard **skipped the ui_sessions upsert
+entirely**, so the new title never reached SQLite; on the next load the
+old title came back. Reproduced with a dedicated SQLite harness (rename a
+2-message session, no-op append, read back: old title).
+
+Fix: the summary upsert now ALWAYS runs inside the append transaction;
+only the message-insert loop is conditional on there being new rows. A
+no-summary no-op append preserves the existing title (no corruption);
+an empty-messages append with a summary both upserts the title and
+truncates stale rows. Regression-tested in the HistorySqliteStore.delta
+spec (3 new cases, 10/10).
+
+### Prev/Next user landed imprecisely ("inconsistent", "doesn't work until
+I switch threads")
+
+The nav jump fired exactly ONCE per click (the v3.2.10 anti-scroll-trap
+guard) — but a virtualized list only has MEASURED heights for rows that
+have been rendered; a jump across many unrendered rows is computed from
+ESTIMATED heights and lands short of or past the target, and the
+once-only guard meant no later correction could fix it. Switching threads
+remounted the list with a fresh measurement epoch, which is why it
+"worked after visiting another chat".
+
+Fix: the jump still applies immediately, then RE-APPLIES under a bounded
+correction budget (6 passes max) as the target's neighbourhood renders
+and real heights replace estimates, stopping the moment the computed
+scrollTop converges. The budget is keyed to the version counter — a new
+click resets it, layout-only updates drain it — and a user drag >40px
+away cancels the loop outright, so the v3.2.10 scroll-trap can never
+return (tested: a perpetually-drifting layout drains to zero). The
+budget semantics live in a pure, unit-tested function
+(`nextUserNavCorrectionBudget`, 4 new spec cases).
+
+Also: the nav cursor now resets when a NEW user message is sent while
+parked at the bottom (sending a follow-up is the natural "moving on"
+signal — Prev previously kept walking from a stale anchor, which read as
+"inconsistent"). Scrolled-up readers keep their cursor. Exposed
+`isNearBottom()` on the ChatMessageList handle for this.
+
+### Mesh bridges + neuralOS audit (no latent bugs found; verified sound)
+
+- synapse/reactorpro bridge connections are POOLED by config key and
+  reused (`_conns`), not leaked per call; failed connects evict the cache
+  entry (retry-safe)
+- event subscriptions return proper stop-handles; no orphan intervals
+- the 180s dispatch → 170s invoke budget math is consistent across
+  synapse-bridge, reactorpro-bridge, and the observability runner
+  (hard cap 600s)
+- neuralos: engine executability (X_OK) enforced since v3.9.2; bridges
+  write-gated (`ALLOW_WRITES=False` default); timeout plumbing verified
+  end-to-end (execFile timeout + probe runner env)
+- the freeze family (MemorySaver checkpoint leak, bounded history
+  search) was fixed in v3.8.9 and the guards (safeMemorySaver specs) are
+  green in this release's chain — no remaining hang vectors found in the
+  reviewed render/persistence paths (getPanelRect is a map lookup; no
+  sync JSON deep-clones on the render path)
+
+Tests: HistorySqliteStore.delta 10/10 (3 new), userMessageNav 8 cases
+(4 new), v3210Fixes 8/8 (scroll-trap regression guard), chatPanel 9/9,
+uiHistory suites (persistence 25, compaction 5, streaming 13,
+renameRace 4), neuralos 51/51, synapse 6/6, reactorpro 52/52; full
+layout-ui + backend-unit chains green; typecheck:all 0 errors.
+
+
 ## v3.9.3 (2026-09-24)
 
 **Fix: synapse-bridge default dispatch timeout 600s → 180s (the edge

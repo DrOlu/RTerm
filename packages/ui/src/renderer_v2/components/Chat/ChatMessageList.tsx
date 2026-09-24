@@ -4,7 +4,7 @@ import type { AppStore } from "../../stores/AppStore";
 import type { ChatMessage } from "../../stores/ChatStore";
 import { MessageRow } from "./MessageRow";
 import { buildChatRenderItems, type ChatRenderItem } from "./chatRenderModel";
-import { userNavScrollTop } from "./userMessageNav";
+import { userNavScrollTop, nextUserNavCorrectionBudget } from "./userMessageNav";
 import {
   type ChatBannerUiState,
   type ChatBannerUiStateMap,
@@ -51,6 +51,8 @@ interface ChatMessageListProps {
 export interface ChatMessageListHandle {
   scrollToTop: () => void;
   scrollToBottom: () => void;
+  /** v3.9.4: is the viewport parked at (or near) the bottom? */
+  isNearBottom: () => boolean;
 }
 
 interface ObservedChatRowProps {
@@ -274,6 +276,14 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
           shouldAutoScrollRef.current = true;
           setShouldAutoScroll(true);
           scrollToProgrammatic(element.scrollHeight - element.clientHeight);
+        },
+        isNearBottom: () => {
+          const element = scrollRef.current;
+          if (!element) return false;
+          return (
+            element.scrollHeight - element.scrollTop - element.clientHeight <
+            BOTTOM_AUTO_SCROLL_THRESHOLD_PX * 2
+          );
         },
       };
     return () => {
@@ -517,22 +527,66 @@ export const ChatMessageList: React.FC<ChatMessageListProps> = observer(
     // drag to the bottom was overridden dozens of times ("the scrollbar doesn't
     // scroll"). Now the jump fires exactly once per click (keyed on the version
     // counter), computed from the layout as it stands at click time.
+    //
+    // v3.9.4 fix (the "inconsistent jump / doesn't work until I switch
+    // threads" bug): jumping ONCE is only correct when the layout is already
+    // accurate. A virtualized list has MEASURED heights only for rows that
+    // have been rendered; everything before the target uses ESTIMATED
+    // heights. A jump over many unrendered rows (the normal case in a long
+    // chat) lands on estimated offsets — visibly short of or past the target
+    // — and the old once-only guard meant no later correction could fix it.
+    // The corrected model: apply the jump immediately, then RE-APPLY at most
+    // a few times as measurements settle (each jump renders the target's
+    // neighbourhood; measured heights replace estimates; the next application
+    // is more accurate), stopping as soon as the offset stabilizes or the
+    // budget runs out. The v3.2.10 scroll-trap stays closed: re-applications
+    // are keyed on the SAME version counter (a genuinely NEW click resets the
+    // budget), and the budget is small enough that a user drag between
+    // corrections wins.
     const lastUserNavAppliedVersionRef = React.useRef(-1);
+    const userNavCorrectionBudgetRef = React.useRef(0);
+    const userNavLastAppliedScrollTopRef = React.useRef<number | null>(null);
     React.useLayoutEffect(() => {
       if (!userNavTargetMessageId) return;
-      // Only jump when the version counter changed (a new click), never on
-      // layout-only updates.
-      if (lastUserNavAppliedVersionRef.current === userNavTargetVersion) return;
+      // Only act when the version counter changed (a new click) OR while a
+      // correction budget remains (measurements settling after a jump).
+      const isNewClick =
+        lastUserNavAppliedVersionRef.current !== userNavTargetVersion;
+      if (!isNewClick && userNavCorrectionBudgetRef.current <= 0) return;
       const element = scrollRef.current;
       if (!element) return;
       const targetIndex = renderItemIndexById.get(userNavTargetMessageId);
       if (typeof targetIndex !== "number") return;
-      lastUserNavAppliedVersionRef.current = userNavTargetVersion;
+      if (isNewClick) {
+        lastUserNavAppliedVersionRef.current = userNavTargetVersion;
+      }
       // Pin the USER QUERY to the top of the pane. The old formula vertically
       // centered the row, so a short user bubble next to a long assistant
       // reply made the jump look like it landed on the assistant.
       const targetTop = virtualLayout.offsets[targetIndex] || 0;
-      scrollToProgrammatic(userNavScrollTop(targetTop));
+      const nextScrollTop = userNavScrollTop(targetTop);
+      userNavCorrectionBudgetRef.current = nextUserNavCorrectionBudget({
+        isNewClick,
+        budget: userNavCorrectionBudgetRef.current,
+        nextScrollTop,
+        lastAppliedScrollTop: userNavLastAppliedScrollTopRef.current,
+      });
+      if (userNavCorrectionBudgetRef.current <= 0 && !isNewClick) return;
+      userNavLastAppliedScrollTopRef.current = nextScrollTop;
+      scrollToProgrammatic(nextScrollTop);
+      // If the user starts dragging between corrections (scrolled away from
+      // where we last placed them), abandon the correction loop — never
+      // fight a real user scroll.
+      window.requestAnimationFrame(() => {
+        const el = scrollRef.current;
+        if (
+          el &&
+          userNavCorrectionBudgetRef.current > 0 &&
+          Math.abs(el.scrollTop - nextScrollTop) > 40
+        ) {
+          userNavCorrectionBudgetRef.current = 0;
+        }
+      });
     }, [
       renderItemIndexById,
       scrollToProgrammatic,

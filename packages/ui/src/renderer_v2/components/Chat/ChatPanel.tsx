@@ -261,6 +261,35 @@ export const ChatPanel: React.FC<ChatPanelProps> = observer(
     React.useEffect(() => {
       setUserNavTargetId(null);
     }, [activeSessionId]);
+    // v3.9.4: also reset when the session gains a NEW user message while
+    // the user is at/near the bottom — sending a follow-up question is the
+    // natural "I'm moving on" signal. Without this, Prev kept walking from
+    // the stale cursor (an older query), which read as "it doesn't take me
+    // to the previous chat — it's inconsistent". If the user is scrolled
+    // up reading history, keep their cursor (they are navigating, not
+    // conversing).
+    const lastUserAnchorCountRef = React.useRef<number>(-1);
+    React.useEffect(() => {
+      const count = userAnchors.length;
+      const previous = lastUserAnchorCountRef.current;
+      lastUserAnchorCountRef.current = count;
+      if (
+        previous >= 0 &&
+        count > previous &&
+        userNavTargetId !== null &&
+        chatListRef.current &&
+        "isNearBottom" in chatListRef.current
+      ) {
+        // only auto-reset when the view is parked at the bottom (the
+        // auto-scroll position after sending a message)
+        const list = chatListRef.current as unknown as {
+          isNearBottom?: () => boolean;
+        };
+        if (typeof list.isNearBottom === "function" && list.isNearBottom()) {
+          setUserNavTargetId(null);
+        }
+      }
+    }, [userAnchors.length, userNavTargetId]);
     const handleUserNav = useCallback(
       (direction: "previous" | "next" | "latest") => {
         const target = resolveUserMessageNavTarget(
