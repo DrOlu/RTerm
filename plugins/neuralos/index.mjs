@@ -35,6 +35,12 @@ export function register(ctx) {
     } catch { /* logging must never break a tool */ }
   }
 
+  const settings = (typeof ctx.getSettings === 'function' ? ctx.getSettings() : ctx.settings) || {}
+  if (settings.neuralos?.enabled === false) {
+    log('disabled in settings — not registering tools')
+    return
+  }
+
   registerList(ctx, cfg, log)
   registerAsk(ctx, cfg, exec, log)
   registerGraph(ctx, cfg, exec, log)

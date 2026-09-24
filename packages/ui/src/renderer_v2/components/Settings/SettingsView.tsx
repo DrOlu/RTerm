@@ -1040,7 +1040,7 @@ interface PluginFieldDef {
 }
 
 const PLUGIN_PANELS: Array<{
-  block: "webIntel" | "nats" | "synapse" | "numbat" | "monid" | "reactorpro"
+  block: "webIntel" | "nats" | "synapse" | "numbat" | "monid" | "reactorpro" | "neuralos"
   title: string
   description: string
   fields: PluginFieldDef[]
@@ -1104,6 +1104,22 @@ const PLUGIN_PANELS: Array<{
       { key: "binaryPath", label: "CLI path", placeholder: "monid (on PATH)" },
       { key: "apiKey", label: "API key", type: "password", placeholder: "Paste key — not shown again", hint: "Saved with `monid keys add -l rterm`. Leave blank to keep the existing key." },
       { key: "keyLabel", label: "Key label", placeholder: "rterm" },
+    ],
+  },
+  {
+    block: "neuralos",
+    title: "neuralOS",
+    description:
+      "On-device data agents (~/neuralos-instances): each instance is a verified probe menu over a real data source, selected by the bundled 121M neuralOS engine and executed by the instance's Python bridge. Tools: neuralos_list_instances, neuralos_ask, neuralos_graph, neuralos_admin (write probes behind a confirm=\"yes\" interlock). Engine + weights ship with the app; blank fields fall back to the bundle, the shared cache (~/.cache/neuralos, auto-provisioned on first use), then <instancesDir>/engine.",
+    fields: [
+      { key: "enabled", label: "Enabled", type: "boolean" },
+      { key: "instancesDir", label: "Instances root", placeholder: "~/neuralos-instances" },
+      { key: "pythonBin", label: "Python interpreter", placeholder: "python3", hint: "Needs pydantic + the instance's client lib (e.g. pymysql for chinook)." },
+      { key: "engineBin", label: "Engine binary override", placeholder: "(bundled engine when blank)" },
+      { key: "engineWeights", label: "Engine weights override", placeholder: "(bundled needle3.cact when blank)" },
+      { key: "autoDownload", label: "Auto-provision cache on first use", type: "boolean", hint: "One ~36MB fetch from the public Cactus-Compute release, offline forever after." },
+      { key: "cacheDir", label: "Cache dir", placeholder: "~/.cache/neuralos" },
+      { key: "timeoutMs", label: "Timeout (ms)", placeholder: "120000" },
     ],
   },
   {

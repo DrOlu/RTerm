@@ -1,5 +1,18 @@
 # Changelog
 
+## v3.9.1 (2026-09-24)
+
+**neuralOS is now visible in Settings → Plugins.** The plugins tab renders a
+fixed set of per-plugin settings panels, and neuralOS had none — the plugin
+loaded (its four tools appear under Plugin tools) but had no settings form.
+New panel: instances root, python interpreter, engine binary/weights overrides,
+auto-provisioning toggle, cache dir, timeout, plus an Enabled switch the
+plugin now honors (`neuralos.enabled=false` registers zero tools). Blank
+fields fall back to the bundled engine → shared cache → `<instancesDir>/engine`.
+
+Also: settings-block enable gate in the neuralos plugin (spec 42 tests).
+
+
 ## v3.9.0 (2026-09-24)
 
 **neuralOS native — on-device data agents as first-class RTerm tools, bundled.**

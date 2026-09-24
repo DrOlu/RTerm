@@ -257,6 +257,15 @@ else { console.log(JSON.stringify({ function_calls: [{ name: 'transactions_count
   const answered = (await unknown.handler({ instance: 'does-not-exist', question: 'x' })) as { error?: string }
   ok(answered.error?.includes("no instance named 'does-not-exist'"), 'ask answers an unknown instance as data')
   ok(logged.some((l) => l.includes('registered neuralos tools')), 'the plugin announces registration through ctx.log')
+
+  // the enabled=false settings gate: the Settings panel switch is honest
+  const off: Array<{ name: string }> = []
+  register({
+    registerTool: (t) => off.push(t as never),
+    log: () => {},
+    getSettings: () => ({ neuralos: { enabled: false } }),
+  })
+  ok(off.length === 0, 'enabled=false registers zero tools')
 }
 
 // ---------------------------------------------------------------------------
