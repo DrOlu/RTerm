@@ -14,6 +14,8 @@
  *   node scripts/publish-npm.mjs --dry-run   # assemble only, print tarball listing
  *   node scripts/publish-npm.mjs             # publish both names
  * Auth: NODE_AUTH_TOKEN (npm granular token with publish rights).
+ *
+ * Idempotent: if name@version is already on the registry, that name is skipped.
  */
 import { execFileSync } from 'node:child_process'
 import { cpSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs'
@@ -47,7 +49,24 @@ if (!existsSync(standalone)) {
 
 const template = JSON.parse(readFileSync(path.join(repoRoot, 'scripts/npm-package.template.json'), 'utf-8'))
 
+function alreadyPublished(name, version) {
+  try {
+    const out = execFileSync('npm', ['view', `${name}@${version}`, 'version'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    return out === version
+  } catch {
+    return false
+  }
+}
+
 for (const pkg of PACKAGES) {
+  if (!dryRun && alreadyPublished(pkg.name, VERSION)) {
+    console.log(`[publish-npm] ${pkg.name}@${VERSION} already on npm — skipping`)
+    continue
+  }
+
   const stage = path.join(repoRoot, `.npm-stage-${pkg.name}`)
   rmSync(stage, { recursive: true, force: true })
   mkdirSync(path.join(stage, 'bin'), { recursive: true })
@@ -58,12 +77,16 @@ for (const pkg of PACKAGES) {
   writeFileSync(path.join(stage, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 
   console.log(`[publish-npm] ${pkg.name}@${VERSION}: staged at ${path.relative(repoRoot, stage)}`)
-  if (dryRun) {
-    execFileSync('npm', ['pack', '--dry-run', path.basename(stage)], { cwd: repoRoot, stdio: 'inherit' })
-    continue
+  try {
+    if (dryRun) {
+      execFileSync('npm', ['pack', '--dry-run'], { cwd: stage, stdio: 'inherit' })
+      continue
+    }
+    execFileSync('npm', ['publish', stage, '--access', 'public'], { stdio: 'inherit', env: process.env })
+    console.log(`[publish-npm] published ${pkg.name}@${VERSION}`)
+  } finally {
+    if (!dryRun) rmSync(stage, { recursive: true, force: true })
   }
-  execFileSync('npm', ['publish', stage, '--access', 'public'], { stdio: 'inherit', env: process.env })
-  console.log(`[publish-npm] published ${pkg.name}@${VERSION}`)
 }
 
 if (dryRun) console.log('[publish-npm] dry run complete — nothing published')

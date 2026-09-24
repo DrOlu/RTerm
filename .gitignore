@@ -26,6 +26,7 @@ demo.md
 .codex-backups/
 apps/electron/cli-runtime/
 bun.lock
+.npm-stage-*
 
 # neuralOS engine artifacts (build-time downloads — only the README is committed)
 resources/neuralos/*
