@@ -1,0 +1,47 @@
+{
+  "main": "bin/gybackend.cjs",
+  "bin": {
+    "gybackend": "bin/gybackend.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/kv": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
+    "better-sqlite3": "^12.11.1"
+  },
+  "keywords": [
+    "forward-deployed-engineer",
+    "fde",
+    "ai-terminal",
+    "ai-agent",
+    "ssh",
+    "winrm",
+    "serial-console",
+    "cisco",
+    "network-automation",
+    "sre",
+    "observability",
+    "incident-response",
+    "change-management",
+    "infrastructure-automation",
+    "runbooks",
+    "neuralos",
+    "aiops",
+    "ai-sre",
+    "agentic-ai",
+    "chatops",
+    "self-healing",
+    "runbook-automation",
+    "closed-loop-remediation",
+    "mcp"
+  ],
+  "license": "MIT",
+  "homepage": "https://rterm.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DrOlu/RTerm.git"
+  }
+}
