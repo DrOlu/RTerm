@@ -56,6 +56,15 @@ jobs:
           jq --arg v "$VERSION" '.version = $v' package.json > package.json.tmp && mv package.json.tmp package.json
           echo "Synced package.json version to $VERSION"
       - run: npm install
+      - name: Download neuralOS engine + weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p resources/neuralos
+          BASE="https://huggingface.co/Cactus-Compute/needle3/resolve/main"
+          curl -fsSL --retry 3 -o resources/neuralos/needle3.cact "$BASE/needle3.cact"
+          curl -fsSL --retry 3 -o resources/neuralos/engine-macos-arm64 "$BASE/macos-arm64/needle"
+          ls -la resources/neuralos/
       - run: npm run dist:mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -67,6 +76,16 @@ jobs:
           find dist -maxdepth 1 -name "*.dmg" | while read f; do
             echo "Uploading $f"
           done
+      - name: Verify bundled neuralOS engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=$(find dist -type d -name neuralos 2>/dev/null | head -1)
+          echo "neuralos resources at: ${found:-NOT FOUND}"
+          [ -n "$found" ]
+          ls -la "$found"
+          test -f "$found/needle3.cact"
+          test -f "$found/engine-macos-arm64"
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-mac
@@ -108,10 +127,29 @@ jobs:
               Write-Host "Patched $f"
             }
           }
+      - name: Download neuralOS engine + weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p resources/neuralos
+          BASE="https://huggingface.co/Cactus-Compute/needle3/resolve/main"
+          curl -fsSL --retry 3 -o resources/neuralos/needle3.cact "$BASE/needle3.cact"
+          curl -fsSL --retry 3 -o resources/neuralos/engine-windows-x86_64.exe "$BASE/windows-x86_64/needle.exe"
+          ls -la resources/neuralos/
       - run: npm run dist:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+      - name: Verify bundled neuralOS engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=$(find dist -type d -name neuralos 2>/dev/null | head -1)
+          echo "neuralos resources at: ${found:-NOT FOUND}"
+          [ -n "$found" ]
+          ls -la "$found"
+          test -f "$found/needle3.cact"
+          test -f "$found/engine-windows-x86_64.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-win
@@ -143,10 +181,29 @@ jobs:
           echo "Synced package.json version to $VERSION"
       - run: npm install || true
       - run: rm -rf node_modules/canvas
+      - name: Download neuralOS engine + weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p resources/neuralos
+          BASE="https://huggingface.co/Cactus-Compute/needle3/resolve/main"
+          curl -fsSL --retry 3 -o resources/neuralos/needle3.cact "$BASE/needle3.cact"
+          curl -fsSL --retry 3 -o resources/neuralos/engine-linux-x86_64 "$BASE/linux-x86_64/needle"
+          ls -la resources/neuralos/
       - run: npm run dist:linux
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+      - name: Verify bundled neuralOS engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=$(find dist -type d -name neuralos 2>/dev/null | head -1)
+          echo "neuralos resources at: ${found:-NOT FOUND}"
+          [ -n "$found" ]
+          ls -la "$found"
+          test -f "$found/needle3.cact"
+          test -f "$found/engine-linux-x86_64"
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-x64
@@ -180,10 +237,29 @@ jobs:
           echo "Synced package.json version to $VERSION"
       - run: npm install || true
       - run: rm -rf node_modules/canvas
+      - name: Download neuralOS engine + weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p resources/neuralos
+          BASE="https://huggingface.co/Cactus-Compute/needle3/resolve/main"
+          curl -fsSL --retry 3 -o resources/neuralos/needle3.cact "$BASE/needle3.cact"
+          curl -fsSL --retry 3 -o resources/neuralos/engine-linux-arm64 "$BASE/linux-arm64/needle"
+          ls -la resources/neuralos/
       - run: npm run dist:linux-arm64
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+      - name: Verify bundled neuralOS engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=$(find dist -type d -name neuralos 2>/dev/null | head -1)
+          echo "neuralos resources at: ${found:-NOT FOUND}"
+          [ -n "$found" ]
+          ls -la "$found"
+          test -f "$found/needle3.cact"
+          test -f "$found/engine-linux-arm64"
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-arm64
@@ -192,6 +268,27 @@ jobs:
             dist/*arm64.deb
             dist/*arm64.rpm
           retention-days: 1
+
+  publish-npm:
+    name: Publish rterm-backend + neuralos to npm
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build standalone backend
+        run: npm run build:backend-standalone
+      - name: Assemble and publish both npm names
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/publish-npm.mjs
 
   release:
     name: Create GitHub Release

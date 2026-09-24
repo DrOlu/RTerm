@@ -1,0 +1,15 @@
+{
+  "name": "neuralos",
+  "version": "1.0.0",
+  "description": "neuralOS instances as RTerm agent tools — on-device data agents over verified probe menus (chinook, cyberbank, aws, efraud, ...). The 121M neuralOS engine selects the probe for a plain-English question and the instance's Python bridge executes it against the real data source; the engine ships with the desktop bundle and the standalone backend auto-provisions ~/.cache/neuralos on first use. Four tools: neuralos_list_instances, neuralos_ask, neuralos_graph (relationship maps), neuralos_admin (write probes behind a confirm=\"yes\" interlock). Config in Settings (neuralos block: instancesDir, pythonBin, engineBin/engineWeights, autoDownload); instances root defaults to ~/neuralos-instances.",
+  "entry": "index.mjs",
+  "tools": [
+    "neuralos_list_instances",
+    "neuralos_ask",
+    "neuralos_graph",
+    "neuralos_admin"
+  ],
+  "permissions": [
+    "exec"
+  ]
+}

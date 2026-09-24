@@ -87,6 +87,9 @@ extraResources:
   # discovers them at {resourcesPath}/plugins/.
   - from: plugins
     to: plugins
+  # neuralOS engine + weights (build-time download, per-OS; see build-release.yml)
+  - from: resources/neuralos
+    to: neuralos
     filter:
       - "**/*"
 asarUnpack:

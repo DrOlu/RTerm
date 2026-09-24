@@ -1,5 +1,35 @@
 # Changelog
 
+## v3.9.0 (2026-09-24)
+
+**neuralOS native — on-device data agents as first-class RTerm tools, bundled.**
+
+A new official plugin, `neuralos`, wires the neuralOS instances
+(`~/neuralos-instances` — verified probe menus over real data sources) into
+the agent as four tools: `neuralos_list_instances`, `neuralos_ask`
+(plain-English question -> the 121M on-device engine selects the probe, the
+instance bridge executes it, a verified digest comes back), `neuralos_graph`
+(relationship maps, executed directly by probe name), and `neuralos_admin`
+(write probes behind a `confirm="yes"` interlock). Settings block `neuralos`
+(instancesDir, pythonBin, engineBin/engineWeights, autoDownload); config also
+via `NEURALOS_*` env.
+
+**True install-and-nothing-else, on every channel:**
+- **Desktop**: the engine binary + 35 MB `needle3.cact` weights are
+  downloaded at build time and shipped inside every installer (macOS ARM64,
+  Windows x64, Linux x64 + ARM64) at `<resources>/neuralos/` — a build-time
+  verify gate fails the release if the bundle is missing.
+- **npm** (`rterm-backend` + `neuralos`, the same package under both names):
+  the plugin auto-provisions `~/.cache/neuralos` on first use — one ~36 MB
+  fetch from the public Cactus-Compute/needle3 release, then offline
+  forever. Publishing is now a first-class release-workflow job (was manual).
+
+Also new: the npm publish pipeline (`scripts/publish-npm.mjs` +
+`scripts/npm-package.template.json`) assembles the standalone backend into
+the published layout (bin/gybackend.cjs + plugins/ + README) and publishes
+both names at the repo version, driven by the `NPM_TOKEN` secret.
+
+
 ## v3.8.9 (2026-09-18)
 
 Four fixes for the extended-chat freeze family and session durability — all
