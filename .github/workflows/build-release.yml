@@ -80,8 +80,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          found=$(find dist -type d -name neuralos 2>/dev/null | head -1)
-          echo "neuralos resources at: ${found:-NOT FOUND}"
+          found=$(find dist -type d -name neuralos -not -path "*plugins*" 2>/dev/null | head -1)
+          echo "neuralos engine bundle at: ${found:-NOT FOUND}"
           [ -n "$found" ]
           ls -la "$found"
           test -f "$found/needle3.cact"
@@ -144,8 +144,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          found=$(find dist -type d -name neuralos 2>/dev/null | head -1)
-          echo "neuralos resources at: ${found:-NOT FOUND}"
+          found=$(find dist -type d -name neuralos -not -path "*plugins*" 2>/dev/null | head -1)
+          echo "neuralos engine bundle at: ${found:-NOT FOUND}"
           [ -n "$found" ]
           ls -la "$found"
           test -f "$found/needle3.cact"
@@ -198,8 +198,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          found=$(find dist -type d -name neuralos 2>/dev/null | head -1)
-          echo "neuralos resources at: ${found:-NOT FOUND}"
+          found=$(find dist -type d -name neuralos -not -path "*plugins*" 2>/dev/null | head -1)
+          echo "neuralos engine bundle at: ${found:-NOT FOUND}"
           [ -n "$found" ]
           ls -la "$found"
           test -f "$found/needle3.cact"
@@ -254,8 +254,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          found=$(find dist -type d -name neuralos 2>/dev/null | head -1)
-          echo "neuralos resources at: ${found:-NOT FOUND}"
+          found=$(find dist -type d -name neuralos -not -path "*plugins*" 2>/dev/null | head -1)
+          echo "neuralos engine bundle at: ${found:-NOT FOUND}"
           [ -n "$found" ]
           ls -la "$found"
           test -f "$found/needle3.cact"
