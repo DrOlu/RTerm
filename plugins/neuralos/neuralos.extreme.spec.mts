@@ -12,7 +12,7 @@
  * Run:  npx tsx plugins/neuralos/neuralos.extreme.spec.mts
  */
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -288,6 +288,94 @@ else { console.log(JSON.stringify({ function_calls: [{ name: 'transactions_count
   ok(out.code === 0 && out.stdout.trim() === 'forwarded', 'defaultExec forwards opts.env to the child process')
   const plain = await exec(process.execPath, ['-e', 'console.log(Boolean(process.env.PATH))'])
   ok(plain.code === 0 && plain.stdout.trim() === 'true', 'defaultExec keeps the parent environment for plain calls')
+}
+
+// ---------------------------------------------------------------------------
+// 12. The lost-exec-bit family (v3.9.2). curl -o / electron-builder
+//     extraResources ship engines with mode 0644; spawning them dies with
+//     EACCES and an EMPTY stderr. Resolution must check executability, not
+//     existence — a broken bundle must never shadow a runnable engine.
+// ---------------------------------------------------------------------------
+{
+  // 12a. A 0644 bundled engine is skipped, and the next candidate wins.
+  const root = mkdtempSync(join(tmpdir(), 'neuralos-execbit-'))
+  const resources = join(root, 'resources')
+  const cache = join(root, 'cache')
+  const instances = join(root, 'instances')
+  mkdirSync(join(resources, 'neuralos'), { recursive: true })
+  mkdirSync(cache, { recursive: true })
+  mkdirSync(join(instances, 'engine'), { recursive: true })
+  // bundled copy: present but NOT executable (the v3.9.1 bug)
+  writeFileSync(join(resources, 'neuralos', 'engine-macos-arm64'), 'bundled-broken')
+  writeFileSync(join(resources, 'neuralos', 'needle3.cact'), 'bundled-weights')
+  chmodSync(join(resources, 'neuralos', 'engine-macos-arm64'), 0o644)
+  // fleet-convention copy: executable
+  writeFileSync(join(instances, 'engine', 'needle'), '#!/bin/sh\necho ok')
+  writeFileSync(join(instances, 'engine', 'needle3.cact'), 'fleet-weights')
+  chmodSync(join(instances, 'engine', 'needle'), 0o755)
+
+  const cfg = resolveConfig({ getSettings: () => ({}) }, { NEURALOS_INSTANCES_DIR: instances, NEURALOS_CACHE_DIR: cache, NEURALOS_AUTO_DOWNLOAD: '0' })
+  const resolved = await resolveEngine(cfg, { platform: 'darwin', arch: 'arm64', resourcesPath: resources })
+  ok(resolved.engineBin === join(instances, 'engine', 'needle'), 'a 0644 bundled engine is skipped for the runnable fleet engine', JSON.stringify(resolved))
+
+  // 12b. chmod recovery: a 0644 engine we OWN is fixed in place, not skipped.
+  const ownedDir = mkdtempSync(join(tmpdir(), 'neuralos-owned-'))
+  writeFileSync(join(ownedDir, 'engine-macos-arm64'), 'owned')
+  writeFileSync(join(ownedDir, 'needle3.cact'), 'owned-weights')
+  chmodSync(join(ownedDir, 'engine-macos-arm64'), 0o644)
+  const cfgOwned = resolveConfig({ getSettings: () => ({}) }, { NEURALOS_INSTANCES_DIR: join(root, 'nope'), NEURALOS_CACHE_DIR: ownedDir, NEURALOS_AUTO_DOWNLOAD: '0' })
+  const recovered = await resolveEngine(cfgOwned, { platform: 'darwin', arch: 'arm64' })
+  ok(recovered.engineBin === join(ownedDir, 'engine-macos-arm64'), 'a 0644 engine we own is chmod-recovered instead of skipped', JSON.stringify(recovered))
+
+  // 12c. EACCES at spawn time is named, with the fix in the message.
+  const denied = await engineSelect(
+    () => Promise.resolve({ ok: false, code: 'EACCES', stdout: '', stderr: '' }),
+    { engineBin: '/broken/engine', engineWeights: '/w' },
+    '/m',
+    'q',
+  )
+  ok(
+    (denied as { error?: string }).error?.includes('engine not executable') && (denied as { error?: string }).error?.includes('chmod +x'),
+    'EACCES spawn failure names the fix (chmod +x / engineBin override)',
+    JSON.stringify(denied),
+  )
+
+  // 12d. A non-EACCES crash keeps the original shape.
+  const crash = await engineSelect(
+    () => Promise.resolve({ ok: false, code: 1, stdout: '', stderr: 'boom' }),
+    { engineBin: '/e', engineWeights: '/w' },
+    '/m',
+    'q',
+  )
+  ok((crash as { error?: string }).error === 'engine exited 1: boom', 'non-EACCES crashes keep the engine exited N: stderr shape')
+
+  // 12e. defaultExec preserves a real EACCES code from the OS.
+  const realExec = defaultExec()
+  const noExecFile = join(root, 'not-executable')
+  writeFileSync(noExecFile, 'x')
+  chmodSync(noExecFile, 0o644)
+  const eacc = await realExec(noExecFile, [])
+  ok(eacc.code === 'EACCES', 'defaultExec surfaces EACCES as the code (not a generic 1)', JSON.stringify(eacc.code))
+
+  // 12f. defaultExec reports timeout kills honestly.
+  const slow = await realExec(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { timeoutMs: 300 })
+  ok(String(slow.code).includes('killed') || String(slow.code).includes('ETIMEDOUT'), 'a timeout kill is reported as killed/ETIMEDOUT, not exit 1', JSON.stringify(slow.code))
+
+  // 12g. truncate(undefined) must not throw (JSON.stringify(undefined) is undefined).
+  const undef = truncate(undefined as never)
+  ok(undef === 'null', 'truncate(undefined) renders honestly instead of crashing', String(undef))
+
+  // 12h. A corrupt menu is data for graphProbe, never an exception.
+  const corruptDir = mkdtempSync(join(tmpdir(), 'neuralos-corrupt-'))
+  writeFileSync(join(corruptDir, 'needle_menu.json'), 'NOT JSON {{{')
+  const corrupt = await graphProbe(() => Promise.resolve({ ok: true, code: 0, stdout: '{}', stderr: '' }), resolveConfig({}, {}), corruptDir, { op: 'overview' })
+  ok((corrupt as { error?: string }).error?.includes('instance menu unreadable'), 'graphProbe reports a corrupt menu as data')
+
+  // 12i. A menu that is valid JSON but not an array is also rejected as data.
+  const nonArrayDir = mkdtempSync(join(tmpdir(), 'neuralos-nonarray-'))
+  writeFileSync(join(nonArrayDir, 'needle_menu.json'), '{"not":"an array"}')
+  const nonArray = await graphProbe(() => Promise.resolve({ ok: true, code: 0, stdout: '{}', stderr: '' }), resolveConfig({}, {}), nonArrayDir, { op: 'overview' })
+  ok((nonArray as { error?: string }).error?.includes('instance menu unreadable'), 'a non-array menu is rejected as data')
 }
 
 console.log(`\n${pass} passed, ${fail} failed`)

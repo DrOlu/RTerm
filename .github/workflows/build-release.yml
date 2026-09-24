@@ -64,6 +64,7 @@ jobs:
           BASE="https://huggingface.co/Cactus-Compute/needle3/resolve/main"
           curl -fsSL --retry 3 -o resources/neuralos/needle3.cact "$BASE/needle3.cact"
           curl -fsSL --retry 3 -o resources/neuralos/engine-macos-arm64 "$BASE/macos-arm64/needle"
+          chmod +x resources/neuralos/engine-macos-arm64
           ls -la resources/neuralos/
       - run: npm run dist:mac
         env:
@@ -86,6 +87,7 @@ jobs:
           ls -la "$found"
           test -f "$found/needle3.cact"
           test -f "$found/engine-macos-arm64"
+          test -x "$found/engine-macos-arm64"
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-mac
@@ -135,6 +137,7 @@ jobs:
           BASE="https://huggingface.co/Cactus-Compute/needle3/resolve/main"
           curl -fsSL --retry 3 -o resources/neuralos/needle3.cact "$BASE/needle3.cact"
           curl -fsSL --retry 3 -o resources/neuralos/engine-windows-x86_64.exe "$BASE/windows-x86_64/needle.exe"
+          chmod +x resources/neuralos/engine-windows-x86_64.exe
           ls -la resources/neuralos/
       - run: npm run dist:win
         env:
@@ -189,6 +192,7 @@ jobs:
           BASE="https://huggingface.co/Cactus-Compute/needle3/resolve/main"
           curl -fsSL --retry 3 -o resources/neuralos/needle3.cact "$BASE/needle3.cact"
           curl -fsSL --retry 3 -o resources/neuralos/engine-linux-x86_64 "$BASE/linux-x86_64/needle"
+          chmod +x resources/neuralos/engine-linux-x86_64
           ls -la resources/neuralos/
       - run: npm run dist:linux
         env:
@@ -204,6 +208,7 @@ jobs:
           ls -la "$found"
           test -f "$found/needle3.cact"
           test -f "$found/engine-linux-x86_64"
+          test -x "$found/engine-linux-x86_64"
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-x64
@@ -245,6 +250,7 @@ jobs:
           BASE="https://huggingface.co/Cactus-Compute/needle3/resolve/main"
           curl -fsSL --retry 3 -o resources/neuralos/needle3.cact "$BASE/needle3.cact"
           curl -fsSL --retry 3 -o resources/neuralos/engine-linux-arm64 "$BASE/linux-arm64/needle"
+          chmod +x resources/neuralos/engine-linux-arm64
           ls -la resources/neuralos/
       - run: npm run dist:linux-arm64
         env:
@@ -260,6 +266,7 @@ jobs:
           ls -la "$found"
           test -f "$found/needle3.cact"
           test -f "$found/engine-linux-arm64"
+          test -x "$found/engine-linux-arm64"
       - uses: actions/upload-artifact@v4
         with:
           name: rterm-linux-arm64

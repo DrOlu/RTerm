@@ -1,5 +1,52 @@
 # Changelog
 
+## v3.9.2 (2026-09-24)
+
+**Fix: the bundled neuralOS engine shipped without its exec bit — every
+`neuralos_ask`/`neuralos_graph` call in the desktop app died with
+`engine exited EACCES:` (empty stderr).**
+
+Root cause chain: `curl -o` in the release workflow writes files with mode
+0644 and the workflow never chmod'd them; electron-builder's extraResources
+preserves that mode into the packaged app; and `resolveEngine` checked only
+*existence* (F_OK), so the un-runnable bundled engine permanently shadowed
+perfectly good alternatives (the shared cache, `<instancesDir>/engine/needle`).
+
+Fixes, layered so this class of bug cannot recur:
+
+- **`resolveEngine` now checks executability (X_OK), not existence.** A
+  present-but-unexecutable candidate is skipped (never a hard stop), so a
+  broken bundle falls through to the next runnable engine.
+- **One-shot chmod recovery:** a 0644 engine we own is fixed in place
+  (chmod 0755 + re-probe) instead of skipped — covers curl -o, zip/tar
+  extraction, and copy flows that drop the exec bit.
+- **EACCES at spawn time is named, with the fix in the message**
+  (`engine not executable (path) — restore the exec bit (chmod +x) or set
+  neuralos.engineBin/engineWeights`) instead of the cryptic
+  `engine exited EACCES:` with a trailing colon and no stderr.
+- **Exhausted-path errors now explain every failure:** when no candidate is
+  usable, the error lists the found-but-not-executable paths alongside the
+  auto-download failure, so operators see why every route was exhausted.
+- **Release workflow chmods the downloaded engines on all 4 platforms** and
+  the verify steps now assert `test -x` (mac + Linux) so an un-runnable
+  engine can never ship again.
+
+Also fixed in the same review (all error-as-data, no thrown exceptions):
+
+- `defaultExec` preserved a real `EACCES` code but reported timeout kills
+  (SIGTERM from our own timeout) as a generic `exit 1` — now reported as
+  `killed (SIGTERM)` so timeouts are distinguishable from crashes.
+- `truncate(undefined)` crashed (`JSON.stringify(undefined)` is
+  `undefined`, not a string) — now renders `'null'` honestly.
+- `graphProbe` threw on a corrupt/non-array `needle_menu.json` instead of
+  answering with an error — every other read path in the plugin already
+  reports errors as data; this one now does too.
+
+Spec: 9 new tests (section 12) — 0644-bundle skip, chmod recovery, EACCES
+naming, non-EACCES crash shape, real-EACCES code preservation, timeout-kill
+honesty, truncate(undefined), corrupt menu, non-array menu. 51 total.
+
+
 ## v3.9.1 (2026-09-24)
 
 **neuralOS is now visible in Settings → Plugins.** The plugins tab renders a

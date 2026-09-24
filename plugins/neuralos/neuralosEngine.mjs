@@ -79,7 +79,14 @@ export function defaultExec() {
     new Promise((resolve) => {
       const execEnv = opts.env ? { ...process.env, ...opts.env } : process.env
       const child = cpExecFile(cmd, args, { timeout: opts.timeoutMs ?? 120000, maxBuffer: 16 * 1024 * 1024, env: execEnv }, (err, stdout, stderr) => {
-        resolve({ ok: !err, code: err ? err.code ?? 1 : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
+        // err.code: 'EACCES'/'ENOENT'/'ETIMEDOUT' style codes, undefined for
+        // signal kills (e.g. our own timeout SIGTERM). Preserve the real
+        // code; a timeout must not masquerade as a generic exit 1.
+        let code = 0
+        if (err) {
+          code = typeof err.code === 'string' || typeof err.code === 'number' ? err.code : err.signal ? `killed (${err.signal})` : 1
+        }
+        resolve({ ok: !err, code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') })
       })
       void child
     })
@@ -91,6 +98,33 @@ async function exists(p) {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * A candidate is USABLE only if the binary is actually EXECUTABLE.
+ * Existence alone is not enough: electron-builder's extraResources copy and
+ * curl-downloaded files routinely land with mode 0644 — spawning them dies
+ * with EACCES ("engine exited EACCES:" with an empty stderr, the classic
+ * symptom). We probe X_OK; where the path is OURS to manage (the shared
+ * cache, the fleet-convention dir, an explicit override) we attempt a
+ * one-shot chmod recovery and re-probe. The app bundle is NOT ours to
+ * mutate — a 0644 bundled engine is skipped, never chmod'd, so a broken
+ * bundle falls through to the next runnable engine instead of shadowing it.
+ */
+async function executable(p, { recover = true } = {}) {
+  try {
+    await fs.access(p, fsConstants.X_OK)
+    return true
+  } catch {
+    if (!recover) return false
+    try {
+      await fs.chmod(p, 0o755)
+      await fs.access(p, fsConstants.X_OK)
+      return true
+    } catch {
+      return false
+    }
   }
 }
 
@@ -149,19 +183,36 @@ export async function resolveEngine(cfg, deps = {}) {
   const resources = (deps.resourcesPath ?? process.resourcesPath) ?? undefined
   const bundled = bundledEngineName(platform, arch)
   if (resources && bundled) {
-    candidates.push({ bin: path.join(resources, 'neuralos', bundled), weights: path.join(resources, 'neuralos', WEIGHTS_NAME) })
+    // the app bundle is not ours to chmod — probe, skip, never recover
+    candidates.push({ bin: path.join(resources, 'neuralos', bundled), weights: path.join(resources, 'neuralos', WEIGHTS_NAME), recover: false })
   }
   if (bundled) {
     candidates.push({ bin: path.join(cfg.cacheDir, bundled), weights: path.join(cfg.cacheDir, WEIGHTS_NAME) })
   }
   candidates.push({ bin: path.join(cfg.instancesDir, 'engine', 'needle'), weights: path.join(cfg.instancesDir, 'engine', WEIGHTS_NAME) })
+  const skipped = []
   for (const c of candidates) {
-    if ((await exists(c.bin)) && (await exists(c.weights))) return { engineBin: c.bin, engineWeights: c.weights }
+    if (!(await exists(c.bin)) || !(await exists(c.weights))) continue
+    if (!(await executable(c.bin, { recover: c.recover !== false }))) {
+      // A present-but-unexecutable engine is a broken candidate, never a
+      // hard stop: record it and fall through to the next candidate.
+      skipped.push(c.bin)
+      continue
+    }
+    return { engineBin: c.bin, engineWeights: c.weights }
   }
   if (cfg.autoDownload) {
-    return ensureEngine({ ...deps, cacheDir: cfg.cacheDir, platform, arch })
+    const ensured = await ensureEngine({ ...deps, cacheDir: cfg.cacheDir, platform, arch })
+    if (!ensured.error) return ensured
+    // autoDownload could not provision a usable engine either — surface
+    // BOTH failures so the operator can see why every path was exhausted.
+    return {
+      error: `neuralOS engine not usable: ${ensured.error}${skipped.length ? `; also found but not executable: ${skipped.join(', ')} (chmod +x them or set neuralos.engineBin/engineWeights)` : ''}`,
+    }
   }
-  return { error: 'neuralOS engine not found — set neuralos.engineBin/engineWeights (settings), install the desktop bundle, or enable autoDownload' }
+  return {
+    error: `neuralOS engine not found or not executable${skipped.length ? ` (found but not executable: ${skipped.join(', ')} — chmod +x them or set neuralos.engineBin/engineWeights)` : ' — set neuralos.engineBin/engineWeights (settings), install the desktop bundle, or enable autoDownload'}`,
+  }
 }
 
 export function parseJsonObject(text) {
@@ -220,7 +271,16 @@ export async function engineSelect(exec, engine, menuPath, question, opts = {}) 
   } catch (e) {
     return { error: `engine execution failed: ${String(e?.message ?? e)}` }
   }
-  if (out.code !== 0 && !out.stdout.trim()) return { error: `engine exited ${out.code}: ${out.stderr.slice(0, 200)}` }
+  if (out.code !== 0 && !out.stdout.trim()) {
+    // EACCES on spawn surfaces as code 'EACCES' with EMPTY stderr — the
+    // classic lost-exec-bit symptom. Name the fix instead of a bare code.
+    if (out.code === 'EACCES' || /EACCES|permission denied/i.test(String(out.stderr))) {
+      return {
+        error: `engine not executable (${engine.engineBin}) — restore the exec bit (chmod +x) or set neuralos.engineBin/engineWeights to a runnable binary`,
+      }
+    }
+    return { error: `engine exited ${out.code}: ${out.stderr.slice(0, 200)}` }
+  }
   const parsed = parseJsonObject(out.stdout)
   if (!parsed) return { error: `engine output not JSON: ${out.stdout.slice(0, 120)}` }
   const calls = parsed.function_calls
@@ -266,8 +326,16 @@ export async function executeProbe(exec, cfg, instanceDir, probe, args, opts = {
  */
 export async function graphProbe(exec, cfg, instanceDir, input) {
   if (!['overview', 'neighbors', 'connect'].includes(input.op)) return { error: `unknown graph op: ${input.op}` }
-  const raw = await fs.readFile(path.join(instanceDir, 'needle_menu.json'), 'utf-8')
-  const menu = JSON.parse(raw)
+  // A corrupt/unreadable menu is an answer, never a thrown exception —
+  // every other read path in this file already reports errors as data.
+  let menu
+  try {
+    const raw = await fs.readFile(path.join(instanceDir, 'needle_menu.json'), 'utf-8')
+    menu = JSON.parse(raw)
+    if (!Array.isArray(menu)) throw new Error('menu is not an array')
+  } catch (e) {
+    return { error: `instance menu unreadable: ${String(e?.message ?? e)}` }
+  }
   const graphNames = menu.map((t) => t.name).filter((n) => n.includes('_graph_'))
   const probe = graphNames.find((n) => n.endsWith(`_graph_${input.op}`))
   if (!probe) return { error: `this instance has no ${input.op} graph probe`, available_graph_probes: graphNames }
@@ -288,7 +356,9 @@ export async function adminProbe(exec, cfg, instanceDir, probe, args) {
 }
 
 export function truncate(value, max = MAX_RESULT_CHARS) {
-  const text = typeof value === 'string' ? value : JSON.stringify(value)
+  // JSON.stringify(undefined) is undefined (not a string) — a probe that
+  // returned nothing must not crash the tool; render it honestly instead.
+  const text = typeof value === 'string' ? value : JSON.stringify(value) ?? 'null'
   if (text.length <= max) return text
   return `${text.slice(0, max)}\n… (truncated at ${max} chars)`
 }
