@@ -5,7 +5,7 @@ import type {
   PDFDocumentProxy,
   RenderTask,
 } from "pdfjs-dist";
-import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.js?url";
+import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
   clampPreviewValue,
   resolveAnchoredPreviewScrollOffset,
