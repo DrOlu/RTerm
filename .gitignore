@@ -31,3 +31,8 @@ bun.lock
 # neuralOS engine artifacts (build-time downloads — only the README is committed)
 resources/neuralos/*
 !resources/neuralos/README.md
+
+# SSH keys must never be committed
+id_rsa
+id_rsa.pub
+*.ppk
