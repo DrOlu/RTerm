@@ -651,6 +651,46 @@ export const BUILTIN_TOOL_INFO: BuiltInToolInfo[] = [
     name: "manage_etw",
     description: "Windows ETW diagnostics — start/stop a trace (logman), parse captured Get-WinEvent/Get-Counter output, list sessions. Use against a Windows host for network/file/registry/process/DNS diagnostics.",
   },
+  {
+    name: "manage_incident",
+    description: "Incident bundles — pack chat + terminals + recording + run id into one INC-* you can reopen (open/get/list/close).",
+    shortDescription: "Incident bundles (INC-*)",
+  },
+  {
+    name: "manage_collab",
+    description: "Two-operator session presence: join, takeConn (\"I have the conn\"), whoHasConn, list.",
+    shortDescription: "Two-operator presence",
+  },
+  {
+    name: "manage_jump_path",
+    description: "Named multi-hop jump paths with time-boxed break-glass (define/list/breakGlass/allowed).",
+    shortDescription: "Jump paths + break-glass",
+  },
+  {
+    name: "manage_approval",
+    description: "Queued HITL approvals with TTL auto-deny and optional two-person approve (request/list/get/decide/sweep).",
+    shortDescription: "HITL approval queue",
+  },
+  {
+    name: "snapshot_output",
+    description: "Remember command output per connection and diff against the last snapshot.",
+    shortDescription: "Output snapshots + diff",
+  },
+  {
+    name: "replay_agent_run",
+    description: "Replay agent steps with stubbed tool outputs — debug without touching live hosts.",
+    shortDescription: "Replay agent runs",
+  },
+  {
+    name: "plan_offline_join",
+    description: "Plan offline domain join (djoin provision on DC + requestODJ on member) when SMB IPC$ is blocked.",
+    shortDescription: "Offline domain join",
+  },
+  {
+    name: "net_device",
+    description: "Network device helpers: parse CDP neighbors, diff running vs startup config, detect config mode.",
+    shortDescription: "Network device helpers",
+  },
 ];
 
 export function buildReadFileDescription(support: { image: boolean }): string {

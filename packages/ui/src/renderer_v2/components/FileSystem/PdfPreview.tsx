@@ -214,7 +214,7 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
       .then((document) => {
         if (!document) return;
         if (cancelled) {
-          void document.destroy();
+          void document.cleanup();
           return;
         }
         setPdfDocument(document);
@@ -242,7 +242,7 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
   React.useEffect(() => {
     return () => {
       if (pdfDocument) {
-        void pdfDocument.destroy();
+        void pdfDocument.cleanup();
       }
     };
   }, [pdfDocument]);
@@ -417,6 +417,7 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
         canvas.style.height = `${Math.floor(viewport.height)}px`;
 
         renderTask = page.render({
+          canvas,
           canvasContext: context,
           viewport,
           transform:

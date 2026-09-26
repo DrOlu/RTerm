@@ -1,6 +1,6 @@
 {
   "name": "rterm",
-  "version": "3.9.4",
+  "version": "3.9.5",
   "description": "AI-native terminal & agentic-AI operations platform for Forward Deployed Engineers & SREs - AIOps closed-loop remediation, AI SRE, self-healing infrastructure, runbook automation, ChatOps over SSH/WinRM/serial under policy with tamper-evident audit.",
   "main": "./out/main/index.js",
   "author": "Hyperspace Technologies <rterm@hyperspace.ng>",
@@ -88,7 +88,7 @@
     "mobx-react-lite": "^4.0.7",
     "node-pty": "1.2.0-beta.3",
     "pdf-parse": "^1.1.1",
-    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^6.3.289",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-i18next": "^16.5.2",
@@ -131,6 +131,9 @@
     "tsx": "4.20.6",
     "typescript": "^5.3.3",
     "vite": "^5.0.10"
+  },
+  "overrides": {
+    "seroval": "^1.6.7"
   },
   "license": "Apache-2.0",
   "keywords": [

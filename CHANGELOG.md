@@ -1,5 +1,42 @@
 # Changelog
 
+## v3.9.5 (2026-09-26)
+
+**Security hardening release: removed a committed SSH private key, closed the
+audit backlog (52 -> 24 findings, 0 critical/high remaining), and made 8
+agent tools visible in the tools UI again.**
+
+### Security
+
+- **Removed `id_rsa` / `id_rsa.pub` from the repository.** A
+  passphrase-protected OpenSSH keypair was tracked at the repo root; nothing
+  referenced it. Removed from the index and gitignored. The key material
+  remains in git history — rotate it and treat it as compromised.
+- **Dependency audit 52 -> 24 (0 critical / 0 high remaining).**
+  `npm audit fix` applied the semver-compatible batch; `seroval` forced to
+  ^1.6.7 via overrides (closes the seroval RCE via JSON deserialization that
+  arrived transitively through @opentui/solid); `pdfjs-dist` upgraded 3.11 ->
+  6.3.289 (closes PDF.js arbitrary JavaScript execution on opening a crafted
+  PDF) with `PdfPreview` migrated to the v6 API (`cleanup()` replaces
+  `destroy()`, `render()` takes `canvas`). Remaining 24 findings are low /
+  moderate with no non-breaking fix path.
+
+### Fixed
+
+- **8 agent tools were dispatchable but invisible.** `manage_incident`,
+  `manage_collab`, `manage_jump_path`, `manage_approval`, `snapshot_output`,
+  `replay_agent_run`, `plan_offline_join`, and `net_device` shipped as real
+  tools but were never registered in `BUILTIN_TOOL_INFO`, so they were
+  missing from the tools section and the built-in tool status summary. All
+  eight are now registered with descriptions.
+
+### Verification
+
+- `npm run test`: all extreme suites pass (1,483 assertions, 0 failures).
+- `typecheck`, `typecheck:backend`, `typecheck:mobile-web`: clean.
+- `npm audit --omit=dev`: 24 low/moderate, 0 high, 0 critical.
+
+
 ## v3.9.4 (2026-09-24)
 
 **Three user-facing fixes: thread rename not sticking, Prev/Next user
