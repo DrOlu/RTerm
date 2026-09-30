@@ -277,7 +277,7 @@ jobs:
           retention-days: 1
 
   publish-npm:
-    name: Publish rterm-backend + neuralos to npm
+    name: Publish rterm-backend to npm
     needs: release
     runs-on: ubuntu-latest
     steps:

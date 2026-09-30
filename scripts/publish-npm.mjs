@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
- * Assemble and publish the standalone RTerm backend to npm under BOTH
- * published names — `rterm-backend` and `neuralos` (the same tarball; the
- * neuralos name is the distribution alias) — at the version in version.json.
+ * Assemble and publish the standalone RTerm backend to npm as
+ * `rterm-backend` at the version in version.json.
+ *
+ * v3.9.7: the `neuralos` npm alias is RETIRED — the name now references an
+ * unrelated application, so RTerm no longer publishes under it. Existing
+ * published neuralos versions stay on the registry (they are not
+ * deprecated here), but no new version is published under that name.
  *
  * Layout mirrors the existing 3.8.x packages byte-for-byte:
  *   bin/gybackend.cjs   (apps/gybackend/dist-standalone/gybackend.cjs)
@@ -12,7 +16,7 @@
  *
  * Run from the repo root AFTER `npm run build:backend-standalone`:
  *   node scripts/publish-npm.mjs --dry-run   # assemble only, print tarball listing
- *   node scripts/publish-npm.mjs             # publish both names
+ *   node scripts/publish-npm.mjs             # publish
  * Auth: NODE_AUTH_TOKEN (npm granular token with publish rights).
  *
  * Idempotent: if name@version is already on the registry, that name is skipped.
@@ -33,11 +37,6 @@ const PACKAGES = [
     name: 'rterm-backend',
     description:
       'AI-native terminal & agentic-AI operations platform for Forward Deployed Engineers & SREs: AIOps closed-loop remediation, AI SRE, self-healing infrastructure, runbook automation, ChatOps; executes over SSH/WinRM/serial under policy with tamper-evident audit.',
-  },
-  {
-    name: 'neuralos',
-    description:
-      'Standalone neuralOS backend (rterm-backend): AI-native terminal & agentic-AI operations platform. Ships the neuralOS plugin — on-device data agents (verified probe menus over real data sources, engine + weights auto-provisioned on first use).',
   },
 ]
 

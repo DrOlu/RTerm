@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.9.7 (2026-09-30)
+
+**The `neuralos` npm alias is retired — RTerm now publishes only as
+`rterm-backend`.**
+
+The `neuralos` name on npm now references an unrelated application, so
+RTerm no longer publishes under it. Changes:
+
+- `scripts/publish-npm.mjs` publishes ONLY `rterm-backend` (the neuralos
+  entry is removed from the PACKAGES list; the script header documents
+  the retirement).
+- The release workflow's publish job is renamed to "Publish rterm-backend
+  to npm".
+- The `neuralos` keyword is dropped from the npm package template.
+- The neuralOS PLUGIN (plugins/neuralos/) is untouched — it still ships
+  inside the rterm-backend tarball and the desktop app; only the npm
+  PACKAGE NAME alias is retired.
+- Previously published neuralos versions (3.8.9–3.9.6) remain on the
+  registry, un-deprecated; no new version is published under that name.
+
+
 ## v3.9.6 (2026-09-30)
 
 **Fix: the Windows portable "double-click does nothing" — root-caused and
