@@ -130,6 +130,45 @@ function createWindow(options?: CreateWindowOptions): BrowserWindow {
     height = savedWindow.height;
     x = savedWindow.x;
     y = savedWindow.y;
+    // v3.9.5: validate restored bounds against the CURRENT display setup.
+    // A portable exe carries its userData between machines — saved bounds
+    // from a bigger monitor (or a monitor that no longer exists) restore a
+    // window that is entirely off-screen or larger than the display, and
+    // the app looks like it "didn't launch" (process runs, no window
+    // anywhere). Same failure after a resolution change. Clamp size to the
+    // work area and drop any position that isn't on a visible display.
+    try {
+      const primary = screen.getPrimaryDisplay();
+      const wa = primary.workAreaSize;
+      const minW = isMainWindow ? 800 : 520;
+      const minH = isMainWindow ? 500 : 340;
+      // Clamp size to the work area (keep the user's size when it fits).
+      width = Math.min(Math.max(width, minW), Math.max(wa.width, minW));
+      height = Math.min(Math.max(height, minH), Math.max(wa.height, minH));
+      // Position must intersect SOME display's work area; otherwise let
+      // the OS place the window (undefined x/y = default centered).
+      const displays = screen.getAllDisplays();
+      const positioned = displays.some(
+        (d) =>
+          x !== undefined &&
+          y !== undefined &&
+          x < d.workArea.x + d.workArea.width - 80 &&
+          x + width > d.workArea.x + 80 &&
+          y < d.workArea.y + d.workArea.height - 40 &&
+          y + height > d.workArea.y + 40,
+      );
+      if (!positioned) {
+        console.warn(
+          `[Main] Saved window bounds (${x ?? "?"},${y ?? "?"} ${width}x${height}) are off-screen on the current displays — using default position.`,
+        );
+        x = undefined;
+        y = undefined;
+      }
+    } catch (error) {
+      console.warn("[Main] Failed to validate saved window bounds:", error);
+      x = undefined;
+      y = undefined;
+    }
   } else {
     // Match WaveTerm-like default sizing: fill most of the work area, but capped.
     // (Wave uses: width/height = workArea - 200, caps 2000x1200, mins 800x500)

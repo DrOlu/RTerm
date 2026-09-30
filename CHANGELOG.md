@@ -1,5 +1,76 @@
 # Changelog
 
+## v3.9.6 (2026-09-30)
+
+**Fix: the Windows portable "double-click does nothing" — root-caused and
+reproduced live on Windows Server 2022.**
+
+### The settings-BOM startup crash (the fatal one)
+
+Reproduced: launching RTerm.Portable.3.9.4-x64.exe on a real Windows box,
+the process started, ran ~30 seconds, and exited silently — no window, no
+dialog, no Event Log entry. Capturing stderr from the extracted app
+revealed:
+
+```
+UnhandledPromiseRejectionWarning: SyntaxError: Unexpected token '',
+"{ "s"... is not valid JSON
+    at ElectronStore._deserialize (conf)
+    at new ElectronStore (electron-store)
+    at ElectronAppSettingsMigration.run
+    at startElectronMain
+```
+
+`electron-store`'s JSON.parse **chokes on a UTF-8 BOM (EF BB BF)**, and
+the throw happens inside `new Store()` — before any of the migration's
+own logic — with no try/catch anywhere on the path, so the unhandled
+rejection killed the app during startup. The BOM arrives whenever any
+external tool rewrites the settings file: Windows PowerShell 5.1's
+`Set-Content -Encoding UTF8` ALWAYS writes one (how this was found), as
+do some editors and sync tools; a truncated file from a crash mid-write
+is equally fatal.
+
+Fix, in two layers:
+
+- **Sanitize before reading** (`sanitizeSettingsJson.ts`, pure +
+  unit-tested): no BOM → untouched (byte-identical, zero writes); BOM +
+  valid JSON → BOM stripped in place; BOM + invalid JSON → quarantined
+  to `<file>.corrupt-<timestamp>` and removed so the app boots with
+  defaults. The user loses settings, never the app.
+- **Never let the migration kill startup**: `run()` wraps the sanitize
+  pass AND the `new Store()` constructions; an unexpected parse failure
+  quarantines both store files and boots with defaults.
+
+Spec: `sanitizeSettingsJson.extreme.spec.ts` — 16 cases including the
+exact live-repro bytes, registered in the layout-ui chain.
+
+### Restored window bounds are now validated (the "invisible window")
+
+`createWindow()` restored saved bounds with no validation. A portable
+exe carries its userData between machines — bounds saved on a bigger
+monitor (or a monitor that no longer exists) restore a window that is
+larger than the display or entirely off-screen: the process runs, the
+taskbar may show nothing, and it looks exactly like "double-click does
+nothing". (Observed live: saved 1474×938 at (-8,-8) on a 1024×768
+display.) Same failure after a resolution change.
+
+Fix: clamp the restored size to the current work area (respecting
+minimums) and drop the position unless it intersects some display's
+work area — the OS then centers the window. Warns to the console when
+it happens.
+
+### Verification
+
+- Live on Windows Server 2022: portable extracts (178MB → 625 files),
+  launches RTerm.exe (~12s cold), and with the BOM'd settings the app
+  DIED in ~30s; the same poisoned file is now sanitized and the app
+  survives. (The remaining no-window on that particular headless box is
+  a WinRM session-station limitation for GUI apps, not an RTerm bug —
+  processes stay alive with a real desktop session available.)
+- sanitizeSettingsJson spec 16/16; typecheck:all 0 errors; full
+  layout-ui chain green.
+
+
 ## v3.9.5 (2026-09-26)
 
 **Security hardening release: removed a committed SSH private key, closed the
