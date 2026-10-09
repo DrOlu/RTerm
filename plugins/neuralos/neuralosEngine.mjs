@@ -25,6 +25,18 @@ import { promises as fs, constants as fsConstants } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
+// v3.9.8: top-K probe retrieval (ported from the instances' ask.py) lives in
+// retrieval.mjs — this module re-exports it so the plugin keeps a single
+// import surface. See retrieval.mjs for the full rationale and contract.
+export {
+  retrieveProbes,
+  writeRetrievedMenu,
+  cleanupRetrievedMenu,
+  enumFastPath,
+  RETRIEVAL_TOP_K,
+  RETRIEVAL_MENU_THRESHOLD,
+} from './retrieval.mjs'
+
 export const HF_BASE = 'https://huggingface.co/Cactus-Compute/needle3/resolve/main'
 export const WEIGHTS_NAME = 'needle3.cact'
 export const MAX_RESULT_CHARS = 6000
@@ -70,6 +82,18 @@ export function resolveConfig(ctx = {}, env = process.env) {
     autoDownload: block.autoDownload !== false && env.NEURALOS_AUTO_DOWNLOAD !== '0',
     cacheDir: pick(block.cacheDir, env.NEURALOS_CACHE_DIR, cacheDir(env)),
     timeoutMs: Number(block.timeoutMs) > 0 ? Number(block.timeoutMs) : 120000,
+    // v3.9.8: top-K retrieval (ported from the instances' ask.py). Below
+    // retrievalMenuThreshold probes the FULL menu goes to the engine (its
+    // own selection is best on small menus); at or above the threshold the
+    // question is scored against the menu first and only the top-K most
+    // relevant probes are handed to the engine — the 121M model picks more
+    // accurately from a focused menu (live-observed mispicks on the 37-60
+    // probe instances were retrieval-shaped). Set
+    // block.retrieval = false (or NEURALOS_RETRIEVAL=0) to always send the
+    // full menu (the pre-3.9.8 behavior).
+    retrieval: block.retrieval !== false && env.NEURALOS_RETRIEVAL !== '0',
+    retrievalMenuThreshold: Number(block.retrievalMenuThreshold) > 0 ? Number(block.retrievalMenuThreshold) : 13,
+    retrievalTopK: Number(block.retrievalTopK) > 0 ? Number(block.retrievalTopK) : 8,
   }
 }
 

@@ -1,5 +1,72 @@
 # Changelog
 
+## v3.9.8 (2026-10-01)
+
+**neuralOS plugin: top-K probe retrieval productized — `neuralos_ask` now
+hands the 121M engine a FOCUSED menu, with a deterministic enum fast path
+that can skip the engine entirely.**
+
+### The problem (observed live this session)
+
+The plugin passed each instance's FULL probe menu to the engine for
+selection. That works well on small menus but degrades as menus grow —
+and produced two live failures:
+
+- cyberbank (60 probes): "failed transactions by failure reason" — the
+  engine abstained entirely (`no call selected`) with every candidate in
+  context;
+- outlook-mail (14 probes): a "read latest mail" phrasing fired the WRONG
+  probe (`mail_forward`) with the full 14-probe menu, while ask.py's
+  8-probe focused context picked `mail_read_latest` correctly.
+
+The instances' own `ask.py` lab tool already had the answer — lexical
+retrieval with a focused context — but it was CLI-only.
+
+### The fix (`retrieval.mjs`, productized + unit-tested)
+
+`neuralos_ask` now, for every instance:
+
+1. **Scores the question against the menu** with the ask.py weights
+   (trigger overlap ×3, name ×1, description ×0.3; command-verb
+   stopwords dropped — `list`/`show`/`all` discriminate nothing).
+2. **Hands the engine only the top-K most relevant probes** (default 8)
+   as a real filtered menu file — the engine's `--tools` argument stays
+   a file, written per-process and cleaned up after the ask.
+3. **Deterministic enum fast path**: when the rank-1 probe's REQUIRED
+   arguments are all enum-caged AND every value appears verbatim in the
+   question, the probe fires DIRECTLY — no engine spin, no grounding
+   risk, instant. (`count messages in sentitems` → `mail_count
+   {folder: "sentitems"}` without consulting the 121M model.)
+4. **Never hides**: menus below the retrieval threshold (13 probes) go
+   to the engine whole, and a question that matches nothing still gets
+   the full menu. Retrieval can only focus, never make a probe
+   unreachable — that is the one failure mode ask.py had and this port
+   fixes.
+
+Enabled by default; `neuralos.retrieval=false` (or
+`NEURALOS_RETRIEVAL=0`) restores the pre-3.9.8 full-menu behavior.
+Threshold and top-K are settings (`retrievalMenuThreshold`,
+`retrievalTopK`).
+
+Structure: the contract lives in `plugins/neuralos/retrieval.mjs` (pure,
+except the menu-file IO), re-exported by `neuralosEngine.mjs` so the
+plugin keeps one import surface.
+
+Spec: `retrieval.extreme.spec.mjs` — 31 cases (scoring weights,
+threshold, never-hide, top-K capping, fast-path firing rules including
+case-insensitivity and the required-non-enum rejection, menu-file round
+trip, and a real-shaped chinook-style ranking sanity check). Registered
+in the layout-ui chain. Full plugin spec 51/51 still green.
+
+Verified live on the running daemon: "read the latest email" (outlook-
+mail) → `mail_read_latest`; "count messages in sentitems" →
+`mail_count {folder: "sentitems"}`; and on cyberbank the previously-
+abstaining question now retrieves
+`failed_transactions_by_failure_reason` into the focused menu (the
+engine may still honestly abstain on genuinely ambiguous phrasings —
+retrieval narrowed its world correctly).
+
+
 ## v3.9.7 (2026-09-30)
 
 **The `neuralos` npm alias is retired — RTerm now publishes only as

@@ -22,7 +22,7 @@
  *   autoDownload — provision the shared cache when nothing local (default true)
  */
 
-import { resolveConfig, listInstances, instanceDirFor, resolveEngine, engineSelect, executeProbe, graphProbe, adminProbe, truncate, defaultExec } from './neuralosEngine.mjs'
+import { resolveConfig, listInstances, instanceDirFor, resolveEngine, engineSelect, executeProbe, graphProbe, adminProbe, truncate, defaultExec, retrieveProbes, enumFastPath, writeRetrievedMenu, cleanupRetrievedMenu } from './neuralosEngine.mjs'
 
 export { resolveConfig } from './neuralosEngine.mjs'
 
@@ -79,11 +79,64 @@ function registerAsk(ctx, cfg, exec, log) {
       if (typeof dir !== 'string') return dir
       const engine = await resolveEngine(cfg)
       if (engine.error) return engine
-      const selection = await engineSelect(exec, engine, `${dir}/needle_menu.json`, question, { timeoutMs: cfg.timeoutMs })
-      if (selection.error) return { instance, question, ...selection }
-      const result = await executeProbe(exec, cfg, dir, selection.pick, selection.args, { timeoutMs: cfg.timeoutMs })
-      log(`ask ${instance} -> ${selection.pick} (conf ${selection.confidence})`)
-      return truncate({ instance, question, pick: selection.pick, confidence: selection.confidence, result })
+      // v3.9.8: top-K retrieval (ported from the instances' ask.py). On
+      // menus >= cfg.retrievalMenuThreshold probes, score the question
+      // against the menu and hand the engine only the top-K most relevant
+      // probes — focused selection beats the full menu on large instances
+      // (the 121M model misfires when 37-60 probes dilute the context).
+      // Falls back to the full menu when retrieval is off, the menu is
+      // small, or nothing scores — retrieval can only focus, never hide.
+      let menuPath = `${dir}/needle_menu.json`
+      let usedRetrieval = false
+      let retrievedCount = 0
+      if (cfg.retrieval) {
+        try {
+          const menu = JSON.parse(await import('node:fs/promises').then((m) => m.readFile(menuPath, 'utf-8')))
+          const retrieved = retrieveProbes(menu, question, {
+            topK: cfg.retrievalTopK,
+            menuThreshold: cfg.retrievalMenuThreshold,
+          })
+          // v3.9.8 enum fast path: when the rank-1 probe's REQUIRED args
+          // are all enum-caged and every value appears verbatim in the
+          // question, fire it directly — deterministic, instant, and
+          // immune to 121M grounding. Any miss falls through to the
+          // engine (with the focused menu).
+          if (Array.isArray(retrieved) && retrieved.length > 0) {
+            const fast = enumFastPath(retrieved[0], question)
+            if (fast) {
+              const result = await executeProbe(exec, cfg, dir, fast.pick, fast.args, { timeoutMs: cfg.timeoutMs })
+              log(`ask ${instance} -> ${fast.pick} (enum fast path)`)
+              return truncate({ instance, question, pick: fast.pick, confidence: null, fastPath: true, result })
+            }
+            menuPath = await writeRetrievedMenu(dir, retrieved)
+            usedRetrieval = true
+            retrievedCount = retrieved.length
+          }
+        } catch { /* menu read failure -> full menu, engine reports as data */ }
+      }
+      try {
+        const selection = await engineSelect(exec, engine, menuPath, question, { timeoutMs: cfg.timeoutMs })
+        if (selection.error) {
+          return {
+            instance,
+            question,
+            ...(usedRetrieval ? { retrieval: { focusedProbes: retrievedCount } } : {}),
+            ...selection,
+          }
+        }
+        const result = await executeProbe(exec, cfg, dir, selection.pick, selection.args, { timeoutMs: cfg.timeoutMs })
+        log(`ask ${instance} -> ${selection.pick} (conf ${selection.confidence}${usedRetrieval ? `, retrieval ${retrievedCount}-probe menu` : ''})`)
+        return truncate({
+          instance,
+          question,
+          pick: selection.pick,
+          confidence: selection.confidence,
+          ...(usedRetrieval ? { retrieval: { focusedProbes: retrievedCount } } : {}),
+          result,
+        })
+      } finally {
+        if (usedRetrieval) await cleanupRetrievedMenu(menuPath)
+      }
     },
   })
 }
